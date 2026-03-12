@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  k8s-job-run --namespace NAME --image IMAGE [--job-name NAME] [--timeout 300s] -- COMMAND [ARG...]
+USAGE
+}
+
+die() {
+  printf 'k8s-job-run: %s\n' "$*" >&2
+  exit 64
+}
+
+namespace="default"
+image=""
+job_name=""
+timeout="300s"
+cleanup_policy="${CONTROL_PLANE_CLEANUP_JOBS:-always}"
+created_job=""
+
+# shellcheck disable=SC2329
+cleanup() {
+  if [[ -n "${created_job}" ]] && [[ "${cleanup_policy}" == "always" ]]; then
+    kubectl delete job --namespace "${namespace}" "${created_job}" --ignore-not-found >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --namespace)
+      namespace="$2"
+      shift 2
+      ;;
+    --image)
+      image="$2"
+      shift 2
+      ;;
+    --job-name)
+      job_name="$2"
+      shift 2
+      ;;
+    --timeout)
+      timeout="$2"
+      shift 2
+      ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      die "unknown option: $1"
+      ;;
+  esac
+done
+
+[[ -n "${image}" ]] || die "--image is required"
+[[ $# -gt 0 ]] || die "a command must be provided after --"
+
+start_args=(--namespace "${namespace}" --image "${image}")
+if [[ -n "${job_name}" ]]; then
+  start_args+=(--job-name "${job_name}")
+fi
+
+created_job="$(k8s-job-start "${start_args[@]}" -- "$@" | tr -d '\n')"
+k8s-job-wait --namespace "${namespace}" --job-name "${created_job}" --timeout "${timeout}"
+pod_name="$(k8s-job-pod --namespace "${namespace}" --job-name "${created_job}" | tr -d '\n')"
+
+if [[ -n "${pod_name}" ]]; then
+  k8s-job-logs --namespace "${namespace}" --job-name "${created_job}"
+  exit_code="$(kubectl get pod --namespace "${namespace}" "${pod_name}" -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}' 2>/dev/null || true)"
+  if [[ -n "${exit_code}" ]]; then
+    exit "${exit_code}"
+  fi
+fi
+
+exit 0

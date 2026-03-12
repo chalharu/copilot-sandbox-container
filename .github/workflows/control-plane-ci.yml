@@ -1,0 +1,72 @@
+name: Control Plane CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run hadolint on control plane Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: containers/control-plane/Dockerfile
+
+      - name: Run hadolint on execution plane Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: containers/execution-plane-smoke/Dockerfile
+
+      - name: Run shellcheck
+        run: |
+          shellcheck \
+            containers/control-plane/bin/control-plane-entrypoint \
+            containers/control-plane/bin/control-plane-run \
+            containers/control-plane/bin/control-plane-session \
+            containers/control-plane/bin/k8s-job-start \
+            containers/control-plane/bin/k8s-job-wait \
+            containers/control-plane/bin/k8s-job-pod \
+            containers/control-plane/bin/k8s-job-logs \
+            containers/control-plane/bin/k8s-job-run \
+            containers/execution-plane-smoke/execution-plane-smoke \
+            scripts/test-standalone.sh \
+            scripts/test-kind.sh
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: lint
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Set up Kind
+        uses: engineerd/setup-kind@v0.6.2
+        with:
+          version: v0.23.0
+
+      - name: Build control plane image
+        run: docker build -t control-plane:test containers/control-plane
+
+      - name: Build execution plane image
+        run: docker build -t execution-plane-smoke:test containers/execution-plane-smoke
+
+      - name: Run standalone smoke tests
+        run: ./scripts/test-standalone.sh control-plane:test execution-plane-smoke:test
+
+      - name: Run Kind integration tests
+        run: ./scripts/test-kind.sh control-plane:test execution-plane-smoke:test control-plane-ci

@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  control-plane-run --image IMAGE [options] -- COMMAND [ARG...]
+
+Options:
+  --mode auto|podman|k8s-job      Execution mode (default: auto)
+  --execution-hint short|long     Hint used when --mode=auto (default: short)
+  --namespace NAME                Kubernetes namespace (default: CONTROL_PLANE_K8S_NAMESPACE or default)
+  --job-name NAME                 Kubernetes Job name
+  --timeout DURATION              Kubernetes Job wait timeout (default: 300s)
+  --workspace PATH                Host or mounted workspace path (default: /workspace)
+  --image IMAGE                   Execution Plane image to run
+  --help                          Show this help
+USAGE
+}
+
+die() {
+  printf 'control-plane-run: %s\n' "$*" >&2
+  exit 64
+}
+
+mode="${CONTROL_PLANE_RUN_MODE:-auto}"
+execution_hint="${CONTROL_PLANE_EXECUTION_HINT:-short}"
+namespace="${CONTROL_PLANE_K8S_NAMESPACE:-default}"
+job_name=""
+timeout="${CONTROL_PLANE_K8S_TIMEOUT:-300s}"
+workspace="${CONTROL_PLANE_WORKSPACE:-/workspace}"
+image=""
+podman_bin="${CONTROL_PLANE_PODMAN_BIN:-podman}"
+k8s_runner_bin="${CONTROL_PLANE_K8S_RUNNER_BIN:-k8s-job-run}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --mode)
+      mode="$2"
+      shift 2
+      ;;
+    --execution-hint)
+      execution_hint="$2"
+      shift 2
+      ;;
+    --namespace)
+      namespace="$2"
+      shift 2
+      ;;
+    --job-name)
+      job_name="$2"
+      shift 2
+      ;;
+    --timeout)
+      timeout="$2"
+      shift 2
+      ;;
+    --workspace)
+      workspace="$2"
+      shift 2
+      ;;
+    --image)
+      image="$2"
+      shift 2
+      ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      die "unknown option: $1"
+      ;;
+  esac
+done
+
+[[ -n "${image}" ]] || die "--image is required"
+[[ $# -gt 0 ]] || die "a command must be provided after --"
+
+case "${mode}" in
+  auto|podman|k8s-job)
+    ;;
+  *)
+    die "invalid mode: ${mode}"
+    ;;
+esac
+
+case "${execution_hint}" in
+  short|long)
+    ;;
+  *)
+    die "invalid execution hint: ${execution_hint}"
+    ;;
+esac
+
+if [[ "${mode}" == "auto" ]]; then
+  if [[ "${execution_hint}" == "long" ]]; then
+    mode="k8s-job"
+  else
+    mode="podman"
+  fi
+fi
+
+if [[ "${mode}" == "podman" ]]; then
+  mkdir -p "${workspace}"
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  exec "${podman_bin}" run --rm -v "${workspace}:/workspace" "${image}" "$@"
+fi
+
+runner_args=(
+  --namespace "${namespace}"
+  --timeout "${timeout}"
+  --image "${image}"
+)
+
+if [[ -n "${job_name}" ]]; then
+  runner_args+=(--job-name "${job_name}")
+fi
+
+exec "${k8s_runner_bin}" "${runner_args[@]}" -- "$@"

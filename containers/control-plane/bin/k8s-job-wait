@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  k8s-job-wait --namespace NAME --job-name NAME [--timeout 300s]
+USAGE
+}
+
+die() {
+  printf 'k8s-job-wait: %s\n' "$*" >&2
+  exit 64
+}
+
+namespace="default"
+job_name=""
+timeout="300s"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --namespace)
+      namespace="$2"
+      shift 2
+      ;;
+    --job-name)
+      job_name="$2"
+      shift 2
+      ;;
+    --timeout)
+      timeout="$2"
+      shift 2
+      ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "unknown option: $1"
+      ;;
+  esac
+done
+
+[[ -n "${job_name}" ]] || die "--job-name is required"
+
+if kubectl wait --namespace "${namespace}" --for=condition=complete "job/${job_name}" --timeout="${timeout}" >/dev/null 2>&1; then
+  exit 0
+fi
+
+failed_condition="$(kubectl get job "${job_name}" --namespace "${namespace}" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)"
+if [[ "${failed_condition}" == "True" ]]; then
+  printf 'k8s-job-wait: job %s failed\n' "${job_name}" >&2
+  exit 1
+fi
+
+printf 'k8s-job-wait: timed out waiting for job %s\n' "${job_name}" >&2
+exit 124

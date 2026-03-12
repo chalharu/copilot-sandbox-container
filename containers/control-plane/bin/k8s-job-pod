@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  k8s-job-pod --namespace NAME --job-name NAME
+USAGE
+}
+
+die() {
+  printf 'k8s-job-pod: %s\n' "$*" >&2
+  exit 64
+}
+
+namespace="default"
+job_name=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --namespace)
+      namespace="$2"
+      shift 2
+      ;;
+    --job-name)
+      job_name="$2"
+      shift 2
+      ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "unknown option: $1"
+      ;;
+  esac
+done
+
+[[ -n "${job_name}" ]] || die "--job-name is required"
+
+kubectl get pods --namespace "${namespace}" --selector "job-name=${job_name}" -o jsonpath='{.items[0].metadata.name}'
+printf '\n'

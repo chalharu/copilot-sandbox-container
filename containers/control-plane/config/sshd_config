@@ -1,0 +1,22 @@
+Port 2222
+Protocol 2
+AddressFamily any
+ListenAddress 0.0.0.0
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+PidFile /run/sshd.pid
+PermitRootLogin no
+AllowUsers copilot
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+UsePAM no
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+PermitUserEnvironment no
+AllowTcpForwarding yes
+X11Forwarding no
+PrintMotd no
+UseDNS no
+Subsystem sftp internal-sftp

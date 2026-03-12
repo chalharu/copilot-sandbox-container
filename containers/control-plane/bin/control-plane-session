@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+session_name="${CONTROL_PLANE_SCREEN_SESSION:-copilot}"
+
+if [[ "${1:-}" == "--command" ]]; then
+  shift
+  [[ $# -gt 0 ]] || {
+    printf 'control-plane-session: --command requires a shell command\n' >&2
+    exit 64
+  }
+  exec screen -DmS "${session_name}" bash -lc "$*"
+fi
+
+exec screen -xRR "${session_name}"

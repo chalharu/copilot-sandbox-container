@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  k8s-job-start --namespace NAME --image IMAGE [--job-name NAME] -- COMMAND [ARG...]
+USAGE
+}
+
+die() {
+  printf 'k8s-job-start: %s\n' "$*" >&2
+  exit 64
+}
+
+yaml_quote() {
+  local value="$1"
+  value="${value//\'/\'\'}"
+  printf "'%s'" "${value}"
+}
+
+render_yaml_list() {
+  local indent="$1"
+  shift
+  local item
+  for item in "$@"; do
+    printf '%s- %s\n' "${indent}" "$(yaml_quote "${item}")"
+  done
+}
+
+namespace="default"
+image=""
+job_name=""
+workspace_pvc="${CONTROL_PLANE_WORKSPACE_PVC:-}"
+workspace_mount_path="${CONTROL_PLANE_WORKSPACE_MOUNT_PATH:-/workspace}"
+workspace_subpath="${CONTROL_PLANE_WORKSPACE_SUBPATH:-workspace}"
+job_service_account="${CONTROL_PLANE_JOB_SERVICE_ACCOUNT:-}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --namespace)
+      namespace="$2"
+      shift 2
+      ;;
+    --image)
+      image="$2"
+      shift 2
+      ;;
+    --job-name)
+      job_name="$2"
+      shift 2
+      ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      die "unknown option: $1"
+      ;;
+  esac
+done
+
+[[ -n "${image}" ]] || die "--image is required"
+[[ $# -gt 0 ]] || die "a command must be provided after --"
+
+if [[ -z "${job_name}" ]]; then
+  job_name="control-plane-job-$(date +%s)"
+fi
+
+command_block="$(render_yaml_list '            ' "$@")"
+volume_mount_block=""
+volume_block=""
+service_account_block=""
+
+if [[ -n "${workspace_pvc}" ]]; then
+  volume_mount_block=$(cat <<EOF
+          volumeMounts:
+            - name: workspace
+              mountPath: $(yaml_quote "${workspace_mount_path}")
+              subPath: $(yaml_quote "${workspace_subpath}")
+EOF
+  )
+  volume_block=$(cat <<EOF
+      volumes:
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: $(yaml_quote "${workspace_pvc}")
+EOF
+  )
+fi
+
+if [[ -n "${job_service_account}" ]]; then
+  service_account_block=$(cat <<EOF
+      serviceAccountName: $(yaml_quote "${job_service_account}")
+EOF
+  )
+fi
+
+cat <<EOF | kubectl create -f - >/dev/null
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: $(yaml_quote "${job_name}")
+  namespace: $(yaml_quote "${namespace}")
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: control-plane-execution
+        job-name: $(yaml_quote "${job_name}")
+    spec:
+      restartPolicy: Never
+${service_account_block}
+      containers:
+        - name: execution
+          image: $(yaml_quote "${image}")
+          imagePullPolicy: IfNotPresent
+          command:
+${command_block}
+${volume_mount_block}
+${volume_block}
+EOF
+
+printf '%s\n' "${job_name}"

@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+control_plane_user="${CONTROL_PLANE_USER:-copilot}"
+control_plane_home="$(getent passwd "${control_plane_user}" | cut -d: -f6)"
+control_plane_workspace="${CONTROL_PLANE_WORKSPACE:-/workspace}"
+runtime_dir="/run/user/$(id -u "${control_plane_user}")"
+authorized_keys_path="${control_plane_home}/.ssh/authorized_keys"
+
+mkdir -p \
+  "${control_plane_home}/.copilot" \
+  "${control_plane_home}/.config/containers" \
+  "${control_plane_home}/.config/gh" \
+  "${control_plane_home}/.ssh" \
+  "${control_plane_workspace}" \
+  /run/sshd \
+  "${runtime_dir}"
+
+chown -R "${control_plane_user}:${control_plane_user}" \
+  "${control_plane_home}/.copilot" \
+  "${control_plane_home}/.config" \
+  "${control_plane_home}/.ssh" \
+  "${control_plane_workspace}" \
+  "${runtime_dir}"
+
+chmod 700 "${control_plane_home}/.ssh" "${runtime_dir}"
+touch "${authorized_keys_path}"
+chmod 600 "${authorized_keys_path}"
+chown "${control_plane_user}:${control_plane_user}" "${authorized_keys_path}"
+
+if [[ -n "${SSH_PUBLIC_KEY:-}" ]] && ! grep -Fxq "${SSH_PUBLIC_KEY}" "${authorized_keys_path}"; then
+  printf '%s\n' "${SSH_PUBLIC_KEY}" >> "${authorized_keys_path}"
+fi
+
+if [[ -n "${SSH_PUBLIC_KEY_FILE:-}" ]] && [[ -f "${SSH_PUBLIC_KEY_FILE}" ]]; then
+  while IFS= read -r key; do
+    [[ -z "${key}" ]] && continue
+    if ! grep -Fxq "${key}" "${authorized_keys_path}"; then
+      printf '%s\n' "${key}" >> "${authorized_keys_path}"
+    fi
+  done < "${SSH_PUBLIC_KEY_FILE}"
+fi
+
+ssh-keygen -A
+
+if [[ $# -eq 0 ]]; then
+  set -- /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config
+fi
+
+exec "$@"
