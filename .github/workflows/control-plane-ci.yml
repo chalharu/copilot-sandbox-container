@@ -16,35 +16,26 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Run hadolint on control plane Dockerfile
-        uses: hadolint/hadolint-action@v3.1.0
-        with:
-          dockerfile: containers/control-plane/Dockerfile
+      - name: Install Podman toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman buildah
 
-      - name: Run hadolint on execution plane Dockerfile
-        uses: hadolint/hadolint-action@v3.1.0
-        with:
-          dockerfile: containers/execution-plane-smoke/Dockerfile
+      - name: Build hadolint container
+        run: buildah bud --tag hadolint:test containers/hadolint
 
-      - name: Run hadolint on Rust execution plane Dockerfile
-        uses: hadolint/hadolint-action@v3.1.0
-        with:
-          dockerfile: containers/execution-plane-rust/Dockerfile
-
-      - name: Run hadolint on Python execution plane Dockerfile
-        uses: hadolint/hadolint-action@v3.1.0
-        with:
-          dockerfile: containers/execution-plane-python/Dockerfile
-
-      - name: Run hadolint on Go execution plane Dockerfile
-        uses: hadolint/hadolint-action@v3.1.0
-        with:
-          dockerfile: containers/execution-plane-go/Dockerfile
-
-      - name: Run hadolint on Node execution plane Dockerfile
-        uses: hadolint/hadolint-action@v3.1.0
-        with:
-          dockerfile: containers/execution-plane-node/Dockerfile
+      - name: Run hadolint container
+        run: |
+          podman run --rm \
+            -v "${PWD}:/workspace:ro" \
+            hadolint:test \
+            /workspace/containers/control-plane/Dockerfile \
+            /workspace/containers/execution-plane-smoke/Dockerfile \
+            /workspace/containers/execution-plane-rust/Dockerfile \
+            /workspace/containers/execution-plane-python/Dockerfile \
+            /workspace/containers/execution-plane-go/Dockerfile \
+            /workspace/containers/execution-plane-node/Dockerfile \
+            /workspace/containers/hadolint/Dockerfile
 
       - name: Run shellcheck
         run: |

@@ -5,6 +5,7 @@ Control Plane / Execution Plane の要件は `docs/requirements.md` にありま
 このリポジトリには、要件に基づく以下の実装を含みます。
 
 - `containers/control-plane/`: Control Plane イメージ
+- `containers/hadolint/`: Dockerfile lint 用 `hadolint` コンテナ
 - `containers/execution-plane-rust/`: Rust 向け Execution Plane サンプル
 - `containers/execution-plane-python/`: Python 向け Execution Plane サンプル
 - `containers/execution-plane-go/`: Go 向け Execution Plane サンプル
@@ -21,9 +22,15 @@ Control Plane / Execution Plane の要件は `docs/requirements.md` にありま
 ローカルでの lint 例:
 
 ```bash
-hadolint containers/control-plane/Dockerfile \
- containers/execution-plane-*/Dockerfile \
- containers/execution-plane-smoke/Dockerfile
+buildah bud -t hadolint:test containers/hadolint
+podman run --rm -v "$PWD:/workspace:ro" hadolint:test \
+ /workspace/containers/control-plane/Dockerfile \
+ /workspace/containers/execution-plane-smoke/Dockerfile \
+ /workspace/containers/execution-plane-rust/Dockerfile \
+ /workspace/containers/execution-plane-python/Dockerfile \
+ /workspace/containers/execution-plane-go/Dockerfile \
+ /workspace/containers/execution-plane-node/Dockerfile \
+ /workspace/containers/hadolint/Dockerfile
 shellcheck containers/control-plane/bin/* \
  containers/execution-plane-smoke/execution-plane-smoke \
  scripts/test-standalone.sh scripts/test-kind.sh

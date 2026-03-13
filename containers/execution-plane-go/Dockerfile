@@ -12,7 +12,7 @@ RUN apt-get update -o Acquire::Retries=3 \
         bash \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && go install github.com/go-delve/delve/cmd/dlv@latest \
+    && go install github.com/go-delve/delve/cmd/dlv@v1.26.1 \
     && groupadd --gid "${EXECUTION_PLANE_GID}" "${EXECUTION_PLANE_USER}" \
     && useradd --uid "${EXECUTION_PLANE_UID}" \
         --gid "${EXECUTION_PLANE_GID}" \
