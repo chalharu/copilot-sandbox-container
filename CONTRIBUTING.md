@@ -40,7 +40,8 @@ Types:
 
 - `scripts/lint.sh` is the supported lint entry point.
 - `scripts/lint.sh` runs `hadolint` and `shellcheck` through their upstream
-  container images instead of requiring host installs.
+  container images, and builds the repository's `containers/yamllint/` image to
+  run `yamllint` v1.38.0.
 - `scripts/build-test.sh` is the supported local build/test entry point.
 - `scripts/build-test.sh` auto-detects a working Docker Buildx toolchain first,
   then falls back to a Podman / Buildah toolchain.
@@ -50,5 +51,5 @@ Types:
   smoke / integration scripts used by `scripts/build-test.sh`.
 - When this repository is developed from inside a containerized tooling
   environment, keep these scripts unchanged and provide the required toolchain:
-  `docker`, or `buildah` plus `podman`, together with `kind`, `kubectl`, `ssh`,
-  and `ssh-keygen`.
+  `docker`, or `podman` (with `buildah` used when available), together with
+  `kind`, `kubectl`, `ssh`, and `ssh-keygen`.

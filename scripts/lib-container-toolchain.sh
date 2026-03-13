@@ -14,8 +14,8 @@ docker_build_toolchain_available() {
 }
 
 podman_build_toolchain_available() {
-  command -v buildah >/dev/null 2>&1 \
-    && command -v podman >/dev/null 2>&1
+  command -v podman >/dev/null 2>&1 \
+    && podman build --help >/dev/null 2>&1
 }
 
 container_runtime_for_toolchain() {
@@ -39,7 +39,11 @@ build_command_for_toolchain() {
       printf 'docker\n'
       ;;
     podman)
-      printf 'buildah\n'
+      if command -v buildah >/dev/null 2>&1; then
+        printf 'buildah\n'
+      else
+        printf 'podman\n'
+      fi
       ;;
     *)
       printf 'Unsupported toolchain: %s\n' "$1" >&2
@@ -105,7 +109,7 @@ detect_build_test_toolchain() {
       ;;
     podman)
       podman_build_toolchain_available || {
-        printf 'Podman toolchain requires both buildah and podman.\n' >&2
+        printf 'Podman toolchain requires podman with image build support.\n' >&2
         exit 1
       }
       printf 'podman\n'
@@ -129,7 +133,7 @@ detect_build_test_toolchain() {
     return
   fi
 
-  printf 'Missing supported build/test toolchain. Provide a working docker buildx environment, or install both buildah and podman.\n' >&2
+  printf 'Missing supported build/test toolchain. Provide a working docker buildx environment, or install podman with image build support.\n' >&2
   exit 1
 }
 
@@ -143,7 +147,11 @@ build_image_for_toolchain() {
       docker buildx build --load -t "${image_tag}" "${context_dir}"
       ;;
     podman)
-      buildah bud --tag "${image_tag}" "${context_dir}"
+      if command -v buildah >/dev/null 2>&1; then
+        buildah bud --tag "${image_tag}" "${context_dir}"
+      else
+        podman build --tag "${image_tag}" "${context_dir}"
+      fi
       ;;
     *)
       printf 'Unsupported toolchain: %s\n' "${toolchain}" >&2

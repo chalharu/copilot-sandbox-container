@@ -15,7 +15,10 @@
 
 ## 使い方
 
-1. `image` を実際の Control Plane イメージに置き換えます。
+1. `image` を利用したい Control Plane イメージに合わせます。GitHub Actions から
+   公開される既定値は
+   `ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest` です。
+   再現性を優先する場合は `:latest` ではなく commit SHA tag を使ってください。
 2. `SSH_PUBLIC_KEY` を利用者の公開鍵に置き換えます。
 3. `storageClassName` と PVC サイズをクラスタ環境に合わせて調整します。
 4. 必要に応じて Job 用の image pull policy と resource 上限を調整します。

@@ -31,6 +31,7 @@ jobs:
     needs: lint
     permissions:
       contents: read
+      packages: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -52,3 +53,17 @@ jobs:
         env:
           CONTROL_PLANE_TOOLCHAIN: podman
         run: ./scripts/build-test.sh
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: printf '%s' "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Publish control plane image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GHCR_CONTROL_PLANE_IMAGE: ghcr.io/${{ github.repository }}/control-plane
+        run: |
+          podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}"
+          podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:latest"
+          podman push "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}"
+          podman push "${GHCR_CONTROL_PLANE_IMAGE}:latest"
