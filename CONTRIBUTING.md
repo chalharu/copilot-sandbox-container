@@ -39,9 +39,11 @@ Types:
 ## 4. Local and Containerized Validation
 
 - `scripts/lint.sh` is the supported lint entry point.
+- `scripts/lint.sh` runs `hadolint` and `shellcheck` through their upstream
+  container images instead of requiring host installs.
 - `scripts/build-test.sh` is the supported local build/test entry point.
-- `scripts/build-test.sh` auto-detects a Docker toolchain first, then falls back
-  to a Podman / Buildah toolchain when Docker is unavailable.
+- `scripts/build-test.sh` auto-detects a working Docker Buildx toolchain first,
+  then falls back to a Podman / Buildah toolchain.
 - Use `CONTROL_PLANE_TOOLCHAIN=docker` to force Docker / BuildKit, or
   `CONTROL_PLANE_TOOLCHAIN=podman` to force Podman / Buildah.
 - `scripts/test-standalone.sh` and `scripts/test-kind.sh` remain the lower-level

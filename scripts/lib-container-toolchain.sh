@@ -7,6 +7,17 @@ require_command() {
   }
 }
 
+docker_build_toolchain_available() {
+  command -v docker >/dev/null 2>&1 \
+    && docker buildx version >/dev/null 2>&1 \
+    && docker info >/dev/null 2>&1
+}
+
+podman_build_toolchain_available() {
+  command -v buildah >/dev/null 2>&1 \
+    && command -v podman >/dev/null 2>&1
+}
+
 container_runtime_for_toolchain() {
   case "$1" in
     docker)
@@ -85,13 +96,18 @@ detect_build_test_toolchain() {
 
   case "${requested_toolchain}" in
     docker)
-      require_command docker
+      docker_build_toolchain_available || {
+        printf 'Docker toolchain requires a working docker CLI with buildx support.\n' >&2
+        exit 1
+      }
       printf 'docker\n'
       return
       ;;
     podman)
-      require_command buildah
-      require_command podman
+      podman_build_toolchain_available || {
+        printf 'Podman toolchain requires both buildah and podman.\n' >&2
+        exit 1
+      }
       printf 'podman\n'
       return
       ;;
@@ -103,17 +119,17 @@ detect_build_test_toolchain() {
       ;;
   esac
 
-  if command -v docker >/dev/null 2>&1; then
+  if docker_build_toolchain_available; then
     printf 'docker\n'
     return
   fi
 
-  if command -v buildah >/dev/null 2>&1 && command -v podman >/dev/null 2>&1; then
+  if podman_build_toolchain_available; then
     printf 'podman\n'
     return
   fi
 
-  printf 'Missing supported build/test toolchain. Install docker, or install both buildah and podman.\n' >&2
+  printf 'Missing supported build/test toolchain. Provide a working docker buildx environment, or install both buildah and podman.\n' >&2
   exit 1
 }
 

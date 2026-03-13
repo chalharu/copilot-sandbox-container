@@ -19,7 +19,7 @@ jobs:
       - name: Install Podman toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y podman shellcheck
+          sudo apt-get install -y podman
 
       - name: Run lint
         env:

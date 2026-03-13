@@ -128,6 +128,23 @@ start_port_forward() {
   port_forward_pid=$!
 }
 
+dump_control_plane_diagnostics() {
+  kubectl get pods --namespace "${namespace}" -o wide >&2 || true
+  kubectl describe pod/control-plane --namespace "${namespace}" >&2 || true
+  kubectl logs --namespace "${namespace}" pod/control-plane -c init-state >&2 || true
+  kubectl logs --namespace "${namespace}" pod/control-plane -c control-plane >&2 || true
+  kubectl get events --namespace "${namespace}" --sort-by=.lastTimestamp >&2 || true
+}
+
+wait_for_control_plane_pod() {
+  if kubectl wait --namespace "${namespace}" --for=condition=Ready pod/control-plane --timeout=180s >/dev/null; then
+    return 0
+  fi
+
+  dump_control_plane_diagnostics
+  return 1
+}
+
 load_kind_image() {
   local image="$1"
   local archive_basename archive_path
@@ -323,7 +340,7 @@ load_kind_image "${control_plane_image}"
 load_kind_image "${execution_plane_image}"
 ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"
 apply_resources
-kubectl wait --namespace "${namespace}" --for=condition=Ready pod/control-plane --timeout=180s >/dev/null
+wait_for_control_plane_pod
 start_port_forward
 wait_for_ssh
 

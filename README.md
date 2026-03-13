@@ -28,8 +28,8 @@ Control Plane / Execution Plane の要件は `docs/requirements.md` にありま
 ```
 
 `scripts/lint.sh` は `docker` があればそれを使い、なければ `podman` を使って
-公式の `hadolint/hadolint:latest-debian` イメージを直接実行します。
-Podman を明示したい場合は次のように指定できます。
+公式の `hadolint/hadolint:latest-debian` と `koalaman/shellcheck:stable`
+イメージを直接実行します。Podman を明示したい場合は次のように指定できます。
 
 ```bash
 CONTROL_PLANE_TOOLCHAIN=podman ./scripts/lint.sh
@@ -41,10 +41,10 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/lint.sh
 ./scripts/build-test.sh
 ```
 
-`scripts/build-test.sh` は `docker` があれば Docker / BuildKit の流れを使い、
-Docker が無い場合は `buildah` と `podman` の組み合わせへフォールバックします。
-使用する系統を固定したい場合は `CONTROL_PLANE_TOOLCHAIN=docker` または
-`CONTROL_PLANE_TOOLCHAIN=podman` を指定します。
+`scripts/build-test.sh` は `docker buildx` が利用可能なら Docker / BuildKit の
+流れを使い、それ以外では `buildah` と `podman` の組み合わせへフォールバック
+します。使用する系統を固定したい場合は `CONTROL_PLANE_TOOLCHAIN=docker`
+または `CONTROL_PLANE_TOOLCHAIN=podman` を指定します。
 
 ```bash
 CONTROL_PLANE_TOOLCHAIN=docker ./scripts/build-test.sh
@@ -54,6 +54,8 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 `scripts/build-test.sh` は `containers/control-plane` と
 `containers/execution-plane-smoke` を build したうえで、
 `scripts/test-standalone.sh` と `scripts/test-kind.sh` を順に呼び出します。
+Podman / Buildah 系では Kind 内の image 名と一致させるため、
+デフォルトの tag に `localhost/` 接頭辞を使います。
 `scripts/test-kind.sh` は `${CONTROL_PLANE_CONTAINER_BIN:-$KIND_EXPERIMENTAL_PROVIDER}`
 の `save` サブコマンドでローカルイメージをアーカイブし、
 `kind load image-archive` でクラスタへ投入します。
