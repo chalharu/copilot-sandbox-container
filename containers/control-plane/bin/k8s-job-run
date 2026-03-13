@@ -20,7 +20,7 @@ timeout="300s"
 cleanup_policy="${CONTROL_PLANE_CLEANUP_JOBS:-always}"
 created_job=""
 
-# shellcheck disable=SC2329
+# shellcheck disable=SC2329,SC2317
 cleanup() {
   if [[ -n "${created_job}" ]] && [[ "${cleanup_policy}" == "always" ]]; then
     kubectl delete job --namespace "${namespace}" "${created_job}" --ignore-not-found >/dev/null 2>&1 || true
