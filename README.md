@@ -2,88 +2,109 @@
 
 Control Plane / Execution Plane の要件は `docs/requirements.md` にあります。
 
-このリポジトリには、要件に基づく以下の実装と参照用サンプルを含みます。
+## 概要
+
+このリポジトリは、Copilot 向けの `control-plane` イメージと、用途別の
+Execution Plane 参照実装、それらを lint / build / test / publish する
+スクリプト群をまとめたものです。
+
+## 含まれるもの
+
+### 公開イメージ
+
+- `ghcr.io/chalharu/copilot-sandbox-container/control-plane`
+- `ghcr.io/chalharu/copilot-sandbox-container/yamllint`
+
+### リポジトリ内のイメージ定義
 
 - `containers/control-plane/`: Control Plane イメージ
-- `containers/execution-plane-rust/`: Rust 向け Execution Plane の参照実装
-- `containers/execution-plane-python/`: Python 向け Execution Plane の参照実装
-- `containers/execution-plane-go/`: Go 向け Execution Plane の参照実装
-- `containers/execution-plane-node/`: Node.js 向け Execution Plane の参照実装
-- `containers/execution-plane-smoke/`: テスト用の最小 Execution Plane
-- `containers/yamllint/`: `yamllint` v1.38.0 だけを含む lint 用イメージ
-- `deploy/kubernetes/control-plane.example.yaml`: Kubernetes 向けの配備例
-- `docs/kubernetes-deployment.md`: Kubernetes 配備時の調整ポイント
-- `scripts/lint.sh`: `hadolint` / `shellcheck` / `yamllint` をまとめて実行する
-  lint 用スクリプト
-- `scripts/build-test.sh`: ローカルの Docker または Podman / Buildah を検出して
-  build / smoke / Kind integration をまとめて実行するスクリプト
-- `scripts/test-standalone.sh`: 単独起動モードの smoke test
-- `scripts/test-kind.sh`: Docker / Podman provider の Kind を使った
- Kubernetes モードの統合テスト
-- `.github/workflows/control-plane-ci.yml`: `scripts/lint.sh` と
- `scripts/build-test.sh` を使って検証し、`main` では Control Plane イメージを
- GHCR へ公開する CI
+- `containers/yamllint/`: `yamllint` v1.38.0 用の最小イメージ
+- `containers/execution-plane-smoke/`: smoke test 用の最小 Execution Plane
+- `containers/execution-plane-rust/`: Rust 向け参照実装
+- `containers/execution-plane-python/`: Python 向け参照実装
+- `containers/execution-plane-go/`: Go 向け参照実装
+- `containers/execution-plane-node/`: Node.js 向け参照実装
 
-推奨するローカル lint 実行:
+### 主要スクリプト
+
+- `scripts/lint.sh`: `hadolint` / `shellcheck` / `yamllint` を実行
+- `scripts/build-test.sh`: build / standalone smoke / Kind integration を実行
+- `scripts/test-standalone.sh`: 単独起動モードの下位 smoke test
+- `scripts/test-kind.sh`: Kind 上の下位 integration test
+
+### 配備例
+
+- `deploy/kubernetes/control-plane.example.yaml`
+- `docs/kubernetes-deployment.md`
+
+## クイックスタート
+
+### lint
 
 ```bash
 ./scripts/lint.sh
 ```
 
-`scripts/lint.sh` は Docker BuildKit または Podman 系で Docker Hardened Images
-ベースの `containers/yamllint/` を build し、そのうえで `hadolint/hadolint:latest-debian`、
-`koalaman/shellcheck:stable`、自前の `yamllint` イメージを使って lint を実行します。
-Podman 系を明示したい場合は次のように指定できます。
+Podman 系を固定したい場合:
 
 ```bash
 CONTROL_PLANE_TOOLCHAIN=podman ./scripts/lint.sh
 ```
 
-推奨するローカル build / test 実行:
+`scripts/lint.sh` は、信頼できる upstream イメージである
+`hadolint/hadolint:latest-debian` と `koalaman/shellcheck:stable` を直接使い、
+`yamllint` についてはリポジトリ内の `containers/yamllint/` を build して使います。
+
+### build / test
 
 ```bash
 ./scripts/build-test.sh
 ```
 
-`scripts/build-test.sh` は `docker buildx` が利用可能なら Docker / BuildKit の
-流れを使い、それ以外では Podman / Buildah 系へフォールバックします。
-使用する系統を固定したい場合は `CONTROL_PLANE_TOOLCHAIN=docker`
-または `CONTROL_PLANE_TOOLCHAIN=podman` を指定します。
+系統を明示したい場合:
 
 ```bash
 CONTROL_PLANE_TOOLCHAIN=docker ./scripts/build-test.sh
 CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 ```
 
-`scripts/build-test.sh` は `containers/control-plane` と
-`containers/execution-plane-smoke` を build したうえで、
+`scripts/build-test.sh` は `docker buildx` が利用可能なら Docker / BuildKit を使い、
+それ以外では Podman / Buildah 系へフォールバックします。内部では
+`containers/control-plane` と `containers/execution-plane-smoke` を build し、
 `scripts/test-standalone.sh` と `scripts/test-kind.sh` を順に呼び出します。
-Podman / Buildah 系では Kind 内の image 名と一致させるため、
-デフォルトの tag に `localhost/` 接頭辞を使います。
-`scripts/test-kind.sh` は `${CONTROL_PLANE_CONTAINER_BIN:-$KIND_EXPERIMENTAL_PROVIDER}`
-の `save` サブコマンドでローカルイメージをアーカイブし、
-`kind load image-archive` でクラスタへ投入します。
 
-CI や WSL 系の環境で rootless Podman 上の Kind 起動が
-systemd / cgroup 制約により失敗する場合、`scripts/test-kind.sh` は
-passwordless sudo が利用可能であれば rootful な Kind 実行へ自動で
-フォールバックします。常に sudo フォールバックを使いたい場合は
-`CONTROL_PLANE_KIND_SUDO_MODE=always`、無効化したい場合は
-`CONTROL_PLANE_KIND_SUDO_MODE=never` を指定できます。
+Podman / Buildah 系では Kind 内の image 名と一致させるため、デフォルトの tag に
+`localhost/` 接頭辞を使います。
 
-Execution Plane サンプルはすべて `/workspace` を作業ディレクトリとして
-使う前提で、Control Plane から Podman 実行または Kubernetes Job 実行へ
-切り替えて利用できます。ここで同梱している各 Execution Plane は
-Control Plane 連携を確認するための最小サンプルであり、網羅的な一覧では
-ありません。upstream の公式イメージが `/workspace` 共有や必要コマンドの
-条件をそのまま満たす場合は、それらを直接使ってかまいません。不足がある
-場合にだけ、このリポジトリのような薄いラッパーイメージを追加する前提です。
+## イメージ方針
 
-この方針により、このリポジトリ自身の開発でも Docker / Podman 系の実行環境
-から同じ `scripts/lint.sh` / `scripts/build-test.sh` を呼び出せます。より細かい
-制御が必要な場合だけ、下位の `scripts/test-standalone.sh` /
-`scripts/test-kind.sh` を直接使います。
+- 契約を満たす trusted upstream image がある場合は、それをそのまま使います。
+- 使えるのが third-party image だけ、またはこのリポジトリ専用の薄い調整が必要な
+  場合は、リポジトリ内で最小イメージを build します。
+- そのようなリポジトリ管理イメージは GHCR に公開して再利用します。
 
-`main` への push が成功すると、GitHub Actions は Control Plane イメージを
-`ghcr.io/chalharu/copilot-sandbox-container/control-plane` に公開し、
+現時点の GHCR 公開対象:
+
+- `control-plane`
+- `yamllint`
+
+`main` への push が成功すると、GitHub Actions はこれらを
+`ghcr.io/chalharu/copilot-sandbox-container/<image>` に公開し、
 `latest` と commit SHA の tag を更新します。
+
+## Kubernetes 配備
+
+テンプレートは `deploy/kubernetes/control-plane.example.yaml` にあります。
+
+既定の Control Plane イメージは
+`ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest` です。
+再現性を優先する場合は `latest` ではなく commit SHA tag を使ってください。
+
+## Execution Plane について
+
+同梱している Execution Plane は、Control Plane 連携を確認するための参照実装です。
+一覧を固定することが目的ではありません。`/workspace` 共有や必要コマンドなどの
+契約を満たす upstream イメージがあるなら、それを直接使って構いません。
+
+より細かい挙動を確認したい場合だけ、下位の `scripts/test-standalone.sh` /
+`scripts/test-kind.sh` を直接使ってください。

@@ -47,6 +47,9 @@ Types:
   then falls back to a Podman / Buildah toolchain.
 - Use `CONTROL_PLANE_TOOLCHAIN=docker` to force Docker / BuildKit, or
   `CONTROL_PLANE_TOOLCHAIN=podman` to force Podman / Buildah.
+- Use trusted upstream images when they already satisfy the contract; if only a
+  third-party image exists, build a thin repository-managed image and publish it
+  to GHCR for reuse.
 - `scripts/test-standalone.sh` and `scripts/test-kind.sh` remain the lower-level
   smoke / integration scripts used by `scripts/build-test.sh`.
 - When this repository is developed from inside a containerized tooling

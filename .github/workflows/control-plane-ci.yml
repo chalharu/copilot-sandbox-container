@@ -58,12 +58,21 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: printf '%s' "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      - name: Publish control plane image
+      - name: Build yamllint image for publishing
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: buildah bud --tag localhost/yamllint:test containers/yamllint
+
+      - name: Publish GHCR images
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GHCR_CONTROL_PLANE_IMAGE: ghcr.io/${{ github.repository }}/control-plane
+          GHCR_YAMLLINT_IMAGE: ghcr.io/${{ github.repository }}/yamllint
         run: |
           podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}"
           podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:latest"
+          podman tag localhost/yamllint:test "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}"
+          podman tag localhost/yamllint:test "${GHCR_YAMLLINT_IMAGE}:latest"
           podman push "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}"
           podman push "${GHCR_CONTROL_PLANE_IMAGE}:latest"
+          podman push "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}"
+          podman push "${GHCR_YAMLLINT_IMAGE}:latest"
