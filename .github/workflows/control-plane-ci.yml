@@ -19,51 +19,18 @@ jobs:
       - name: Install Podman toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y podman buildah
+          sudo apt-get install -y podman shellcheck
 
-      - name: Build hadolint container
-        run: buildah bud --tag hadolint:test containers/hadolint
-
-      - name: Run hadolint container
-        run: |
-          podman run --rm \
-            -v "${PWD}:/workspace:ro" \
-            hadolint:test \
-            /workspace/containers/control-plane/Dockerfile \
-            /workspace/containers/execution-plane-smoke/Dockerfile \
-            /workspace/containers/execution-plane-rust/Dockerfile \
-            /workspace/containers/execution-plane-python/Dockerfile \
-            /workspace/containers/execution-plane-go/Dockerfile \
-            /workspace/containers/execution-plane-node/Dockerfile \
-            /workspace/containers/hadolint/Dockerfile
-
-      - name: Run shellcheck
-        run: |
-          shellcheck \
-            containers/control-plane/bin/control-plane-podman \
-            containers/control-plane/bin/control-plane-screen \
-            containers/control-plane/bin/control-plane-entrypoint \
-            containers/control-plane/bin/control-plane-run \
-            containers/control-plane/config/profile-control-plane-env.sh \
-            containers/control-plane/bin/control-plane-session \
-            containers/control-plane/bin/k8s-job-start \
-            containers/control-plane/bin/k8s-job-wait \
-            containers/control-plane/bin/k8s-job-pod \
-            containers/control-plane/bin/k8s-job-logs \
-            containers/control-plane/bin/k8s-job-run \
-            containers/execution-plane-smoke/execution-plane-smoke \
-            scripts/test-standalone.sh \
-            scripts/test-kind.sh
+      - name: Run lint
+        env:
+          CONTROL_PLANE_TOOLCHAIN: podman
+        run: ./scripts/lint.sh
 
   integration:
     runs-on: ubuntu-latest
     needs: lint
     permissions:
       contents: read
-    env:
-      CONTROL_PLANE_CONTAINER_BIN: podman
-      KIND_EXPERIMENTAL_PROVIDER: podman
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -81,14 +48,7 @@ jobs:
         with:
           version: v0.23.0
 
-      - name: Build control plane image
-        run: buildah bud --tag control-plane:test containers/control-plane
-
-      - name: Build execution plane image
-        run: buildah bud --tag execution-plane-smoke:test containers/execution-plane-smoke
-
-      - name: Run standalone smoke tests
-        run: ./scripts/test-standalone.sh control-plane:test execution-plane-smoke:test
-
-      - name: Run Kind integration tests
-        run: ./scripts/test-kind.sh control-plane:test execution-plane-smoke:test control-plane-ci
+      - name: Run build and integration tests
+        env:
+          CONTROL_PLANE_TOOLCHAIN: podman
+        run: ./scripts/build-test.sh

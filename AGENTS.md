@@ -25,13 +25,15 @@
 
 ```bash
 # Development
-# [Add your dev server command here]
+# No dev server. Edit the container images and shell scripts directly.
 
 # Testing
-# [Add your test command here]
+./scripts/lint.sh
+./scripts/build-test.sh
 
 # Build
-# [Add your build command here]
+CONTROL_PLANE_TOOLCHAIN=docker ./scripts/build-test.sh
+CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 ```
 
 ---
