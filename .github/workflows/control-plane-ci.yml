@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      CONTROL_PLANE_DHI_CACHE_DIR: ${{ github.workspace }}/.cache/control-plane/dhi-images
 
     steps:
       - name: Check out repository
@@ -20,6 +22,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y podman
+
+      - name: Restore DHI image cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CONTROL_PLANE_DHI_CACHE_DIR }}
+          key: ${{ runner.os }}-dhi-python-${{ hashFiles('containers/yamllint/Dockerfile', 'scripts/prepare-dhi-images.sh') }}
+
+      - name: Prepare DHI images
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: ./scripts/prepare-dhi-images.sh
 
       - name: Run lint
         env:
@@ -32,6 +46,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      CONTROL_PLANE_DHI_CACHE_DIR: ${{ github.workspace }}/.cache/control-plane/dhi-images
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -40,6 +56,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y podman buildah
+
+      - name: Restore DHI image cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CONTROL_PLANE_DHI_CACHE_DIR }}
+          key: ${{ runner.os }}-dhi-python-${{ hashFiles('containers/yamllint/Dockerfile', 'scripts/prepare-dhi-images.sh') }}
+
+      - name: Prepare DHI images
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: ./scripts/prepare-dhi-images.sh
 
       - name: Set up kubectl
         uses: azure/setup-kubectl@v4
