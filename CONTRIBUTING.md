@@ -35,3 +35,15 @@ Types:
 - `refactor`: code change without behavior change
 - `test`: tests
 - `chore`: maintenance/configuration
+
+## 4. Local and Containerized Validation
+
+- `scripts/test-standalone.sh` and `scripts/test-kind.sh` are the supported local
+  validation entry points.
+- Use `CONTROL_PLANE_CONTAINER_BIN=docker` for Docker / BuildKit, or
+  `CONTROL_PLANE_CONTAINER_BIN=podman` for Podman / Buildah.
+- `scripts/test-kind.sh` also honors `KIND_EXPERIMENTAL_PROVIDER`, so Docker and
+  Podman based Kind workflows can share the same script.
+- When this repository is developed from inside a containerized tooling
+  environment, keep these scripts unchanged and provide the required container
+  runtime, `kind`, `kubectl`, `ssh`, and `ssh-keygen` in that environment.

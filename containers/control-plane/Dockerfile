@@ -80,11 +80,13 @@ RUN existing_group="$(getent group "${CONTROL_PLANE_GID}" | cut -d: -f1 || true)
         "/home/${CONTROL_PLANE_USER}" \
         /workspace \
     && chmod 700 "/home/${CONTROL_PLANE_USER}/.ssh" \
-    && ln -sf /usr/bin/podman /usr/local/bin/docker \
     && ln -sf /usr/sbin/sshd /usr/local/bin/sshd
 
 COPY --chmod=644 config/sshd_config /etc/ssh/sshd_config
 COPY --chmod=644 config/storage.conf /home/${CONTROL_PLANE_USER}/.config/containers/storage.conf
+COPY --chmod=644 config/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
+COPY --chmod=755 bin/control-plane-podman /usr/local/bin/control-plane-podman
+COPY --chmod=755 bin/control-plane-screen /usr/local/bin/control-plane-screen
 COPY --chmod=755 bin/control-plane-entrypoint /usr/local/bin/control-plane-entrypoint
 COPY --chmod=755 bin/control-plane-run /usr/local/bin/control-plane-run
 COPY --chmod=755 bin/control-plane-session /usr/local/bin/control-plane-session
@@ -94,7 +96,10 @@ COPY --chmod=755 bin/k8s-job-pod /usr/local/bin/k8s-job-pod
 COPY --chmod=755 bin/k8s-job-logs /usr/local/bin/k8s-job-logs
 COPY --chmod=755 bin/k8s-job-run /usr/local/bin/k8s-job-run
 
-RUN chown -R "${CONTROL_PLANE_USER}:${CONTROL_PLANE_USER}" "/home/${CONTROL_PLANE_USER}/.config"
+RUN ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/podman \
+    && ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/docker \
+    && ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen \
+    && chown -R "${CONTROL_PLANE_USER}:${CONTROL_PLANE_USER}" "/home/${CONTROL_PLANE_USER}/.config"
 
 WORKDIR /workspace
 EXPOSE 2222

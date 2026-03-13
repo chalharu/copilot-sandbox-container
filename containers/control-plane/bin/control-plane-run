@@ -112,7 +112,12 @@ fi
 
 if [[ "${mode}" == "podman" ]]; then
   mkdir -p "${workspace}"
-  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-${HOME}/.copilot/run}"
+  export TMPDIR="${TMPDIR:-${HOME}/.copilot/tmp}"
+  mkdir -p "${XDG_RUNTIME_DIR}"
+  mkdir -p "${TMPDIR}"
+  chmod 700 "${XDG_RUNTIME_DIR}"
+  chmod 700 "${TMPDIR}"
   exec "${podman_bin}" run --rm -v "${workspace}:/workspace" "${image}" "$@"
 fi
 

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+runtime_config_file="${CONTROL_PLANE_RUNTIME_ENV_FILE:-${HOME:-/home/${USER:-copilot}}/.config/control-plane/runtime.env}"
+if [[ -f "${runtime_config_file}" ]]; then
+  # shellcheck disable=SC1090
+  source "${runtime_config_file}"
+fi
+
+export SCREENDIR="${SCREENDIR:-${HOME:-/tmp}/.copilot/screen}"
+mkdir -p "${SCREENDIR}"
+chmod 700 "${SCREENDIR}"
+
+exec /usr/bin/screen "$@"

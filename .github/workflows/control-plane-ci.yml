@@ -40,8 +40,11 @@ jobs:
       - name: Run shellcheck
         run: |
           shellcheck \
+            containers/control-plane/bin/control-plane-podman \
+            containers/control-plane/bin/control-plane-screen \
             containers/control-plane/bin/control-plane-entrypoint \
             containers/control-plane/bin/control-plane-run \
+            containers/control-plane/config/profile-control-plane-env.sh \
             containers/control-plane/bin/control-plane-session \
             containers/control-plane/bin/k8s-job-start \
             containers/control-plane/bin/k8s-job-wait \
@@ -58,6 +61,7 @@ jobs:
     permissions:
       contents: read
     env:
+      CONTROL_PLANE_CONTAINER_BIN: podman
       KIND_EXPERIMENTAL_PROVIDER: podman
 
     steps:
@@ -67,7 +71,7 @@ jobs:
       - name: Install Podman toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y podman buildah skopeo
+          sudo apt-get install -y podman buildah
 
       - name: Set up kubectl
         uses: azure/setup-kubectl@v4

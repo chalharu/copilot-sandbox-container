@@ -4,7 +4,10 @@ set -euo pipefail
 control_plane_user="${CONTROL_PLANE_USER:-copilot}"
 control_plane_home="$(getent passwd "${control_plane_user}" | cut -d: -f6)"
 control_plane_workspace="${CONTROL_PLANE_WORKSPACE:-/workspace}"
-runtime_dir="/run/user/$(id -u "${control_plane_user}")"
+podman_state_dir="${control_plane_home}/.copilot/containers"
+runtime_dir="${XDG_RUNTIME_DIR:-${control_plane_home}/.copilot/run}"
+tmp_dir="${TMPDIR:-${control_plane_home}/.copilot/tmp}"
+screen_dir="${SCREENDIR:-${control_plane_home}/.copilot/screen}"
 authorized_keys_path="${control_plane_home}/.ssh/authorized_keys"
 kube_dir="${control_plane_home}/.kube"
 kubeconfig_path="${kube_dir}/config"
@@ -16,27 +19,100 @@ write_runtime_var() {
   printf '%s=%q\n' "$1" "$2"
 }
 
+safe_chown_tree() {
+  local owner="$1"
+  shift
+  local target
+  for target in "$@"; do
+    [[ -e "${target}" ]] || continue
+    find "${target}" ! -type s -exec chown "${owner}" {} +
+  done
+}
+
+directory_has_entries() {
+  local target="$1"
+  find "${target}" -mindepth 1 -maxdepth 1 -print -quit | grep -q .
+}
+
+ensure_podman_storage_link() {
+  local link_path="$1"
+  local state_path="$2"
+  local entries=()
+
+  if [[ -L "${link_path}" ]]; then
+    if [[ "$(readlink "${link_path}")" == "${state_path}" ]]; then
+      return
+    fi
+
+    rm -f "${link_path}"
+    ln -s "${state_path}" "${link_path}"
+    return
+  fi
+
+  if [[ -e "${link_path}" ]] && [[ ! -d "${link_path}" ]]; then
+    printf 'Refusing to replace non-directory path at %s\n' "${link_path}" >&2
+    exit 1
+  fi
+
+  if [[ -d "${link_path}" ]] && directory_has_entries "${link_path}"; then
+    if directory_has_entries "${state_path}"; then
+      printf 'Refusing to overwrite existing Podman storage; migrate %s into %s manually\n' "${link_path}" "${state_path}" >&2
+      exit 1
+    fi
+
+    shopt -s dotglob nullglob
+    entries=("${link_path}"/*)
+    shopt -u dotglob nullglob
+    if [[ ${#entries[@]} -gt 0 ]]; then
+      mv -n "${entries[@]}" "${state_path}/"
+      if directory_has_entries "${link_path}"; then
+        printf 'Refusing to continue after partial Podman storage migration from %s into %s\n' "${link_path}" "${state_path}" >&2
+        exit 1
+      fi
+    fi
+  fi
+
+  rm -rf "${link_path}"
+  ln -s "${state_path}" "${link_path}"
+}
+
 mkdir -p \
   "${control_plane_home}/.copilot" \
   "${control_plane_home}/.config/containers" \
   "${control_plane_home}/.config/gh" \
+  "${control_plane_home}/.local/share" \
   "${runtime_config_dir}" \
   "${kube_dir}" \
   "${control_plane_home}/.ssh" \
   "${control_plane_workspace}" \
+  "${podman_state_dir}" \
+  "${screen_dir}" \
+  "${tmp_dir}" \
   /run/sshd \
   "${runtime_dir}"
 
-chown -R "${control_plane_user}:${control_plane_user}" \
+safe_chown_tree "${control_plane_user}:${control_plane_user}" \
   "${control_plane_home}/.copilot" \
   "${control_plane_home}/.config" \
   "${runtime_config_dir}" \
   "${kube_dir}" \
   "${control_plane_home}/.ssh" \
   "${control_plane_workspace}" \
+  "${podman_state_dir}" \
+  "${screen_dir}" \
+  "${tmp_dir}" \
   "${runtime_dir}"
+chown "${control_plane_user}:${control_plane_user}" \
+  "${control_plane_home}/.local" \
+  "${control_plane_home}/.local/share"
 
-chmod 700 "${control_plane_home}/.ssh" "${runtime_dir}"
+ensure_podman_storage_link "${control_plane_home}/.local/share/containers" "${podman_state_dir}"
+
+chown -h "${control_plane_user}:${control_plane_user}" "${control_plane_home}/.local/share/containers"
+chmod 700 "${control_plane_home}/.ssh" "${runtime_dir}" "${tmp_dir}" "${screen_dir}"
+export XDG_RUNTIME_DIR="${runtime_dir}"
+export TMPDIR="${tmp_dir}"
+export SCREENDIR="${screen_dir}"
 touch "${authorized_keys_path}"
 chmod 600 "${authorized_keys_path}"
 chown "${control_plane_user}:${control_plane_user}" "${authorized_keys_path}"
@@ -100,6 +176,10 @@ fi
   write_runtime_var CONTROL_PLANE_JOB_CPU_LIMIT "${CONTROL_PLANE_JOB_CPU_LIMIT:-1000m}"
   write_runtime_var CONTROL_PLANE_JOB_MEMORY_REQUEST "${CONTROL_PLANE_JOB_MEMORY_REQUEST:-128Mi}"
   write_runtime_var CONTROL_PLANE_JOB_MEMORY_LIMIT "${CONTROL_PLANE_JOB_MEMORY_LIMIT:-1Gi}"
+  write_runtime_var XDG_RUNTIME_DIR "${runtime_dir}"
+  write_runtime_var TMPDIR "${tmp_dir}"
+  write_runtime_var SCREENDIR "${screen_dir}"
+  write_runtime_var KUBECONFIG "${KUBECONFIG:-}"
 } > "${runtime_config_path}"
 chown "${control_plane_user}:${control_plane_user}" "${runtime_config_path}"
 chmod 600 "${runtime_config_path}"

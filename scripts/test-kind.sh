@@ -7,6 +7,7 @@ cluster_name="${3:-control-plane-ci}"
 namespace="${CONTROL_PLANE_TEST_NAMESPACE:-control-plane-ci}"
 ssh_port="${CONTROL_PLANE_TEST_SSH_PORT:-32222}"
 kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-podman}"
+container_bin="${CONTROL_PLANE_CONTAINER_BIN:-${kind_provider}}"
 workdir="$(mktemp -d)"
 ssh_key="${workdir}/id_ed25519"
 kubeconfig_path="${workdir}/kubeconfig"
@@ -64,7 +65,7 @@ create_cluster() {
     return 1
   fi
 
-  if ! grep -Eq 'could not find a log line that matches|Failed to allocate manager object|Failed to create /init.scope control group' "${create_log}"; then
+  if ! grep -Eq 'could not find a log line that matches|Failed to allocate manager object|Failed to create /init.scope control group|Error during unshare\(\.\.\.\): Operation not permitted' "${create_log}"; then
     return 1
   fi
 
@@ -134,9 +135,7 @@ load_kind_image() {
   archive_basename="$(printf '%s' "${image}" | tr '/:' '__')"
   archive_path="${workdir}/${archive_basename}.tar"
 
-  skopeo copy --insecure-policy \
-    "containers-storage:${image}" \
-    "docker-archive:${archive_path}:${image}" >/dev/null
+  "${container_bin}" save --output "${archive_path}" "${image}" >/dev/null
   kind_cmd load image-archive "${archive_path}" --name "${cluster_name}"
 }
 
@@ -302,8 +301,7 @@ trap cleanup EXIT
 
 require_command kind
 require_command kubectl
-require_command podman
-require_command skopeo
+require_command "${container_bin}"
 require_command ssh
 require_command ssh-keygen
 

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+runtime_config_file="${CONTROL_PLANE_RUNTIME_ENV_FILE:-${HOME:-/home/${USER:-copilot}}/.config/control-plane/runtime.env}"
+if [[ -f "${runtime_config_file}" ]]; then
+  # shellcheck disable=SC1090
+  source "${runtime_config_file}"
+fi
+
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/podman-run-$(id -u)}"
+export TMPDIR="${TMPDIR:-${HOME:-/tmp}/.copilot/tmp}"
+mkdir -p "${XDG_RUNTIME_DIR}"
+mkdir -p "${TMPDIR}"
+chmod 700 "${XDG_RUNTIME_DIR}"
+chmod 700 "${TMPDIR}"
+
+exec /usr/bin/podman "$@"
