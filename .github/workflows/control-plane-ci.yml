@@ -26,6 +26,26 @@ jobs:
         with:
           dockerfile: containers/execution-plane-smoke/Dockerfile
 
+      - name: Run hadolint on Rust execution plane Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: containers/execution-plane-rust/Dockerfile
+
+      - name: Run hadolint on Python execution plane Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: containers/execution-plane-python/Dockerfile
+
+      - name: Run hadolint on Go execution plane Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: containers/execution-plane-go/Dockerfile
+
+      - name: Run hadolint on Node execution plane Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: containers/execution-plane-node/Dockerfile
+
       - name: Run shellcheck
         run: |
           shellcheck \
@@ -46,10 +66,17 @@ jobs:
     needs: lint
     permissions:
       contents: read
+    env:
+      KIND_EXPERIMENTAL_PROVIDER: podman
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Install Podman toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman buildah skopeo
 
       - name: Set up kubectl
         uses: azure/setup-kubectl@v4
@@ -60,10 +87,10 @@ jobs:
           version: v0.23.0
 
       - name: Build control plane image
-        run: docker build -t control-plane:test containers/control-plane
+        run: buildah bud --tag control-plane:test containers/control-plane
 
       - name: Build execution plane image
-        run: docker build -t execution-plane-smoke:test containers/execution-plane-smoke
+        run: buildah bud --tag execution-plane-smoke:test containers/execution-plane-smoke
 
       - name: Run standalone smoke tests
         run: ./scripts/test-standalone.sh control-plane:test execution-plane-smoke:test

@@ -6,16 +6,82 @@ execution_plane_image="${2:?usage: scripts/test-kind.sh <control-plane-image> <e
 cluster_name="${3:-control-plane-ci}"
 namespace="${CONTROL_PLANE_TEST_NAMESPACE:-control-plane-ci}"
 ssh_port="${CONTROL_PLANE_TEST_SSH_PORT:-32222}"
+kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-podman}"
 workdir="$(mktemp -d)"
 ssh_key="${workdir}/id_ed25519"
+kubeconfig_path="${workdir}/kubeconfig"
 port_forward_pid=""
 created_cluster=0
+kind_uses_sudo=0
+kind_sudo_mode="${CONTROL_PLANE_KIND_SUDO_MODE:-auto}"
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || {
     printf 'Missing required command: %s\n' "$1" >&2
     exit 1
   }
+}
+
+kind_cmd() {
+  if [[ "${kind_uses_sudo}" -eq 1 ]]; then
+    sudo -n env KIND_EXPERIMENTAL_PROVIDER="${kind_provider}" kind "$@"
+  else
+    kind "$@"
+  fi
+}
+
+refresh_kubeconfig() {
+  if [[ "${kind_uses_sudo}" -eq 1 ]]; then
+    rm -f "${kubeconfig_path}"
+    kind_cmd export kubeconfig --name "${cluster_name}" --kubeconfig "${kubeconfig_path}" >/dev/null
+    sudo chown "$(id -u):$(id -g)" "${kubeconfig_path}" >/dev/null 2>&1 || true
+    export KUBECONFIG="${kubeconfig_path}"
+  else
+    unset KUBECONFIG || true
+  fi
+}
+
+enable_kind_sudo() {
+  require_command sudo
+  sudo -n true >/dev/null 2>&1 || {
+    printf 'Passwordless sudo is required for Kind fallback in this environment\n' >&2
+    exit 1
+  }
+  kind_uses_sudo=1
+}
+
+create_cluster() {
+  local create_log="${workdir}/kind-create.log"
+
+  if kind_cmd create cluster --name "${cluster_name}" >"${create_log}" 2>&1; then
+    cat "${create_log}"
+    return 0
+  fi
+
+  cat "${create_log}" >&2
+
+  if [[ "${kind_provider}" != "podman" ]] || [[ "${kind_uses_sudo}" -eq 1 ]] || [[ "${kind_sudo_mode}" == "never" ]]; then
+    return 1
+  fi
+
+  if ! grep -Eq 'could not find a log line that matches|Failed to allocate manager object|Failed to create /init.scope control group' "${create_log}"; then
+    return 1
+  fi
+
+  enable_kind_sudo
+  kind delete cluster --name "${cluster_name}" >/dev/null 2>&1 || true
+
+  if kind_cmd get clusters | grep -qx "${cluster_name}"; then
+    return 0
+  fi
+
+  if kind_cmd create cluster --name "${cluster_name}" >"${create_log}" 2>&1; then
+    cat "${create_log}"
+    return 0
+  fi
+
+  cat "${create_log}" >&2
+  return 1
 }
 
 ssh_opts=(
@@ -59,6 +125,19 @@ start_port_forward() {
   stop_port_forward
   kubectl port-forward --namespace "${namespace}" pod/control-plane "${ssh_port}:2222" >"${workdir}/port-forward.log" 2>&1 &
   port_forward_pid=$!
+}
+
+load_kind_image() {
+  local image="$1"
+  local archive_basename archive_path
+
+  archive_basename="$(printf '%s' "${image}" | tr '/:' '__')"
+  archive_path="${workdir}/${archive_basename}.tar"
+
+  skopeo copy --insecure-policy \
+    "containers-storage:${image}" \
+    "docker-archive:${archive_path}:${image}" >/dev/null
+  kind_cmd load image-archive "${archive_path}" --name "${cluster_name}"
 }
 
 apply_resources() {
@@ -155,7 +234,7 @@ spec:
   containers:
     - name: control-plane
       image: ${control_plane_image}
-      imagePullPolicy: IfNotPresent
+      imagePullPolicy: Never
       env:
         - name: SSH_PUBLIC_KEY
           value: "${public_key}"
@@ -167,9 +246,29 @@ spec:
           value: workspace
         - name: CONTROL_PLANE_JOB_SERVICE_ACCOUNT
           value: control-plane
+        - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
+          value: Never
       ports:
         - containerPort: 2222
           name: ssh
+      readinessProbe:
+        tcpSocket:
+          port: ssh
+        periodSeconds: 5
+        failureThreshold: 12
+      livenessProbe:
+        tcpSocket:
+          port: ssh
+        initialDelaySeconds: 10
+        periodSeconds: 10
+        failureThreshold: 6
+      resources:
+        requests:
+          cpu: 250m
+          memory: 256Mi
+        limits:
+          cpu: "1"
+          memory: 1Gi
       volumeMounts:
         - name: state
           mountPath: /home/copilot/.copilot
@@ -195,27 +294,35 @@ cleanup() {
   kubectl delete namespace "${namespace}" --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete pv control-plane-state-pv --ignore-not-found >/dev/null 2>&1 || true
   if [[ "${created_cluster}" -eq 1 ]]; then
-    kind delete cluster --name "${cluster_name}" >/dev/null 2>&1 || true
+    kind_cmd delete cluster --name "${cluster_name}" >/dev/null 2>&1 || true
   fi
   rm -rf "${workdir}"
 }
 trap cleanup EXIT
 
-require_command docker
 require_command kind
 require_command kubectl
+require_command podman
+require_command skopeo
 require_command ssh
 require_command ssh-keygen
 
-if ! kind get clusters | grep -qx "${cluster_name}"; then
-  kind create cluster --name "${cluster_name}"
+export KIND_EXPERIMENTAL_PROVIDER="${kind_provider}"
+
+if [[ "${kind_sudo_mode}" == "always" ]]; then
+  enable_kind_sudo
+fi
+
+if ! kind_cmd get clusters | grep -qx "${cluster_name}"; then
+  create_cluster
   created_cluster=1
 fi
 
+refresh_kubeconfig
 kubectl config use-context "kind-${cluster_name}" >/dev/null
 kubectl wait --for=condition=Ready node --all --timeout=180s >/dev/null
-kind load docker-image "${control_plane_image}" --name "${cluster_name}"
-kind load docker-image "${execution_plane_image}" --name "${cluster_name}"
+load_kind_image "${control_plane_image}"
+load_kind_image "${execution_plane_image}"
 ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"
 apply_resources
 kubectl wait --namespace "${namespace}" --for=condition=Ready pod/control-plane --timeout=180s >/dev/null
@@ -226,12 +333,13 @@ ssh_bash <<EOF
 set -euo pipefail
 command -v node
 command -v npm
-npm ls -g @github/copilot-cli --depth=0 | grep -q '@github/copilot-cli@'
+npm ls -g @github/copilot --depth=0 | grep -q '@github/copilot@'
 command -v git
 command -v gh
 command -v kubectl
 command -v podman
 command -v docker
+docker --version >/dev/null
 command -v sshd
 command -v screen
 kubectl auth can-i create jobs --namespace ${namespace} | grep -q '^yes$'

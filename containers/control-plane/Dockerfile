@@ -11,7 +11,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CONTROL_PLANE_WORKSPACE=/workspace
 
 # hadolint ignore=DL3008
-RUN apt-get update \
+RUN apt-get update -o Acquire::Retries=3 \
     && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
@@ -31,15 +31,40 @@ RUN apt-get update \
         uidmap \
     && rm -rf /var/lib/apt/lists/*
 
-RUN npm install --global "@github/copilot-cli@${COPILOT_CLI_VERSION}" \
+RUN npm install --global "@github/copilot@${COPILOT_CLI_VERSION}" \
     && npm cache clean --force
 
-RUN groupadd --gid "${CONTROL_PLANE_GID}" "${CONTROL_PLANE_USER}" \
-    && useradd --uid "${CONTROL_PLANE_UID}" \
-        --gid "${CONTROL_PLANE_GID}" \
-        --create-home \
+RUN existing_group="$(getent group "${CONTROL_PLANE_GID}" | cut -d: -f1 || true)" \
+    && if [ -n "${existing_group}" ] && [ "${existing_group}" != "${CONTROL_PLANE_USER}" ]; then \
+        groupmod --new-name "${CONTROL_PLANE_USER}" "${existing_group}"; \
+    elif [ -z "${existing_group}" ] && ! getent group "${CONTROL_PLANE_USER}" >/dev/null; then \
+        groupadd --gid "${CONTROL_PLANE_GID}" "${CONTROL_PLANE_USER}"; \
+    fi \
+    && if getent group "${CONTROL_PLANE_USER}" >/dev/null; then \
+        groupmod --gid "${CONTROL_PLANE_GID}" "${CONTROL_PLANE_USER}"; \
+    fi \
+    && existing_user="$(getent passwd "${CONTROL_PLANE_UID}" | cut -d: -f1 || true)" \
+    && if [ -n "${existing_user}" ] && [ "${existing_user}" != "${CONTROL_PLANE_USER}" ]; then \
+        usermod --login "${CONTROL_PLANE_USER}" \
+            --home "/home/${CONTROL_PLANE_USER}" \
+            --move-home \
+            --shell /bin/bash \
+            --gid "${CONTROL_PLANE_USER}" \
+            "${existing_user}"; \
+    elif ! getent passwd "${CONTROL_PLANE_USER}" >/dev/null; then \
+        useradd --uid "${CONTROL_PLANE_UID}" \
+            --gid "${CONTROL_PLANE_USER}" \
+            --create-home \
+            --home-dir "/home/${CONTROL_PLANE_USER}" \
+            --shell /bin/bash \
+            "${CONTROL_PLANE_USER}"; \
+    fi \
+    && usermod --uid "${CONTROL_PLANE_UID}" \
+        --gid "${CONTROL_PLANE_USER}" \
+        --home "/home/${CONTROL_PLANE_USER}" \
         --shell /bin/bash \
         "${CONTROL_PLANE_USER}" \
+    && passwd -d "${CONTROL_PLANE_USER}" \
     && mkdir -p \
         "/home/${CONTROL_PLANE_USER}/.copilot" \
         "/home/${CONTROL_PLANE_USER}/.config/containers" \
@@ -47,13 +72,14 @@ RUN groupadd --gid "${CONTROL_PLANE_GID}" "${CONTROL_PLANE_USER}" \
         "/home/${CONTROL_PLANE_USER}/.ssh" \
         /run/sshd \
         /workspace \
-    && printf '%s:%s:65536\n' "${CONTROL_PLANE_USER}" 100000 >> /etc/subuid \
-    && printf '%s:%s:65536\n' "${CONTROL_PLANE_USER}" 100000 >> /etc/subgid \
+    && if ! grep -q "^${CONTROL_PLANE_USER}:" /etc/subuid; then printf '%s:%s:65536\n' "${CONTROL_PLANE_USER}" 100000 >> /etc/subuid; fi \
+    && if ! grep -q "^${CONTROL_PLANE_USER}:" /etc/subgid; then printf '%s:%s:65536\n' "${CONTROL_PLANE_USER}" 100000 >> /etc/subgid; fi \
     && chown -R "${CONTROL_PLANE_USER}:${CONTROL_PLANE_USER}" \
         "/home/${CONTROL_PLANE_USER}" \
         /workspace \
     && chmod 700 "/home/${CONTROL_PLANE_USER}/.ssh" \
-    && ln -sf /usr/bin/podman /usr/local/bin/docker
+    && ln -sf /usr/bin/podman /usr/local/bin/docker \
+    && ln -sf /usr/sbin/sshd /usr/local/bin/sshd
 
 COPY --chmod=644 config/sshd_config /etc/ssh/sshd_config
 COPY --chmod=644 config/storage.conf /home/${CONTROL_PLANE_USER}/.config/containers/storage.conf

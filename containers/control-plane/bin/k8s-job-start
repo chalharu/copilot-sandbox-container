@@ -13,6 +13,12 @@ die() {
   exit 64
 }
 
+runtime_config_file="${CONTROL_PLANE_RUNTIME_ENV_FILE:-${HOME:-/home/${USER:-copilot}}/.config/control-plane/runtime.env}"
+if [[ -f "${runtime_config_file}" ]]; then
+  # shellcheck disable=SC1090
+  source "${runtime_config_file}"
+fi
+
 yaml_quote() {
   local value="$1"
   value="${value//\'/\'\'}"
@@ -35,6 +41,11 @@ workspace_pvc="${CONTROL_PLANE_WORKSPACE_PVC:-}"
 workspace_mount_path="${CONTROL_PLANE_WORKSPACE_MOUNT_PATH:-/workspace}"
 workspace_subpath="${CONTROL_PLANE_WORKSPACE_SUBPATH:-workspace}"
 job_service_account="${CONTROL_PLANE_JOB_SERVICE_ACCOUNT:-}"
+job_image_pull_policy="${CONTROL_PLANE_JOB_IMAGE_PULL_POLICY:-IfNotPresent}"
+job_cpu_request="${CONTROL_PLANE_JOB_CPU_REQUEST:-100m}"
+job_cpu_limit="${CONTROL_PLANE_JOB_CPU_LIMIT:-1000m}"
+job_memory_request="${CONTROL_PLANE_JOB_MEMORY_REQUEST:-128Mi}"
+job_memory_limit="${CONTROL_PLANE_JOB_MEMORY_LIMIT:-1Gi}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -75,6 +86,16 @@ command_block="$(render_yaml_list '            ' "$@")"
 volume_mount_block=""
 volume_block=""
 service_account_block=""
+resources_block=$(cat <<EOF
+          resources:
+            requests:
+              cpu: $(yaml_quote "${job_cpu_request}")
+              memory: $(yaml_quote "${job_memory_request}")
+            limits:
+              cpu: $(yaml_quote "${job_cpu_limit}")
+              memory: $(yaml_quote "${job_memory_limit}")
+EOF
+)
 
 if [[ -n "${workspace_pvc}" ]]; then
   volume_mount_block=$(cat <<EOF
@@ -119,9 +140,10 @@ ${service_account_block}
       containers:
         - name: execution
           image: $(yaml_quote "${image}")
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: $(yaml_quote "${job_image_pull_policy}")
           command:
 ${command_block}
+${resources_block}
 ${volume_mount_block}
 ${volume_block}
 EOF

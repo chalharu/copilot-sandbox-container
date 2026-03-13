@@ -6,11 +6,22 @@ control_plane_home="$(getent passwd "${control_plane_user}" | cut -d: -f6)"
 control_plane_workspace="${CONTROL_PLANE_WORKSPACE:-/workspace}"
 runtime_dir="/run/user/$(id -u "${control_plane_user}")"
 authorized_keys_path="${control_plane_home}/.ssh/authorized_keys"
+kube_dir="${control_plane_home}/.kube"
+kubeconfig_path="${kube_dir}/config"
+service_account_dir="/var/run/secrets/kubernetes.io/serviceaccount"
+runtime_config_dir="${control_plane_home}/.config/control-plane"
+runtime_config_path="${runtime_config_dir}/runtime.env"
+
+write_runtime_var() {
+  printf '%s=%q\n' "$1" "$2"
+}
 
 mkdir -p \
   "${control_plane_home}/.copilot" \
   "${control_plane_home}/.config/containers" \
   "${control_plane_home}/.config/gh" \
+  "${runtime_config_dir}" \
+  "${kube_dir}" \
   "${control_plane_home}/.ssh" \
   "${control_plane_workspace}" \
   /run/sshd \
@@ -19,6 +30,8 @@ mkdir -p \
 chown -R "${control_plane_user}:${control_plane_user}" \
   "${control_plane_home}/.copilot" \
   "${control_plane_home}/.config" \
+  "${runtime_config_dir}" \
+  "${kube_dir}" \
   "${control_plane_home}/.ssh" \
   "${control_plane_workspace}" \
   "${runtime_dir}"
@@ -40,6 +53,56 @@ if [[ -n "${SSH_PUBLIC_KEY_FILE:-}" ]] && [[ -f "${SSH_PUBLIC_KEY_FILE}" ]]; the
     fi
   done < "${SSH_PUBLIC_KEY_FILE}"
 fi
+
+if [[ -z "${KUBECONFIG:-}" ]] \
+  && [[ -n "${KUBERNETES_SERVICE_HOST:-}" ]] \
+  && [[ -f "${service_account_dir}/token" ]] \
+  && [[ -f "${service_account_dir}/ca.crt" ]] \
+  && [[ ! -f "${kubeconfig_path}" ]]; then
+  namespace="default"
+  if [[ -f "${service_account_dir}/namespace" ]]; then
+    namespace="$(cat "${service_account_dir}/namespace")"
+  fi
+  cat > "${kubeconfig_path}" <<EOF
+apiVersion: v1
+kind: Config
+clusters:
+  - cluster:
+      certificate-authority: ${service_account_dir}/ca.crt
+      server: https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS:-443}
+    name: in-cluster
+contexts:
+  - context:
+      cluster: in-cluster
+      namespace: ${namespace}
+      user: ${control_plane_user}
+    name: in-cluster
+current-context: in-cluster
+users:
+  - name: ${control_plane_user}
+    user:
+      tokenFile: ${service_account_dir}/token
+EOF
+  chown "${control_plane_user}:${control_plane_user}" "${kubeconfig_path}"
+  chmod 600 "${kubeconfig_path}"
+  export KUBECONFIG="${kubeconfig_path}"
+fi
+
+{
+  write_runtime_var CONTROL_PLANE_K8S_NAMESPACE "${CONTROL_PLANE_K8S_NAMESPACE:-default}"
+  write_runtime_var CONTROL_PLANE_WORKSPACE "${CONTROL_PLANE_WORKSPACE:-/workspace}"
+  write_runtime_var CONTROL_PLANE_WORKSPACE_PVC "${CONTROL_PLANE_WORKSPACE_PVC:-}"
+  write_runtime_var CONTROL_PLANE_WORKSPACE_MOUNT_PATH "${CONTROL_PLANE_WORKSPACE_MOUNT_PATH:-/workspace}"
+  write_runtime_var CONTROL_PLANE_WORKSPACE_SUBPATH "${CONTROL_PLANE_WORKSPACE_SUBPATH:-workspace}"
+  write_runtime_var CONTROL_PLANE_JOB_SERVICE_ACCOUNT "${CONTROL_PLANE_JOB_SERVICE_ACCOUNT:-}"
+  write_runtime_var CONTROL_PLANE_JOB_IMAGE_PULL_POLICY "${CONTROL_PLANE_JOB_IMAGE_PULL_POLICY:-IfNotPresent}"
+  write_runtime_var CONTROL_PLANE_JOB_CPU_REQUEST "${CONTROL_PLANE_JOB_CPU_REQUEST:-100m}"
+  write_runtime_var CONTROL_PLANE_JOB_CPU_LIMIT "${CONTROL_PLANE_JOB_CPU_LIMIT:-1000m}"
+  write_runtime_var CONTROL_PLANE_JOB_MEMORY_REQUEST "${CONTROL_PLANE_JOB_MEMORY_REQUEST:-128Mi}"
+  write_runtime_var CONTROL_PLANE_JOB_MEMORY_LIMIT "${CONTROL_PLANE_JOB_MEMORY_LIMIT:-1Gi}"
+} > "${runtime_config_path}"
+chown "${control_plane_user}:${control_plane_user}" "${runtime_config_path}"
+chmod 600 "${runtime_config_path}"
 
 ssh-keygen -A
 

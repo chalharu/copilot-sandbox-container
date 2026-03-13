@@ -35,7 +35,7 @@ Control Plane は、以下を含む必要があります。
 
 - Copilot CLI を実行できること
 - `Node.js (LTS)` と `npm`
-- `@github/copilot-cli`
+- `@github/copilot`
 - `gh` と `git`
 - `docker` CLI 互換を備えた `rootless Podman`
 - `kubectl`
@@ -86,14 +86,14 @@ Control Plane では、以下のディレクトリを永続化する必要があ
 
 Control Plane は、処理内容に応じて実行方式を切り替える必要があります。
 
-**Podman 実行を選ぶ処理**
+#### Podman 実行を選ぶ処理
 
 - Linter (`clippy`, `eslint`, `flake8` など)
 - 小規模ビルド
 - 静的解析
 - 数秒以内の応答が必要な処理
 
-**K8s Job 実行を選ぶ処理**
+#### K8s Job 実行を選ぶ処理
 
 - フルビルド (`cargo build --release` など)
 - 大規模テスト
@@ -122,7 +122,8 @@ Execution Plane は、以下を満たす必要があります。
 
 - 実際のビルド・テスト・実行を担当すること
 - 言語ごとに独立した実行環境として提供されること
-- 単独起動モードでは Podman コンテナ、Kubernetes モードでは Job 実行環境として利用できること
+- 単独起動モードでは Podman コンテナ、Kubernetes モードでは Job
+   実行環境として利用できること
 - 必要なツールチェーンとネイティブ依存関係を各実行環境内に閉じ込めること
 - 対象プロジェクトの内容にアクセスできること
 - 言語ごとに独立して追加・更新できること
@@ -130,7 +131,9 @@ Execution Plane は、以下を満たす必要があります。
 `/workspace` の扱いは環境に応じて次のようにします。
 
 - 単独起動モードでは、Control Plane と実行コンテナが同じ `/workspace` を共有する
-- Kubernetes モードでは、Control Plane Pod と K8s Job が同じ Persistent Volume、または同等の共有ストレージ上の `/workspace` を参照する
+- Kubernetes モードでは、Control Plane Pod と K8s Job が同じ
+   Persistent Volume、または同等の共有ストレージ上の `/workspace` を
+   参照する
 
 ### 4.8 言語別実行環境の構成例
 

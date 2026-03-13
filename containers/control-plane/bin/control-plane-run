@@ -23,6 +23,12 @@ die() {
   exit 64
 }
 
+runtime_config_file="${CONTROL_PLANE_RUNTIME_ENV_FILE:-${HOME:-/home/${USER:-copilot}}/.config/control-plane/runtime.env}"
+if [[ -f "${runtime_config_file}" ]]; then
+  # shellcheck disable=SC1090
+  source "${runtime_config_file}"
+fi
+
 mode="${CONTROL_PLANE_RUN_MODE:-auto}"
 execution_hint="${CONTROL_PLANE_EXECUTION_HINT:-short}"
 namespace="${CONTROL_PLANE_K8S_NAMESPACE:-default}"

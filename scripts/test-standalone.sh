@@ -4,14 +4,15 @@ set -euo pipefail
 control_plane_image="${1:?usage: scripts/test-standalone.sh <control-plane-image> <execution-plane-image>}"
 execution_plane_image="${2:?usage: scripts/test-standalone.sh <control-plane-image> <execution-plane-image>}"
 ssh_port="${CONTROL_PLANE_TEST_SSH_PORT:-2222}"
+container_bin="${CONTROL_PLANE_CONTAINER_BIN:-podman}"
 container_name="control-plane-standalone-test"
 workdir="$(mktemp -d)"
 state_root="${workdir}/state"
 ssh_key="${workdir}/id_ed25519"
 
 cleanup() {
-  docker rm -f "${container_name}" >/dev/null 2>&1 || true
-  rm -rf "${workdir}"
+  "${container_bin}" rm -f "${container_name}" >/dev/null 2>&1 || true
+  rm -rf "${workdir}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -52,10 +53,18 @@ wait_for_ssh() {
 }
 
 start_container() {
-  docker run -d --rm             --name "${container_name}"             -p "127.0.0.1:${ssh_port}:2222"             -e SSH_PUBLIC_KEY="$(cat "${ssh_key}.pub")"             -v "${state_root}/copilot:/home/copilot/.copilot"             -v "${state_root}/gh:/home/copilot/.config/gh"             -v "${state_root}/ssh:/home/copilot/.ssh"             -v "${state_root}/workspace:/workspace"             "${control_plane_image}" >/dev/null
+  "${container_bin}" run -d --rm \
+    --name "${container_name}" \
+    -p "127.0.0.1:${ssh_port}:2222" \
+    -e SSH_PUBLIC_KEY="$(cat "${ssh_key}.pub")" \
+    -v "${state_root}/copilot:/home/copilot/.copilot" \
+    -v "${state_root}/gh:/home/copilot/.config/gh" \
+    -v "${state_root}/ssh:/home/copilot/.ssh" \
+    -v "${state_root}/workspace:/workspace" \
+    "${control_plane_image}" >/dev/null
 }
 
-require_command docker
+require_command "${container_bin}"
 require_command ssh
 require_command ssh-keygen
 
@@ -65,15 +74,16 @@ ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"
 start_container
 wait_for_ssh
 
-docker exec "${container_name}" bash -lc 'set -euo pipefail
+"${container_bin}" exec "${container_name}" bash -lc 'set -euo pipefail
   command -v node
   command -v npm
-  npm ls -g @github/copilot-cli --depth=0 | grep -q "@github/copilot-cli@"
+  npm ls -g @github/copilot --depth=0 | grep -q "@github/copilot@"
   command -v git
   command -v gh
   command -v kubectl
   command -v podman
   command -v docker
+  docker --version >/dev/null
   command -v sshd
   command -v screen
   command -v control-plane-run
@@ -116,7 +126,7 @@ grep -q '${execution_plane_image}' /tmp/fake-podman.log
 grep -q '/workspace:/workspace' /tmp/fake-podman.log
 EOF
 
-docker rm -f "${container_name}" >/dev/null
+"${container_bin}" rm -f "${container_name}" >/dev/null
 start_container
 wait_for_ssh
 
