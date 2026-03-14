@@ -3,7 +3,9 @@ set -euo pipefail
 
 cache_dir="${CONTROL_PLANE_DHI_CACHE_DIR:-${HOME}/.cache/control-plane/dhi-images}"
 dhi_images=(
+  # renovate: datasource=docker depName=dhi.io/python versioning=docker
   "dhi.io/python:3-alpine3.23-dev"
+  # renovate: datasource=docker depName=dhi.io/python versioning=docker
   "dhi.io/python:3-alpine3.23"
 )
 

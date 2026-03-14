@@ -27,7 +27,7 @@ Execution Plane 参照実装、それらを lint / build / test / publish する
 
 ### 主要スクリプト
 
-- `scripts/lint.sh`: `hadolint` / `shellcheck` / `yamllint` を実行
+- `scripts/lint.sh`: `hadolint` / `shellcheck` / `biome` / `yamllint` と Renovate 設定検証を実行
 - `scripts/build-test.sh`: build / standalone smoke / Kind integration を実行
 - `scripts/test-standalone.sh`: 単独起動モードの下位 smoke test
 - `scripts/test-kind.sh`: Kind 上の下位 integration test
@@ -52,7 +52,7 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/lint.sh
 ```
 
 `scripts/lint.sh` は、信頼できる upstream イメージである
-`hadolint/hadolint:latest-debian` と `koalaman/shellcheck:stable` を直接使い、
+`hadolint` / `shellcheck` / `biome` は upstream image を直接使い、
 `yamllint` についてはリポジトリ内の `containers/yamllint/` を build して使います。
 
 ### build / test

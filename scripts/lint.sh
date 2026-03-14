@@ -8,8 +8,12 @@ source "${script_dir}/lib-container-toolchain.sh"
 toolchain="$(detect_build_test_toolchain)"
 container_bin="$(container_runtime_for_toolchain "${toolchain}")"
 build_bin="$(build_command_for_toolchain "${toolchain}")"
-hadolint_image="${CONTROL_PLANE_HADOLINT_IMAGE:-hadolint/hadolint:latest-debian}"
-shellcheck_image="${CONTROL_PLANE_SHELLCHECK_IMAGE:-koalaman/shellcheck:stable}"
+# renovate: datasource=docker depName=hadolint/hadolint versioning=docker
+hadolint_image="${CONTROL_PLANE_HADOLINT_IMAGE:-hadolint/hadolint:v2.13.1-debian}"
+# renovate: datasource=docker depName=koalaman/shellcheck versioning=docker
+shellcheck_image="${CONTROL_PLANE_SHELLCHECK_IMAGE:-koalaman/shellcheck:v0.10.0}"
+# renovate: datasource=docker depName=ghcr.io/biomejs/biome versioning=docker
+biome_image="${CONTROL_PLANE_BIOME_IMAGE:-ghcr.io/biomejs/biome:2.4.6}"
 yamllint_image="${CONTROL_PLANE_YAMLLINT_IMAGE_TAG:-localhost/yamllint:test}"
 yamllint_config="${CONTROL_PLANE_YAMLLINT_CONFIG:-/workspace/.yamllint}"
 dockerfiles=()
@@ -55,6 +59,10 @@ if [[ "${#yaml_files[@]}" -eq 0 ]]; then
 fi
 
 printf 'Using %s toolchain for lint\n' "${toolchain}"
+# Biome ignores .json5 when traversing repository paths, so validate renovate.json5
+# through stdin and discard the normalized output once parsing succeeds.
+"${container_bin}" run --rm -i --entrypoint biome "${biome_image}" check --formatter-enabled=false --write --stdin-file-path=renovate.json5 < renovate.json5 >/dev/null
+CONTROL_PLANE_CONTAINER_BIN="${container_bin}" "${script_dir}/validate-renovate-config.sh"
 build_image_for_toolchain "${toolchain}" "${yamllint_image}" containers/yamllint
 "${container_bin}" run --rm -v "${PWD}:/workspace:ro" "${hadolint_image}" hadolint "${dockerfiles[@]}"
 "${container_bin}" run --rm -v "${PWD}:/workspace:ro" "${shellcheck_image}" -x -P /workspace "${shellcheck_targets[@]}"

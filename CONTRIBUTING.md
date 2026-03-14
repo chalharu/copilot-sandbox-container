@@ -40,8 +40,9 @@ Types:
 
 - `scripts/lint.sh` is the supported lint entry point.
 - `scripts/lint.sh` runs `hadolint` and `shellcheck` through their upstream
-  container images, and builds the repository's `containers/yamllint/` image to
-  run `yamllint` v1.38.0.
+  container images, validates `renovate.json5` with `ghcr.io/biomejs/biome`,
+  runs a local Renovate dry-run for scope validation, and builds the
+  repository's `containers/yamllint/` image to run `yamllint` v1.38.0.
 - `scripts/build-test.sh` is the supported local build/test entry point.
 - `scripts/build-test.sh` auto-detects a working Docker Buildx toolchain first,
   then falls back to a Podman / Buildah toolchain.

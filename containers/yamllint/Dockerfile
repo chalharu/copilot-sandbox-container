@@ -1,5 +1,6 @@
 FROM dhi.io/python:3-alpine3.23-dev AS builder
 
+# renovate: datasource=pypi depName=yamllint
 ARG YAMLLINT_VERSION=1.38.0
 ENV VIRTUAL_ENV=/opt/yamllint
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
