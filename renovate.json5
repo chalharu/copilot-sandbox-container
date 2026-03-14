@@ -1,15 +1,16 @@
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
 
-  extends: ["config:recommended"],
+  extends: ["config:recommended", "docker:pinDigests"],
 
   enabledManagers: ["dockerfile", "github-actions", "custom.regex"],
 
   labels: ["dependencies"],
   dependencyDashboard: true,
-  prCreation: "not-pending",
+  prCreation: "immediate",
   rebaseWhen: "behind-base-branch",
-  automergeStrategy: "squash",
+  timezone: "Asia/Tokyo",
+  automergeStrategy: "auto",
 
   packageRules: [
     {
@@ -18,6 +19,17 @@
       automerge: true,
       automergeType: "pr",
       platformAutomerge: true,
+    },
+    {
+      description: "Pin GitHub Actions by digest unless they are first-party actions",
+      matchManagers: ["github-actions"],
+      pinDigests: true,
+    },
+    {
+      description: "Keep first-party GitHub Actions on version tags",
+      matchManagers: ["github-actions"],
+      matchPackageNames: ["actions/cache", "actions/checkout"],
+      pinDigests: false,
     },
     {
       description: "Keep DHI base images aligned across yamllint and cache preparation",
