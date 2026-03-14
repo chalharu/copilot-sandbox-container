@@ -119,3 +119,28 @@ jobs:
           podman push "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}"
           podman push "${GHCR_YAMLLINT_IMAGE}:latest"
           podman push "${GHCR_YAMLLINT_IMAGE}:${{ steps.image_versions.outputs.yamllint_component_tag }}"
+
+  cleanup-packages:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs: integration
+    permissions:
+      contents: read
+      packages: write
+    env:
+      GHCR_MIN_VERSIONS_TO_KEEP: "30"
+    strategy:
+      fail-fast: false
+      matrix:
+        package_name:
+          - control-plane
+          - yamllint
+    steps:
+      - name: Delete old GHCR package versions
+        uses: actions/delete-package-versions@v5.0.0
+        with:
+          owner: ${{ github.repository_owner }}
+          package-name: ${{ matrix.package_name }}
+          package-type: container
+          min-versions-to-keep: ${{ env.GHCR_MIN_VERSIONS_TO_KEEP }}
+          token: ${{ secrets.GITHUB_TOKEN }}
