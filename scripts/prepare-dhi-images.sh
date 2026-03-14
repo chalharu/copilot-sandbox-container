@@ -34,7 +34,7 @@ login_dhi() {
 }
 
 for image in "${dhi_images[@]}"; do
-  archive_path="${cache_dir}/$(printf '%s' "${image}" | tr '/:' '__').tar"
+  archive_path="${cache_dir}/$(printf '%s' "${image}" | tr '/:' '__').oci.tar"
 
   if ! podman image exists "${image}"; then
     if [[ -f "${archive_path}" ]]; then
@@ -55,6 +55,6 @@ for image in "${dhi_images[@]}"; do
   fi
 
   if [[ ! -f "${archive_path}" ]]; then
-    podman save --format docker-archive --output "${archive_path}" "${image}" >/dev/null
+    podman save --format oci-archive --output "${archive_path}" "${image}" >/dev/null
   fi
 done
