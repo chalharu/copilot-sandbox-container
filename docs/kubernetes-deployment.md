@@ -19,7 +19,8 @@
    公開される既定値は
    `ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest` です。
    `:copilot-<COPILOT_CLI_VERSION>` tag も使えますが、再現性を優先する場合は
-   `:latest` ではなく commit SHA tag を使ってください。
+   `:latest` ではなく commit SHA tag を使ってください。なお公開イメージは
+   直近 30 version を保持し、それ以前の package version は自動削除されます。
 2. `SSH_PUBLIC_KEY` を利用者の公開鍵に置き換えます。
 3. `storageClassName` と PVC サイズをクラスタ環境に合わせて調整します。
 4. 必要に応じて Job 用の image pull policy と resource 上限を調整します。
