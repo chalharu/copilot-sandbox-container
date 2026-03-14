@@ -1,7 +1,12 @@
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
 
-  extends: ["config:recommended", "docker:pinDigests"],
+  extends: [
+    "config:recommended",
+    "docker:pinDigests",
+    "helpers:pinGitHubActionDigests",
+    ":disableRateLimiting",
+  ],
 
   enabledManagers: ["dockerfile", "github-actions", "custom.regex"],
 
@@ -19,11 +24,6 @@
       automerge: true,
       automergeType: "pr",
       platformAutomerge: true,
-    },
-    {
-      description: "Pin GitHub Actions by digest unless they are first-party actions",
-      matchManagers: ["github-actions"],
-      pinDigests: true,
     },
     {
       description: "Keep first-party GitHub Actions on version tags",
