@@ -21,7 +21,11 @@ if [[ ! -f "${yamllint_dockerfile}" ]]; then
   exit 1
 fi
 
-mapfile -t dhi_images < <(
+while IFS= read -r image; do
+  if [[ -n "${image}" ]]; then
+    dhi_images+=("${image}")
+  fi
+done < <(
   awk '$1 == "FROM" && $2 ~ /^dhi\.io\// { print $2 }' "${yamllint_dockerfile}" | LC_ALL=C sort -u
 )
 
