@@ -9,7 +9,7 @@ toolchain="$(detect_build_test_toolchain)"
 container_bin="$(container_runtime_for_toolchain "${toolchain}")"
 build_bin="$(build_command_for_toolchain "${toolchain}")"
 # renovate: datasource=docker depName=hadolint/hadolint versioning=docker
-hadolint_image="${CONTROL_PLANE_HADOLINT_IMAGE:-hadolint/hadolint:v2.13.1-debian}"
+hadolint_image="${CONTROL_PLANE_HADOLINT_IMAGE:-hadolint/hadolint:v2.14.0-debian}"
 # renovate: datasource=docker depName=koalaman/shellcheck versioning=docker
 shellcheck_image="${CONTROL_PLANE_SHELLCHECK_IMAGE:-koalaman/shellcheck:v0.11.0}"
 # renovate: datasource=docker depName=ghcr.io/biomejs/biome versioning=docker
