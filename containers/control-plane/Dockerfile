@@ -1,6 +1,7 @@
-FROM node:20-bookworm-slim
+FROM node:20.20.1-bookworm-slim
 
-ARG COPILOT_CLI_VERSION=latest
+# renovate: datasource=npm depName=@github/copilot
+ARG COPILOT_CLI_VERSION=1.0.5
 ARG CONTROL_PLANE_UID=1000
 ARG CONTROL_PLANE_GID=1000
 ARG CONTROL_PLANE_USER=copilot

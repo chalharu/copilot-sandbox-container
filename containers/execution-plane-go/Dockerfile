@@ -1,4 +1,4 @@
-FROM golang:1.26-bookworm@sha256:c7a82e9e2df2fea5d8cb62a16aa6f796d2b2ed81ccad4ddd2bc9f0d22936c3f2
+FROM golang:1.26.1-bookworm@sha256:c7a82e9e2df2fea5d8cb62a16aa6f796d2b2ed81ccad4ddd2bc9f0d22936c3f2
 
 ARG EXECUTION_PLANE_UID=1000
 ARG EXECUTION_PLANE_GID=1000

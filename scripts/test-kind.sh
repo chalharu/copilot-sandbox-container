@@ -239,7 +239,8 @@ spec:
   serviceAccountName: control-plane
   initContainers:
     - name: init-state
-      image: busybox:1.36
+      # renovate: datasource=docker depName=busybox versioning=docker
+      image: busybox:1.36.1
       command:
         - sh
         - -c

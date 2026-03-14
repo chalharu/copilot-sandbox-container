@@ -72,9 +72,11 @@ if ! "${container_bin}" run --rm \
 fi
 
 expected_dependencies=(
+  "@github/copilot"
   "actions/cache"
   "actions/checkout"
   "azure/setup-kubectl"
+  "busybox"
   "dhi.io/python"
   "engineerd/setup-kind"
   "ghcr.io/biomejs/biome"

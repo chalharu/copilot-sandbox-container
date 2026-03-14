@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.3.1
 
       - name: Install Podman toolchain
         run: |
@@ -24,7 +24,7 @@ jobs:
           sudo apt-get install -y podman
 
       - name: Restore DHI image cache
-        uses: actions/cache@v4
+        uses: actions/cache@v4.3.0
         with:
           path: ${{ env.CONTROL_PLANE_DHI_CACHE_DIR }}
           key: ${{ runner.os }}-dhi-python-${{ hashFiles('containers/yamllint/Dockerfile', 'scripts/prepare-dhi-images.sh') }}
@@ -50,7 +50,7 @@ jobs:
       CONTROL_PLANE_DHI_CACHE_DIR: ${{ github.workspace }}/.cache/control-plane/dhi-images
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.3.1
 
       - name: Install Podman toolchain
         run: |
@@ -58,7 +58,7 @@ jobs:
           sudo apt-get install -y podman buildah
 
       - name: Restore DHI image cache
-        uses: actions/cache@v4
+        uses: actions/cache@v4.3.0
         with:
           path: ${{ env.CONTROL_PLANE_DHI_CACHE_DIR }}
           key: ${{ runner.os }}-dhi-python-${{ hashFiles('containers/yamllint/Dockerfile', 'scripts/prepare-dhi-images.sh') }}
@@ -70,7 +70,7 @@ jobs:
         run: ./scripts/prepare-dhi-images.sh
 
       - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
+        uses: azure/setup-kubectl@v4.0.1
 
       - name: Set up Kind
         uses: engineerd/setup-kind@v0.6.2

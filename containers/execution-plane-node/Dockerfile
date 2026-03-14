@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim
+FROM node:20.20.1-bookworm-slim
 
 ARG EXECUTION_PLANE_UID=1000
 ARG EXECUTION_PLANE_GID=1000
