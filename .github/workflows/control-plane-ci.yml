@@ -132,7 +132,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package_name:
+        package_suffix:
           - control-plane
           - yamllint
     steps:
@@ -140,7 +140,7 @@ jobs:
         uses: actions/delete-package-versions@v5.0.0
         with:
           owner: ${{ github.repository_owner }}
-          package-name: ${{ matrix.package_name }}
+          package-name: ${{ format('{0}/{1}', github.event.repository.name, matrix.package_suffix) }}
           package-type: container
           min-versions-to-keep: ${{ env.GHCR_MIN_VERSIONS_TO_KEEP }}
           token: ${{ secrets.GITHUB_TOKEN }}
