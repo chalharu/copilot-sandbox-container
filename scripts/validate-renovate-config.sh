@@ -17,6 +17,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Renovate runs as a non-root UID, so the mounted cache directory must be
+# writable even when executed through rootless Podman in GitHub Actions.
+chmod 0777 "${base_dir}"
+
 require_command "${container_bin}"
 
 "${container_bin}" run --rm \
@@ -26,7 +30,7 @@ require_command "${container_bin}"
   "${renovate_image}" \
   --strict --no-global /workspace/renovate.json5
 
-"${container_bin}" run --rm \
+if ! "${container_bin}" run --rm \
   -e LOG_LEVEL=debug \
   -e RENOVATE_CONFIG_FILE=/workspace/renovate.json5 \
   -e RENOVATE_BASE_DIR=/tmp/renovate-base \
@@ -39,7 +43,10 @@ require_command "${container_bin}"
   --dry-run=full \
   --onboarding=false \
   --repository-cache=reset \
-  >"${log_file}" 2>&1
+  >"${log_file}" 2>&1; then
+  cat "${log_file}" >&2
+  exit 1
+fi
 
 expected_dependencies=(
   "actions/cache"
