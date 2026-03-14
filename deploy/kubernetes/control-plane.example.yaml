@@ -65,7 +65,7 @@ spec:
   initContainers:
     - name: init-state
       # renovate: datasource=docker depName=busybox versioning=docker
-      image: busybox:1.37.0
+      image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
       command:
         - sh
         - -c
