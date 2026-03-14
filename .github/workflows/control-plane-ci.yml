@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4.3.1
+        uses: actions/checkout@v6.0.2
 
       - name: Install Podman toolchain
         run: |
@@ -50,7 +50,7 @@ jobs:
       CONTROL_PLANE_DHI_CACHE_DIR: ${{ github.workspace }}/.cache/control-plane/dhi-images
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4.3.1
+        uses: actions/checkout@v6.0.2
 
       - name: Install Podman toolchain
         run: |
