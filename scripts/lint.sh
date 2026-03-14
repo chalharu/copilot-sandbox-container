@@ -9,11 +9,11 @@ toolchain="$(detect_build_test_toolchain)"
 container_bin="$(container_runtime_for_toolchain "${toolchain}")"
 build_bin="$(build_command_for_toolchain "${toolchain}")"
 # renovate: datasource=docker depName=hadolint/hadolint versioning=docker
-hadolint_image="${CONTROL_PLANE_HADOLINT_IMAGE:-hadolint/hadolint:v2.14.0-debian}"
+hadolint_image="${CONTROL_PLANE_HADOLINT_IMAGE:-hadolint/hadolint:v2.14.0-debian@sha256:158cd0184dcaa18bd8ec20b61f4c1cabdf8b32a592d062f57bdcb8e4c1d312e2}"
 # renovate: datasource=docker depName=koalaman/shellcheck versioning=docker
-shellcheck_image="${CONTROL_PLANE_SHELLCHECK_IMAGE:-koalaman/shellcheck:v0.11.0}"
+shellcheck_image="${CONTROL_PLANE_SHELLCHECK_IMAGE:-koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d}"
 # renovate: datasource=docker depName=ghcr.io/biomejs/biome versioning=docker
-biome_image="${CONTROL_PLANE_BIOME_IMAGE:-ghcr.io/biomejs/biome:2.4.6}"
+biome_image="${CONTROL_PLANE_BIOME_IMAGE:-ghcr.io/biomejs/biome:2.4.6@sha256:6d4442aab25c2211d931e1a422823e21fce60909abf4102e015ebc67a4b8e926}"
 yamllint_image="${CONTROL_PLANE_YAMLLINT_IMAGE_TAG:-localhost/yamllint:test}"
 yamllint_config="${CONTROL_PLANE_YAMLLINT_CONFIG:-/workspace/.yamllint}"
 dockerfiles=()
