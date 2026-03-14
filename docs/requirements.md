@@ -131,11 +131,11 @@ Execution Plane は、以下を満たす必要があります。
 - 言語ごとに独立して追加・更新できること
 
 ただし、すべての Execution Plane をこのリポジトリで個別に持つ必要は
-ありません。公式イメージが `/workspace` の共有、必要コマンド、実行ユーザー
-などの契約をそのまま満たす場合は upstream イメージを直接使い、不足が
-ある場合だけ薄いラッパーイメージを用意する前提とします。trusted upstream
-image が存在しない場合は、このリポジトリで最小イメージを build して
-GHCR へ公開し、再利用できるようにします。
+ありません。公式イメージが `/workspace` の共有、対象 workflow に必要な
+コマンド、実行ユーザーなどの契約をそのまま満たす場合は upstream イメージを
+直接使い、不足がある場合だけ薄いラッパーイメージを用意する前提とします。
+trusted upstream image が存在しない場合は、このリポジトリで最小イメージを
+build して GHCR へ公開し、再利用できるようにします。
 
 このリポジトリに同梱する Execution Plane は、Control Plane との結合点を
 確認するための参照実装です。対象言語や用途の一覧を固定することは目的では
@@ -177,8 +177,10 @@ GHCR へ公開し、再利用できるようにします。
   Kind integration test
 - 含める候補: `docker` 互換 CLI、`podman` または `buildah`、`kind`、
   `kubectl`、`ssh`、`ssh-keygen`
-- 提供方法: 専用の Execution Plane を追加してもよいし、`quay.io/buildah/stable`
-  などの upstream イメージをそのまま使ってもよい
+- 提供方法: 専用の Execution Plane を追加してもよいし、
+  `quay.io/buildah/stable` などの upstream イメージが上記 workflow に必要な
+  コマンド一式を満たすなら、そのまま使ってもよい。不足がある場合だけ薄い
+  ラッパーイメージで補う
 
 上記はあくまで構成例であり、各実行環境は用途に応じて自由に追加・調整できる
 ものとします。公式イメージをそのまま使える場合はそれを優先し、この

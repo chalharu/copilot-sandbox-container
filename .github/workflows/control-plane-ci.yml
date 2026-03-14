@@ -90,6 +90,17 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: buildah bud --tag localhost/yamllint:test containers/yamllint
 
+      - name: Read published image versions
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: image_versions
+        run: |
+          control_plane_version="$(sed -n 's/^ARG COPILOT_CLI_VERSION=//p' containers/control-plane/Dockerfile)"
+          yamllint_version="$(sed -n 's/^ARG YAMLLINT_VERSION=//p' containers/yamllint/Dockerfile)"
+          test -n "${control_plane_version}"
+          test -n "${yamllint_version}"
+          printf 'control_plane_component_tag=copilot-%s\n' "${control_plane_version}" >> "${GITHUB_OUTPUT}"
+          printf 'yamllint_component_tag=%s\n' "${yamllint_version}" >> "${GITHUB_OUTPUT}"
+
       - name: Publish GHCR images
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
@@ -98,9 +109,13 @@ jobs:
         run: |
           podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}"
           podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:latest"
+          podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${{ steps.image_versions.outputs.control_plane_component_tag }}"
           podman tag localhost/yamllint:test "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}"
           podman tag localhost/yamllint:test "${GHCR_YAMLLINT_IMAGE}:latest"
+          podman tag localhost/yamllint:test "${GHCR_YAMLLINT_IMAGE}:${{ steps.image_versions.outputs.yamllint_component_tag }}"
           podman push "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}"
           podman push "${GHCR_CONTROL_PLANE_IMAGE}:latest"
+          podman push "${GHCR_CONTROL_PLANE_IMAGE}:${{ steps.image_versions.outputs.control_plane_component_tag }}"
           podman push "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}"
           podman push "${GHCR_YAMLLINT_IMAGE}:latest"
+          podman push "${GHCR_YAMLLINT_IMAGE}:${{ steps.image_versions.outputs.yamllint_component_tag }}"
