@@ -26,9 +26,9 @@
       platformAutomerge: true,
     },
     {
-      description: "Keep first-party GitHub Actions on version tags",
+      description: "Override the helper preset for actions/* GitHub Actions",
       matchManagers: ["github-actions"],
-      matchPackageNames: ["actions/cache", "actions/checkout"],
+      matchPackageNames: ["/^actions\\/.+$/"],
       pinDigests: false,
     },
     {
