@@ -39,6 +39,12 @@
       separateMajorMinor: false,
       separateMinorPatch: false,
     },
+    {
+      description: "Keep setup-kind manually pinned while the upstream v0.6.2 tag points at the wrong commit",
+      matchManagers: ["github-actions"],
+      matchPackageNames: ["engineerd/setup-kind"],
+      enabled: false,
+    },
   ],
 
   customManagers: [
