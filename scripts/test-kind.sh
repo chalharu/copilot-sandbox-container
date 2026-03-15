@@ -118,20 +118,20 @@ wait_for_ssh() {
 wait_for_screen_term() {
   local target_session="$1"
   local term_file="$2"
-  local expected_term="${3:-screen-256color}"
+  local expected_term_pattern="${3:-screen-256color(-bce)?}"
   local attempts="${4:-15}"
   local remote_command
   local _
 
-  printf -v remote_command 'TARGET_SESSION=%q TERM_FILE=%q EXPECTED_TERM=%q bash -l -se' \
-    "${target_session}" "${term_file}" "${expected_term}"
+  printf -v remote_command 'TARGET_SESSION=%q TERM_FILE=%q EXPECTED_TERM_PATTERN=%q bash -l -se' \
+    "${target_session}" "${term_file}" "${expected_term_pattern}"
 
   for _ in $(seq 1 "${attempts}"); do
     # shellcheck disable=SC2029
     if ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_command}" <<'EOF' >/dev/null 2>&1
 set -euo pipefail
 screen -list | grep -q -- "${TARGET_SESSION}"
-grep -qx -- "${EXPECTED_TERM}" "${TERM_FILE}"
+grep -Eq -- "^(${EXPECTED_TERM_PATTERN})$" "${TERM_FILE}"
 EOF
     then
       return 0
@@ -487,7 +487,7 @@ set -euo pipefail
 screen -list || true
 cat /workspace/k8s-screen-term.txt || true
 EOF
-  printf 'Expected kind-session to report TERM=screen-256color\n' >&2
+  printf 'Expected kind-session to report a screen-256color TERM variant\n' >&2
   exit 1
 fi
 
