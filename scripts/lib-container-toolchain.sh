@@ -17,7 +17,7 @@ report_podman_runtime_failure() {
 
   if grep -Fq 'newuidmap' <<<"${output}" && grep -Fq 'Operation not permitted' <<<"${output}"; then
     printf '%s\n' \
-      'Podman is installed but unusable in this environment: nested user namespace setup is blocked (`newuidmap` failed).' \
+      "Podman is installed but unusable in this environment: nested user namespace setup is blocked (\`newuidmap\` failed)." \
       'Use a working Docker buildx daemon, or run the workflow in GitHub Actions / on a container host that supports rootless user namespaces.' \
       >&2
   fi
