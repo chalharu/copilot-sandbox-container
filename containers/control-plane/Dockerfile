@@ -47,7 +47,8 @@ RUN arch="$(dpkg --print-architecture)" \
     esac \
     && curl -fsSLo "/tmp/kind-linux-${kind_arch}" "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-${kind_arch}" \
     && curl -fsSLo "/tmp/kind-linux-${kind_arch}.sha256sum" "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-${kind_arch}.sha256sum" \
-    && (cd /tmp && sha256sum -c "kind-linux-${kind_arch}.sha256sum") \
+    && kind_sha256="$(cut -d' ' -f1 "/tmp/kind-linux-${kind_arch}.sha256sum")" \
+    && printf '%s  %s\n' "${kind_sha256}" "/tmp/kind-linux-${kind_arch}" | sha256sum -c - \
     && install -m 0755 "/tmp/kind-linux-${kind_arch}" /usr/local/bin/kind \
     && rm -f "/tmp/kind-linux-${kind_arch}" "/tmp/kind-linux-${kind_arch}.sha256sum"
 
