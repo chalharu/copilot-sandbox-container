@@ -72,6 +72,32 @@ EOF
   return 1
 }
 
+wait_for_screen_term() {
+  local target_session="$1"
+  local term_file="$2"
+  local expected_term="${3:-screen-256color}"
+  local attempts="${4:-15}"
+  local remote_command
+  local _
+
+  printf -v remote_command 'TARGET_SESSION=%q TERM_FILE=%q EXPECTED_TERM=%q bash -l -se' \
+    "${target_session}" "${term_file}" "${expected_term}"
+
+  for _ in $(seq 1 "${attempts}"); do
+    if ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_command}" <<'EOF' >/dev/null 2>&1
+set -euo pipefail
+screen -list | grep -q -- "${TARGET_SESSION}"
+grep -qx -- "${EXPECTED_TERM}" "${TERM_FILE}"
+EOF
+    then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
 ssh_host_fingerprint() {
   local fingerprint
 
@@ -168,12 +194,15 @@ echo ssh > ~/.ssh/state.txt
 screen -T screen-256color -dmS smoke-session sh -lc 'printf "%s\n" "$TERM" > /workspace/screen-term.txt; echo screen-ok > /workspace/screen.txt; sleep 30'
 EOF
 
-sleep 2
-ssh_bash <<'EOF'
+if ! wait_for_screen_term smoke-session /workspace/screen-term.txt; then
+  ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
-screen -list | grep -q smoke-session
-grep -qx screen-256color /workspace/screen-term.txt
+screen -list || true
+cat /workspace/screen-term.txt || true
 EOF
+  printf 'Expected smoke-session to report TERM=screen-256color\n' >&2
+  exit 1
+fi
 
 ssh_bash <<EOF
 set -euo pipefail
