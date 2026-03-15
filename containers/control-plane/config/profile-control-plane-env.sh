@@ -7,3 +7,7 @@ if [ -f "${runtime_config_file}" ]; then
   . "${runtime_config_file}"
   set +a
 fi
+
+: "${EDITOR:=vim}"
+: "${VISUAL:=${EDITOR}}"
+export EDITOR VISUAL

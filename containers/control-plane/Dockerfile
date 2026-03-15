@@ -24,6 +24,7 @@ RUN apt-get update -o Acquire::Retries=3 \
         git \
         jq \
         kubernetes-client \
+        ncurses-term \
         openssh-client \
         openssh-server \
         podman \
@@ -32,6 +33,7 @@ RUN apt-get update -o Acquire::Retries=3 \
         slirp4netns \
         tini \
         uidmap \
+        vim \
     && rm -rf /var/lib/apt/lists/*
 
 RUN npm install --global "@github/copilot@${COPILOT_CLI_VERSION}" \
@@ -84,6 +86,7 @@ RUN existing_group="$(getent group "${CONTROL_PLANE_GID}" | cut -d: -f1 || true)
     && ln -sf /usr/sbin/sshd /usr/local/bin/sshd
 
 COPY --chmod=644 config/sshd_config /etc/ssh/sshd_config
+COPY --chmod=644 config/screenrc /etc/screenrc
 COPY --chmod=644 config/storage.conf /home/${CONTROL_PLANE_USER}/.config/containers/storage.conf
 COPY --chmod=644 config/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
 COPY --chmod=644 config/profile-control-plane-session.sh /etc/profile.d/control-plane-session.sh

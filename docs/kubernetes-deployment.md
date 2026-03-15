@@ -59,6 +59,19 @@
 を選べる picker が起動します。新しい作業を始めるときも、既存セッションへ
 戻るときも同じ入口を使えます。
 
+Control Plane イメージは `vim` を同梱し、ログイン shell で `EDITOR` /
+`VISUAL` を未設定時だけ `vim` に補います。Copilot CLI で multiline shortcut が
+通らないときでも、`Ctrl+G` ですぐ外部 editor を開けます。
+
+また、GNU Screen では `screen-256color` / UTF-8 / alt screen / background color
+erase を既定化し、`tmux-256color` を含む terminfo も入れています。そのため、
+`tmux` 経由で SSH 接続しても表示崩れを起こしにくくしています。
+
+ただし Copilot CLI の multiline 入力 (`Shift+Enter`) 自体は upstream で Kitty
+protocol 対応 terminal を前提としており、対応 terminal では `/terminal-setup`
+を実行してください。`tmux` / GNU Screen を挟むと `Shift+Enter` や `Ctrl+Enter`
+が安定しない場合があります。その場合は paste か `Ctrl+G` を使ってください。
+
 `control-plane-operations` skill は Control Plane イメージに user-level skill として
 同梱され、起動時に `~/.copilot/skills/control-plane-operations` へ同期されます。
 そのため、このリポジトリ以外を `/workspace` に mount しても同じ運用ガイドを

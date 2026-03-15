@@ -115,6 +115,21 @@ pull 結果を cache して rate limit を避けます。
 `control-plane-operations` skill をイメージに同梱しているため、他のリポジトリを
 `/workspace` に mount した場合でも同じ運用ガイドを使えます。
 
+Control Plane イメージには `vim` も同梱され、ログイン shell では `EDITOR` /
+`VISUAL` を未設定時だけ `vim` に補います。Copilot CLI の multiline shortcut が
+通らない環境でも、`Ctrl+G` で外部 editor を開く運用をすぐ使えます。
+
+GNU Screen には `/etc/screenrc` で `screen-256color` / UTF-8 / alt screen /
+background color erase を既定で設定し、Control Plane イメージには
+`tmux-256color` や `xterm-256color` を含む追加 terminfo も入れています。これにより
+`tmux` 経由の SSH ログインでも表示崩れを起こしにくくしています。
+
+一方で、Copilot CLI の multiline 入力 (`Shift+Enter`) は upstream では Kitty
+protocol 対応 terminal を前提とします。対応 terminal では `/terminal-setup` を
+実行してください。`tmux` / GNU Screen 経由では key event が転送されず、
+`Shift+Enter` や `Ctrl+Enter` が安定しない場合があります。その場合は paste か
+`Ctrl+G` を使ってください。
+
 既定の Control Plane イメージは
 `ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest` です。
 `copilot-<COPILOT_CLI_VERSION>` tag も使えますが、再現性を優先する場合は

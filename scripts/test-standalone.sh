@@ -38,7 +38,7 @@ ssh_cmd() {
 }
 
 ssh_bash() {
-  ssh "${ssh_opts[@]}" copilot@127.0.0.1 'bash -se'
+  ssh "${ssh_opts[@]}" copilot@127.0.0.1 'bash -l -se'
 }
 
 wait_for_ssh() {
@@ -131,6 +131,7 @@ wait_for_ssh
   docker --version >/dev/null
   command -v sshd
   command -v screen
+  command -v vim
   command -v control-plane-run
   command -v control-plane-session
   command -v k8s-job-start
@@ -138,6 +139,9 @@ wait_for_ssh
   command -v k8s-job-pod
   command -v k8s-job-logs
   command -v k8s-job-run
+  test "$(TERM=xterm-256color tput colors)" -ge 256
+  test "$(TERM=screen-256color tput colors)" -ge 256
+  test "$(TERM=tmux-256color tput colors)" -ge 256
   test -f /home/copilot/.copilot/skills/control-plane-operations/SKILL.md
   test -f /home/copilot/.copilot/skills/control-plane-operations/references/control-plane-run.md
   grep -q "^copilot:" /etc/subuid
@@ -146,17 +150,20 @@ wait_for_ssh
 
 ssh_bash <<'EOF'
 set -euo pipefail
+test "${EDITOR}" = "vim"
+test "${VISUAL}" = "vim"
 mkdir -p ~/.copilot ~/.config/gh /workspace
 echo standalone > ~/.copilot/state.txt
 echo gh > ~/.config/gh/state.txt
 echo ssh > ~/.ssh/state.txt
-screen -dmS smoke-session sh -lc 'echo screen-ok > /workspace/screen.txt; sleep 30'
+screen -dmS smoke-session sh -lc 'printf "%s\n" "$TERM" > /workspace/screen-term.txt; echo screen-ok > /workspace/screen.txt; sleep 30'
 EOF
 
 sleep 2
 ssh_bash <<'EOF'
 set -euo pipefail
 screen -list | grep -q smoke-session
+grep -qx screen-256color /workspace/screen-term.txt
 EOF
 
 ssh_bash <<EOF
@@ -195,7 +202,7 @@ container_env=(-e CONTROL_PLANE_SESSION_SELECTION=new:auto-login)
 start_container
 wait_for_ssh
 
-TERM="${TERM:-xterm}" ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 </dev/null >"${workdir}/ssh-login.log" 2>&1 &
+TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 </dev/null >"${workdir}/ssh-login.log" 2>&1 &
 interactive_ssh_pid=$!
 if ! wait_for_screen_session auto-login; then
   printf 'Expected auto-login screen session to be created during SSH login\n' >&2

@@ -4,12 +4,6 @@ set -euo pipefail
 session_name="${CONTROL_PLANE_SCREEN_SESSION:-copilot}"
 selection_override="${CONTROL_PLANE_SESSION_SELECTION:-}"
 
-ensure_screen_term() {
-  if ! TERM="${TERM:-}" tput clear >/dev/null 2>&1; then
-    export TERM=xterm
-  fi
-}
-
 list_sessions() {
   screen -list 2>/dev/null | awk '/^[[:space:]]*[0-9]+\./ {sub(/^[[:space:]]+/, "", $0); print}'
 }
@@ -18,7 +12,6 @@ create_session() {
   local new_session_name="${1:-${session_name}}"
 
   [[ -n "${new_session_name}" ]] || new_session_name="${session_name}"
-  ensure_screen_term
   exec screen -S "${new_session_name}"
 }
 
@@ -80,7 +73,6 @@ select_session() {
   fi
 
   if [[ "${session_count}" -gt 0 ]] && attach_target="$(resolve_existing_session "${selection}" "${session_lines[@]}")"; then
-    ensure_screen_term
     exec screen -xRR "${attach_target}"
   fi
 
@@ -115,7 +107,6 @@ if [[ "${1:-}" == "--command" ]]; then
     printf 'control-plane-session: --command requires a shell command\n' >&2
     exit 64
   }
-  ensure_screen_term
   exec screen -DmS "${session_name}" bash -lc "$*"
 fi
 
@@ -129,5 +120,4 @@ if [[ "${1:-}" == "--select" ]]; then
   exit 0
 fi
 
-ensure_screen_term
 exec screen -xRR "${session_name}"

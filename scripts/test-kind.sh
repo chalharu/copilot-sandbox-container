@@ -100,7 +100,7 @@ ssh_cmd() {
 }
 
 ssh_bash() {
-  ssh "${ssh_opts[@]}" copilot@127.0.0.1 'bash -se'
+  ssh "${ssh_opts[@]}" copilot@127.0.0.1 'bash -l -se'
 }
 
 wait_for_ssh() {
@@ -431,6 +431,12 @@ command -v docker
 docker --version >/dev/null
 command -v sshd
 command -v screen
+command -v vim
+test "\$(TERM=xterm-256color tput colors)" -ge 256
+test "\$(TERM=screen-256color tput colors)" -ge 256
+test "\$(TERM=tmux-256color tput colors)" -ge 256
+test "\${EDITOR}" = "vim"
+test "\${VISUAL}" = "vim"
 test -f ~/.copilot/skills/control-plane-operations/SKILL.md
 kubectl auth can-i create jobs --namespace ${namespace} | grep -q '^yes$'
 EOF
@@ -441,13 +447,14 @@ mkdir -p ~/.copilot ~/.config/gh ~/.ssh /workspace
 echo k8s > ~/.copilot/state.txt
 echo gh > ~/.config/gh/state.txt
 echo ssh > ~/.ssh/state.txt
-screen -dmS kind-session sh -lc 'echo k8s-screen > /workspace/k8s-screen.txt; sleep 30'
+screen -dmS kind-session sh -lc 'printf "%s\n" "$TERM" > /workspace/k8s-screen-term.txt; echo k8s-screen > /workspace/k8s-screen.txt; sleep 30'
 EOF
 
 sleep 2
 ssh_bash <<'EOF'
 set -euo pipefail
 screen -list | grep -q kind-session
+grep -qx screen-256color /workspace/k8s-screen-term.txt
 EOF
 
 job_name="$(ssh_bash <<EOF
