@@ -107,7 +107,7 @@ if [[ "${1:-}" == "--command" ]]; then
     printf 'control-plane-session: --command requires a shell command\n' >&2
     exit 64
   }
-  exec screen -DmS "${session_name}" bash -lc "$*"
+  exec screen -T screen-256color -DmS "${session_name}" bash -lc "$*"
 fi
 
 if [[ "${1:-}" == "--list" ]]; then

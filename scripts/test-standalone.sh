@@ -165,7 +165,7 @@ mkdir -p ~/.copilot ~/.config/gh /workspace
 echo standalone > ~/.copilot/state.txt
 echo gh > ~/.config/gh/state.txt
 echo ssh > ~/.ssh/state.txt
-screen -dmS smoke-session sh -lc 'printf "%s\n" "$TERM" > /workspace/screen-term.txt; echo screen-ok > /workspace/screen.txt; sleep 30'
+screen -T screen-256color -dmS smoke-session sh -lc 'printf "%s\n" "$TERM" > /workspace/screen-term.txt; echo screen-ok > /workspace/screen.txt; sleep 30'
 EOF
 
 sleep 2

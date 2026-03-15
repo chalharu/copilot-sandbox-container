@@ -451,7 +451,7 @@ mkdir -p ~/.copilot ~/.config/gh ~/.ssh /workspace
 echo k8s > ~/.copilot/state.txt
 echo gh > ~/.config/gh/state.txt
 echo ssh > ~/.ssh/state.txt
-screen -dmS kind-session sh -lc 'printf "%s\n" "$TERM" > /workspace/k8s-screen-term.txt; echo k8s-screen > /workspace/k8s-screen.txt; sleep 30'
+screen -T screen-256color -dmS kind-session sh -lc 'printf "%s\n" "$TERM" > /workspace/k8s-screen-term.txt; echo k8s-screen > /workspace/k8s-screen.txt; sleep 30'
 EOF
 
 sleep 2
