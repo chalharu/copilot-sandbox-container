@@ -12,6 +12,7 @@
 - PersistentVolumeClaim
 - SSH 用 Service
 - Control Plane Deployment
+- PVC 上に永続化される SSH host key
 
 テンプレート本体は `deploy/kubernetes/control-plane.example.yaml` にあります。
 
@@ -27,8 +28,10 @@
    `copilot-github-token` は任意ですが、設定すると SSH ログイン後の shell でも
    `COPILOT_GITHUB_TOKEN` として利用できます。
 3. `storageClassName` と PVC サイズをクラスタ環境に合わせて調整します。
-4. 必要に応じて Job 用の image pull policy と resource 上限を調整します。
-5. 適用後は `kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox`
+4. テンプレートは同じ PVC の `ssh-host-keys` subPath に SSH host key を置くため、
+   Pod が再作成されても host key が変わりません。
+5. 必要に応じて Job 用の image pull policy と resource 上限を調整します。
+6. 適用後は `kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox`
    のように Service 経由で SSH を公開できます。
 
 ```yaml
@@ -51,6 +54,16 @@
 テンプレートでは raw Pod ではなく `Deployment` を採用しています。これにより
 単一レプリカ構成のまま self-healing と更新管理を使え、`strategy: Recreate` で
 単一の PVC を安全に持ち回せます。
+
+対話的な SSH ログインでは、GNU Screen の既存セッション一覧と `New session`
+を選べる picker が起動します。新しい作業を始めるときも、既存セッションへ
+戻るときも同じ入口を使えます。
+
+`control-plane-operations` skill は Control Plane イメージに user-level skill として
+同梱され、起動時に `~/.copilot/skills/control-plane-operations` へ同期されます。
+そのため、このリポジトリ以外を `/workspace` に mount しても同じ運用ガイドを
+使えます。repo 固有の追加 skill が必要な場合だけ、別途その repo 側に
+`.github/skills/` を置いてください。
 
 ## private registry を使う場合
 

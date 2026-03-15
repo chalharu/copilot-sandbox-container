@@ -108,7 +108,7 @@ spec:
           command:
             - sh
             - -c
-            - mkdir -p /state/copilot /state/gh /state/ssh /state/workspace && chmod 700 /state/ssh
+            - mkdir -p /state/copilot /state/gh /state/ssh /state/ssh-host-keys /state/workspace && chmod 700 /state/ssh /state/ssh-host-keys
           volumeMounts:
             - name: state
               mountPath: /state
@@ -170,6 +170,9 @@ spec:
             - name: state
               mountPath: /home/copilot/.ssh
               subPath: ssh
+            - name: state
+              mountPath: /var/lib/control-plane/ssh-host-keys
+              subPath: ssh-host-keys
             - name: state
               mountPath: /workspace
               subPath: workspace

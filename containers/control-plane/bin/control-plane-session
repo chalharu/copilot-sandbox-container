@@ -2,6 +2,112 @@
 set -euo pipefail
 
 session_name="${CONTROL_PLANE_SCREEN_SESSION:-copilot}"
+selection_override="${CONTROL_PLANE_SESSION_SELECTION:-}"
+
+ensure_screen_term() {
+  if ! TERM="${TERM:-}" tput clear >/dev/null 2>&1; then
+    export TERM=xterm
+  fi
+}
+
+list_sessions() {
+  screen -list 2>/dev/null | awk '/^[[:space:]]*[0-9]+\./ {sub(/^[[:space:]]+/, "", $0); print}'
+}
+
+create_session() {
+  local new_session_name="${1:-${session_name}}"
+
+  [[ -n "${new_session_name}" ]] || new_session_name="${session_name}"
+  ensure_screen_term
+  exec screen -S "${new_session_name}"
+}
+
+resolve_existing_session() {
+  local selection="$1"
+  shift
+  local index=1
+  local session_line session_id short_name
+
+  for session_line in "$@"; do
+    session_id="${session_line%%[[:space:]]*}"
+    short_name="${session_id#*.}"
+
+    if [[ "${selection}" == "${index}" ]] || [[ "${selection}" == "${session_id}" ]] || [[ "${selection}" == "${short_name}" ]]; then
+      printf '%s\n' "${session_id}"
+      return 0
+    fi
+
+    index=$((index + 1))
+  done
+
+  return 1
+}
+
+select_session() {
+  local session_lines=()
+  local session_line
+  local session_count=0
+  local selection=""
+  local new_session_index
+  local attach_target=""
+  local new_session_name=""
+
+  while IFS= read -r session_line; do
+    [[ -n "${session_line}" ]] || continue
+    session_lines+=("${session_line}")
+  done < <(list_sessions || true)
+
+  session_count="${#session_lines[@]}"
+  new_session_index=$((session_count + 1))
+
+  if [[ -n "${selection_override}" ]]; then
+    selection="${selection_override}"
+  else
+    printf 'GNU Screen sessions:\n'
+    if [[ "${session_count}" -eq 0 ]]; then
+      printf '  (no existing sessions)\n'
+    else
+      local index=1
+      for session_line in "${session_lines[@]}"; do
+        printf '  %d) %s\n' "${index}" "${session_line}"
+        index=$((index + 1))
+      done
+    fi
+    printf '  %d) New session (%s)\n' "${new_session_index}" "${session_name}"
+    printf 'Select a session number or type a new session name [%d]: ' "${new_session_index}" >&2
+    read -r selection || exit 0
+    [[ -n "${selection}" ]] || selection="${new_session_index}"
+  fi
+
+  if [[ "${session_count}" -gt 0 ]] && attach_target="$(resolve_existing_session "${selection}" "${session_lines[@]}")"; then
+    ensure_screen_term
+    exec screen -xRR "${attach_target}"
+  fi
+
+  case "${selection}" in
+    new)
+      create_session "${session_name}"
+      ;;
+    new:*)
+      new_session_name="${selection#new:}"
+      create_session "${new_session_name}"
+      ;;
+    "${new_session_index}")
+      create_session "${session_name}"
+      ;;
+    ''|*[!0-9]*)
+      create_session "${selection}"
+      ;;
+    [0-9]*)
+      printf 'control-plane-session: session index %s not found; choose 1-%d or type a new session name\n' "${selection}" "${new_session_index}" >&2
+      exit 64
+      ;;
+    *)
+      printf 'control-plane-session: invalid selection %s\n' "${selection}" >&2
+      exit 64
+      ;;
+  esac
+}
 
 if [[ "${1:-}" == "--command" ]]; then
   shift
@@ -9,7 +115,19 @@ if [[ "${1:-}" == "--command" ]]; then
     printf 'control-plane-session: --command requires a shell command\n' >&2
     exit 64
   }
+  ensure_screen_term
   exec screen -DmS "${session_name}" bash -lc "$*"
 fi
 
+if [[ "${1:-}" == "--list" ]]; then
+  list_sessions
+  exit 0
+fi
+
+if [[ "${1:-}" == "--select" ]]; then
+  select_session
+  exit 0
+fi
+
+ensure_screen_term
 exec screen -xRR "${session_name}"

@@ -9,6 +9,7 @@ container_name="control-plane-standalone-test"
 workdir="$(mktemp -d)"
 state_root="${workdir}/state"
 ssh_key="${workdir}/id_ed25519"
+container_env=()
 
 cleanup() {
   "${container_bin}" rm -f "${container_name}" >/dev/null 2>&1 || true
@@ -52,23 +53,67 @@ wait_for_ssh() {
   exit 1
 }
 
+wait_for_screen_session() {
+  local target_session="$1"
+  local attempts="${2:-15}"
+  local _
+
+  for _ in $(seq 1 "${attempts}"); do
+    if ssh_bash <<EOF >/dev/null 2>&1
+set -euo pipefail
+screen -list | grep -q -- '${target_session}'
+EOF
+    then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
+ssh_host_fingerprint() {
+  local fingerprint
+
+  fingerprint="$(ssh-keyscan -p "${ssh_port}" 127.0.0.1 2>/dev/null | ssh-keygen -lf - | awk '/ED25519/ { print $2; exit }')"
+  [[ -n "${fingerprint}" ]] || {
+    printf 'Unable to read SSH host key fingerprint on port %s\n' "${ssh_port}" >&2
+    exit 1
+  }
+
+  printf '%s\n' "${fingerprint}"
+}
+
 start_container() {
-  "${container_bin}" run -d --rm \
-    --name "${container_name}" \
-    -p "127.0.0.1:${ssh_port}:2222" \
-    -e SSH_PUBLIC_KEY="$(cat "${ssh_key}.pub")" \
-    -v "${state_root}/copilot:/home/copilot/.copilot" \
-    -v "${state_root}/gh:/home/copilot/.config/gh" \
-    -v "${state_root}/ssh:/home/copilot/.ssh" \
-    -v "${state_root}/workspace:/workspace" \
-    "${control_plane_image}" >/dev/null
+  local run_args=(
+    run -d --rm
+    --name "${container_name}"
+    -p "127.0.0.1:${ssh_port}:2222"
+    -e SSH_PUBLIC_KEY="$(cat "${ssh_key}.pub")"
+  )
+
+  if ((${#container_env[@]} > 0)); then
+    run_args+=("${container_env[@]}")
+  fi
+
+  run_args+=(
+    -v "${state_root}/copilot:/home/copilot/.copilot"
+    -v "${state_root}/gh:/home/copilot/.config/gh"
+    -v "${state_root}/ssh:/home/copilot/.ssh"
+    -v "${state_root}/ssh-host-keys:/var/lib/control-plane/ssh-host-keys"
+    -v "${state_root}/workspace:/workspace"
+    "${control_plane_image}"
+  )
+
+  "${container_bin}" "${run_args[@]}" >/dev/null
 }
 
 require_command "${container_bin}"
 require_command ssh
 require_command ssh-keygen
+require_command ssh-keyscan
 
-mkdir -p "${state_root}/copilot" "${state_root}/gh" "${state_root}/ssh" "${state_root}/workspace"
+mkdir -p "${state_root}/copilot" "${state_root}/gh" "${state_root}/ssh" "${state_root}/ssh-host-keys" "${state_root}/workspace"
 ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"
 
 start_container
@@ -93,6 +138,8 @@ wait_for_ssh
   command -v k8s-job-pod
   command -v k8s-job-logs
   command -v k8s-job-run
+  test -f /home/copilot/.copilot/skills/control-plane-operations/SKILL.md
+  test -f /home/copilot/.copilot/skills/control-plane-operations/references/control-plane-run.md
   grep -q "^copilot:" /etc/subuid
   grep -q "^copilot:" /etc/subgid
 '
@@ -126,9 +173,14 @@ grep -q '${execution_plane_image}' /tmp/fake-podman.log
 grep -q '/workspace:/workspace' /tmp/fake-podman.log
 EOF
 
+first_host_fingerprint="$(ssh_host_fingerprint)"
+
 "${container_bin}" rm -f "${container_name}" >/dev/null
 start_container
 wait_for_ssh
+
+second_host_fingerprint="$(ssh_host_fingerprint)"
+[[ "${first_host_fingerprint}" == "${second_host_fingerprint}" ]]
 
 ssh_bash <<'EOF'
 set -euo pipefail
@@ -137,3 +189,19 @@ test -f ~/.config/gh/state.txt
 test -f ~/.ssh/state.txt
 test -f /workspace/screen.txt
 EOF
+
+"${container_bin}" rm -f "${container_name}" >/dev/null
+container_env=(-e CONTROL_PLANE_SESSION_SELECTION=new:auto-login)
+start_container
+wait_for_ssh
+
+TERM="${TERM:-xterm}" ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 </dev/null >"${workdir}/ssh-login.log" 2>&1 &
+interactive_ssh_pid=$!
+if ! wait_for_screen_session auto-login; then
+  printf 'Expected auto-login screen session to be created during SSH login\n' >&2
+  cat "${workdir}/ssh-login.log" >&2 || true
+  exit 1
+fi
+
+kill "${interactive_ssh_pid}" >/dev/null 2>&1 || true
+wait "${interactive_ssh_pid}" 2>/dev/null || true

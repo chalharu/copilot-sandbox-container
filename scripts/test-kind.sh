@@ -8,6 +8,7 @@ namespace="${CONTROL_PLANE_TEST_NAMESPACE:-control-plane-ci}"
 ssh_port="${CONTROL_PLANE_TEST_SSH_PORT:-32222}"
 kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-podman}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-${kind_provider}}"
+control_plane_selector="app.kubernetes.io/name=control-plane"
 workdir="$(mktemp -d)"
 ssh_key="${workdir}/id_ed25519"
 kubeconfig_path="${workdir}/kubeconfig"
@@ -114,6 +115,18 @@ wait_for_ssh() {
   exit 1
 }
 
+ssh_host_fingerprint() {
+  local fingerprint
+
+  fingerprint="$(ssh-keyscan -p "${ssh_port}" 127.0.0.1 2>/dev/null | ssh-keygen -lf - | awk '/ED25519/ { print $2; exit }')"
+  [[ -n "${fingerprint}" ]] || {
+    printf 'Unable to read SSH host key fingerprint on port %s\n' "${ssh_port}" >&2
+    exit 1
+  }
+
+  printf '%s\n' "${fingerprint}"
+}
+
 stop_port_forward() {
   if [[ -n "${port_forward_pid}" ]]; then
     kill "${port_forward_pid}" >/dev/null 2>&1 || true
@@ -124,20 +137,31 @@ stop_port_forward() {
 
 start_port_forward() {
   stop_port_forward
-  kubectl port-forward --namespace "${namespace}" pod/control-plane "${ssh_port}:2222" >"${workdir}/port-forward.log" 2>&1 &
+  kubectl port-forward --namespace "${namespace}" service/control-plane "${ssh_port}:2222" >"${workdir}/port-forward.log" 2>&1 &
   port_forward_pid=$!
 }
 
+control_plane_pod_name() {
+  kubectl get pods --namespace "${namespace}" -l "${control_plane_selector}" -o jsonpath='{.items[0].metadata.name}'
+}
+
 dump_control_plane_diagnostics() {
-  kubectl get pods --namespace "${namespace}" -o wide >&2 || true
-  kubectl describe pod/control-plane --namespace "${namespace}" >&2 || true
-  kubectl logs --namespace "${namespace}" pod/control-plane -c init-state >&2 || true
-  kubectl logs --namespace "${namespace}" pod/control-plane -c control-plane >&2 || true
+  local pod_name=""
+
+  kubectl get deployment,replicaset,pods,svc --namespace "${namespace}" -l "${control_plane_selector}" -o wide >&2 || true
+  kubectl describe deployment/control-plane --namespace "${namespace}" >&2 || true
+  pod_name="$(control_plane_pod_name 2>/dev/null || true)"
+  if [[ -n "${pod_name}" ]]; then
+    kubectl describe pod/"${pod_name}" --namespace "${namespace}" >&2 || true
+    kubectl logs --namespace "${namespace}" pod/"${pod_name}" -c init-state >&2 || true
+    kubectl logs --namespace "${namespace}" pod/"${pod_name}" -c control-plane >&2 || true
+  fi
   kubectl get events --namespace "${namespace}" --sort-by=.lastTimestamp >&2 || true
 }
 
 wait_for_control_plane_pod() {
-  if kubectl wait --namespace "${namespace}" --for=condition=Ready pod/control-plane --timeout=180s >/dev/null; then
+  if kubectl rollout status --namespace "${namespace}" deployment/control-plane --timeout=180s >/dev/null \
+    && kubectl wait --namespace "${namespace}" --for=condition=Ready pod -l "${control_plane_selector}" --timeout=180s >/dev/null; then
     return 0
   fi
 
@@ -231,78 +255,126 @@ spec:
   volumeName: control-plane-state-pv
 ---
 apiVersion: v1
-kind: Pod
+kind: Secret
+metadata:
+  name: control-plane-auth
+  namespace: ${namespace}
+type: Opaque
+stringData:
+  ssh-public-key: |
+    ${public_key}
+---
+apiVersion: v1
+kind: Service
 metadata:
   name: control-plane
   namespace: ${namespace}
+  labels:
+    app.kubernetes.io/name: control-plane
 spec:
-  serviceAccountName: control-plane
-  initContainers:
-    - name: init-state
-      # renovate: datasource=docker depName=busybox versioning=docker
-      image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
-      command:
-        - sh
-        - -c
-        - mkdir -p /state/copilot /state/gh /state/ssh /state/workspace && chmod 700 /state/ssh
-      volumeMounts:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: control-plane
+  ports:
+    - name: ssh
+      port: 2222
+      targetPort: ssh
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control-plane
+  namespace: ${namespace}
+  labels:
+    app.kubernetes.io/name: control-plane
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: control-plane
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: control-plane
+    spec:
+      serviceAccountName: control-plane
+      initContainers:
+        - name: init-state
+          # renovate: datasource=docker depName=busybox versioning=docker
+          image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
+          command:
+            - sh
+            - -c
+            - mkdir -p /state/copilot /state/gh /state/ssh /state/ssh-host-keys /state/workspace && chmod 700 /state/ssh /state/ssh-host-keys
+          volumeMounts:
+            - name: state
+              mountPath: /state
+      containers:
+        - name: control-plane
+          image: ${control_plane_image}
+          imagePullPolicy: Never
+          env:
+            - name: SSH_PUBLIC_KEY_FILE
+              value: /var/run/control-plane-auth/ssh-public-key
+            - name: CONTROL_PLANE_K8S_NAMESPACE
+              value: ${namespace}
+            - name: CONTROL_PLANE_WORKSPACE_PVC
+              value: control-plane-state-pvc
+            - name: CONTROL_PLANE_WORKSPACE_SUBPATH
+              value: workspace
+            - name: CONTROL_PLANE_JOB_SERVICE_ACCOUNT
+              value: control-plane
+            - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
+              value: Never
+          ports:
+            - containerPort: 2222
+              name: ssh
+          readinessProbe:
+            tcpSocket:
+              port: ssh
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: ssh
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: state
+              mountPath: /home/copilot/.copilot
+              subPath: copilot
+            - name: state
+              mountPath: /home/copilot/.config/gh
+              subPath: gh
+            - name: state
+              mountPath: /home/copilot/.ssh
+              subPath: ssh
+            - name: state
+              mountPath: /var/lib/control-plane/ssh-host-keys
+              subPath: ssh-host-keys
+            - name: state
+              mountPath: /workspace
+              subPath: workspace
+            - name: control-plane-auth
+              mountPath: /var/run/control-plane-auth
+              readOnly: true
+      volumes:
         - name: state
-          mountPath: /state
-  containers:
-    - name: control-plane
-      image: ${control_plane_image}
-      imagePullPolicy: Never
-      env:
-        - name: SSH_PUBLIC_KEY
-          value: "${public_key}"
-        - name: CONTROL_PLANE_K8S_NAMESPACE
-          value: ${namespace}
-        - name: CONTROL_PLANE_WORKSPACE_PVC
-          value: control-plane-state-pvc
-        - name: CONTROL_PLANE_WORKSPACE_SUBPATH
-          value: workspace
-        - name: CONTROL_PLANE_JOB_SERVICE_ACCOUNT
-          value: control-plane
-        - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
-          value: Never
-      ports:
-        - containerPort: 2222
-          name: ssh
-      readinessProbe:
-        tcpSocket:
-          port: ssh
-        periodSeconds: 5
-        failureThreshold: 12
-      livenessProbe:
-        tcpSocket:
-          port: ssh
-        initialDelaySeconds: 10
-        periodSeconds: 10
-        failureThreshold: 6
-      resources:
-        requests:
-          cpu: 250m
-          memory: 256Mi
-        limits:
-          cpu: "1"
-          memory: 1Gi
-      volumeMounts:
-        - name: state
-          mountPath: /home/copilot/.copilot
-          subPath: copilot
-        - name: state
-          mountPath: /home/copilot/.config/gh
-          subPath: gh
-        - name: state
-          mountPath: /home/copilot/.ssh
-          subPath: ssh
-        - name: state
-          mountPath: /workspace
-          subPath: workspace
-  volumes:
-    - name: state
-      persistentVolumeClaim:
-        claimName: control-plane-state-pvc
+          persistentVolumeClaim:
+            claimName: control-plane-state-pvc
+        - name: control-plane-auth
+          secret:
+            secretName: control-plane-auth
 EOF
 }
 
@@ -322,6 +394,7 @@ require_command kubectl
 require_command "${container_bin}"
 require_command ssh
 require_command ssh-keygen
+require_command ssh-keyscan
 
 export KIND_EXPERIMENTAL_PROVIDER="${kind_provider}"
 
@@ -358,6 +431,7 @@ command -v docker
 docker --version >/dev/null
 command -v sshd
 command -v screen
+test -f ~/.copilot/skills/control-plane-operations/SKILL.md
 kubectl auth can-i create jobs --namespace ${namespace} | grep -q '^yes$'
 EOF
 
@@ -433,12 +507,16 @@ grep -q '^run$' /tmp/fake-podman.log
 grep -q '${execution_plane_image}' /tmp/fake-podman.log
 EOF
 
+first_host_fingerprint="$(ssh_host_fingerprint)"
+
 stop_port_forward
-kubectl delete pod control-plane --namespace "${namespace}" --wait=true >/dev/null
-apply_resources
-kubectl wait --namespace "${namespace}" --for=condition=Ready pod/control-plane --timeout=180s >/dev/null
+kubectl rollout restart deployment/control-plane --namespace "${namespace}" >/dev/null
+wait_for_control_plane_pod
 start_port_forward
 wait_for_ssh
+
+second_host_fingerprint="$(ssh_host_fingerprint)"
+[[ "${first_host_fingerprint}" == "${second_host_fingerprint}" ]]
 
 ssh_bash <<'EOF'
 set -euo pipefail
