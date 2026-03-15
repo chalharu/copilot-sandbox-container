@@ -106,6 +106,9 @@ pull 結果を cache して rate limit を避けます。
 ## Kubernetes 配備
 
 テンプレートは `deploy/kubernetes/control-plane.example.yaml` にあります。
+この例は raw Pod ではなく、Secret / Service / Deployment / PVC をまとめた
+単一レプリカ構成です。SSH 公開鍵は Secret から渡し、必要なら同じ Secret で
+`COPILOT_GITHUB_TOKEN` も注入できます。
 
 既定の Control Plane イメージは
 `ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest` です。

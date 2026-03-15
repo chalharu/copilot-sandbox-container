@@ -53,86 +53,133 @@ spec:
   storageClassName: standard
 ---
 apiVersion: v1
-kind: Pod
+kind: Secret
+metadata:
+  name: control-plane-auth
+  namespace: copilot-sandbox
+type: Opaque
+stringData:
+  ssh-public-key: |
+    ssh-ed25519 AAAA... replace-me
+  # Optional: add a fine-grained PAT with Copilot access when you want the
+  # control plane to start with COPILOT_GITHUB_TOKEN configured.
+  # copilot-github-token: github_pat_... replace-me
+---
+apiVersion: v1
+kind: Service
 metadata:
   name: control-plane
   namespace: copilot-sandbox
   labels:
     app.kubernetes.io/name: control-plane
 spec:
-  serviceAccountName: control-plane
-  restartPolicy: Always
-  initContainers:
-    - name: init-state
-      # renovate: datasource=docker depName=busybox versioning=docker
-      image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
-      command:
-        - sh
-        - -c
-        - mkdir -p /state/copilot /state/gh /state/ssh /state/workspace && chmod 700 /state/ssh
-      volumeMounts:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: control-plane
+  ports:
+    - name: ssh
+      port: 2222
+      targetPort: ssh
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control-plane
+  namespace: copilot-sandbox
+  labels:
+    app.kubernetes.io/name: control-plane
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: control-plane
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: control-plane
+    spec:
+      serviceAccountName: control-plane
+      initContainers:
+        - name: init-state
+          # renovate: datasource=docker depName=busybox versioning=docker
+          image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
+          command:
+            - sh
+            - -c
+            - mkdir -p /state/copilot /state/gh /state/ssh /state/workspace && chmod 700 /state/ssh
+          volumeMounts:
+            - name: state
+              mountPath: /state
+      containers:
+        - name: control-plane
+          image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SSH_PUBLIC_KEY_FILE
+              value: /var/run/control-plane-auth/ssh-public-key
+            - name: COPILOT_GITHUB_TOKEN_FILE
+              value: /var/run/control-plane-auth/copilot-github-token
+            - name: CONTROL_PLANE_K8S_NAMESPACE
+              value: copilot-sandbox
+            - name: CONTROL_PLANE_WORKSPACE_PVC
+              value: control-plane-state-pvc
+            - name: CONTROL_PLANE_WORKSPACE_SUBPATH
+              value: workspace
+            - name: CONTROL_PLANE_JOB_SERVICE_ACCOUNT
+              value: control-plane
+            - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
+              value: IfNotPresent
+            - name: CONTROL_PLANE_JOB_CPU_REQUEST
+              value: 250m
+            - name: CONTROL_PLANE_JOB_CPU_LIMIT
+              value: "2"
+            - name: CONTROL_PLANE_JOB_MEMORY_REQUEST
+              value: 256Mi
+            - name: CONTROL_PLANE_JOB_MEMORY_LIMIT
+              value: 2Gi
+          ports:
+            - containerPort: 2222
+              name: ssh
+          readinessProbe:
+            tcpSocket:
+              port: ssh
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: ssh
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: state
+              mountPath: /home/copilot/.copilot
+              subPath: copilot
+            - name: state
+              mountPath: /home/copilot/.config/gh
+              subPath: gh
+            - name: state
+              mountPath: /home/copilot/.ssh
+              subPath: ssh
+            - name: state
+              mountPath: /workspace
+              subPath: workspace
+            - name: control-plane-auth
+              mountPath: /var/run/control-plane-auth
+              readOnly: true
+      volumes:
         - name: state
-          mountPath: /state
-  containers:
-    - name: control-plane
-      image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest
-      imagePullPolicy: IfNotPresent
-      env:
-        - name: SSH_PUBLIC_KEY
-          value: "ssh-ed25519 AAAA... replace-me"
-        - name: CONTROL_PLANE_K8S_NAMESPACE
-          value: copilot-sandbox
-        - name: CONTROL_PLANE_WORKSPACE_PVC
-          value: control-plane-state-pvc
-        - name: CONTROL_PLANE_WORKSPACE_SUBPATH
-          value: workspace
-        - name: CONTROL_PLANE_JOB_SERVICE_ACCOUNT
-          value: control-plane
-        - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
-          value: IfNotPresent
-        - name: CONTROL_PLANE_JOB_CPU_REQUEST
-          value: 250m
-        - name: CONTROL_PLANE_JOB_CPU_LIMIT
-          value: "2"
-        - name: CONTROL_PLANE_JOB_MEMORY_REQUEST
-          value: 256Mi
-        - name: CONTROL_PLANE_JOB_MEMORY_LIMIT
-          value: 2Gi
-      ports:
-        - containerPort: 2222
-          name: ssh
-      readinessProbe:
-        tcpSocket:
-          port: ssh
-        periodSeconds: 5
-        failureThreshold: 12
-      livenessProbe:
-        tcpSocket:
-          port: ssh
-        initialDelaySeconds: 10
-        periodSeconds: 10
-        failureThreshold: 6
-      resources:
-        requests:
-          cpu: 250m
-          memory: 512Mi
-        limits:
-          cpu: "2"
-          memory: 2Gi
-      volumeMounts:
-        - name: state
-          mountPath: /home/copilot/.copilot
-          subPath: copilot
-        - name: state
-          mountPath: /home/copilot/.config/gh
-          subPath: gh
-        - name: state
-          mountPath: /home/copilot/.ssh
-          subPath: ssh
-        - name: state
-          mountPath: /workspace
-          subPath: workspace
-  volumes:
-    - name: state
-      persistentVolumeClaim:
-        claimName: control-plane-state-pvc
+          persistentVolumeClaim:
+            claimName: control-plane-state-pvc
+        - name: control-plane-auth
+          secret:
+            secretName: control-plane-auth
