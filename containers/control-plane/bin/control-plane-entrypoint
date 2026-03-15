@@ -8,6 +8,9 @@ podman_state_dir="${control_plane_home}/.copilot/containers"
 runtime_dir="${XDG_RUNTIME_DIR:-${control_plane_home}/.copilot/run}"
 tmp_dir="${TMPDIR:-${control_plane_home}/.copilot/tmp}"
 screen_dir="${SCREENDIR:-${control_plane_home}/.copilot/screen}"
+host_key_dir="${CONTROL_PLANE_HOST_KEY_DIR:-/var/lib/control-plane/ssh-host-keys}"
+bundled_skills_dir="/usr/local/share/control-plane/skills"
+copilot_skills_dir="${control_plane_home}/.copilot/skills"
 authorized_keys_path="${control_plane_home}/.ssh/authorized_keys"
 kube_dir="${control_plane_home}/.kube"
 kubeconfig_path="${kube_dir}/config"
@@ -77,6 +80,46 @@ ensure_podman_storage_link() {
   ln -s "${state_path}" "${link_path}"
 }
 
+ensure_ssh_host_key() {
+  local key_type="$1"
+  local key_basename="$2"
+  local persistent_key_path="${host_key_dir}/${key_basename}"
+  local etc_key_path="/etc/ssh/${key_basename}"
+
+  if [[ -e "${persistent_key_path}" ]] && [[ ! -f "${persistent_key_path}" ]]; then
+    printf 'Refusing to use non-file SSH host key path at %s\n' "${persistent_key_path}" >&2
+    exit 1
+  fi
+
+  if [[ ! -f "${persistent_key_path}" ]]; then
+    ssh-keygen -q -N '' -t "${key_type}" -f "${persistent_key_path}"
+  fi
+
+  if [[ ! -f "${persistent_key_path}.pub" ]]; then
+    ssh-keygen -y -f "${persistent_key_path}" > "${persistent_key_path}.pub"
+  fi
+
+  chown root:root "${persistent_key_path}" "${persistent_key_path}.pub"
+  chmod 600 "${persistent_key_path}"
+  chmod 644 "${persistent_key_path}.pub"
+
+  ln -sfn "${persistent_key_path}" "${etc_key_path}"
+  ln -sfn "${persistent_key_path}.pub" "${etc_key_path}.pub"
+}
+
+install_bundled_control_plane_skill() {
+  local skill_name="control-plane-operations"
+  local source_dir="${bundled_skills_dir}/${skill_name}"
+  local target_dir="${copilot_skills_dir}/${skill_name}"
+
+  [[ -d "${source_dir}" ]] || return
+
+  mkdir -p "${copilot_skills_dir}"
+  rm -rf "${target_dir}"
+  cp -R "${source_dir}" "${target_dir}"
+  chown -R "${control_plane_user}:${control_plane_user}" "${target_dir}"
+}
+
 mkdir -p \
   "${control_plane_home}/.copilot" \
   "${control_plane_home}/.config/containers" \
@@ -85,10 +128,12 @@ mkdir -p \
   "${runtime_config_dir}" \
   "${kube_dir}" \
   "${control_plane_home}/.ssh" \
+  "${copilot_skills_dir}" \
   "${control_plane_workspace}" \
   "${podman_state_dir}" \
   "${screen_dir}" \
   "${tmp_dir}" \
+  "${host_key_dir}" \
   /run/sshd \
   "${runtime_dir}"
 
@@ -98,6 +143,7 @@ safe_chown_tree "${control_plane_user}:${control_plane_user}" \
   "${runtime_config_dir}" \
   "${kube_dir}" \
   "${control_plane_home}/.ssh" \
+  "${copilot_skills_dir}" \
   "${control_plane_workspace}" \
   "${podman_state_dir}" \
   "${screen_dir}" \
@@ -110,7 +156,8 @@ chown "${control_plane_user}:${control_plane_user}" \
 ensure_podman_storage_link "${control_plane_home}/.local/share/containers" "${podman_state_dir}"
 
 chown -h "${control_plane_user}:${control_plane_user}" "${control_plane_home}/.local/share/containers"
-chmod 700 "${control_plane_home}/.ssh" "${runtime_dir}" "${tmp_dir}" "${screen_dir}"
+chown root:root "${host_key_dir}"
+chmod 700 "${control_plane_home}/.ssh" "${runtime_dir}" "${tmp_dir}" "${screen_dir}" "${host_key_dir}"
 export XDG_RUNTIME_DIR="${runtime_dir}"
 export TMPDIR="${tmp_dir}"
 export SCREENDIR="${screen_dir}"
@@ -179,6 +226,16 @@ fi
   write_runtime_var CONTROL_PLANE_WORKSPACE_PVC "${CONTROL_PLANE_WORKSPACE_PVC:-}"
   write_runtime_var CONTROL_PLANE_WORKSPACE_MOUNT_PATH "${CONTROL_PLANE_WORKSPACE_MOUNT_PATH:-/workspace}"
   write_runtime_var CONTROL_PLANE_WORKSPACE_SUBPATH "${CONTROL_PLANE_WORKSPACE_SUBPATH:-workspace}"
+  write_runtime_var CONTROL_PLANE_HOST_KEY_DIR "${host_key_dir}"
+  if [[ -n "${CONTROL_PLANE_SCREEN_SESSION:-}" ]]; then
+    write_runtime_var CONTROL_PLANE_SCREEN_SESSION "${CONTROL_PLANE_SCREEN_SESSION}"
+  fi
+  if [[ -n "${CONTROL_PLANE_SESSION_SELECTION:-}" ]]; then
+    write_runtime_var CONTROL_PLANE_SESSION_SELECTION "${CONTROL_PLANE_SESSION_SELECTION}"
+  fi
+  if [[ -n "${CONTROL_PLANE_DISABLE_SESSION_PICKER:-}" ]]; then
+    write_runtime_var CONTROL_PLANE_DISABLE_SESSION_PICKER "${CONTROL_PLANE_DISABLE_SESSION_PICKER}"
+  fi
   write_runtime_var CONTROL_PLANE_JOB_SERVICE_ACCOUNT "${CONTROL_PLANE_JOB_SERVICE_ACCOUNT:-}"
   write_runtime_var CONTROL_PLANE_JOB_IMAGE_PULL_POLICY "${CONTROL_PLANE_JOB_IMAGE_PULL_POLICY:-IfNotPresent}"
   write_runtime_var CONTROL_PLANE_JOB_CPU_REQUEST "${CONTROL_PLANE_JOB_CPU_REQUEST:-100m}"
@@ -196,7 +253,10 @@ fi
 chown "${control_plane_user}:${control_plane_user}" "${runtime_config_path}"
 chmod 600 "${runtime_config_path}"
 
-ssh-keygen -A
+install_bundled_control_plane_skill
+ensure_ssh_host_key rsa ssh_host_rsa_key
+ensure_ssh_host_key ecdsa ssh_host_ecdsa_key
+ensure_ssh_host_key ed25519 ssh_host_ed25519_key
 
 if [[ $# -eq 0 ]]; then
   set -- /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config

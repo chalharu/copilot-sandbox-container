@@ -108,7 +108,12 @@ pull 結果を cache して rate limit を避けます。
 テンプレートは `deploy/kubernetes/control-plane.example.yaml` にあります。
 この例は raw Pod ではなく、Secret / Service / Deployment / PVC をまとめた
 単一レプリカ構成です。SSH 公開鍵は Secret から渡し、必要なら同じ Secret で
-`COPILOT_GITHUB_TOKEN` も注入できます。
+`COPILOT_GITHUB_TOKEN` も注入できます。SSH host key も同じ PVC 上に永続化される
+ため、Pod の再作成で fingerprint が変わりません。
+
+対話的な SSH ログインでは GNU Screen の session picker が起動します。また、
+`control-plane-operations` skill をイメージに同梱しているため、他のリポジトリを
+`/workspace` に mount した場合でも同じ運用ガイドを使えます。
 
 既定の Control Plane イメージは
 `ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest` です。
