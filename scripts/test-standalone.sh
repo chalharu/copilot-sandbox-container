@@ -84,6 +84,7 @@ wait_for_screen_term() {
     "${target_session}" "${term_file}" "${expected_term}"
 
   for _ in $(seq 1 "${attempts}"); do
+    # shellcheck disable=SC2029
     if ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_command}" <<'EOF' >/dev/null 2>&1
 set -euo pipefail
 screen -list | grep -q -- "${TARGET_SESSION}"
