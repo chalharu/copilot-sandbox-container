@@ -10,4 +10,6 @@ fi
 
 : "${EDITOR:=vim}"
 : "${VISUAL:=${EDITOR}}"
-export EDITOR VISUAL
+: "${BUILDAH_ISOLATION:=chroot}"
+: "${GH_PAGER:=cat}"
+export EDITOR VISUAL BUILDAH_ISOLATION GH_PAGER

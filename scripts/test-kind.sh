@@ -428,6 +428,8 @@ command -v gh
 command -v kubectl
 command -v podman
 command -v docker
+command -v buildah
+command -v kind
 docker --version >/dev/null
 command -v sshd
 command -v screen
@@ -437,6 +439,8 @@ test "\$(TERM=screen-256color tput colors)" -ge 256
 test "\$(TERM=tmux-256color tput colors)" -ge 256
 test "\${EDITOR}" = "vim"
 test "\${VISUAL}" = "vim"
+test "\${BUILDAH_ISOLATION}" = "chroot"
+test "\${GH_PAGER}" = "cat"
 test -f ~/.copilot/skills/control-plane-operations/SKILL.md
 kubectl auth can-i create jobs --namespace ${namespace} | grep -q '^yes$'
 EOF

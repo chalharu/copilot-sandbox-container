@@ -2,6 +2,8 @@ FROM node:24.14.0-bookworm-slim@sha256:e8e2e91b1378f83c5b2dd15f0247f34110e2fe895
 
 # renovate: datasource=npm depName=@github/copilot
 ARG COPILOT_CLI_VERSION=1.0.5
+# renovate: datasource=github-releases depName=kubernetes-sigs/kind
+ARG KIND_VERSION=v0.24.0
 ARG CONTROL_PLANE_UID=1000
 ARG CONTROL_PLANE_GID=1000
 ARG CONTROL_PLANE_USER=copilot
@@ -17,6 +19,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN apt-get update -o Acquire::Retries=3 \
     && apt-get install -y --no-install-recommends \
         bash \
+        buildah \
         ca-certificates \
         curl \
         fuse-overlayfs \
@@ -35,6 +38,18 @@ RUN apt-get update -o Acquire::Retries=3 \
         uidmap \
         vim \
     && rm -rf /var/lib/apt/lists/*
+
+RUN arch="$(dpkg --print-architecture)" \
+    && case "${arch}" in \
+        amd64) kind_arch=amd64 ;; \
+        arm64) kind_arch=arm64 ;; \
+        *) printf 'Unsupported architecture for kind: %s\n' "${arch}" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSLo "/tmp/kind-linux-${kind_arch}" "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-${kind_arch}" \
+    && curl -fsSLo "/tmp/kind-linux-${kind_arch}.sha256sum" "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-${kind_arch}.sha256sum" \
+    && (cd /tmp && sha256sum -c "kind-linux-${kind_arch}.sha256sum") \
+    && install -m 0755 "/tmp/kind-linux-${kind_arch}" /usr/local/bin/kind \
+    && rm -f "/tmp/kind-linux-${kind_arch}" "/tmp/kind-linux-${kind_arch}.sha256sum"
 
 RUN npm install --global "@github/copilot@${COPILOT_CLI_VERSION}" \
     && npm cache clean --force

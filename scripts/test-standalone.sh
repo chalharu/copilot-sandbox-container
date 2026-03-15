@@ -119,39 +119,48 @@ ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"
 start_container
 wait_for_ssh
 
-"${container_bin}" exec "${container_name}" bash -lc 'set -euo pipefail
-  command -v node
-  command -v npm
-  npm ls -g @github/copilot --depth=0 | grep -q "@github/copilot@"
-  command -v git
-  command -v gh
-  command -v kubectl
-  command -v podman
-  command -v docker
-  docker --version >/dev/null
-  command -v sshd
-  command -v screen
-  command -v vim
-  command -v control-plane-run
-  command -v control-plane-session
-  command -v k8s-job-start
-  command -v k8s-job-wait
-  command -v k8s-job-pod
-  command -v k8s-job-logs
-  command -v k8s-job-run
-  test "$(TERM=xterm-256color tput colors)" -ge 256
-  test "$(TERM=screen-256color tput colors)" -ge 256
-  test "$(TERM=tmux-256color tput colors)" -ge 256
-  test -f /home/copilot/.copilot/skills/control-plane-operations/SKILL.md
-  test -f /home/copilot/.copilot/skills/control-plane-operations/references/control-plane-run.md
-  grep -q "^copilot:" /etc/subuid
-  grep -q "^copilot:" /etc/subgid
-'
+"${container_bin}" exec "${container_name}" bash -l -se <<'EOF'
+set -euo pipefail
+command -v node
+command -v npm
+npm ls -g @github/copilot --depth=0 | grep -q "@github/copilot@"
+command -v git
+command -v gh
+command -v kubectl
+command -v podman
+command -v docker
+command -v buildah
+command -v kind
+docker --version >/dev/null
+command -v sshd
+command -v screen
+command -v vim
+command -v control-plane-run
+command -v control-plane-session
+command -v k8s-job-start
+command -v k8s-job-wait
+command -v k8s-job-pod
+command -v k8s-job-logs
+command -v k8s-job-run
+test "$(TERM=xterm-256color tput colors)" -ge 256
+test "$(TERM=screen-256color tput colors)" -ge 256
+test "$(TERM=tmux-256color tput colors)" -ge 256
+test "${EDITOR}" = "vim"
+test "${VISUAL}" = "vim"
+test "${BUILDAH_ISOLATION}" = "chroot"
+test "${GH_PAGER}" = "cat"
+test -f /home/copilot/.copilot/skills/control-plane-operations/SKILL.md
+test -f /home/copilot/.copilot/skills/control-plane-operations/references/control-plane-run.md
+grep -q "^copilot:" /etc/subuid
+grep -q "^copilot:" /etc/subgid
+EOF
 
 ssh_bash <<'EOF'
 set -euo pipefail
 test "${EDITOR}" = "vim"
 test "${VISUAL}" = "vim"
+test "${BUILDAH_ISOLATION}" = "chroot"
+test "${GH_PAGER}" = "cat"
 mkdir -p ~/.copilot ~/.config/gh /workspace
 echo standalone > ~/.copilot/state.txt
 echo gh > ~/.config/gh/state.txt

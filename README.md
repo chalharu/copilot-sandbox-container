@@ -73,6 +73,12 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 `containers/control-plane` と `containers/execution-plane-smoke` を build し、
 `scripts/test-standalone.sh` と `scripts/test-kind.sh` を順に呼び出します。
 
+Control Plane イメージ自体にも `buildah` と `kind` を同梱しているため、同じ
+entry point をコンテナ内から試しやすくしています。ただし、Kubernetes 上の
+非特権 Pod などでは nested rootless Podman が host 側の user namespace 制約で
+失敗し、`newuidmap ... Operation not permitted` が出る場合があります。その場合は
+Docker Buildx が使える host か GitHub Actions を使ってください。
+
 Podman / Buildah 系では Kind 内の image 名と一致させるため、デフォルトの tag に
 `localhost/` 接頭辞を使います。
 
@@ -118,6 +124,9 @@ pull 結果を cache して rate limit を避けます。
 Control Plane イメージには `vim` も同梱され、ログイン shell では `EDITOR` /
 `VISUAL` を未設定時だけ `vim` に補います。Copilot CLI の multiline shortcut が
 通らない環境でも、`Ctrl+G` で外部 editor を開く運用をすぐ使えます。
+
+`gh` については SSH / GNU Screen 越しでも pager 待ちで止まって見えにくいよう、
+login shell では `GH_PAGER=cat` を既定化しています。
 
 GNU Screen には `/etc/screenrc` で `screen-256color` / UTF-8 / alt screen /
 background color erase を既定で設定し、Control Plane イメージには
