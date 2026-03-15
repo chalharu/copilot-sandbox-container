@@ -14,6 +14,7 @@ kubeconfig_path="${kube_dir}/config"
 service_account_dir="/var/run/secrets/kubernetes.io/serviceaccount"
 runtime_config_dir="${control_plane_home}/.config/control-plane"
 runtime_config_path="${runtime_config_dir}/runtime.env"
+copilot_github_token="${COPILOT_GITHUB_TOKEN:-}"
 
 write_runtime_var() {
   printf '%s=%q\n' "$1" "$2"
@@ -130,6 +131,14 @@ if [[ -n "${SSH_PUBLIC_KEY_FILE:-}" ]] && [[ -f "${SSH_PUBLIC_KEY_FILE}" ]]; the
   done < "${SSH_PUBLIC_KEY_FILE}"
 fi
 
+if [[ -z "${copilot_github_token}" ]] && [[ -n "${COPILOT_GITHUB_TOKEN_FILE:-}" ]] && [[ -f "${COPILOT_GITHUB_TOKEN_FILE}" ]]; then
+  IFS= read -r copilot_github_token < "${COPILOT_GITHUB_TOKEN_FILE}" || true
+fi
+
+if [[ -n "${copilot_github_token}" ]]; then
+  export COPILOT_GITHUB_TOKEN="${copilot_github_token}"
+fi
+
 if [[ -z "${KUBECONFIG:-}" ]] \
   && [[ -n "${KUBERNETES_SERVICE_HOST:-}" ]] \
   && [[ -f "${service_account_dir}/token" ]] \
@@ -180,6 +189,9 @@ fi
   write_runtime_var TMPDIR "${tmp_dir}"
   write_runtime_var SCREENDIR "${screen_dir}"
   write_runtime_var KUBECONFIG "${KUBECONFIG:-}"
+  if [[ -n "${copilot_github_token}" ]]; then
+    write_runtime_var COPILOT_GITHUB_TOKEN "${copilot_github_token}"
+  fi
 } > "${runtime_config_path}"
 chown "${control_plane_user}:${control_plane_user}" "${runtime_config_path}"
 chmod 600 "${runtime_config_path}"
