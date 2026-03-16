@@ -78,7 +78,7 @@ Control Plane イメージには `podman` / `kind` など
 `scripts/lint.sh` や `scripts/build-test.sh` に必要なコマンドを同梱しています。
 ただし nested build runner が実際に動くかは、外側の host / container runtime /
 Kubernetes securityContext 依存です。サンプルの Kubernetes Deployment では
-`securityContext.privileged: true` を付けてこの前提を満たしますが、非特権 Pod や
+`securityContext.privileged: true` を付けてこの前提を取りやすくしていますが、非特権 Pod や
 privileged を禁止するクラスタでは rootless Podman が失敗し、
 `newuidmap ... Operation not permitted` が出る場合があります。その場合は Docker
 Buildx が使える host か GitHub Actions を使ってください。Control Plane
