@@ -182,20 +182,26 @@ test -f /home/copilot/.copilot/skills/control-plane-operations/SKILL.md
 test -f /home/copilot/.copilot/skills/control-plane-operations/references/control-plane-run.md
 grep -q "^copilot:" /etc/subuid
 grep -q "^copilot:" /etc/subgid
-test "$(readlink /home/copilot/.local/share/containers)" = "/home/copilot/.copilot/containers"
-grep -qx 'graphroot = "/home/copilot/.copilot/containers/storage"' /home/copilot/.config/containers/storage.conf
-grep -qx 'runroot = "/home/copilot/.copilot/run/containers/storage"' /home/copilot/.config/containers/storage.conf
 grep -qx 'cgroup_manager = "cgroupfs"' /home/copilot/.config/containers/containers.conf
 grep -qx 'events_logger = "file"' /home/copilot/.config/containers/containers.conf
 if [[ -e /dev/fuse ]]; then
+  expected_driver=overlay
+else
+  expected_driver=vfs
+fi
+expected_state_dir="/home/copilot/.copilot/containers/${expected_driver}"
+test "$(readlink /home/copilot/.local/share/containers)" = "${expected_state_dir}"
+grep -qx "graphroot = \"${expected_state_dir}/storage\"" /home/copilot/.config/containers/storage.conf
+grep -qx "runroot = \"/home/copilot/.copilot/run/${expected_driver}/containers/storage\"" /home/copilot/.config/containers/storage.conf
+if [[ "${expected_driver}" == "overlay" ]]; then
   grep -qx 'driver = "overlay"' /home/copilot/.config/containers/storage.conf
   grep -qx 'mount_program = "/usr/bin/fuse-overlayfs"' /home/copilot/.config/containers/storage.conf
 else
   grep -qx 'driver = "vfs"' /home/copilot/.config/containers/storage.conf
   ! grep -q 'mount_program' /home/copilot/.config/containers/storage.conf
 fi
-test -d /home/copilot/.copilot/containers/storage/overlay
-test -d /home/copilot/.copilot/containers/storage/volumes
+test -d "${expected_state_dir}/storage/${expected_driver}"
+test -d "${expected_state_dir}/storage/volumes"
 EOF
 
 ssh_bash <<'EOF'
@@ -238,16 +244,21 @@ EOF
 
 ssh_bash <<EOF
 set -euo pipefail
+printf 'small input\n' > /workspace/job-input.txt
+printf 'colon input\n' > '/workspace/job:input.txt'
 cat > /tmp/fake-podman <<'INNER'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "\$@" > /tmp/fake-podman.log
 INNER
 chmod +x /tmp/fake-podman
-CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-run --mode auto --execution-hint short --workspace /workspace --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/podman-auto.txt short
+CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-run --mode auto --execution-hint short --workspace /workspace --mount-file /workspace/job-input.txt:inputs/job-input.txt --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/podman-auto.txt short
 grep -q '^run$' /tmp/fake-podman.log
 grep -q '${execution_plane_image}' /tmp/fake-podman.log
 grep -q '/workspace:/workspace' /tmp/fake-podman.log
+grep -Eq ':/var/run/control-plane/job-inputs:ro$' /tmp/fake-podman.log
+CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-run --mode auto --execution-hint short --workspace /workspace --mount-file '/workspace/job:input.txt' --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/podman-auto-colon.txt short
+grep -Eq ':/var/run/control-plane/job-inputs:ro$' /tmp/fake-podman.log
 EOF
 
 first_host_fingerprint="$(ssh_host_fingerprint)"
@@ -266,6 +277,14 @@ test -f ~/.config/gh/state.txt
 test -f ~/.ssh/state.txt
 test -f /workspace/screen.txt
 EOF
+
+set +e
+missing_caps_output="$("${container_bin}" run --rm --cap-drop ALL "${control_plane_image}" 2>&1)"
+missing_caps_status=$?
+set -e
+[[ "${missing_caps_status}" -ne 0 ]]
+grep -q 'Missing Linux capabilities for control-plane startup' <<<"${missing_caps_output}"
+grep -q 'SYS_CHROOT' <<<"${missing_caps_output}"
 
 "${container_bin}" rm -f "${container_name}" >/dev/null
 container_env=(-e CONTROL_PLANE_SESSION_SELECTION=new:auto-login)

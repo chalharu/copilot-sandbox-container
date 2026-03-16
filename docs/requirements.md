@@ -118,6 +118,13 @@ Control Plane には、Kubernetes Job を扱うためのスクリプトまたは
 - ログの取得
 - 実行結果を Copilot CLI に返すこと
 
+また、Control Plane と Job は同一 namespace に固定しないものとし、少なくとも次を扱える必要があります。
+
+- Control Plane namespace と Job namespace を分離できること
+- Control Plane が Job namespace の Job / Pod / Pod logs を操作できること
+- 小さい補助ファイルは ConfigMap などで Job へ受け渡せること
+- `/workspace` 全体が必要な場合は、Job namespace 側の shared storage か同等の受け渡し手段を選べること
+
 ### 4.7 Execution Plane 要件
 
 Execution Plane は、以下を満たす必要があります。
@@ -146,8 +153,12 @@ build して GHCR へ公開し、再利用できるようにします。
 
 - 単独起動モードでは、Control Plane と実行コンテナが同じ `/workspace` を共有する
 - Kubernetes モードでは、Control Plane Pod と K8s Job が同じ
-   Persistent Volume、または同等の共有ストレージ上の `/workspace` を
-   参照する
+   Persistent Volume、namespace ごとに用意した同等の共有ストレージ、または
+   ファイル受け渡し手段を通じて必要な `/workspace` 内容を参照する
+
+Kubernetes モードで Job namespace を分ける場合、Control Plane namespace の PVC を
+そのまま Job Pod に mount できるとは限りません。大きい workspace は shared storage を、
+小さい入力は ConfigMap 等の埋め込みを使い分ける前提とします。
 
 ### 4.8 言語別実行環境の構成例
 
@@ -191,6 +202,9 @@ build して GHCR へ公開し、再利用できるようにします。
 - 既定で `privileged` を前提にしないこと（sample deployment は Pod user namespace
   と `RuntimeDefault` seccomp を基本にし、`securityContext.privileged` は本当に
   必要なときだけ明示的な opt-in として許容する）
+- `securityContext.privileged: true` でも nested user namespace が保証されるとは
+  限らないこと。outer runtime が `newuidmap` / `newgidmap` や user namespace を
+  禁止している場合、rootless Podman は失敗し得る
 - Docker-in-Docker のような root 権限依存の構成を避けること
 - 言語間の依存関係衝突を防げること
 - Control Plane と Execution Plane を独立して更新できること
@@ -223,9 +237,10 @@ build して GHCR へ公開し、再利用できるようにします。
 2. `GNU Screen` または `tmux` 上で Copilot CLI セッションを維持する
 3. Copilot CLI が対象処理を長時間処理と判断する
 4. Control Plane が `kubectl` を使って K8s Job を起動する
-5. Control Plane 内の Job 制御スクリプトが完了待機を行う
-6. スクリプトが実行 Pod 名とログを取得する
-7. Copilot CLI が実行結果を受け取り、対話を継続する
+5. 必要なら ConfigMap や shared storage を通じて Job へ入力ファイルを渡す
+6. Control Plane 内の Job 制御スクリプトが完了待機を行う
+7. スクリプトが実行 Pod 名とログを取得する
+8. Copilot CLI が実行結果を受け取り、対話を継続する
 
 ## 7. 構成イメージ
 

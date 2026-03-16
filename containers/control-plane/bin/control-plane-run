@@ -9,18 +9,85 @@ Usage:
 Options:
   --mode auto|podman|k8s-job      Execution mode (default: auto)
   --execution-hint short|long     Hint used when --mode=auto (default: short)
-  --namespace NAME                Kubernetes namespace (default: CONTROL_PLANE_K8S_NAMESPACE or default)
+  --namespace NAME                Kubernetes Job namespace
+  --job-namespace NAME            Alias of --namespace
   --job-name NAME                 Kubernetes Job name
   --timeout DURATION              Kubernetes Job wait timeout (default: 300s)
   --workspace PATH                Host or mounted workspace path (default: /workspace)
+  --mount-file SRC[:DEST]         Mount a small local file under the shared job input dir
+  --input-mount-path PATH         Mount path used for --mount-file (default: /var/run/control-plane/job-inputs)
   --image IMAGE                   Execution Plane image to run
   --help                          Show this help
+
+Namespace default:
+  CONTROL_PLANE_JOB_NAMESPACE, then CONTROL_PLANE_K8S_NAMESPACE, then default
 USAGE
 }
 
 die() {
   printf 'control-plane-run: %s\n' "$*" >&2
   exit 64
+}
+
+validate_relative_path() {
+  local relative_path="$1"
+  local allow_colon="${2:-0}"
+  local segment
+
+  [[ -n "${relative_path}" ]] || die "mount-file destination must not be empty"
+  [[ "${relative_path}" != /* ]] || die "mount-file destination must stay under the input mount path"
+
+  IFS='/' read -r -a path_segments <<< "${relative_path}"
+  for segment in "${path_segments[@]}"; do
+    [[ -n "${segment}" ]] || die "mount-file destination must not contain empty path segments"
+    [[ "${segment}" != "." ]] || die "mount-file destination must not contain '.' segments"
+    [[ "${segment}" != ".." ]] || die "mount-file destination must not contain '..' segments"
+  done
+  if [[ "${allow_colon}" != "1" ]]; then
+    [[ "${relative_path}" != *:* ]] || die "mount-file destination must not contain ':'"
+  fi
+}
+
+normalize_mount_file_spec() {
+  local spec="$1"
+  local source_path
+  local destination_path
+  local allow_colon=0
+
+  if [[ -f "${spec}" ]]; then
+    source_path="${spec}"
+    destination_path="$(basename "${spec}")"
+    allow_colon=1
+  elif [[ "${spec}" == *:* ]]; then
+    source_path="${spec%:*}"
+    destination_path="${spec##*:}"
+  else
+    source_path="${spec}"
+    destination_path="$(basename "${spec}")"
+  fi
+
+  [[ -n "${source_path}" ]] || die "mount-file source must not be empty"
+  [[ -f "${source_path}" ]] || die "mount-file source is not a regular file: ${source_path}"
+  validate_relative_path "${destination_path}" "${allow_colon}"
+
+  printf '%s\t%s\n' "${source_path}" "${destination_path}"
+}
+
+copy_mount_files_to_dir() {
+  local target_dir="$1"
+  shift
+  local spec
+  local normalized
+  local source_path
+  local destination_path
+
+  for spec in "$@"; do
+    normalized="$(normalize_mount_file_spec "${spec}")"
+    source_path="${normalized%%$'\t'*}"
+    destination_path="${normalized#*$'\t'}"
+    mkdir -p "${target_dir}/$(dirname "${destination_path}")"
+    cp "${source_path}" "${target_dir}/${destination_path}"
+  done
 }
 
 runtime_config_file="${CONTROL_PLANE_RUNTIME_ENV_FILE:-${HOME:-/home/${USER:-copilot}}/.config/control-plane/runtime.env}"
@@ -31,13 +98,15 @@ fi
 
 mode="${CONTROL_PLANE_RUN_MODE:-auto}"
 execution_hint="${CONTROL_PLANE_EXECUTION_HINT:-short}"
-namespace="${CONTROL_PLANE_K8S_NAMESPACE:-default}"
+namespace="${CONTROL_PLANE_JOB_NAMESPACE:-${CONTROL_PLANE_K8S_NAMESPACE:-default}}"
 job_name=""
 timeout="${CONTROL_PLANE_K8S_TIMEOUT:-300s}"
 workspace="${CONTROL_PLANE_WORKSPACE:-/workspace}"
 image=""
 podman_bin="${CONTROL_PLANE_PODMAN_BIN:-podman}"
 k8s_runner_bin="${CONTROL_PLANE_K8S_RUNNER_BIN:-k8s-job-run}"
+input_mount_path="${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH:-/var/run/control-plane/job-inputs}"
+mount_files=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -53,6 +122,10 @@ while [[ $# -gt 0 ]]; do
       namespace="$2"
       shift 2
       ;;
+    --job-namespace)
+      namespace="$2"
+      shift 2
+      ;;
     --job-name)
       job_name="$2"
       shift 2
@@ -63,6 +136,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --workspace)
       workspace="$2"
+      shift 2
+      ;;
+    --mount-file)
+      mount_files+=("$2")
+      shift 2
+      ;;
+    --input-mount-path)
+      input_mount_path="$2"
       shift 2
       ;;
     --image)
@@ -111,6 +192,9 @@ if [[ "${mode}" == "auto" ]]; then
 fi
 
 if [[ "${mode}" == "podman" ]]; then
+  local_mount_dir=""
+  podman_args=(run --rm -v "${workspace}:/workspace")
+
   mkdir -p "${workspace}"
   export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-${HOME}/.copilot/run}"
   export TMPDIR="${TMPDIR:-${HOME}/.copilot/tmp}"
@@ -118,7 +202,21 @@ if [[ "${mode}" == "podman" ]]; then
   mkdir -p "${TMPDIR}"
   chmod 700 "${XDG_RUNTIME_DIR}"
   chmod 700 "${TMPDIR}"
-  exec "${podman_bin}" run --rm -v "${workspace}:/workspace" "${image}" "$@"
+
+  if [[ ${#mount_files[@]} -gt 0 ]]; then
+    local_mount_dir="$(mktemp -d "${TMPDIR%/}/control-plane-run-inputs.XXXXXX")"
+    copy_mount_files_to_dir "${local_mount_dir}" "${mount_files[@]}"
+    podman_args+=(-v "${local_mount_dir}:${input_mount_path}:ro")
+    trap 'rm -rf "${local_mount_dir}"' EXIT
+  fi
+
+  podman_args+=("${image}" "$@")
+  if [[ -n "${local_mount_dir}" ]]; then
+    "${podman_bin}" "${podman_args[@]}"
+    exit $?
+  fi
+
+  exec "${podman_bin}" "${podman_args[@]}"
 fi
 
 runner_args=(
@@ -129,6 +227,13 @@ runner_args=(
 
 if [[ -n "${job_name}" ]]; then
   runner_args+=(--job-name "${job_name}")
+fi
+
+if [[ ${#mount_files[@]} -gt 0 ]]; then
+  runner_args+=(--input-mount-path "${input_mount_path}")
+  for mount_file in "${mount_files[@]}"; do
+    runner_args+=(--mount-file "${mount_file}")
+  done
 fi
 
 exec "${k8s_runner_bin}" "${runner_args[@]}" -- "$@"

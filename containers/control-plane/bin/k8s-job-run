@@ -20,10 +20,22 @@ timeout="300s"
 cleanup_policy="${CONTROL_PLANE_CLEANUP_JOBS:-always}"
 created_job=""
 
+job_input_configmap_name() {
+  local current_job_name="$1"
+  local checksum
+  local prefix
+
+  checksum="$(printf '%s' "${current_job_name}" | cksum | awk '{ print $1 }')"
+  prefix="${current_job_name:0:45}"
+  prefix="${prefix%-}"
+  printf '%s-inputs-%s\n' "${prefix}" "${checksum}"
+}
+
 # shellcheck disable=SC2329,SC2317
 cleanup() {
   if [[ -n "${created_job}" ]] && [[ "${cleanup_policy}" == "always" ]]; then
     kubectl delete job --namespace "${namespace}" "${created_job}" --ignore-not-found >/dev/null 2>&1 || true
+    kubectl delete configmap --namespace "${namespace}" "$(job_input_configmap_name "${created_job}")" --ignore-not-found >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT

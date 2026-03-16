@@ -4,7 +4,10 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  k8s-job-start --namespace NAME --image IMAGE [--job-name NAME] -- COMMAND [ARG...]
+  k8s-job-start --namespace NAME --image IMAGE [--job-name NAME] [--mount-file SRC[:DEST]] -- COMMAND [ARG...]
+
+Namespace default:
+  CONTROL_PLANE_JOB_NAMESPACE, then CONTROL_PLANE_K8S_NAMESPACE, then default
 USAGE
 }
 
@@ -34,22 +37,133 @@ render_yaml_list() {
   done
 }
 
-namespace="default"
+validate_relative_path() {
+  local relative_path="$1"
+  local allow_colon="${2:-0}"
+  local segment
+
+  [[ -n "${relative_path}" ]] || die "mount-file destination must not be empty"
+  [[ "${relative_path}" != /* ]] || die "mount-file destination must stay under the input mount path"
+
+  IFS='/' read -r -a path_segments <<< "${relative_path}"
+  for segment in "${path_segments[@]}"; do
+    [[ -n "${segment}" ]] || die "mount-file destination must not contain empty path segments"
+    [[ "${segment}" != "." ]] || die "mount-file destination must not contain '.' segments"
+    [[ "${segment}" != ".." ]] || die "mount-file destination must not contain '..' segments"
+  done
+  if [[ "${allow_colon}" != "1" ]]; then
+    [[ "${relative_path}" != *:* ]] || die "mount-file destination must not contain ':'"
+  fi
+}
+
+normalize_mount_file_spec() {
+  local spec="$1"
+  local source_path
+  local destination_path
+  local allow_colon=0
+
+  if [[ -f "${spec}" ]]; then
+    source_path="${spec}"
+    destination_path="$(basename "${spec}")"
+    allow_colon=1
+  elif [[ "${spec}" == *:* ]]; then
+    source_path="${spec%:*}"
+    destination_path="${spec##*:}"
+  else
+    source_path="${spec}"
+    destination_path="$(basename "${spec}")"
+  fi
+
+  [[ -n "${source_path}" ]] || die "mount-file source must not be empty"
+  [[ -f "${source_path}" ]] || die "mount-file source is not a regular file: ${source_path}"
+  validate_relative_path "${destination_path}" "${allow_colon}"
+
+  printf '%s\t%s\n' "${source_path}" "${destination_path}"
+}
+
+render_configmap_binary_data() {
+  local indent="$1"
+  shift
+  local spec
+  local normalized
+  local source_path
+  local index=0
+  local total_size=0
+  local file_size
+
+  for spec in "$@"; do
+    normalized="$(normalize_mount_file_spec "${spec}")"
+    source_path="${normalized%%$'\t'*}"
+    file_size="$(wc -c < "${source_path}")"
+    total_size=$((total_size + file_size))
+    if (( total_size > input_configmap_max_bytes )); then
+      die "mount-file payload exceeds ${input_configmap_max_bytes} bytes; use a shared workspace PVC or another artifact handoff path"
+    fi
+    printf '%s%s: %s\n' "${indent}" "file-${index}" "$(base64 -w0 < "${source_path}")"
+    index=$((index + 1))
+  done
+}
+
+render_configmap_items() {
+  local indent="$1"
+  shift
+  local spec
+  local normalized
+  local destination_path
+  local index=0
+
+  for spec in "$@"; do
+    normalized="$(normalize_mount_file_spec "${spec}")"
+    destination_path="${normalized#*$'\t'}"
+    printf '%s- key: %s\n' "${indent}" "$(yaml_quote "file-${index}")"
+    printf '%s  path: %s\n' "${indent}" "$(yaml_quote "${destination_path}")"
+    index=$((index + 1))
+  done
+}
+
+job_input_configmap_name() {
+  local current_job_name="$1"
+  local checksum
+  local prefix
+
+  checksum="$(printf '%s' "${current_job_name}" | cksum | awk '{ print $1 }')"
+  prefix="${current_job_name:0:45}"
+  prefix="${prefix%-}"
+  printf '%s-inputs-%s\n' "${prefix}" "${checksum}"
+}
+
+namespace="${CONTROL_PLANE_JOB_NAMESPACE:-${CONTROL_PLANE_K8S_NAMESPACE:-default}}"
 image=""
 job_name=""
-workspace_pvc="${CONTROL_PLANE_WORKSPACE_PVC:-}"
-workspace_mount_path="${CONTROL_PLANE_WORKSPACE_MOUNT_PATH:-/workspace}"
-workspace_subpath="${CONTROL_PLANE_WORKSPACE_SUBPATH:-workspace}"
+workspace_pvc="${CONTROL_PLANE_JOB_WORKSPACE_PVC:-}"
+workspace_mount_path="${CONTROL_PLANE_JOB_WORKSPACE_MOUNT_PATH:-${CONTROL_PLANE_WORKSPACE_MOUNT_PATH:-/workspace}}"
+workspace_subpath="${CONTROL_PLANE_JOB_WORKSPACE_SUBPATH:-${CONTROL_PLANE_WORKSPACE_SUBPATH:-workspace}}"
 job_service_account="${CONTROL_PLANE_JOB_SERVICE_ACCOUNT:-}"
 job_image_pull_policy="${CONTROL_PLANE_JOB_IMAGE_PULL_POLICY:-IfNotPresent}"
 job_cpu_request="${CONTROL_PLANE_JOB_CPU_REQUEST:-100m}"
 job_cpu_limit="${CONTROL_PLANE_JOB_CPU_LIMIT:-1000m}"
 job_memory_request="${CONTROL_PLANE_JOB_MEMORY_REQUEST:-128Mi}"
 job_memory_limit="${CONTROL_PLANE_JOB_MEMORY_LIMIT:-1Gi}"
+input_mount_path="${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH:-/var/run/control-plane/job-inputs}"
+input_configmap_max_bytes="${CONTROL_PLANE_JOB_INPUT_CONFIGMAP_MAX_BYTES:-750000}"
+mount_files=()
+created_input_configmap=""
+job_created=0
+
+cleanup() {
+  if [[ -n "${created_input_configmap}" ]] && [[ "${job_created}" -eq 0 ]]; then
+    kubectl delete configmap --namespace "${namespace}" "${created_input_configmap}" --ignore-not-found >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --namespace)
+      namespace="$2"
+      shift 2
+      ;;
+    --job-namespace)
       namespace="$2"
       shift 2
       ;;
@@ -59,6 +173,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --job-name)
       job_name="$2"
+      shift 2
+      ;;
+    --mount-file)
+      mount_files+=("$2")
+      shift 2
+      ;;
+    --input-mount-path)
+      input_mount_path="$2"
       shift 2
       ;;
     --help)
@@ -82,7 +204,13 @@ if [[ -z "${job_name}" ]]; then
   job_name="control-plane-job-$(date +%s)"
 fi
 
+if [[ -z "${workspace_pvc}" ]] && [[ "${namespace}" == "${CONTROL_PLANE_K8S_NAMESPACE:-default}" ]]; then
+  workspace_pvc="${CONTROL_PLANE_WORKSPACE_PVC:-}"
+fi
+
 command_block="$(render_yaml_list '            ' "$@")"
+volume_mount_entries=""
+volume_entries=""
 volume_mount_block=""
 volume_block=""
 service_account_block=""
@@ -98,15 +226,13 @@ EOF
 )
 
 if [[ -n "${workspace_pvc}" ]]; then
-  volume_mount_block=$(cat <<EOF
-          volumeMounts:
+  volume_mount_entries+=$(cat <<EOF
             - name: workspace
               mountPath: $(yaml_quote "${workspace_mount_path}")
               subPath: $(yaml_quote "${workspace_subpath}")
 EOF
   )
-  volume_block=$(cat <<EOF
-      volumes:
+  volume_entries+=$(cat <<EOF
         - name: workspace
           persistentVolumeClaim:
             claimName: $(yaml_quote "${workspace_pvc}")
@@ -117,6 +243,54 @@ fi
 if [[ -n "${job_service_account}" ]]; then
   service_account_block=$(cat <<EOF
       serviceAccountName: $(yaml_quote "${job_service_account}")
+EOF
+  )
+fi
+
+if [[ ${#mount_files[@]} -gt 0 ]]; then
+  created_input_configmap="$(job_input_configmap_name "${job_name}")"
+  cat <<EOF | kubectl create -f - >/dev/null
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: $(yaml_quote "${created_input_configmap}")
+  namespace: $(yaml_quote "${namespace}")
+  labels:
+    app.kubernetes.io/name: control-plane-job-inputs
+    app.kubernetes.io/part-of: control-plane-execution
+    job-name: $(yaml_quote "${job_name}")
+binaryData:
+$(render_configmap_binary_data '  ' "${mount_files[@]}")
+EOF
+
+  volume_mount_entries+=$(cat <<EOF
+            - name: job-inputs
+              mountPath: $(yaml_quote "${input_mount_path}")
+              readOnly: true
+EOF
+  )
+  volume_entries+=$(cat <<EOF
+        - name: job-inputs
+          configMap:
+            name: $(yaml_quote "${created_input_configmap}")
+            items:
+$(render_configmap_items '              ' "${mount_files[@]}")
+EOF
+  )
+fi
+
+if [[ -n "${volume_mount_entries}" ]]; then
+  volume_mount_block=$(cat <<EOF
+          volumeMounts:
+${volume_mount_entries}
+EOF
+  )
+fi
+
+if [[ -n "${volume_entries}" ]]; then
+  volume_block=$(cat <<EOF
+      volumes:
+${volume_entries}
 EOF
   )
 fi
@@ -147,5 +321,8 @@ ${resources_block}
 ${volume_mount_block}
 ${volume_block}
 EOF
+
+job_created=1
+trap - EXIT
 
 printf '%s\n' "${job_name}"
