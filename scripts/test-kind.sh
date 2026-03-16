@@ -356,7 +356,8 @@ spec:
               value: control-plane
             - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
               value: Never
-          # Allow nested Podman / Kind inside the Control Plane pod.
+          # Keep the sample privileged for widest compatibility with nested
+          # Podman / Kind. CAP_SETUID / CAP_SETGID alone are not equivalent.
           securityContext:
             privileged: true
           ports:

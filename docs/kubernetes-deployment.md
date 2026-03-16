@@ -33,8 +33,12 @@
    Pod が再作成されても host key が変わりません。
 5. テンプレートは Control Plane container に
    `securityContext.privileged: true` を設定しています。これは
-   `scripts/lint.sh` / `scripts/build-test.sh` を Pod 内から完結させるために
-   nested Podman / Kind を通しやすくするためです。クラスタ policy で privileged Pod を
+   `scripts/lint.sh` / `scripts/build-test.sh` を Pod 内から完結させる場合に
+   nested Podman / Kind を通しやすくするためです。`capabilities.add` に
+   `SETUID` / `SETGID` だけを足しても、`newuidmap` / `newgidmap` を使う rootless
+   Podman の代替にはなりません。このサンプルでは、outer host / runtime 側の user
+   namespace 制約も残ることを前提に、より互換性が高い設定として
+   `privileged: true` を残しています。クラスタ policy で privileged Pod を
    使えない場合はこの設定を外し、lint / build / test は host か GitHub Actions へ
    逃がしてください。
 6. 必要に応じて Job 用の image pull policy と resource 上限を調整します。
@@ -87,6 +91,12 @@ erase を既定化し、`tmux-256color` を含む terminfo も入れています
 `securityContext.privileged: true` を入れているため、Kubernetes 上でも nested
 rootless Podman / Kind を動かしやすくし、`scripts/lint.sh` や
 `scripts/build-test.sh` を Pod 内から実行しやすくしています。
+
+一方で、`capabilities.add: ["SETUID", "SETGID"]` だけでは
+`newuidmap` / `newgidmap` の代替にはなりません。これらは setuid helper として
+動き、外側の host / container runtime 側でも user namespace が許可されている
+必要があります。そのため、このサンプルでは capability 追加だけに置き換えず、
+より保守的な既定値として `privileged: true` を残しています。
 
 それでもクラスタ側が privileged Pod を禁止していたり、外側の host / container
 runtime 側が user namespace や `newuidmap` / `newgidmap` を止めている場合は、

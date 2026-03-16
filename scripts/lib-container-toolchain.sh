@@ -23,7 +23,7 @@ report_missing_build_test_toolchain() {
   if running_inside_control_plane_image; then
     printf '%s\n' \
       'This control-plane image includes the Podman/Kind toolchain used by scripts/lint.sh and scripts/build-test.sh, but nested containers still depend on the outer host or Kubernetes securityContext.' \
-      'When running on Kubernetes, keep the sample privileged control-plane container (or another runtime that permits nested user namespaces); otherwise use GitHub Actions or a host with Docker Buildx or rootless Podman.' \
+      'When running on Kubernetes, keep the sample privileged control-plane container (or another runtime that permits nested user namespaces); CAP_SETUID/CAP_SETGID alone are not an equivalent replacement for newuidmap/newgidmap.' \
       'The image already provisions /etc/subuid and /etc/subgid for the copilot user, but those files alone cannot override host/runtime restrictions on nested user namespaces.' \
       >&2
   fi
@@ -36,7 +36,7 @@ report_podman_runtime_failure() {
     printf '%s\n' \
       "Podman is installed but unusable in this environment: nested user namespace setup is blocked (\`newuidmap\` failed)." \
       'Entries in /etc/subuid and /etc/subgid inside the nested container are not enough; the outer host/runtime still has to allow user namespaces and newuidmap/newgidmap.' \
-      'Use the sample privileged Kubernetes deployment, a working Docker buildx daemon, or GitHub Actions / a container host that supports rootless user namespaces.' \
+      'Use the sample privileged Kubernetes deployment, a working Docker buildx daemon, or GitHub Actions / a container host that supports rootless user namespaces; CAP_SETUID/CAP_SETGID alone are not enough.' \
       >&2
   fi
 }
