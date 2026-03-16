@@ -33,6 +33,7 @@ create_copilot_session() {
     exit 127
   }
 
+  # shellcheck disable=SC2016
   screen -T screen-256color -DmS "${target_session}" \
     bash -lc 'mkdir -p -- "$1" && cd -- "$1" && exec "$2" --yolo' \
     bash "${copilot_workspace}" "${copilot_bin}"
