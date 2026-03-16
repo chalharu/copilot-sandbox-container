@@ -18,6 +18,7 @@ Read `references/control-plane-run.md` when you need command-routing guidance. R
    - Use plain shell work in the control plane for interactive investigation, editing, or Git work.
    - Use `control-plane-run --mode auto --execution-hint short` for quick containerized commands that should stay local to the control plane host.
    - Use `control-plane-run --mode auto --execution-hint long` for commands that should become Kubernetes Jobs.
+   - In the sample least-privilege Kubernetes deployment, `CONTROL_PLANE_RUN_MODE=k8s-job` makes Job execution the default even without explicit `--mode`, so use `--mode podman` only when you intentionally opt back into local Podman.
    - Override with `--mode podman` or `--mode k8s-job` only when the destination must be forced.
 3. Keep long-lived or resumable work inside GNU Screen sessions.
 4. When the task needs extra repository-specific agent behavior, combine this bundled skill with repo-local skills from the mounted repository.
@@ -27,6 +28,7 @@ Read `references/control-plane-run.md` when you need command-routing guidance. R
 - Interactive SSH logins enter `control-plane-session --select`, which shows existing GNU Screen sessions, adds a `Copilot` option when no dedicated Copilot session exists, and always offers `New session`.
 - Use the default session picker path for normal work. It preserves the "reattach if possible, create if needed" flow without having to remember Screen flags.
 - Choose `Copilot` to start `copilot --yolo` from `/workspace` inside its own Screen session.
+- Copilot sessions start attached to the current SSH TTY instead of booting detached first, which avoids TUI stalls where the session looks unresponsive right after login.
 - Use `control-plane-session --command '<shell command>'` when you need to start a detached session non-interactively.
 - Use `CONTROL_PLANE_SESSION_SELECTION=new:<name>` only for scripted or test-only selection overrides.
 

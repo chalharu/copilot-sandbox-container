@@ -23,8 +23,8 @@ report_missing_build_test_toolchain() {
   if running_inside_control_plane_image; then
     printf '%s\n' \
       'This control-plane image includes the Podman/Kind toolchain used by scripts/lint.sh and scripts/build-test.sh, but nested containers still depend on the outer host or Kubernetes securityContext.' \
-      'When running on Kubernetes, prefer the sample hostUsers:false deployment with Pod user namespaces and RuntimeDefault seccomp. Keep allowPrivilegeEscalation enabled there because rootless Podman still relies on setuid newuidmap/newgidmap helpers.' \
-      'The image already provisions /etc/subuid and /etc/subgid for the copilot user, but those files alone cannot override host/runtime restrictions on nested user namespaces.' \
+      'When running on Kubernetes, prefer the sample least-privilege SSH/Copilot deployment and route execution through Kubernetes Jobs or GitHub Actions by default.' \
+      'The image already provisions /etc/subuid and /etc/subgid for the copilot user, but those files alone cannot override host/runtime restrictions on nested user namespaces, /dev/fuse, or other local Podman requirements.' \
       >&2
   fi
 }
@@ -36,7 +36,7 @@ report_podman_runtime_failure() {
     printf '%s\n' \
       "Podman is installed but unusable in this environment: nested user namespace setup is blocked (\`newuidmap\` failed)." \
       'Entries in /etc/subuid and /etc/subgid inside the nested container are not enough; the outer host/runtime still has to allow user namespaces and newuidmap/newgidmap.' \
-      'Use the sample hostUsers:false deployment on a runtime that supports Pod user namespaces, or fall back to GitHub Actions / a host runner. If you must run locally in-cluster, privileged mode remains a last-resort override.' \
+      'Use the sample least-privilege deployment for SSH/Copilot plus Kubernetes Jobs, or fall back to GitHub Actions / a host runner. If you must run local Podman in-cluster, extra runtime support or privileged mode remains a last-resort override.' \
       >&2
   fi
 }

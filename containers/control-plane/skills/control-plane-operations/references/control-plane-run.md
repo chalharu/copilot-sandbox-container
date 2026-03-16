@@ -37,6 +37,7 @@ control-plane-session --command \
 
 ## Notes
 
+- The sample least-privilege Kubernetes deployment exports `CONTROL_PLANE_RUN_MODE=k8s-job`, so plain `control-plane-run ...` defaults to the Job path unless you override it.
 - Pass `--workspace /workspace` when the local execution path must mount the repository workspace.
 - Keep Kubernetes-specific flags (`--namespace`, `--job-name`) ready even in `auto` mode when the command may route to a Job.
 - Prefer explicit image references. Use commit SHA tags for reproducible automation.

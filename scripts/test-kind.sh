@@ -327,7 +327,6 @@ spec:
       labels:
         app.kubernetes.io/name: control-plane
     spec:
-      hostUsers: false
       serviceAccountName: control-plane
       initContainers:
         - name: init-state
@@ -337,6 +336,16 @@ spec:
             - sh
             - -c
             - mkdir -p /state/copilot /state/gh /state/ssh /state/ssh-host-keys /state/workspace && chmod 700 /state/ssh /state/ssh-host-keys
+          securityContext:
+            privileged: false
+            runAsUser: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
           volumeMounts:
             - name: state
               mountPath: /state
@@ -355,15 +364,26 @@ spec:
               value: workspace
             - name: CONTROL_PLANE_JOB_SERVICE_ACCOUNT
               value: control-plane
+            - name: CONTROL_PLANE_RUN_MODE
+              value: k8s-job
             - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
               value: Never
-          # Prefer a least-privilege default: use Pod user namespaces and keep
-          # the runtime seccomp profile. We intentionally avoid privileged=true,
-          # but still allow the default root capability set because the
-          # entrypoint and sshd need standard root operations such as chown and
-          # setuid/setgid.
+          # Keep the Kind test on the same least-privilege SSH/Copilot profile as
+          # the sample manifest. Local nested Podman remains opt-in elsewhere.
           securityContext:
+            privileged: false
+            runAsUser: 0
+            runAsNonRoot: false
             allowPrivilegeEscalation: true
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+                - SETGID
+                - SETUID
             seccompProfile:
               type: RuntimeDefault
           ports:
@@ -483,9 +503,6 @@ test "\${EDITOR}" = "vim"
 test "\${VISUAL}" = "vim"
 test "\${GH_PAGER}" = "cat"
 test -f ~/.copilot/skills/control-plane-operations/SKILL.md
-uid_map_host_uid="\$(awk 'NR==1 { print \$2 }' /proc/self/uid_map)"
-test -n "\${uid_map_host_uid}"
-test "\${uid_map_host_uid}" != "0"
 grep -qx 'graphroot = "/home/copilot/.copilot/containers/storage"' ~/.config/containers/storage.conf
 grep -qx 'runroot = "/home/copilot/.copilot/run/containers/storage"' ~/.config/containers/storage.conf
 test -d ~/.copilot/containers/storage/overlay
@@ -569,6 +586,18 @@ set -euo pipefail
 test -f /workspace/auto-job.txt
 EOF
 
+default_mode_output="$(ssh_bash <<EOF
+set -euo pipefail
+control-plane-run --namespace ${namespace} --job-name ci-default-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/default-job.txt default
+EOF
+)"
+grep -q 'default' <<<"${default_mode_output}"
+
+ssh_bash <<'EOF'
+set -euo pipefail
+test -f /workspace/default-job.txt
+EOF
+
 ssh_bash <<EOF
 set -euo pipefail
 cat > /tmp/fake-podman <<'INNER'
@@ -600,5 +629,6 @@ test -f ~/.config/gh/state.txt
 test -f ~/.ssh/state.txt
 test -f /workspace/manual-job.txt
 test -f /workspace/auto-job.txt
+test -f /workspace/default-job.txt
 test -f /workspace/k8s-screen.txt
 EOF
