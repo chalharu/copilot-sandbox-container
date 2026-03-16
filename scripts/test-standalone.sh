@@ -293,7 +293,7 @@ container_env=(
   -e CONTROL_PLANE_COPILOT_BIN=/workspace/test-copilot
   -e CONTROL_PLANE_COPILOT_SESSION=picker-copilot
   -e CONTROL_PLANE_SESSION_SELECTION=copilot
-  -e CONTROL_PLANE_GIT_USER_NAME=Picker Test User
+  -e "CONTROL_PLANE_GIT_USER_NAME=Picker Test User"
   -e CONTROL_PLANE_GIT_USER_EMAIL=picker@example.com
   -e COPILOT_GITHUB_TOKEN=picker-token
 )
