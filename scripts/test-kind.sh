@@ -607,6 +607,10 @@ npm ls -g @github/copilot --depth=0 | grep -q '@github/copilot@'
 command -v git
 command -v gh
 command -v kubectl
+command -v k8s-job-start
+command -v k8s-job-wait
+command -v k8s-job-pod
+command -v k8s-job-logs
 command -v podman
 command -v docker
 command -v kind
@@ -691,11 +695,26 @@ EOF
   exit 1
 fi
 
-job_name="$(ssh_bash <<EOF
+if ! job_name="$(ssh_bash <<EOF
 set -euo pipefail
 k8s-job-start --namespace ${job_namespace} --job-name ci-manual-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/manual-job.txt manual
 EOF
-)"
+)";
+then
+  ssh_bash <<EOF >&2 || true
+set -euxo pipefail
+command -v k8s-job-start
+kubectl config current-context
+kubectl get namespace ${job_namespace}
+kubectl get serviceaccount control-plane-job --namespace ${job_namespace}
+kubectl get pvc control-plane-workspace-pvc --namespace ${job_namespace}
+kubectl auth can-i create jobs --namespace ${job_namespace}
+kubectl delete job --namespace ${job_namespace} ci-manual-job --ignore-not-found >/dev/null 2>&1 || true
+bash -x "\$(command -v k8s-job-start)" --namespace ${job_namespace} --job-name ci-manual-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/manual-job.txt manual
+EOF
+  dump_control_plane_diagnostics
+  exit 1
+fi
 job_name="$(printf '%s' "${job_name}" | tr -d '\r\n')"
 
 ssh_bash <<EOF
