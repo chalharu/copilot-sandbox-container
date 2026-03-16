@@ -1,7 +1,7 @@
 FROM node:24.14.0-bookworm-slim@sha256:e8e2e91b1378f83c5b2dd15f0247f34110e2fe895f6ca7719dbb780f929368eb
 
 # renovate: datasource=npm depName=@github/copilot
-ARG COPILOT_CLI_VERSION=1.0.5
+ARG COPILOT_CLI_VERSION=1.0.6
 # renovate: datasource=github-releases depName=kubernetes-sigs/kind
 ARG KIND_VERSION=v0.31.0
 ARG CONTROL_PLANE_UID=1000
