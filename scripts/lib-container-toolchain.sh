@@ -22,7 +22,7 @@ report_missing_build_test_toolchain() {
 
   if running_inside_control_plane_image; then
     printf '%s\n' \
-      'This control-plane image keeps Podman for execution-plane workflows, but `scripts/lint.sh` and `scripts/build-test.sh` still require a host or CI build runner.' \
+      'This control-plane image keeps Podman for execution-plane workflows, but scripts/lint.sh and scripts/build-test.sh still require a host or CI build runner.' \
       'Run those validation entry points in GitHub Actions, or from a host with Docker Buildx or rootless Podman.' \
       >&2
   fi
