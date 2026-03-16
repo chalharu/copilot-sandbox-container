@@ -139,6 +139,10 @@ spec:
               value: 256Mi
             - name: CONTROL_PLANE_JOB_MEMORY_LIMIT
               value: 2Gi
+          # Allow nested Podman / Kind so this pod can run scripts/lint.sh and
+          # scripts/build-test.sh directly after SSH login.
+          securityContext:
+            privileged: true
           ports:
             - containerPort: 2222
               name: ssh

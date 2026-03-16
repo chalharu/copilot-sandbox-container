@@ -356,6 +356,9 @@ spec:
               value: control-plane
             - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
               value: Never
+          # Allow nested Podman / Kind inside the Control Plane pod.
+          securityContext:
+            privileged: true
           ports:
             - containerPort: 2222
               name: ssh
@@ -455,6 +458,7 @@ command -v git
 command -v gh
 command -v kubectl
 command -v podman
+podman info >/dev/null
 command -v docker
 command -v kind
 docker --version >/dev/null

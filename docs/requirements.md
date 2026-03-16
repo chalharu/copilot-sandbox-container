@@ -188,7 +188,10 @@ build して GHCR へ公開し、再利用できるようにします。
 
 ### 4.9 安全性と運用要件
 
-- `privileged` を前提にしないこと
+- 既定で `privileged` を前提にしないこと（このリポジトリ自身の
+  `scripts/lint.sh` / `scripts/build-test.sh` を Kubernetes 上の Control Plane Pod
+  内で完結させる場合だけは、明示的な opt-in として
+  `securityContext.privileged` を許容する）
 - Docker-in-Docker のような root 権限依存の構成を避けること
 - 言語間の依存関係衝突を防げること
 - Control Plane と Execution Plane を独立して更新できること

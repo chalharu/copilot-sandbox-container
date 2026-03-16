@@ -74,12 +74,14 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 `containers/control-plane` と `containers/execution-plane-smoke` を build し、
 `scripts/test-standalone.sh` と `scripts/test-kind.sh` を順に呼び出します。
 
-Control Plane イメージは `control-plane-run` 用に `podman` / `docker` wrapper を
-持ちますが、`scripts/lint.sh` や `scripts/build-test.sh` を完結させるための
-nested build runner までは持ちません。Kubernetes 上の非特権 Pod などでは
-rootless Podman が host 側の user namespace 制約で失敗し、
-`newuidmap ... Operation not permitted` が出る場合があります。その場合は
-Docker Buildx が使える host か GitHub Actions を使ってください。Control Plane
+Control Plane イメージには `podman` / `kind` など
+`scripts/lint.sh` や `scripts/build-test.sh` に必要なコマンドを同梱しています。
+ただし nested build runner が実際に動くかは、外側の host / container runtime /
+Kubernetes securityContext 依存です。サンプルの Kubernetes Deployment では
+`securityContext.privileged: true` を付けてこの前提を満たしますが、非特権 Pod や
+privileged を禁止するクラスタでは rootless Podman が失敗し、
+`newuidmap ... Operation not permitted` が出る場合があります。その場合は Docker
+Buildx が使える host か GitHub Actions を使ってください。Control Plane
 イメージ内では `/etc/subuid` / `/etc/subgid` を用意していますが、それだけでは
 不十分で、外側の host / container runtime 側でも user namespace と
 `newuidmap` / `newgidmap` が許可されている必要があります。Buildah を個別に
@@ -131,6 +133,12 @@ Copilot セッションが無い場合は picker に `Copilot (/workspace, --yol
 Enter だけで `/workspace` から `copilot --yolo` を始められます。また、
 `control-plane-operations` skill をイメージに同梱しているため、他のリポジトリを
 `/workspace` に mount した場合でも同じ運用ガイドを使えます。
+
+同じサンプル Deployment では Control Plane container に
+`securityContext.privileged: true` を入れているため、SSH で入ったあとに
+`scripts/lint.sh` や `scripts/build-test.sh` を Pod 内でそのまま実行しやすくして
+います。クラスタ policy で privileged を許可できない場合は、これらの検証は
+GitHub Actions 側で実行してください。
 
 Control Plane イメージには `vim` も同梱され、ログイン shell では `EDITOR` /
 `VISUAL` を未設定時だけ `vim` に補います。Copilot CLI の multiline shortcut が

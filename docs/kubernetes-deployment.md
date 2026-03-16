@@ -31,8 +31,14 @@
 3. `storageClassName` と PVC サイズをクラスタ環境に合わせて調整します。
 4. テンプレートは同じ PVC の `ssh-host-keys` subPath に SSH host key を置くため、
    Pod が再作成されても host key が変わりません。
-5. 必要に応じて Job 用の image pull policy と resource 上限を調整します。
-6. 適用後は `kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox`
+5. テンプレートは Control Plane container に
+   `securityContext.privileged: true` を設定しています。これは
+   `scripts/lint.sh` / `scripts/build-test.sh` を Pod 内から完結させるために
+   nested Podman / Kind を許可するためです。クラスタ policy で privileged Pod を
+   使えない場合はこの設定を外し、lint / build / test は host か GitHub Actions へ
+   逃がしてください。
+6. 必要に応じて Job 用の image pull policy と resource 上限を調整します。
+7. 適用後は `kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox`
    のように Service 経由で SSH を公開できます。
 
 ```yaml
@@ -77,17 +83,18 @@ UTF-8 テキストも表示しやすくしています。
 erase を既定化し、`tmux-256color` を含む terminfo も入れています。そのため、
 `tmux` 経由で SSH 接続しても表示崩れを起こしにくくしています。
 
-ただし、Kubernetes 上の非特権 Pod では nested rootless Podman が host 側の
-user namespace 制約で失敗し、`newuidmap ... Operation not permitted` が出る
-場合があります。Control Plane イメージは `control-plane-run` 用の wrapper は
-持ちますが、`scripts/lint.sh` や `scripts/build-test.sh` を完結させる nested
-build runner までは持ちません。イメージ内の `/etc/subuid` / `/etc/subgid` を
-整えても、それだけでは不十分で、外側の host / container runtime 側でも user
-namespace と `newuidmap` / `newgidmap` が許可されている必要があります。その場合は
-Control Plane 内で Podman を無理に使わず、Docker Buildx が使える host か
-GitHub Actions で lint / build / test を実行してください。Buildah を個別に
-使いたい場合は `quay.io/buildah/stable` のような upstream イメージを host / CI
-側で利用してください。
+このサンプルでは Control Plane container に
+`securityContext.privileged: true` を入れているため、Kubernetes 上でも nested
+rootless Podman / Kind が動く前提をそろえ、`scripts/lint.sh` や
+`scripts/build-test.sh` を Pod 内から実行しやすくしています。
+
+それでもクラスタ側が privileged Pod を禁止していたり、外側の host / container
+runtime 側が user namespace や `newuidmap` / `newgidmap` を止めている場合は、
+`newuidmap ... Operation not permitted` が出ることがあります。その場合は Pod
+Security / runtime 設定を見直すか、Control Plane 内で Podman を無理に使わず、
+Docker Buildx が使える host か GitHub Actions で lint / build / test を実行して
+ください。Buildah を個別に使いたい場合は `quay.io/buildah/stable` のような
+upstream イメージを host / CI 側で利用してください。
 
 ただし Copilot CLI の multiline 入力 (`Shift+Enter`) 自体は upstream で Kitty
 protocol 対応 terminal を前提としており、対応 terminal では `/terminal-setup`
