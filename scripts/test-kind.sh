@@ -100,7 +100,7 @@ ssh_cmd() {
 }
 
 ssh_bash() {
-  ssh "${ssh_opts[@]}" copilot@127.0.0.1 'bash -se'
+  ssh "${ssh_opts[@]}" copilot@127.0.0.1 'bash -l -se'
 }
 
 wait_for_ssh() {
@@ -113,6 +113,33 @@ wait_for_ssh() {
   done
   printf 'Timed out waiting for SSH on port %s\n' "${ssh_port}" >&2
   exit 1
+}
+
+wait_for_screen_term() {
+  local target_session="$1"
+  local term_file="$2"
+  local expected_term_pattern="${3:-screen-256color(-bce)?}"
+  local attempts="${4:-15}"
+  local remote_command
+  local _
+
+  printf -v remote_command 'TARGET_SESSION=%q TERM_FILE=%q EXPECTED_TERM_PATTERN=%q bash -l -se' \
+    "${target_session}" "${term_file}" "${expected_term_pattern}"
+
+  for _ in $(seq 1 "${attempts}"); do
+    # shellcheck disable=SC2029
+    if ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_command}" <<'EOF' >/dev/null 2>&1
+set -euo pipefail
+screen -list | grep -q -- "${TARGET_SESSION}"
+grep -Eq -- "^(${EXPECTED_TERM_PATTERN})$" "${TERM_FILE}"
+EOF
+    then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
 }
 
 ssh_host_fingerprint() {
@@ -428,9 +455,19 @@ command -v gh
 command -v kubectl
 command -v podman
 command -v docker
+command -v buildah
+command -v kind
 docker --version >/dev/null
 command -v sshd
 command -v screen
+command -v vim
+test "\$(TERM=xterm-256color tput colors)" -ge 256
+test "\$(TERM=screen-256color tput colors)" -ge 256
+test "\$(TERM=tmux-256color tput colors)" -ge 256
+test "\${EDITOR}" = "vim"
+test "\${VISUAL}" = "vim"
+test "\${BUILDAH_ISOLATION}" = "chroot"
+test "\${GH_PAGER}" = "cat"
 test -f ~/.copilot/skills/control-plane-operations/SKILL.md
 kubectl auth can-i create jobs --namespace ${namespace} | grep -q '^yes$'
 EOF
@@ -441,14 +478,18 @@ mkdir -p ~/.copilot ~/.config/gh ~/.ssh /workspace
 echo k8s > ~/.copilot/state.txt
 echo gh > ~/.config/gh/state.txt
 echo ssh > ~/.ssh/state.txt
-screen -dmS kind-session sh -lc 'echo k8s-screen > /workspace/k8s-screen.txt; sleep 30'
+screen -T screen-256color -dmS kind-session sh -lc 'printf "%s\n" "$TERM" > /workspace/k8s-screen-term.txt; echo k8s-screen > /workspace/k8s-screen.txt; sleep 30'
 EOF
 
-sleep 2
-ssh_bash <<'EOF'
+if ! wait_for_screen_term kind-session /workspace/k8s-screen-term.txt; then
+  ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
-screen -list | grep -q kind-session
+screen -list || true
+cat /workspace/k8s-screen-term.txt || true
 EOF
+  printf 'Expected kind-session to report a screen-256color TERM variant\n' >&2
+  exit 1
+fi
 
 job_name="$(ssh_bash <<EOF
 set -euo pipefail

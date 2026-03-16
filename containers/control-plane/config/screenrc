@@ -1,0 +1,6 @@
+# Prefer a 256-color UTF-8 terminal inside Screen so TUIs such as Copilot CLI and vim
+# render predictably, including full-screen redraws.
+defutf8 on
+term screen-256color
+defbce on
+altscreen on

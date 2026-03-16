@@ -2,6 +2,8 @@ FROM node:24.14.0-bookworm-slim@sha256:e8e2e91b1378f83c5b2dd15f0247f34110e2fe895
 
 # renovate: datasource=npm depName=@github/copilot
 ARG COPILOT_CLI_VERSION=1.0.5
+# renovate: datasource=github-releases depName=kubernetes-sigs/kind
+ARG KIND_VERSION=v0.24.0
 ARG CONTROL_PLANE_UID=1000
 ARG CONTROL_PLANE_GID=1000
 ARG CONTROL_PLANE_USER=copilot
@@ -17,6 +19,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN apt-get update -o Acquire::Retries=3 \
     && apt-get install -y --no-install-recommends \
         bash \
+        buildah \
         ca-certificates \
         curl \
         fuse-overlayfs \
@@ -24,6 +27,7 @@ RUN apt-get update -o Acquire::Retries=3 \
         git \
         jq \
         kubernetes-client \
+        ncurses-term \
         openssh-client \
         openssh-server \
         podman \
@@ -32,7 +36,21 @@ RUN apt-get update -o Acquire::Retries=3 \
         slirp4netns \
         tini \
         uidmap \
+        vim \
     && rm -rf /var/lib/apt/lists/*
+
+RUN arch="$(dpkg --print-architecture)" \
+    && case "${arch}" in \
+        amd64) kind_arch=amd64 ;; \
+        arm64) kind_arch=arm64 ;; \
+        *) printf 'Unsupported architecture for kind: %s\n' "${arch}" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSLo "/tmp/kind-linux-${kind_arch}" "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-${kind_arch}" \
+    && curl -fsSLo "/tmp/kind-linux-${kind_arch}.sha256sum" "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-${kind_arch}.sha256sum" \
+    && kind_sha256="$(cut -d' ' -f1 "/tmp/kind-linux-${kind_arch}.sha256sum")" \
+    && printf '%s  %s\n' "${kind_sha256}" "/tmp/kind-linux-${kind_arch}" | sha256sum -c - \
+    && install -m 0755 "/tmp/kind-linux-${kind_arch}" /usr/local/bin/kind \
+    && rm -f "/tmp/kind-linux-${kind_arch}" "/tmp/kind-linux-${kind_arch}.sha256sum"
 
 RUN npm install --global "@github/copilot@${COPILOT_CLI_VERSION}" \
     && npm cache clean --force
@@ -84,6 +102,7 @@ RUN existing_group="$(getent group "${CONTROL_PLANE_GID}" | cut -d: -f1 || true)
     && ln -sf /usr/sbin/sshd /usr/local/bin/sshd
 
 COPY --chmod=644 config/sshd_config /etc/ssh/sshd_config
+COPY --chmod=644 config/screenrc /etc/screenrc
 COPY --chmod=644 config/storage.conf /home/${CONTROL_PLANE_USER}/.config/containers/storage.conf
 COPY --chmod=644 config/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
 COPY --chmod=644 config/profile-control-plane-session.sh /etc/profile.d/control-plane-session.sh

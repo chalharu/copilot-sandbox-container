@@ -7,3 +7,9 @@ if [ -f "${runtime_config_file}" ]; then
   . "${runtime_config_file}"
   set +a
 fi
+
+: "${EDITOR:=vim}"
+: "${VISUAL:=${EDITOR}}"
+: "${BUILDAH_ISOLATION:=chroot}"
+: "${GH_PAGER:=cat}"
+export EDITOR VISUAL BUILDAH_ISOLATION GH_PAGER

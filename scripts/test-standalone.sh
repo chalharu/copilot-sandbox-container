@@ -38,7 +38,7 @@ ssh_cmd() {
 }
 
 ssh_bash() {
-  ssh "${ssh_opts[@]}" copilot@127.0.0.1 'bash -se'
+  ssh "${ssh_opts[@]}" copilot@127.0.0.1 'bash -l -se'
 }
 
 wait_for_ssh() {
@@ -62,6 +62,33 @@ wait_for_screen_session() {
     if ssh_bash <<EOF >/dev/null 2>&1
 set -euo pipefail
 screen -list | grep -q -- '${target_session}'
+EOF
+    then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
+wait_for_screen_term() {
+  local target_session="$1"
+  local term_file="$2"
+  local expected_term_pattern="${3:-screen-256color(-bce)?}"
+  local attempts="${4:-15}"
+  local remote_command
+  local _
+
+  printf -v remote_command 'TARGET_SESSION=%q TERM_FILE=%q EXPECTED_TERM_PATTERN=%q bash -l -se' \
+    "${target_session}" "${term_file}" "${expected_term_pattern}"
+
+  for _ in $(seq 1 "${attempts}"); do
+    # shellcheck disable=SC2029
+    if ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_command}" <<'EOF' >/dev/null 2>&1
+set -euo pipefail
+screen -list | grep -q -- "${TARGET_SESSION}"
+grep -Eq -- "^(${EXPECTED_TERM_PATTERN})$" "${TERM_FILE}"
 EOF
     then
       return 0
@@ -119,45 +146,64 @@ ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"
 start_container
 wait_for_ssh
 
-"${container_bin}" exec "${container_name}" bash -lc 'set -euo pipefail
-  command -v node
-  command -v npm
-  npm ls -g @github/copilot --depth=0 | grep -q "@github/copilot@"
-  command -v git
-  command -v gh
-  command -v kubectl
-  command -v podman
-  command -v docker
-  docker --version >/dev/null
-  command -v sshd
-  command -v screen
-  command -v control-plane-run
-  command -v control-plane-session
-  command -v k8s-job-start
-  command -v k8s-job-wait
-  command -v k8s-job-pod
-  command -v k8s-job-logs
-  command -v k8s-job-run
-  test -f /home/copilot/.copilot/skills/control-plane-operations/SKILL.md
-  test -f /home/copilot/.copilot/skills/control-plane-operations/references/control-plane-run.md
-  grep -q "^copilot:" /etc/subuid
-  grep -q "^copilot:" /etc/subgid
-'
+"${container_bin}" exec "${container_name}" bash -l -se <<'EOF'
+set -euo pipefail
+command -v node
+command -v npm
+npm ls -g @github/copilot --depth=0 | grep -q "@github/copilot@"
+command -v git
+command -v gh
+command -v kubectl
+command -v podman
+command -v docker
+command -v buildah
+command -v kind
+docker --version >/dev/null
+command -v sshd
+command -v screen
+command -v vim
+command -v control-plane-run
+command -v control-plane-session
+command -v k8s-job-start
+command -v k8s-job-wait
+command -v k8s-job-pod
+command -v k8s-job-logs
+command -v k8s-job-run
+test "$(TERM=xterm-256color tput colors)" -ge 256
+test "$(TERM=screen-256color tput colors)" -ge 256
+test "$(TERM=tmux-256color tput colors)" -ge 256
+test "${EDITOR}" = "vim"
+test "${VISUAL}" = "vim"
+test "${BUILDAH_ISOLATION}" = "chroot"
+test "${GH_PAGER}" = "cat"
+test -f /home/copilot/.copilot/skills/control-plane-operations/SKILL.md
+test -f /home/copilot/.copilot/skills/control-plane-operations/references/control-plane-run.md
+grep -q "^copilot:" /etc/subuid
+grep -q "^copilot:" /etc/subgid
+EOF
 
 ssh_bash <<'EOF'
 set -euo pipefail
+test "${EDITOR}" = "vim"
+test "${VISUAL}" = "vim"
+test "${BUILDAH_ISOLATION}" = "chroot"
+test "${GH_PAGER}" = "cat"
 mkdir -p ~/.copilot ~/.config/gh /workspace
 echo standalone > ~/.copilot/state.txt
 echo gh > ~/.config/gh/state.txt
 echo ssh > ~/.ssh/state.txt
-screen -dmS smoke-session sh -lc 'echo screen-ok > /workspace/screen.txt; sleep 30'
+screen -T screen-256color -dmS smoke-session sh -lc 'printf "%s\n" "$TERM" > /workspace/screen-term.txt; echo screen-ok > /workspace/screen.txt; sleep 30'
 EOF
 
-sleep 2
-ssh_bash <<'EOF'
+if ! wait_for_screen_term smoke-session /workspace/screen-term.txt; then
+  ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
-screen -list | grep -q smoke-session
+screen -list || true
+cat /workspace/screen-term.txt || true
 EOF
+  printf 'Expected smoke-session to report a screen-256color TERM variant\n' >&2
+  exit 1
+fi
 
 ssh_bash <<EOF
 set -euo pipefail
@@ -195,7 +241,7 @@ container_env=(-e CONTROL_PLANE_SESSION_SELECTION=new:auto-login)
 start_container
 wait_for_ssh
 
-TERM="${TERM:-xterm}" ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 </dev/null >"${workdir}/ssh-login.log" 2>&1 &
+TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 </dev/null >"${workdir}/ssh-login.log" 2>&1 &
 interactive_ssh_pid=$!
 if ! wait_for_screen_session auto-login; then
   printf 'Expected auto-login screen session to be created during SSH login\n' >&2

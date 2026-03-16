@@ -7,14 +7,42 @@ require_command() {
   }
 }
 
-docker_build_toolchain_available() {
+docker_runtime_available() {
   command -v docker >/dev/null 2>&1 \
-    && docker buildx version >/dev/null 2>&1 \
     && docker info >/dev/null 2>&1
 }
 
+report_podman_runtime_failure() {
+  local output="$1"
+
+  if grep -Fq 'newuidmap' <<<"${output}" && grep -Fq 'Operation not permitted' <<<"${output}"; then
+    printf '%s\n' \
+      "Podman is installed but unusable in this environment: nested user namespace setup is blocked (\`newuidmap\` failed)." \
+      'Use a working Docker buildx daemon, or run the workflow in GitHub Actions / on a container host that supports rootless user namespaces.' \
+      >&2
+  fi
+}
+
+podman_runtime_available() {
+  local output
+
+  command -v podman >/dev/null 2>&1 || return 1
+
+  if output="$(podman info 2>&1)"; then
+    return 0
+  fi
+
+  report_podman_runtime_failure "${output}"
+  return 1
+}
+
+docker_build_toolchain_available() {
+  docker_runtime_available \
+    && docker buildx version >/dev/null 2>&1
+}
+
 podman_build_toolchain_available() {
-  command -v podman >/dev/null 2>&1 \
+  podman_runtime_available \
     && podman build --help >/dev/null 2>&1
 }
 
@@ -57,19 +85,41 @@ detect_container_runtime() {
   local requested_toolchain="${CONTROL_PLANE_TOOLCHAIN:-}"
 
   if [[ -n "${requested_runtime}" ]]; then
-    require_command "${requested_runtime}"
+    case "${requested_runtime}" in
+      docker)
+        docker_runtime_available || {
+          printf 'Requested docker runtime is not usable in this environment.\n' >&2
+          exit 1
+        }
+        ;;
+      podman)
+        podman_runtime_available || {
+          printf 'Requested podman runtime is not usable in this environment.\n' >&2
+          exit 1
+        }
+        ;;
+      *)
+        require_command "${requested_runtime}"
+        ;;
+    esac
     printf '%s\n' "${requested_runtime}"
     return
   fi
 
   case "${requested_toolchain}" in
     docker)
-      require_command docker
+      docker_runtime_available || {
+        printf 'Requested docker toolchain is not usable in this environment.\n' >&2
+        exit 1
+      }
       printf 'docker\n'
       return
       ;;
     podman)
-      require_command podman
+      podman_runtime_available || {
+        printf 'Requested podman toolchain is not usable in this environment.\n' >&2
+        exit 1
+      }
       printf 'podman\n'
       return
       ;;
@@ -81,17 +131,17 @@ detect_container_runtime() {
       ;;
   esac
 
-  if command -v docker >/dev/null 2>&1; then
+  if docker_runtime_available; then
     printf 'docker\n'
     return
   fi
 
-  if command -v podman >/dev/null 2>&1; then
+  if podman_runtime_available; then
     printf 'podman\n'
     return
   fi
 
-  printf 'Missing supported container runtime. Install docker or podman.\n' >&2
+  printf 'Missing supported container runtime. Provide a working docker daemon, or podman with a usable rootless user namespace environment.\n' >&2
   exit 1
 }
 
@@ -109,7 +159,7 @@ detect_build_test_toolchain() {
       ;;
     podman)
       podman_build_toolchain_available || {
-        printf 'Podman toolchain requires podman with image build support.\n' >&2
+        printf 'Podman toolchain requires podman with image build support and a usable rootless runtime.\n' >&2
         exit 1
       }
       printf 'podman\n'
@@ -133,7 +183,7 @@ detect_build_test_toolchain() {
     return
   fi
 
-  printf 'Missing supported build/test toolchain. Provide a working docker buildx environment, or install podman with image build support.\n' >&2
+  printf 'Missing supported build/test toolchain. Provide a working docker buildx environment, or podman with image build support and a usable rootless runtime.\n' >&2
   exit 1
 }
 
