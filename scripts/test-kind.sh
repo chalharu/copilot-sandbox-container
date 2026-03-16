@@ -610,19 +610,19 @@ if [[ -e /dev/fuse ]]; then
 else
   expected_driver=vfs
 fi
-expected_state_dir="/home/copilot/.copilot/containers/${expected_driver}"
-test "$(readlink /home/copilot/.local/share/containers)" = "${expected_state_dir}"
-grep -qx "graphroot = \"${expected_state_dir}/storage\"" ~/.config/containers/storage.conf
-grep -qx "runroot = \"/home/copilot/.copilot/run/${expected_driver}/containers/storage\"" ~/.config/containers/storage.conf
-if [[ "${expected_driver}" == "overlay" ]]; then
+expected_state_dir="/home/copilot/.copilot/containers/\${expected_driver}"
+test "$(readlink /home/copilot/.local/share/containers)" = "\${expected_state_dir}"
+grep -qx "graphroot = \"\${expected_state_dir}/storage\"" ~/.config/containers/storage.conf
+grep -qx "runroot = \"/home/copilot/.copilot/run/\${expected_driver}/containers/storage\"" ~/.config/containers/storage.conf
+if [[ "\${expected_driver}" == "overlay" ]]; then
   grep -qx 'driver = "overlay"' ~/.config/containers/storage.conf
   grep -qx 'mount_program = "/usr/bin/fuse-overlayfs"' ~/.config/containers/storage.conf
 else
   grep -qx 'driver = "vfs"' ~/.config/containers/storage.conf
   ! grep -q 'mount_program' ~/.config/containers/storage.conf
 fi
-test -d "${expected_state_dir}/storage/${expected_driver}"
-test -d "${expected_state_dir}/storage/volumes"
+test -d "\${expected_state_dir}/storage/\${expected_driver}"
+test -d "\${expected_state_dir}/storage/volumes"
 test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
 kubectl auth can-i create jobs --namespace ${job_namespace} | grep -q '^yes$'
 kubectl auth can-i create configmaps --namespace ${job_namespace} | grep -q '^yes$'
