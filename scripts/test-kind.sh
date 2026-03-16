@@ -305,7 +305,7 @@ metadata:
   labels:
     app.kubernetes.io/name: control-plane
 spec:
-  type: ClusterIP
+  type: LoadBalancer
   selector:
     app.kubernetes.io/name: control-plane
   ports:
@@ -480,6 +480,7 @@ load_kind_image "${control_plane_image}"
 load_kind_image "${execution_plane_image}"
 ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"
 apply_resources
+test "$(kubectl get service/control-plane --namespace "${namespace}" -o jsonpath='{.spec.type}')" = "LoadBalancer"
 wait_for_control_plane_pod
 start_port_forward
 wait_for_ssh
@@ -513,6 +514,15 @@ test "\${GH_PAGER}" = "cat"
 test -f ~/.copilot/skills/control-plane-operations/SKILL.md
 grep -qx 'graphroot = "/home/copilot/.copilot/containers/storage"' ~/.config/containers/storage.conf
 grep -qx 'runroot = "/home/copilot/.copilot/run/containers/storage"' ~/.config/containers/storage.conf
+grep -qx 'cgroup_manager = "cgroupfs"' ~/.config/containers/containers.conf
+grep -qx 'events_logger = "file"' ~/.config/containers/containers.conf
+if [[ -e /dev/fuse ]]; then
+  grep -qx 'driver = "overlay"' ~/.config/containers/storage.conf
+  grep -qx 'mount_program = "/usr/bin/fuse-overlayfs"' ~/.config/containers/storage.conf
+else
+  grep -qx 'driver = "vfs"' ~/.config/containers/storage.conf
+  ! grep -q 'mount_program' ~/.config/containers/storage.conf
+fi
 test -d ~/.copilot/containers/storage/overlay
 test -d ~/.copilot/containers/storage/volumes
 kubectl auth can-i create jobs --namespace ${namespace} | grep -q '^yes$'
