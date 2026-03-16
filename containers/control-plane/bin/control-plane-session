@@ -12,6 +12,7 @@ selection_override="${CONTROL_PLANE_SESSION_SELECTION:-}"
 copilot_session_name="${CONTROL_PLANE_COPILOT_SESSION:-${session_name}}"
 copilot_workspace="${CONTROL_PLANE_COPILOT_WORKSPACE:-${CONTROL_PLANE_WORKSPACE:-/workspace}}"
 copilot_bin="${CONTROL_PLANE_COPILOT_BIN:-copilot}"
+copilot_github_token_file="${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE:-}"
 
 prune_dead_sessions() {
   screen -wipe >/dev/null 2>&1 || true
@@ -51,8 +52,19 @@ create_copilot_session() {
   # inheriting a detached Screen startup context.
   # shellcheck disable=SC2016
   exec screen -T screen-256color -S "${target_session}" \
-    bash -lc 'mkdir -p -- "$1" && cd -- "$1" && exec "$2" --yolo' \
-    bash "${copilot_workspace}" "${copilot_bin}"
+    bash -lc '
+      set -euo pipefail
+      mkdir -p -- "$1"
+      cd -- "$1"
+      if [[ -n "${3:-}" ]] && [[ -f "${3}" ]]; then
+        IFS= read -r copilot_github_token < "${3}" || true
+        if [[ -n "${copilot_github_token}" ]]; then
+          COPILOT_GITHUB_TOKEN="${copilot_github_token}" exec "$2" --secret-env-vars=COPILOT_GITHUB_TOKEN --yolo
+        fi
+      fi
+      exec "$2" --yolo
+    ' \
+    bash "${copilot_workspace}" "${copilot_bin}" "${copilot_github_token_file}"
 }
 
 resolve_existing_session() {

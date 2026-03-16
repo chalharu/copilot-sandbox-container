@@ -185,6 +185,15 @@ grep -q "^copilot:" /etc/subgid
 test "$(readlink /home/copilot/.local/share/containers)" = "/home/copilot/.copilot/containers"
 grep -qx 'graphroot = "/home/copilot/.copilot/containers/storage"' /home/copilot/.config/containers/storage.conf
 grep -qx 'runroot = "/home/copilot/.copilot/run/containers/storage"' /home/copilot/.config/containers/storage.conf
+grep -qx 'cgroup_manager = "cgroupfs"' /home/copilot/.config/containers/containers.conf
+grep -qx 'events_logger = "file"' /home/copilot/.config/containers/containers.conf
+if [[ -e /dev/fuse ]]; then
+  grep -qx 'driver = "overlay"' /home/copilot/.config/containers/storage.conf
+  grep -qx 'mount_program = "/usr/bin/fuse-overlayfs"' /home/copilot/.config/containers/storage.conf
+else
+  grep -qx 'driver = "vfs"' /home/copilot/.config/containers/storage.conf
+  ! grep -q 'mount_program' /home/copilot/.config/containers/storage.conf
+fi
 test -d /home/copilot/.copilot/containers/storage/overlay
 test -d /home/copilot/.copilot/containers/storage/volumes
 EOF
@@ -284,17 +293,32 @@ container_env=(
   -e CONTROL_PLANE_COPILOT_BIN=/workspace/test-copilot
   -e CONTROL_PLANE_COPILOT_SESSION=picker-copilot
   -e CONTROL_PLANE_SESSION_SELECTION=copilot
+  -e CONTROL_PLANE_GIT_USER_NAME=Picker Test User
+  -e CONTROL_PLANE_GIT_USER_EMAIL=picker@example.com
+  -e COPILOT_GITHUB_TOKEN=picker-token
 )
 start_container
 wait_for_ssh
 
 ssh_bash <<'EOF'
 set -euo pipefail
+test -z "${COPILOT_GITHUB_TOKEN:-}"
+test "$(git config --global user.name)" = "Picker Test User"
+test "$(git config --global user.email)" = "picker@example.com"
+mapfile -t github_helpers < <(git config --global --get-all credential.https://github.com.helper)
+test "${#github_helpers[@]}" -eq 2
+test -z "${github_helpers[0]}"
+test "${github_helpers[1]}" = "!/usr/bin/gh auth git-credential"
+mapfile -t gist_helpers < <(git config --global --get-all credential.https://gist.github.com.helper)
+test "${#gist_helpers[@]}" -eq 2
+test -z "${gist_helpers[0]}"
+test "${gist_helpers[1]}" = "!/usr/bin/gh auth git-credential"
 cat > /workspace/test-copilot <<'INNER'
 #!/usr/bin/env bash
 set -euo pipefail
 pwd > /workspace/copilot-picker-pwd.txt
 printf '%s\n' "$@" > /workspace/copilot-picker-args.txt
+printenv COPILOT_GITHUB_TOKEN > /workspace/copilot-picker-token.txt
 sleep 30
 INNER
 chmod +x /workspace/test-copilot
@@ -335,12 +359,15 @@ for _ in $(seq 1 15); do
 done
 test -f /workspace/copilot-picker-pwd.txt
 test -f /workspace/copilot-picker-args.txt
+test -f /workspace/copilot-picker-token.txt
 if screen -list 2>/dev/null | grep -Eq 'picker-copilot.*\(Dead'; then
   printf 'Expected stale picker-copilot session to be wiped before creating a new one\n' >&2
   exit 1
 fi
 grep -qx '/workspace' /workspace/copilot-picker-pwd.txt
+grep -qx -- '--secret-env-vars=COPILOT_GITHUB_TOKEN' /workspace/copilot-picker-args.txt
 grep -qx -- '--yolo' /workspace/copilot-picker-args.txt
+grep -qx 'picker-token' /workspace/copilot-picker-token.txt
 EOF
 then
   printf 'Expected Copilot picker option to create picker-copilot session during SSH login\n' >&2

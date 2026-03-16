@@ -10,7 +10,7 @@
 - Job 操作用 RBAC
 - SSH 公開鍵と任意の Copilot token 用 Secret
 - PersistentVolumeClaim
-- SSH 用 Service
+- SSH 用 LoadBalancer Service
 - Control Plane Deployment
 - PVC 上に永続化される SSH host key
 
@@ -26,12 +26,17 @@
    直近 30 version を保持し、それ以前の package version は自動削除されます。
    これらの tag は amd64 / arm64 を含む multi-arch manifest として公開されます。
 2. `control-plane-auth` Secret の `ssh-public-key` を利用者の公開鍵に置き換えます。
-   `copilot-github-token` は任意ですが、設定すると SSH ログイン後の shell でも
-   `COPILOT_GITHUB_TOKEN` として利用できます。
-3. `storageClassName` と PVC サイズをクラスタ環境に合わせて調整します。
-4. テンプレートは同じ PVC の `ssh-host-keys` subPath に SSH host key を置くため、
+   `copilot-github-token` は任意ですが、設定すると Copilot 起動時にだけ
+   `--secret-env-vars=COPILOT_GITHUB_TOKEN` 経由で注入され、SSH ログイン後の shell
+   には export されません。
+3. 必要なら `CONTROL_PLANE_GIT_USER_NAME` と `CONTROL_PLANE_GIT_USER_EMAIL` を
+   Deployment の `env` へ追加します。entrypoint は `~/.gitconfig` の
+   `user.name` / `user.email` を更新し、あわせて `gh auth setup-git` 相当の
+   GitHub credential helper (`github.com` / `gist.github.com`) を事前設定します。
+4. `storageClassName` と PVC サイズをクラスタ環境に合わせて調整します。
+5. テンプレートは同じ PVC の `ssh-host-keys` subPath に SSH host key を置くため、
    Pod が再作成されても host key が変わりません。
-5. テンプレートは containerd でも使いやすい least-privilege の SSH / Copilot
+6. テンプレートは containerd でも使いやすい least-privilege の SSH / Copilot
    プロファイルを既定にしています。Pod では `securityContext.fsGroup: 1000` を
    使って projected service-account token を `copilot` shell から読めるようにし、
    main container では `privileged: false` のまま
@@ -40,19 +45,23 @@
    に絞り、`seccompProfile: RuntimeDefault` を使います。`allowPrivilegeEscalation`
    は `sshd` の setuid/setgid・privilege separation sandbox と entrypoint の root
    操作のため `true` のままです。
-6. 同時に `CONTROL_PLANE_RUN_MODE=k8s-job` を入れているため、SSH ログイン後の
+7. 同時に `CONTROL_PLANE_RUN_MODE=k8s-job` を入れているため、SSH ログイン後の
    既定経路は Kubernetes Job 実行です。containerd のように `hostUsers: false` を
    使えない環境でも SSH / Copilot / `k8s-job-*` はそのまま利用できます。
-7. local nested Podman / Kind は依然として best-effort です。`SETUID` /
+8. local nested Podman / Kind は依然として best-effort です。`SETUID` /
    `SETGID` だけでは `newuidmap` / `newgidmap` の代替にはならず、outer host /
    runtime 側の user namespace 制約や `/dev/fuse` 提供状況も残ります。Pod 内で
    `scripts/lint.sh` / `scripts/build-test.sh` を直接回したい場合は host か
    GitHub Actions を使ってください。どうしても Pod 内ローカル実行を優先したい
    場合だけ、追加 device / capability か `securityContext.privileged: true` を
-   opt-in してください。
-8. 必要に応じて Job 用の image pull policy と resource 上限を調整します。
-9. 適用後は `kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox`
-   のように Service 経由で SSH を公開できます。
+   opt-in してください。privileged local Podman を使うときは
+   `CONTROL_PLANE_RUN_MODE=auto` へ切り替えるか `control-plane-run --mode podman`
+   を使ってください。entrypoint は `/dev/fuse` が無い場合に Podman storage driver を
+   `vfs` へ自動フォールバックするため、privileged profile でも復旧しやすくなります。
+9. 必要に応じて Job 用の image pull policy と resource 上限を調整します。
+10. サンプルの Service は `LoadBalancer` です。`EXTERNAL-IP` が付与されるまでは、
+    `kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox`
+    のように Service 経由の port-forward も使えます。
 
 ```yaml
 securityContext:
@@ -91,8 +100,16 @@ container securityContext:
 ```
 
 `copilot-github-token` に入れる値は、GitHub Copilot CLI の自動化向け
-`COPILOT_GITHUB_TOKEN` として使われます。GitHub Actions の既定
-`GITHUB_TOKEN` ではなく、Copilot 利用権限を持つ fine-grained PAT を使ってください。
+`COPILOT_GITHUB_TOKEN` として使われますが、ログイン shell には export されず、
+Copilot プロセスにだけ `--secret-env-vars=COPILOT_GITHUB_TOKEN` 付きで渡されます。
+GitHub Actions の既定 `GITHUB_TOKEN` ではなく、Copilot 利用権限を持つ
+fine-grained PAT を使ってください。
+
+`CONTROL_PLANE_GIT_USER_NAME` と `CONTROL_PLANE_GIT_USER_EMAIL` を設定すると、
+起動時に `~/.gitconfig` へ `user.name` / `user.email` が入り、
+`gh auth setup-git` 相当の credential helper 設定も同時に追加されます。
+helper 自体は先に入りますが、実際の Git 認証には従来どおり `gh auth login`
+などで `~/.config/gh` に認証状態を持たせてください。
 
 テンプレートでは raw Pod ではなく `Deployment` を採用しています。これにより
 単一レプリカ構成のまま self-healing と更新管理を使え、`strategy: Recreate` で

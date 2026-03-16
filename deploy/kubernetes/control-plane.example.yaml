@@ -63,6 +63,8 @@ stringData:
     ssh-ed25519 AAAA... replace-me
   # Optional: add a fine-grained PAT with Copilot access when you want the
   # control plane to start with COPILOT_GITHUB_TOKEN configured.
+  # The entrypoint copies it into a private runtime file and only injects it
+  # into the Copilot process via --secret-env-vars=COPILOT_GITHUB_TOKEN.
   # copilot-github-token: github_pat_... replace-me
 ---
 apiVersion: v1
@@ -73,7 +75,7 @@ metadata:
   labels:
     app.kubernetes.io/name: control-plane
 spec:
-  type: ClusterIP
+  type: LoadBalancer
   selector:
     app.kubernetes.io/name: control-plane
   ports:
@@ -133,6 +135,11 @@ spec:
               value: /var/run/control-plane-auth/ssh-public-key
             - name: COPILOT_GITHUB_TOKEN_FILE
               value: /var/run/control-plane-auth/copilot-github-token
+            # Optional: preseed ~/.gitconfig inside the control plane.
+            # - name: CONTROL_PLANE_GIT_USER_NAME
+            #   value: Your Name
+            # - name: CONTROL_PLANE_GIT_USER_EMAIL
+            #   value: you@example.com
             - name: CONTROL_PLANE_K8S_NAMESPACE
               value: copilot-sandbox
             - name: CONTROL_PLANE_WORKSPACE_PVC
@@ -141,8 +148,15 @@ spec:
               value: workspace
             - name: CONTROL_PLANE_JOB_SERVICE_ACCOUNT
               value: control-plane
+            # Keep Kubernetes Jobs as the default path in the least-privilege
+            # profile. If you explicitly opt into privileged local Podman,
+            # switch this to `auto` or pass --mode podman per command.
             - name: CONTROL_PLANE_RUN_MODE
               value: k8s-job
+            # Optional: force the local Podman storage driver. When /dev/fuse is
+            # unavailable, the entrypoint now falls back to `vfs` automatically.
+            # - name: CONTROL_PLANE_PODMAN_STORAGE_DRIVER
+            #   value: vfs
             - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
               value: IfNotPresent
             - name: CONTROL_PLANE_JOB_CPU_REQUEST
@@ -155,11 +169,14 @@ spec:
               value: 2Gi
           # Default to a containerd-compatible least-privilege SSH/Copilot
           # profile. Local nested Podman/Kind stays opt-in because runtimes
-          # without Pod user namespaces still tend to need extra privileges such
-          # as /dev/fuse or privileged=true. sshd still needs setuid/setgid plus
-          # CAP_SYS_CHROOT for its privilege-separation sandbox, while the Pod
-          # fsGroup keeps projected service-account credentials readable from the
-          # copilot shell.
+          # without Pod user namespaces still tend to need extra privileges.
+          # When you do opt into privileged local Podman, short commands can
+          # route back through Podman by changing CONTROL_PLANE_RUN_MODE, and
+          # the entrypoint falls back to the `vfs` storage driver if /dev/fuse
+          # is unavailable. sshd still needs setuid/setgid plus CAP_SYS_CHROOT
+          # for its privilege-separation sandbox, while the Pod fsGroup keeps
+          # projected service-account credentials readable from the copilot
+          # shell.
           securityContext:
             privileged: false
             runAsUser: 0
