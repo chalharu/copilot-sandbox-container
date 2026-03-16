@@ -49,19 +49,41 @@ login_dhi() {
   logged_in=1
 }
 
+pull_image_with_retry() {
+  local image="$1"
+  local max_attempts=5
+  local attempt output
+
+  for attempt in $(seq 1 "${max_attempts}"); do
+    if output="$(podman pull "${image}" 2>&1)"; then
+      return 0
+    fi
+
+    printf '%s\n' "${output}" >&2
+
+    if [[ "${attempt}" -eq "${max_attempts}" ]]; then
+      return 1
+    fi
+
+    printf 'Retrying DHI pull (%s/%s): %s\n' "$((attempt + 1))" "${max_attempts}" "${image}" >&2
+    sleep 5
+  done
+}
+
 for image in "${dhi_images[@]}"; do
   archive_path="${cache_dir}/$(printf '%s' "${image}" | tr '/:' '__').oci.tar"
 
   if ! podman image exists "${image}"; then
     if [[ -f "${archive_path}" ]]; then
       if ! podman load --input "${archive_path}" >/dev/null; then
+        printf 'Cached DHI image archive is unusable, removing %s and repulling\n' "${archive_path}" >&2
         rm -f "${archive_path}"
       fi
     fi
 
     if ! podman image exists "${image}"; then
       login_dhi
-      podman pull "${image}" >/dev/null
+      pull_image_with_retry "${image}" >/dev/null
     fi
   fi
 

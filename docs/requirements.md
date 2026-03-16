@@ -188,7 +188,9 @@ build して GHCR へ公開し、再利用できるようにします。
 
 ### 4.9 安全性と運用要件
 
-- `privileged` を前提にしないこと
+- 既定で `privileged` を前提にしないこと（sample deployment は Pod user namespace
+  と `RuntimeDefault` seccomp を基本にし、`securityContext.privileged` は本当に
+  必要なときだけ明示的な opt-in として許容する）
 - Docker-in-Docker のような root 権限依存の構成を避けること
 - 言語間の依存関係衝突を防げること
 - Control Plane と Execution Plane を独立して更新できること

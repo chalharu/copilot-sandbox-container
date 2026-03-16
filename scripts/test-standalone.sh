@@ -182,6 +182,11 @@ test -f /home/copilot/.copilot/skills/control-plane-operations/SKILL.md
 test -f /home/copilot/.copilot/skills/control-plane-operations/references/control-plane-run.md
 grep -q "^copilot:" /etc/subuid
 grep -q "^copilot:" /etc/subgid
+test "$(readlink /home/copilot/.local/share/containers)" = "/home/copilot/.copilot/containers"
+grep -qx 'graphroot = "/home/copilot/.copilot/containers/storage"' /home/copilot/.config/containers/storage.conf
+grep -qx 'runroot = "/home/copilot/.copilot/run/containers/storage"' /home/copilot/.config/containers/storage.conf
+test -d /home/copilot/.copilot/containers/storage/overlay
+test -d /home/copilot/.copilot/containers/storage/volumes
 EOF
 
 ssh_bash <<'EOF'
@@ -293,17 +298,34 @@ printf '%s\n' "$@" > /workspace/copilot-picker-args.txt
 sleep 30
 INNER
 chmod +x /workspace/test-copilot
+
+screen -T screen-256color -dmS picker-copilot bash -lc 'sleep 30'
+session_id=""
+for _ in $(seq 1 15); do
+  session_id="$(screen -list 2>/dev/null | awk '/picker-copilot/ && !/\(Dead/ { print $1; exit }')"
+  if [[ -n "${session_id}" ]]; then
+    break
+  fi
+  sleep 1
+done
+test -n "${session_id}"
+kill -9 "${session_id%%.*}"
+for _ in $(seq 1 15); do
+  if screen -list 2>/dev/null | grep -Eq 'picker-copilot.*\(Dead'; then
+    break
+  fi
+  sleep 1
+done
+screen -list 2>/dev/null | grep -Eq 'picker-copilot.*\(Dead'
+if control-plane-session --list | grep -q 'picker-copilot'; then
+  printf 'Dead picker-copilot session leaked into control-plane-session --list\n' >&2
+  exit 1
+fi
 EOF
 
 TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 </dev/null >"${workdir}/ssh-copilot.log" 2>&1 &
 copilot_ssh_pid=$!
-if ! wait_for_screen_session picker-copilot; then
-  printf 'Expected Copilot picker option to create picker-copilot session during SSH login\n' >&2
-  cat "${workdir}/ssh-copilot.log" >&2 || true
-  exit 1
-fi
-
-ssh_bash <<'EOF'
+if ! ssh_bash <<'EOF'
 set -euo pipefail
 for _ in $(seq 1 15); do
   if [[ -f /workspace/copilot-picker-pwd.txt ]] && [[ -f /workspace/copilot-picker-args.txt ]]; then
@@ -311,9 +333,20 @@ for _ in $(seq 1 15); do
   fi
   sleep 1
 done
+test -f /workspace/copilot-picker-pwd.txt
+test -f /workspace/copilot-picker-args.txt
+if screen -list 2>/dev/null | grep -Eq 'picker-copilot.*\(Dead'; then
+  printf 'Expected stale picker-copilot session to be wiped before creating a new one\n' >&2
+  exit 1
+fi
 grep -qx '/workspace' /workspace/copilot-picker-pwd.txt
 grep -qx -- '--yolo' /workspace/copilot-picker-args.txt
 EOF
+then
+  printf 'Expected Copilot picker option to create picker-copilot session during SSH login\n' >&2
+  cat "${workdir}/ssh-copilot.log" >&2 || true
+  exit 1
+fi
 
 kill "${copilot_ssh_pid}" >/dev/null 2>&1 || true
 wait "${copilot_ssh_pid}" 2>/dev/null || true

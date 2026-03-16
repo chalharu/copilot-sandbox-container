@@ -13,8 +13,13 @@ copilot_session_name="${CONTROL_PLANE_COPILOT_SESSION:-${session_name}}"
 copilot_workspace="${CONTROL_PLANE_COPILOT_WORKSPACE:-${CONTROL_PLANE_WORKSPACE:-/workspace}}"
 copilot_bin="${CONTROL_PLANE_COPILOT_BIN:-copilot}"
 
+prune_dead_sessions() {
+  screen -wipe >/dev/null 2>&1 || true
+}
+
 list_sessions() {
-  screen -list 2>/dev/null | awk '/^[[:space:]]*[0-9]+\./ {sub(/^[[:space:]]+/, "", $0); print}'
+  prune_dead_sessions
+  screen -list 2>/dev/null | awk '/^[[:space:]]*[0-9]+\./ && !/\(Dead/ {sub(/^[[:space:]]+/, "", $0); print}'
 }
 
 create_session() {

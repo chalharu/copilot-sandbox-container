@@ -4,8 +4,12 @@ set -euo pipefail
 control_plane_user="${CONTROL_PLANE_USER:-copilot}"
 control_plane_home="$(getent passwd "${control_plane_user}" | cut -d: -f6)"
 control_plane_workspace="${CONTROL_PLANE_WORKSPACE:-/workspace}"
+containers_config_dir="${control_plane_home}/.config/containers"
+containers_storage_config_path="${containers_config_dir}/storage.conf"
 podman_state_dir="${control_plane_home}/.copilot/containers"
 runtime_dir="${XDG_RUNTIME_DIR:-${control_plane_home}/.copilot/run}"
+podman_graphroot="${podman_state_dir}/storage"
+podman_runroot="${runtime_dir}/containers/storage"
 tmp_dir="${TMPDIR:-${control_plane_home}/.copilot/tmp}"
 screen_dir="${SCREENDIR:-${control_plane_home}/.copilot/screen}"
 host_key_dir="${CONTROL_PLANE_HOST_KEY_DIR:-/var/lib/control-plane/ssh-host-keys}"
@@ -21,6 +25,18 @@ copilot_github_token="${COPILOT_GITHUB_TOKEN:-}"
 
 write_runtime_var() {
   printf '%s=%q\n' "$1" "$2"
+}
+
+write_storage_conf() {
+  cat > "${containers_storage_config_path}" <<EOF
+[storage]
+driver = "overlay"
+graphroot = "${podman_graphroot}"
+runroot = "${podman_runroot}"
+
+[storage.options]
+mount_program = "/usr/bin/fuse-overlayfs"
+EOF
 }
 
 safe_chown_tree() {
@@ -42,6 +58,8 @@ ensure_podman_storage_link() {
   local link_path="$1"
   local state_path="$2"
   local entries=()
+
+  mkdir -p "${state_path}"
 
   if [[ -L "${link_path}" ]]; then
     if [[ "$(readlink "${link_path}")" == "${state_path}" ]]; then
@@ -121,7 +139,7 @@ install_bundled_control_plane_skill() {
 
 mkdir -p \
   "${control_plane_home}/.copilot" \
-  "${control_plane_home}/.config/containers" \
+  "${containers_config_dir}" \
   "${control_plane_home}/.config/gh" \
   "${control_plane_home}/.local/share" \
   "${runtime_config_dir}" \
@@ -130,11 +148,15 @@ mkdir -p \
   "${copilot_skills_dir}" \
   "${control_plane_workspace}" \
   "${podman_state_dir}" \
+  "${podman_graphroot}" \
+  "${podman_graphroot}/overlay" \
+  "${podman_graphroot}/volumes" \
   "${screen_dir}" \
   "${tmp_dir}" \
   "${host_key_dir}" \
   /run/sshd \
-  "${runtime_dir}"
+  "${runtime_dir}" \
+  "${podman_runroot}"
 
 safe_chown_tree "${control_plane_user}:${control_plane_user}" \
   "${control_plane_home}/.copilot" \
@@ -258,6 +280,10 @@ fi
 } > "${runtime_config_path}"
 chown "${control_plane_user}:${control_plane_user}" "${runtime_config_path}"
 chmod 600 "${runtime_config_path}"
+
+write_storage_conf
+chown "${control_plane_user}:${control_plane_user}" "${containers_storage_config_path}"
+chmod 644 "${containers_storage_config_path}"
 
 install_bundled_control_plane_skill
 ensure_ssh_host_key rsa ssh_host_rsa_key
