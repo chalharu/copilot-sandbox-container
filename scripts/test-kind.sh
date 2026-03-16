@@ -357,7 +357,8 @@ spec:
             - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
               value: Never
           # Keep the sample privileged for widest compatibility with nested
-          # Podman / Kind. CAP_SETUID / CAP_SETGID alone are not equivalent.
+          # Podman / Kind. CAP_SETUID / CAP_SETGID alone are not an equivalent
+          # replacement for newuidmap/newgidmap or outer runtime userns support.
           securityContext:
             privileged: true
           ports:
