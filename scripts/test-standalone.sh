@@ -350,6 +350,11 @@ fi
 
 kill "${copilot_ssh_pid}" >/dev/null 2>&1 || true
 wait "${copilot_ssh_pid}" 2>/dev/null || true
+if ! grep -Fq 'Starting Copilot session picker-copilot in /workspace...' "${workdir}/ssh-copilot.log"; then
+  printf 'Expected Copilot SSH login to print a startup banner before attaching Screen\n' >&2
+  cat "${workdir}/ssh-copilot.log" >&2 || true
+  exit 1
+fi
 if grep -q 'cannot change locale' "${workdir}/ssh-copilot.log"; then
   printf 'Unexpected locale warning during Copilot SSH login\n' >&2
   cat "${workdir}/ssh-copilot.log" >&2 || true

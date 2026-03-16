@@ -17,6 +17,12 @@ prune_dead_sessions() {
   screen -wipe >/dev/null 2>&1 || true
 }
 
+attach_session() {
+  local target_session="$1"
+
+  exec screen -D -RR "${target_session}"
+}
+
 list_sessions() {
   prune_dead_sessions
   screen -list 2>/dev/null | awk '/^[[:space:]]*[0-9]+\./ && !/\(Dead/ {sub(/^[[:space:]]+/, "", $0); print}'
@@ -38,11 +44,15 @@ create_copilot_session() {
     exit 127
   }
 
+  prune_dead_sessions
+  printf 'Starting Copilot session %s in %s...\n' "${target_session}" "${copilot_workspace}" >&2
+
+  # Start attached so Copilot sees the SSH TTY from the beginning instead of
+  # inheriting a detached Screen startup context.
   # shellcheck disable=SC2016
-  screen -T screen-256color -DmS "${target_session}" \
+  exec screen -T screen-256color -S "${target_session}" \
     bash -lc 'mkdir -p -- "$1" && cd -- "$1" && exec "$2" --yolo' \
     bash "${copilot_workspace}" "${copilot_bin}"
-  exec screen -xRR "${target_session}"
 }
 
 resolve_existing_session() {
@@ -136,7 +146,7 @@ select_session() {
   fi
 
   if [[ "${session_count}" -gt 0 ]] && attach_target="$(resolve_existing_session "${selection}" "${session_lines[@]}")"; then
-    exec screen -xRR "${attach_target}"
+    attach_session "${attach_target}"
   fi
 
   if [[ "${copilot_option_enabled}" -eq 1 ]] && [[ "${selection}" == "${copilot_index}" ]]; then
@@ -190,4 +200,4 @@ if [[ "${1:-}" == "--select" ]]; then
   exit 0
 fi
 
-exec screen -xRR "${session_name}"
+attach_session "${session_name}"

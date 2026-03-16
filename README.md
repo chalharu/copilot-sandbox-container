@@ -77,26 +77,25 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 Control Plane イメージには `podman` / `kind` など
 `scripts/lint.sh` や `scripts/build-test.sh` に必要なコマンドを同梱しています。
 ただし nested build runner が実際に動くかは、外側の host / container runtime /
-Kubernetes securityContext 依存です。サンプルの Kubernetes Deployment では
-least-privilege の既定値として `hostUsers: false` を使い、Pod user namespace 上で
-rootless Podman を動かしやすくしています。`privileged: true` は避けつつ、
-entrypoint の `chown` や `sshd` の setuid/setgid が必要なので container の
-default capability set は残し、`seccompProfile: RuntimeDefault` だけ明示します。
-`allowPrivilegeEscalation` は `newuidmap` / `newgidmap` のために `true` のままです。
-`capabilities.add: ["SETUID", "SETGID"]` だけでは `newuidmap` / `newgidmap`
-の代替にはならず、outer runtime 側の user namespace や `/dev/fuse` も必要です。
-そのため local nested Podman / Kind は依然 best-effort です。そこで詰まる場合や、
-そもそも cluster が Pod user namespace をサポートしない場合は、GitHub Actions か
-host runner を使ってください。どうしても Pod 内ローカル実行を優先したい場合だけ
-`securityContext.privileged: true` を opt-in してください。非特権 Pod や
-privileged を禁止するクラスタでは rootless Podman が失敗し、
-`newuidmap ... Operation not permitted` が出る場合があります。その場合は Docker
-Buildx が使える host か GitHub Actions を使ってください。Control Plane
-イメージ内では `/etc/subuid` / `/etc/subgid` を用意していますが、それだけでは
-不十分で、外側の host / container runtime 側でも user namespace と
-`newuidmap` / `newgidmap` が許可されている必要があります。Buildah を個別に
-使いたい場合は `quay.io/buildah/stable` のような upstream イメージを host / CI
-側で利用してください。
+Kubernetes securityContext 依存です。サンプルの Kubernetes Deployment は
+containerd でも使いやすい least-privilege の SSH/Copilot プロファイルを既定にし、
+Pod の `securityContext.fsGroup` を `1000` にして projected service-account token を
+`copilot` shell から読めるようにしたうえで、
+`privileged: false` のまま capability を `CHOWN` / `DAC_OVERRIDE` / `FOWNER` /
+`SETGID` / `SETUID` / `SYS_CHROOT` に絞っています。`allowPrivilegeEscalation` は
+`sshd` の setuid/setgid・privilege separation sandbox と entrypoint の root 操作の
+ため `true` のままですが、
+`CONTROL_PLANE_RUN_MODE=k8s-job` を入れて local nested Podman を既定経路から
+外しています。
+
+そのため、Kubernetes 上の既定構成では SSH / Copilot / `k8s-job-*` が主経路です。
+`control-plane-run` を明示せず使っても Job 実行へ寄るため、containerd のように
+`hostUsers: false` を使えない環境でも運用しやすくなっています。local nested
+Podman / Kind は依然 best-effort で、outer runtime 側の user namespace、
+`newuidmap` / `newgidmap`、`/dev/fuse` などが必要です。そこで詰まる場合は
+GitHub Actions か host runner を使ってください。どうしても Pod 内ローカル実行を
+優先したい場合だけ、追加 device / capability か
+`securityContext.privileged: true` を opt-in してください。
 
 Podman 系では Kind 内の image 名と一致させるため、デフォルトの tag に
 `localhost/` 接頭辞を使います。
@@ -140,14 +139,18 @@ pull 結果を cache して rate limit を避けます。
 
 対話的な SSH ログインでは GNU Screen の session picker が起動します。既存の
 Copilot セッションが無い場合は picker に `Copilot (/workspace, --yolo)` が追加され、
-Enter だけで `/workspace` から `copilot --yolo` を始められます。また、
+Enter だけで `/workspace` から `copilot --yolo` を始められます。Copilot 用の
+Screen session は detached ではなく SSH TTY に直接 attach した状態で起動するため、
+ログイン直後に応答が消えにくくなっています。また、
 `control-plane-operations` skill をイメージに同梱しているため、他のリポジトリを
 `/workspace` に mount した場合でも同じ運用ガイドを使えます。
 
-同じサンプル Deployment では `hostUsers: false` と `RuntimeDefault` seccomp の
-`securityContext` を使っているため、SSH で入ったあとも権限を絞ったまま運用しやすく
-しています。local Podman / Kind は outer runtime 次第なので、`scripts/lint.sh`
-や `scripts/build-test.sh` が Pod 内で詰まる場合は GitHub Actions 側で実行してください。
+同じサンプル Deployment では capability を `CHOWN` / `DAC_OVERRIDE` / `FOWNER` /
+`SETGID` / `SETUID` / `SYS_CHROOT` に絞り、`RuntimeDefault` seccomp と
+`CONTROL_PLANE_RUN_MODE=k8s-job`、`fsGroup: 1000` を使っているため、SSH で入ったあとも権限を
+絞ったまま運用しやすくしています。local Podman / Kind は outer runtime 次第なので、
+`scripts/lint.sh` や `scripts/build-test.sh` が Pod 内で詰まる場合は GitHub Actions
+側で実行してください。
 
 Control Plane イメージには `vim` も同梱され、ログイン shell では `EDITOR` /
 `VISUAL` を未設定時だけ `vim` に補います。Copilot CLI の multiline shortcut が

@@ -31,32 +31,53 @@
 3. `storageClassName` と PVC サイズをクラスタ環境に合わせて調整します。
 4. テンプレートは同じ PVC の `ssh-host-keys` subPath に SSH host key を置くため、
    Pod が再作成されても host key が変わりません。
-5. テンプレートは least-privilege の既定値として Pod user namespace
-   (`hostUsers: false`) を有効にし、container の `securityContext` では
-   `seccompProfile: RuntimeDefault` を使います。`privileged: true` は避けつつ、
-   entrypoint の `chown` と `sshd` の setuid/setgid が必要なので container の
-   default capability set は残します。rootless Podman も setuid helper の
-   `newuidmap` / `newgidmap` に依存するため、`allowPrivilegeEscalation` は `true`
-   のままです。
-6. `capabilities.add` に `SETUID` / `SETGID` だけを足しても、
-   `newuidmap` / `newgidmap` の代替にはなりません。outer host / runtime 側の user
-   namespace 制約や `/dev/fuse` 提供状況も残るため、Pod 内で
-   `scripts/lint.sh` / `scripts/build-test.sh` を直接回す経路は依然として
-   best-effort です。そこで詰まる場合は host か GitHub Actions を使ってください。
-   それでも Pod 内ローカル実行を優先したい場合だけ、最後の fallback として
-   `securityContext.privileged: true` を opt-in してください。
-7. 必要に応じて Job 用の image pull policy と resource 上限を調整します。
-8. 適用後は `kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox`
+5. テンプレートは containerd でも使いやすい least-privilege の SSH / Copilot
+   プロファイルを既定にしています。Pod では `securityContext.fsGroup: 1000` を
+   使って projected service-account token を `copilot` shell から読めるようにし、
+   main container では `privileged: false` のまま
+   capability を `CHOWN` / `DAC_OVERRIDE` / `FOWNER` / `SETGID` / `SETUID` /
+   `SYS_CHROOT`
+   に絞り、`seccompProfile: RuntimeDefault` を使います。`allowPrivilegeEscalation`
+   は `sshd` の setuid/setgid・privilege separation sandbox と entrypoint の root
+   操作のため `true` のままです。
+6. 同時に `CONTROL_PLANE_RUN_MODE=k8s-job` を入れているため、SSH ログイン後の
+   既定経路は Kubernetes Job 実行です。containerd のように `hostUsers: false` を
+   使えない環境でも SSH / Copilot / `k8s-job-*` はそのまま利用できます。
+7. local nested Podman / Kind は依然として best-effort です。`SETUID` /
+   `SETGID` だけでは `newuidmap` / `newgidmap` の代替にはならず、outer host /
+   runtime 側の user namespace 制約や `/dev/fuse` 提供状況も残ります。Pod 内で
+   `scripts/lint.sh` / `scripts/build-test.sh` を直接回したい場合は host か
+   GitHub Actions を使ってください。どうしても Pod 内ローカル実行を優先したい
+   場合だけ、追加 device / capability か `securityContext.privileged: true` を
+   opt-in してください。
+8. 必要に応じて Job 用の image pull policy と resource 上限を調整します。
+9. 適用後は `kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox`
    のように Service 経由で SSH を公開できます。
 
 ```yaml
-hostUsers: false
-...
 securityContext:
+  fsGroup: 1000
+...
+container securityContext:
+  privileged: false
+  runAsUser: 0
+  runAsNonRoot: false
   allowPrivilegeEscalation: true
+  capabilities:
+    drop:
+      - ALL
+    add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+      - SYS_CHROOT
   seccompProfile:
     type: RuntimeDefault
 ...
+- name: CONTROL_PLANE_RUN_MODE
+  value: k8s-job
 - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
   value: IfNotPresent
 - name: CONTROL_PLANE_JOB_CPU_REQUEST
@@ -80,7 +101,9 @@ securityContext:
 対話的な SSH ログインでは、GNU Screen の既存セッション一覧と `New session`
 を選べる picker が起動します。既存の Copilot セッションが無い場合は
 `Copilot (/workspace, --yolo)` も追加され、Enter だけで `/workspace` から
-`copilot --yolo` を始められます。新しい作業を始めるときも、既存セッションへ
+`copilot --yolo` を始められます。Copilot 用 session は detached ではなく SSH TTY
+に直接 attach した状態で起動するため、接続直後に応答が止まったように見えにくく、
+起動メッセージもそのまま確認できます。新しい作業を始めるときも、既存セッションへ
 戻るときも同じ入口を使えます。
 
 Control Plane イメージは `vim` を同梱し、ログイン shell で `EDITOR` /
@@ -98,22 +121,20 @@ UTF-8 テキストも表示しやすくしています。
 erase を既定化し、`tmux-256color` を含む terminfo も入れています。そのため、
 `tmux` 経由で SSH 接続しても表示崩れを起こしにくくしています。
 
-このサンプルでは `hostUsers: false` で Pod user namespace を使うことで、Pod 内
-root を host 上の unprivileged UID/GID range へ写像しています。これが
-least-privilege の主軸です。
+このサンプルでは containerd でも成立する SSH / Copilot 用の最小権限を主軸にして
+います。Pod の `fsGroup: 1000` で projected service-account token を `copilot`
+user から読めるようにしたうえで、`allowPrivilegeEscalation` は `sshd` の
+setuid/setgid と entrypoint の root 操作のため `true` のままにし、capability は
+`CHOWN` / `DAC_OVERRIDE` / `FOWNER` / `SETGID` / `SETUID` / `SYS_CHROOT`
+に絞っています。`SYS_CHROOT` は sshd の privilege separation sandbox が pre-auth
+child を chroot するために必要です。
 
-一方で、`allowPrivilegeEscalation: false` にすると setuid helper の
-`newuidmap` / `newgidmap` が止まり、rootless Podman が起動できません。そのため
-`allowPrivilegeEscalation` は `true` のままです。また、entrypoint の `chown` と
-`sshd` の setuid/setgid が必要なので、container の default capability set も
-そのままにしています。さらに、
-`capabilities.add: ["SETUID", "SETGID"]` だけでも `newuidmap` / `newgidmap`
-の代替にはなりません。
-
-さらに outer host / container runtime 側で user namespace や `/dev/fuse` が
-許可されていない場合は、この least-privilege 構成でも local Podman / Kind が
+一方で local Podman / Kind は別問題で、`SETUID` / `SETGID` だけでも
+`newuidmap` / `newgidmap` の代替にはなりません。outer host / container runtime
+側で user namespace や `/dev/fuse` が許可されていない場合は、この構成でも
 失敗します。その場合は GitHub Actions / host runner を使うか、必要なときだけ
-`securityContext.privileged: true` を opt-in してください。
+追加 privilege を opt-in してください。containerd では `hostUsers: false` を
+前提にできないため、サンプルの既定値からも外しています。
 
 ### Podman storage 初期化
 

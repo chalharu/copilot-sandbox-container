@@ -100,9 +100,8 @@ spec:
       labels:
         app.kubernetes.io/name: control-plane
     spec:
-      # Map container root to unprivileged host IDs when the cluster/runtime
-      # supports Pod user namespaces.
-      hostUsers: false
+      securityContext:
+        fsGroup: 1000
       serviceAccountName: control-plane
       initContainers:
         - name: init-state
@@ -111,7 +110,17 @@ spec:
           command:
             - sh
             - -c
-            - mkdir -p /state/copilot /state/gh /state/ssh /state/ssh-host-keys /state/workspace && chmod 700 /state/ssh /state/ssh-host-keys
+            - umask 077 && mkdir -p /state/copilot /state/gh /state/ssh /state/ssh-host-keys /state/workspace
+          securityContext:
+            privileged: false
+            runAsUser: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
           volumeMounts:
             - name: state
               mountPath: /state
@@ -132,6 +141,8 @@ spec:
               value: workspace
             - name: CONTROL_PLANE_JOB_SERVICE_ACCOUNT
               value: control-plane
+            - name: CONTROL_PLANE_RUN_MODE
+              value: k8s-job
             - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
               value: IfNotPresent
             - name: CONTROL_PLANE_JOB_CPU_REQUEST
@@ -142,13 +153,28 @@ spec:
               value: 256Mi
             - name: CONTROL_PLANE_JOB_MEMORY_LIMIT
               value: 2Gi
-          # Prefer a least-privilege default: use Pod user namespaces and keep
-          # the runtime seccomp profile. We intentionally avoid privileged=true,
-          # but still allow the default root capability set because the
-          # entrypoint and sshd need standard root operations such as chown and
-          # setuid/setgid.
+          # Default to a containerd-compatible least-privilege SSH/Copilot
+          # profile. Local nested Podman/Kind stays opt-in because runtimes
+          # without Pod user namespaces still tend to need extra privileges such
+          # as /dev/fuse or privileged=true. sshd still needs setuid/setgid plus
+          # CAP_SYS_CHROOT for its privilege-separation sandbox, while the Pod
+          # fsGroup keeps projected service-account credentials readable from the
+          # copilot shell.
           securityContext:
+            privileged: false
+            runAsUser: 0
+            runAsNonRoot: false
             allowPrivilegeEscalation: true
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+                - SETGID
+                - SETUID
+                - SYS_CHROOT
             seccompProfile:
               type: RuntimeDefault
           ports:
