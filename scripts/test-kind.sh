@@ -342,7 +342,7 @@ spec:
           command:
             - sh
             - -c
-            - mkdir -p /state/copilot /state/gh /state/ssh /state/ssh-host-keys /state/workspace && chmod 700 /state/ssh /state/ssh-host-keys
+            - umask 077 && mkdir -p /state/copilot /state/gh /state/ssh /state/ssh-host-keys /state/workspace
           securityContext:
             privileged: false
             runAsUser: 0
