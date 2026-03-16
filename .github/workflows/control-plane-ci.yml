@@ -8,7 +8,18 @@ on:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    name: Lint (${{ matrix.architecture_label }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture_label: x64
+            image_arch: amd64
+            runner: ubuntu-24.04
+          - architecture_label: aarch64
+            image_arch: arm64
+            runner: ubuntu-24.04-arm
     permissions:
       contents: read
     env:
@@ -27,7 +38,7 @@ jobs:
         uses: actions/cache@v5.0.3
         with:
           path: ${{ env.CONTROL_PLANE_DHI_CACHE_DIR }}
-          key: ${{ runner.os }}-dhi-python-${{ hashFiles('containers/yamllint/Dockerfile', 'scripts/prepare-dhi-images.sh') }}
+          key: ${{ runner.os }}-${{ matrix.image_arch }}-dhi-python-${{ hashFiles('containers/yamllint/Dockerfile', 'scripts/prepare-dhi-images.sh') }}
 
       - name: Prepare DHI images
         env:
@@ -41,8 +52,19 @@ jobs:
         run: ./scripts/lint.sh
 
   integration:
-    runs-on: ubuntu-latest
+    name: Integration (${{ matrix.architecture_label }})
+    runs-on: ${{ matrix.runner }}
     needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture_label: x64
+            image_arch: amd64
+            runner: ubuntu-24.04
+          - architecture_label: aarch64
+            image_arch: arm64
+            runner: ubuntu-24.04-arm
     permissions:
       contents: read
       packages: write
@@ -61,7 +83,7 @@ jobs:
         uses: actions/cache@v5.0.3
         with:
           path: ${{ env.CONTROL_PLANE_DHI_CACHE_DIR }}
-          key: ${{ runner.os }}-dhi-python-${{ hashFiles('containers/yamllint/Dockerfile', 'scripts/prepare-dhi-images.sh') }}
+          key: ${{ runner.os }}-${{ matrix.image_arch }}-dhi-python-${{ hashFiles('containers/yamllint/Dockerfile', 'scripts/prepare-dhi-images.sh') }}
 
       - name: Prepare DHI images
         env:
@@ -75,6 +97,7 @@ jobs:
       - name: Set up Kind
         uses: engineerd/setup-kind@ecfad61750951586a9ef973db567df1d28671bdc # v0.6.2
         with:
+          skipClusterLogsExport: true
           version: v0.24.0
 
       - name: Run build and integration tests
@@ -101,29 +124,94 @@ jobs:
           printf 'control_plane_component_tag=copilot-%s\n' "${control_plane_version}" >> "${GITHUB_OUTPUT}"
           printf 'yamllint_component_tag=%s\n' "${yamllint_version}" >> "${GITHUB_OUTPUT}"
 
-      - name: Publish GHCR images
+      - name: Publish architecture image tags
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GHCR_CONTROL_PLANE_IMAGE: ghcr.io/${{ github.repository }}/control-plane
           GHCR_YAMLLINT_IMAGE: ghcr.io/${{ github.repository }}/yamllint
+          GITHUB_SHA: ${{ github.sha }}
+          IMAGE_ARCH: ${{ matrix.image_arch }}
         run: |
-          podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}"
-          podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:latest"
-          podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${{ steps.image_versions.outputs.control_plane_component_tag }}"
-          podman tag localhost/yamllint:test "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}"
-          podman tag localhost/yamllint:test "${GHCR_YAMLLINT_IMAGE}:latest"
-          podman tag localhost/yamllint:test "${GHCR_YAMLLINT_IMAGE}:${{ steps.image_versions.outputs.yamllint_component_tag }}"
-          podman push "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}"
-          podman push "${GHCR_CONTROL_PLANE_IMAGE}:latest"
-          podman push "${GHCR_CONTROL_PLANE_IMAGE}:${{ steps.image_versions.outputs.control_plane_component_tag }}"
-          podman push "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}"
-          podman push "${GHCR_YAMLLINT_IMAGE}:latest"
-          podman push "${GHCR_YAMLLINT_IMAGE}:${{ steps.image_versions.outputs.yamllint_component_tag }}"
+          podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
+          podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${{ steps.image_versions.outputs.control_plane_component_tag }}-${IMAGE_ARCH}"
+          podman tag localhost/yamllint:test "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
+          podman tag localhost/yamllint:test "${GHCR_YAMLLINT_IMAGE}:${{ steps.image_versions.outputs.yamllint_component_tag }}-${IMAGE_ARCH}"
+          podman push "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
+          podman push "${GHCR_CONTROL_PLANE_IMAGE}:${{ steps.image_versions.outputs.control_plane_component_tag }}-${IMAGE_ARCH}"
+          podman push "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
+          podman push "${GHCR_YAMLLINT_IMAGE}:${{ steps.image_versions.outputs.yamllint_component_tag }}-${IMAGE_ARCH}"
+
+  publish-manifests:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    needs: integration
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6.0.2
+
+      - name: Install Podman toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+
+      - name: Read published image versions
+        id: image_versions
+        run: |
+          control_plane_version="$(sed -n 's/^ARG COPILOT_CLI_VERSION=//p' containers/control-plane/Dockerfile)"
+          yamllint_version="$(sed -n 's/^ARG YAMLLINT_VERSION=//p' containers/yamllint/Dockerfile)"
+          test -n "${control_plane_version}"
+          test -n "${yamllint_version}"
+          printf 'control_plane_component_tag=copilot-%s\n' "${control_plane_version}" >> "${GITHUB_OUTPUT}"
+          printf 'yamllint_component_tag=%s\n' "${yamllint_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Log in to GHCR
+        run: printf '%s' "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Publish GHCR multi-arch manifests
+        env:
+          GHCR_CONTROL_PLANE_IMAGE: ghcr.io/${{ github.repository }}/control-plane
+          GHCR_YAMLLINT_IMAGE: ghcr.io/${{ github.repository }}/yamllint
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          create_manifest() {
+            local manifest_name="$1"
+            local target_ref="$2"
+            shift 2
+            podman manifest rm "${manifest_name}" >/dev/null 2>&1 || true
+            podman manifest create "${manifest_name}"
+            for source_ref in "$@"; do
+              podman manifest add "${manifest_name}" "docker://${source_ref}"
+            done
+            podman manifest push --all "${manifest_name}" "docker://${target_ref}"
+          }
+
+          create_manifest "localhost/control-plane:manifest-sha" "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}" \
+            "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-amd64" \
+            "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-arm64"
+          create_manifest "localhost/control-plane:manifest-latest" "${GHCR_CONTROL_PLANE_IMAGE}:latest" \
+            "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-amd64" \
+            "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-arm64"
+          create_manifest "localhost/control-plane:manifest-version" "${GHCR_CONTROL_PLANE_IMAGE}:${{ steps.image_versions.outputs.control_plane_component_tag }}" \
+            "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-amd64" \
+            "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-arm64"
+
+          create_manifest "localhost/yamllint:manifest-sha" "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}" \
+            "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-amd64" \
+            "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-arm64"
+          create_manifest "localhost/yamllint:manifest-latest" "${GHCR_YAMLLINT_IMAGE}:latest" \
+            "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-amd64" \
+            "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-arm64"
+          create_manifest "localhost/yamllint:manifest-version" "${GHCR_YAMLLINT_IMAGE}:${{ steps.image_versions.outputs.yamllint_component_tag }}" \
+            "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-amd64" \
+            "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-arm64"
 
   cleanup-packages:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    needs: integration
+    runs-on: ubuntu-24.04
+    needs: publish-manifests
     permissions:
       contents: read
       packages: write

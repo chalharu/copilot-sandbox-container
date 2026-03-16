@@ -24,8 +24,9 @@ Read `references/control-plane-run.md` when you need command-routing guidance. R
 
 ## Session Management
 
-- Interactive SSH logins enter `control-plane-session --select`, which shows existing GNU Screen sessions and a `New session` option.
+- Interactive SSH logins enter `control-plane-session --select`, which shows existing GNU Screen sessions, adds a `Copilot` option when no dedicated Copilot session exists, and always offers `New session`.
 - Use the default session picker path for normal work. It preserves the "reattach if possible, create if needed" flow without having to remember Screen flags.
+- Choose `Copilot` to start `copilot --yolo` from `/workspace` inside its own Screen session.
 - Use `control-plane-session --command '<shell command>'` when you need to start a detached session non-interactively.
 - Use `CONTROL_PLANE_SESSION_SELECTION=new:<name>` only for scripted or test-only selection overrides.
 

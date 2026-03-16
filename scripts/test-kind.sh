@@ -90,6 +90,7 @@ ssh_opts=(
   -o StrictHostKeyChecking=no
   -o UserKnownHostsFile=/dev/null
   -o IdentitiesOnly=yes
+  -o SetEnv=LC_ALL=en_US.UTF8
   -i "${ssh_key}"
   -p "${ssh_port}"
 )
@@ -464,6 +465,10 @@ test "\$(TERM=xterm-256color tput colors)" -ge 256
 test "\$(TERM=screen-256color tput colors)" -ge 256
 test "\$(TERM=tmux-256color tput colors)" -ge 256
 printf '%s\n' "\${LANG}" | grep -qi 'utf-8'
+test "\${LC_ALL}" = "en_US.UTF8"
+locale charmap | grep -qx 'UTF-8'
+locale -a | grep -Eqi '^en_US\.utf-?8$'
+locale -a | grep -Eqi '^ja_JP\.utf-?8$'
 test "\${EDITOR}" = "vim"
 test "\${VISUAL}" = "vim"
 test "\${GH_PAGER}" = "cat"
@@ -471,13 +476,20 @@ test -f ~/.copilot/skills/control-plane-operations/SKILL.md
 kubectl auth can-i create jobs --namespace ${namespace} | grep -q '^yes$'
 EOF
 
+utf8_roundtrip="$(ssh_bash <<'EOF'
+set -euo pipefail
+printf '日本語★\n'
+EOF
+)"
+[[ "${utf8_roundtrip}" == "日本語★" ]]
+
 ssh_bash <<'EOF'
 set -euo pipefail
 mkdir -p ~/.copilot ~/.config/gh ~/.ssh /workspace
 echo k8s > ~/.copilot/state.txt
 echo gh > ~/.config/gh/state.txt
 echo ssh > ~/.ssh/state.txt
-screen -T screen-256color -dmS kind-session sh -lc 'printf "%s\n" "$TERM" > /workspace/k8s-screen-term.txt; echo k8s-screen > /workspace/k8s-screen.txt; sleep 30'
+screen -T screen-256color -dmS kind-session sh -lc 'printf "%s\n" "$TERM" > /workspace/k8s-screen-term.txt; printf "日本語★\n" > /workspace/k8s-screen-utf8.txt; echo k8s-screen > /workspace/k8s-screen.txt; sleep 30'
 EOF
 
 if ! wait_for_screen_term kind-session /workspace/k8s-screen-term.txt; then
@@ -485,10 +497,16 @@ if ! wait_for_screen_term kind-session /workspace/k8s-screen-term.txt; then
 set -euo pipefail
 screen -list || true
 cat /workspace/k8s-screen-term.txt || true
+cat /workspace/k8s-screen-utf8.txt || true
 EOF
   printf 'Expected kind-session to report a screen-256color TERM variant\n' >&2
   exit 1
 fi
+
+ssh_bash <<'EOF'
+set -euo pipefail
+grep -qx '日本語★' /workspace/k8s-screen-utf8.txt
+EOF
 
 job_name="$(ssh_bash <<EOF
 set -euo pipefail
