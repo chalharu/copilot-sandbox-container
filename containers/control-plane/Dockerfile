@@ -27,6 +27,7 @@ RUN apt-get update -o Acquire::Retries=3 \
         git \
         jq \
         kubernetes-client \
+        locales \
         ncurses-term \
         openssh-client \
         openssh-server \
@@ -37,6 +38,13 @@ RUN apt-get update -o Acquire::Retries=3 \
         tini \
         uidmap \
         vim \
+    && printf '%s\n' \
+        'en_US.UTF-8 UTF-8' \
+        'ja_JP.UTF-8 UTF-8' \
+        > /etc/locale.gen \
+    && locale-gen \
+    && localedef -i en_US -f UTF-8 en_US.UTF8 \
+    && localedef -i ja_JP -f UTF-8 ja_JP.UTF8 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN arch="$(dpkg --print-architecture)" \

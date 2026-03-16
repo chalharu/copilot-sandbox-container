@@ -28,6 +28,7 @@ ssh_opts=(
   -o StrictHostKeyChecking=no
   -o UserKnownHostsFile=/dev/null
   -o IdentitiesOnly=yes
+  -o SetEnv=LC_ALL=en_US.UTF8
   -i "${ssh_key}"
   -p "${ssh_port}"
 )
@@ -172,6 +173,8 @@ test "$(TERM=xterm-256color tput colors)" -ge 256
 test "$(TERM=screen-256color tput colors)" -ge 256
 test "$(TERM=tmux-256color tput colors)" -ge 256
 printf '%s\n' "${LANG}" | grep -qi 'utf-8'
+locale -a | grep -Eqi '^en_US\.utf-?8$'
+locale -a | grep -Eqi '^ja_JP\.utf-?8$'
 test "${EDITOR}" = "vim"
 test "${VISUAL}" = "vim"
 test "${GH_PAGER}" = "cat"
@@ -184,6 +187,8 @@ EOF
 ssh_bash <<'EOF'
 set -euo pipefail
 printf '%s\n' "${LANG}" | grep -qi 'utf-8'
+test "${LC_ALL}" = "en_US.UTF8"
+locale charmap | grep -qx 'UTF-8'
 test "${EDITOR}" = "vim"
 test "${VISUAL}" = "vim"
 test "${GH_PAGER}" = "cat"
@@ -191,18 +196,31 @@ mkdir -p ~/.copilot ~/.config/gh /workspace
 echo standalone > ~/.copilot/state.txt
 echo gh > ~/.config/gh/state.txt
 echo ssh > ~/.ssh/state.txt
-screen -T screen-256color -dmS smoke-session sh -lc 'printf "%s\n" "$TERM" > /workspace/screen-term.txt; echo screen-ok > /workspace/screen.txt; sleep 30'
+screen -T screen-256color -dmS smoke-session sh -lc 'printf "%s\n" "$TERM" > /workspace/screen-term.txt; printf "日本語★\n" > /workspace/screen-utf8.txt; echo screen-ok > /workspace/screen.txt; sleep 30'
 EOF
+
+utf8_roundtrip="$(ssh_bash <<'EOF'
+set -euo pipefail
+printf '日本語★\n'
+EOF
+)"
+[[ "${utf8_roundtrip}" == "日本語★" ]]
 
 if ! wait_for_screen_term smoke-session /workspace/screen-term.txt; then
   ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
 screen -list || true
 cat /workspace/screen-term.txt || true
+cat /workspace/screen-utf8.txt || true
 EOF
   printf 'Expected smoke-session to report a screen-256color TERM variant\n' >&2
   exit 1
 fi
+
+ssh_bash <<'EOF'
+set -euo pipefail
+grep -qx '日本語★' /workspace/screen-utf8.txt
+EOF
 
 ssh_bash <<EOF
 set -euo pipefail
@@ -250,3 +268,57 @@ fi
 
 kill "${interactive_ssh_pid}" >/dev/null 2>&1 || true
 wait "${interactive_ssh_pid}" 2>/dev/null || true
+if grep -q 'cannot change locale' "${workdir}/ssh-login.log"; then
+  printf 'Unexpected locale warning during SSH login\n' >&2
+  cat "${workdir}/ssh-login.log" >&2 || true
+  exit 1
+fi
+
+"${container_bin}" rm -f "${container_name}" >/dev/null
+container_env=(
+  -e CONTROL_PLANE_COPILOT_BIN=/usr/local/bin/test-copilot
+  -e CONTROL_PLANE_COPILOT_SESSION=picker-copilot
+  -e CONTROL_PLANE_SESSION_SELECTION=copilot
+)
+start_container
+wait_for_ssh
+
+"${container_bin}" exec "${container_name}" bash -l -se <<'EOF'
+set -euo pipefail
+cat > /usr/local/bin/test-copilot <<'INNER'
+#!/usr/bin/env bash
+set -euo pipefail
+pwd > /workspace/copilot-picker-pwd.txt
+printf '%s\n' "$@" > /workspace/copilot-picker-args.txt
+sleep 30
+INNER
+chmod +x /usr/local/bin/test-copilot
+EOF
+
+TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 </dev/null >"${workdir}/ssh-copilot.log" 2>&1 &
+copilot_ssh_pid=$!
+if ! wait_for_screen_session picker-copilot; then
+  printf 'Expected Copilot picker option to create picker-copilot session during SSH login\n' >&2
+  cat "${workdir}/ssh-copilot.log" >&2 || true
+  exit 1
+fi
+
+ssh_bash <<'EOF'
+set -euo pipefail
+for _ in $(seq 1 15); do
+  if [[ -f /workspace/copilot-picker-pwd.txt ]] && [[ -f /workspace/copilot-picker-args.txt ]]; then
+    break
+  fi
+  sleep 1
+done
+grep -qx '/workspace' /workspace/copilot-picker-pwd.txt
+grep -qx -- '--yolo' /workspace/copilot-picker-args.txt
+EOF
+
+kill "${copilot_ssh_pid}" >/dev/null 2>&1 || true
+wait "${copilot_ssh_pid}" 2>/dev/null || true
+if grep -q 'cannot change locale' "${workdir}/ssh-copilot.log"; then
+  printf 'Unexpected locale warning during Copilot SSH login\n' >&2
+  cat "${workdir}/ssh-copilot.log" >&2 || true
+  exit 1
+fi

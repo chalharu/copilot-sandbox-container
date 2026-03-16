@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+runtime_config_file="${CONTROL_PLANE_RUNTIME_ENV_FILE:-${HOME:-/home/${USER:-copilot}}/.config/control-plane/runtime.env}"
+if [[ -f "${runtime_config_file}" ]]; then
+  # shellcheck disable=SC1090
+  source "${runtime_config_file}"
+fi
+
 session_name="${CONTROL_PLANE_SCREEN_SESSION:-copilot}"
 selection_override="${CONTROL_PLANE_SESSION_SELECTION:-}"
+copilot_session_name="${CONTROL_PLANE_COPILOT_SESSION:-${session_name}}"
+copilot_workspace="${CONTROL_PLANE_COPILOT_WORKSPACE:-${CONTROL_PLANE_WORKSPACE:-/workspace}}"
+copilot_bin="${CONTROL_PLANE_COPILOT_BIN:-copilot}"
 
 list_sessions() {
   screen -list 2>/dev/null | awk '/^[[:space:]]*[0-9]+\./ {sub(/^[[:space:]]+/, "", $0); print}'
@@ -13,6 +22,21 @@ create_session() {
 
   [[ -n "${new_session_name}" ]] || new_session_name="${session_name}"
   exec screen -S "${new_session_name}"
+}
+
+create_copilot_session() {
+  local target_session="${1:-${copilot_session_name}}"
+
+  [[ -n "${target_session}" ]] || target_session="${copilot_session_name}"
+  command -v "${copilot_bin}" >/dev/null 2>&1 || {
+    printf 'control-plane-session: missing Copilot binary: %s\n' "${copilot_bin}" >&2
+    exit 127
+  }
+
+  screen -T screen-256color -DmS "${target_session}" \
+    bash -lc 'mkdir -p -- "$1" && cd -- "$1" && exec "$2" --yolo' \
+    bash "${copilot_workspace}" "${copilot_bin}"
+  exec screen -xRR "${target_session}"
 }
 
 resolve_existing_session() {
@@ -36,12 +60,31 @@ resolve_existing_session() {
   return 1
 }
 
+session_has_short_name() {
+  local target_short_name="$1"
+  shift
+  local session_line session_id short_name
+
+  for session_line in "$@"; do
+    session_id="${session_line%%[[:space:]]*}"
+    short_name="${session_id#*.}"
+    if [[ "${short_name}" == "${target_short_name}" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 select_session() {
   local session_lines=()
   local session_line
   local session_count=0
   local selection=""
-  local new_session_index
+  local new_session_index=0
+  local copilot_option_enabled=1
+  local copilot_index=0
+  local default_selection=""
   local attach_target=""
   local new_session_name=""
 
@@ -51,7 +94,18 @@ select_session() {
   done < <(list_sessions || true)
 
   session_count="${#session_lines[@]}"
-  new_session_index=$((session_count + 1))
+  if session_has_short_name "${copilot_session_name}" "${session_lines[@]}"; then
+    copilot_option_enabled=0
+  fi
+
+  if [[ "${copilot_option_enabled}" -eq 1 ]]; then
+    copilot_index=$((session_count + 1))
+    new_session_index=$((session_count + 2))
+    default_selection="${copilot_index}"
+  else
+    new_session_index=$((session_count + 1))
+    default_selection="${new_session_index}"
+  fi
 
   if [[ -n "${selection_override}" ]]; then
     selection="${selection_override}"
@@ -66,17 +120,27 @@ select_session() {
         index=$((index + 1))
       done
     fi
+    if [[ "${copilot_option_enabled}" -eq 1 ]]; then
+      printf '  %d) Copilot (%s, --yolo)\n' "${copilot_index}" "${copilot_workspace}"
+    fi
     printf '  %d) New session (%s)\n' "${new_session_index}" "${session_name}"
-    printf 'Select a session number or type a new session name [%d]: ' "${new_session_index}" >&2
+    printf 'Select a session number or type a new session name [%s]: ' "${default_selection}" >&2
     read -r selection || exit 0
-    [[ -n "${selection}" ]] || selection="${new_session_index}"
+    [[ -n "${selection}" ]] || selection="${default_selection}"
   fi
 
   if [[ "${session_count}" -gt 0 ]] && attach_target="$(resolve_existing_session "${selection}" "${session_lines[@]}")"; then
     exec screen -xRR "${attach_target}"
   fi
 
+  if [[ "${copilot_option_enabled}" -eq 1 ]] && [[ "${selection}" == "${copilot_index}" ]]; then
+    create_copilot_session "${copilot_session_name}"
+  fi
+
   case "${selection}" in
+    copilot)
+      create_copilot_session "${copilot_session_name}"
+      ;;
     new)
       create_session "${session_name}"
       ;;
