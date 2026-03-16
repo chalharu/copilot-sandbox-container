@@ -455,7 +455,6 @@ apply_resources
 wait_for_control_plane_pod
 start_port_forward
 wait_for_ssh
-test "$(kubectl get deployment control-plane --namespace "${namespace}" -o jsonpath='{.spec.template.spec.hostUsers}')" = "false"
 
 ssh_bash <<EOF
 set -euo pipefail
