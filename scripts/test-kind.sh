@@ -656,6 +656,7 @@ test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
 kubectl auth can-i create jobs --namespace ${job_namespace} | grep -q '^yes$'
 kubectl auth can-i create configmaps --namespace ${job_namespace} | grep -q '^yes$'
 EOF
+printf '%s\n' 'kind-test: initial remote assertions ok'
 
 utf8_roundtrip="$(ssh_bash <<'EOF'
 set -euo pipefail
@@ -663,6 +664,7 @@ printf '日本語★\n'
 EOF
 )"
 [[ "${utf8_roundtrip}" == "日本語★" ]]
+printf '%s\n' 'kind-test: utf8 roundtrip ok'
 
 ssh_bash <<'EOF'
 set -euo pipefail
@@ -672,6 +674,7 @@ echo gh > ~/.config/gh/state.txt
 echo ssh > ~/.ssh/state.txt
 screen -T screen-256color -dmS kind-session sh -lc 'printf "%s\n" "$TERM" > /workspace/k8s-screen-term.txt; printf "日本語★\n" > /workspace/k8s-screen-utf8.txt; echo k8s-screen > /workspace/k8s-screen.txt; sleep 30'
 EOF
+printf '%s\n' 'kind-test: screen session started'
 
 if ! wait_for_screen_term kind-session /workspace/k8s-screen-term.txt; then
   ssh_bash <<'EOF' >&2 || true
@@ -683,6 +686,7 @@ EOF
   printf 'Expected kind-session to report a screen-256color TERM variant\n' >&2
   exit 1
 fi
+printf '%s\n' 'kind-test: screen term ready'
 
 if ! wait_for_remote_grep '^日本語★$' /workspace/k8s-screen-utf8.txt; then
   ssh_bash <<'EOF' >&2 || true
@@ -694,7 +698,9 @@ EOF
   printf 'Expected kind-session to persist UTF-8 screen output\n' >&2
   exit 1
 fi
+printf '%s\n' 'kind-test: screen utf8 ready'
 
+printf '%s\n' 'kind-test: starting manual job'
 if ! job_name="$(ssh_bash <<EOF
 set -euo pipefail
 k8s-job-start --namespace ${job_namespace} --job-name ci-manual-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/manual-job.txt manual
@@ -716,6 +722,7 @@ EOF
   exit 1
 fi
 job_name="$(printf '%s' "${job_name}" | tr -d '\r\n')"
+printf '%s\n' 'kind-test: manual job created'
 
 ssh_bash <<EOF
 set -euo pipefail
