@@ -276,23 +276,23 @@ fi
 
 "${container_bin}" rm -f "${container_name}" >/dev/null
 container_env=(
-  -e CONTROL_PLANE_COPILOT_BIN=/usr/local/bin/test-copilot
+  -e CONTROL_PLANE_COPILOT_BIN=/workspace/test-copilot
   -e CONTROL_PLANE_COPILOT_SESSION=picker-copilot
   -e CONTROL_PLANE_SESSION_SELECTION=copilot
 )
 start_container
 wait_for_ssh
 
-"${container_bin}" exec "${container_name}" bash -l -se <<'EOF'
+ssh_bash <<'EOF'
 set -euo pipefail
-cat > /usr/local/bin/test-copilot <<'INNER'
+cat > /workspace/test-copilot <<'INNER'
 #!/usr/bin/env bash
 set -euo pipefail
 pwd > /workspace/copilot-picker-pwd.txt
 printf '%s\n' "$@" > /workspace/copilot-picker-args.txt
 sleep 30
 INNER
-chmod +x /usr/local/bin/test-copilot
+chmod +x /workspace/test-copilot
 EOF
 
 TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 </dev/null >"${workdir}/ssh-copilot.log" 2>&1 &
