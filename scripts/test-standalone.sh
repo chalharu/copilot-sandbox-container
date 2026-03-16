@@ -184,6 +184,8 @@ grep -q "^copilot:" /etc/subuid
 grep -q "^copilot:" /etc/subgid
 grep -qx 'cgroup_manager = "cgroupfs"' /home/copilot/.config/containers/containers.conf
 grep -qx 'events_logger = "file"' /home/copilot/.config/containers/containers.conf
+expected_driver=""
+expected_state_dir=""
 if [[ -e /dev/fuse ]]; then
   expected_driver=overlay
 else

@@ -603,6 +603,8 @@ test "\${GH_PAGER}" = "cat"
 test -f ~/.copilot/skills/control-plane-operations/SKILL.md
 grep -qx 'cgroup_manager = "cgroupfs"' ~/.config/containers/containers.conf
 grep -qx 'events_logger = "file"' ~/.config/containers/containers.conf
+expected_driver=""
+expected_state_dir=""
 if [[ -e /dev/fuse ]]; then
   expected_driver=overlay
 else

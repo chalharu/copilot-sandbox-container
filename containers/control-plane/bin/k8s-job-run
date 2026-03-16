@@ -20,6 +20,7 @@ timeout="300s"
 cleanup_policy="${CONTROL_PLANE_CLEANUP_JOBS:-always}"
 created_job=""
 
+# shellcheck disable=SC2329
 job_input_configmap_name() {
   local current_job_name="$1"
   local checksum
