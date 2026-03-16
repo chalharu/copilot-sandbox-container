@@ -182,6 +182,11 @@ test -f /home/copilot/.copilot/skills/control-plane-operations/SKILL.md
 test -f /home/copilot/.copilot/skills/control-plane-operations/references/control-plane-run.md
 grep -q "^copilot:" /etc/subuid
 grep -q "^copilot:" /etc/subgid
+test "$(readlink /home/copilot/.local/share/containers)" = "/home/copilot/.copilot/containers"
+grep -qx 'graphroot = "/home/copilot/.copilot/containers/storage"' /home/copilot/.config/containers/storage.conf
+grep -qx 'runroot = "/home/copilot/.copilot/run/containers/storage"' /home/copilot/.config/containers/storage.conf
+test -d /home/copilot/.copilot/containers/storage/overlay
+test -d /home/copilot/.copilot/containers/storage/volumes
 EOF
 
 ssh_bash <<'EOF'

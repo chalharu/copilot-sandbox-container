@@ -31,21 +31,32 @@
 3. `storageClassName` と PVC サイズをクラスタ環境に合わせて調整します。
 4. テンプレートは同じ PVC の `ssh-host-keys` subPath に SSH host key を置くため、
    Pod が再作成されても host key が変わりません。
-5. テンプレートは Control Plane container に
-   `securityContext.privileged: true` を設定しています。これは
-   `scripts/lint.sh` / `scripts/build-test.sh` を Pod 内から完結させる場合に
-   nested Podman / Kind を通しやすくするためです。`capabilities.add` に
-   `SETUID` / `SETGID` だけを足しても、`newuidmap` / `newgidmap` を使う rootless
-   Podman の代替にはなりません。このサンプルでは、outer host / runtime 側の user
-   namespace 制約も残ることを前提に、より互換性が高い設定として
-   `privileged: true` を残しています。クラスタ policy で privileged Pod を
-   使えない場合はこの設定を外し、lint / build / test は host か GitHub Actions へ
-   逃がしてください。
-6. 必要に応じて Job 用の image pull policy と resource 上限を調整します。
-7. 適用後は `kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox`
+5. テンプレートは least-privilege の既定値として Pod user namespace
+   (`hostUsers: false`) を有効にし、container の `securityContext` では
+   `seccompProfile: RuntimeDefault` を使います。`privileged: true` は避けつつ、
+   entrypoint の `chown` と `sshd` の setuid/setgid が必要なので container の
+   default capability set は残します。rootless Podman も setuid helper の
+   `newuidmap` / `newgidmap` に依存するため、`allowPrivilegeEscalation` は `true`
+   のままです。
+6. `capabilities.add` に `SETUID` / `SETGID` だけを足しても、
+   `newuidmap` / `newgidmap` の代替にはなりません。outer host / runtime 側の user
+   namespace 制約や `/dev/fuse` 提供状況も残るため、Pod 内で
+   `scripts/lint.sh` / `scripts/build-test.sh` を直接回す経路は依然として
+   best-effort です。そこで詰まる場合は host か GitHub Actions を使ってください。
+   それでも Pod 内ローカル実行を優先したい場合だけ、最後の fallback として
+   `securityContext.privileged: true` を opt-in してください。
+7. 必要に応じて Job 用の image pull policy と resource 上限を調整します。
+8. 適用後は `kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox`
    のように Service 経由で SSH を公開できます。
 
 ```yaml
+hostUsers: false
+...
+securityContext:
+  allowPrivilegeEscalation: true
+  seccompProfile:
+    type: RuntimeDefault
+...
 - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
   value: IfNotPresent
 - name: CONTROL_PLANE_JOB_CPU_REQUEST
@@ -87,16 +98,30 @@ UTF-8 テキストも表示しやすくしています。
 erase を既定化し、`tmux-256color` を含む terminfo も入れています。そのため、
 `tmux` 経由で SSH 接続しても表示崩れを起こしにくくしています。
 
-このサンプルでは Control Plane container に
-`securityContext.privileged: true` を入れているため、Kubernetes 上でも nested
-rootless Podman / Kind を動かしやすくし、`scripts/lint.sh` や
-`scripts/build-test.sh` を Pod 内から実行しやすくしています。
+このサンプルでは `hostUsers: false` で Pod user namespace を使うことで、Pod 内
+root を host 上の unprivileged UID/GID range へ写像しています。これが
+least-privilege の主軸です。
 
-一方で、`capabilities.add: ["SETUID", "SETGID"]` だけでは
-`newuidmap` / `newgidmap` の代替にはなりません。これらは setuid helper として
-動き、外側の host / container runtime 側でも user namespace が許可されている
-必要があります。そのため、このサンプルでは capability 追加だけに置き換えず、
-より保守的な既定値として `privileged: true` を残しています。
+一方で、`allowPrivilegeEscalation: false` にすると setuid helper の
+`newuidmap` / `newgidmap` が止まり、rootless Podman が起動できません。そのため
+`allowPrivilegeEscalation` は `true` のままです。また、entrypoint の `chown` と
+`sshd` の setuid/setgid が必要なので、container の default capability set も
+そのままにしています。さらに、
+`capabilities.add: ["SETUID", "SETGID"]` だけでも `newuidmap` / `newgidmap`
+の代替にはなりません。
+
+さらに outer host / container runtime 側で user namespace や `/dev/fuse` が
+許可されていない場合は、この least-privilege 構成でも local Podman / Kind が
+失敗します。その場合は GitHub Actions / host runner を使うか、必要なときだけ
+`securityContext.privileged: true` を opt-in してください。
+
+### Podman storage 初期化
+
+Control Plane は起動時に Podman 用 `graphroot` / `runroot` を
+`~/.copilot/containers/storage` と `~/.copilot/run/containers/storage` へ固定し、
+`storage/overlay` / `storage/volumes` を先に作ります。これにより、
+`/state/copilot/containers/storage/overlay/...` で `No such file or directory`
+が出る初期化レースを起こしにくくしています。
 
 それでもクラスタ側が privileged Pod を禁止していたり、外側の host / container
 runtime 側が user namespace や `newuidmap` / `newgidmap` を止めている場合は、

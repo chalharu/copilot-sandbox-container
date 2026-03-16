@@ -100,6 +100,9 @@ spec:
       labels:
         app.kubernetes.io/name: control-plane
     spec:
+      # Map container root to unprivileged host IDs when the cluster/runtime
+      # supports Pod user namespaces.
+      hostUsers: false
       serviceAccountName: control-plane
       initContainers:
         - name: init-state
@@ -139,11 +142,15 @@ spec:
               value: 256Mi
             - name: CONTROL_PLANE_JOB_MEMORY_LIMIT
               value: 2Gi
-          # Keep the sample privileged for widest compatibility with nested
-          # Podman / Kind. CAP_SETUID / CAP_SETGID alone are not an equivalent
-          # replacement for newuidmap/newgidmap or outer runtime userns support.
+          # Prefer a least-privilege default: use Pod user namespaces and keep
+          # the runtime seccomp profile. We intentionally avoid privileged=true,
+          # but still allow the default root capability set because the
+          # entrypoint and sshd need standard root operations such as chown and
+          # setuid/setgid.
           securityContext:
-            privileged: true
+            allowPrivilegeEscalation: true
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             - containerPort: 2222
               name: ssh

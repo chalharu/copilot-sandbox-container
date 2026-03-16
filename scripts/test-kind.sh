@@ -327,6 +327,7 @@ spec:
       labels:
         app.kubernetes.io/name: control-plane
     spec:
+      hostUsers: false
       serviceAccountName: control-plane
       initContainers:
         - name: init-state
@@ -356,11 +357,15 @@ spec:
               value: control-plane
             - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
               value: Never
-          # Keep the sample privileged for widest compatibility with nested
-          # Podman / Kind. CAP_SETUID / CAP_SETGID alone are not an equivalent
-          # replacement for newuidmap/newgidmap or outer runtime userns support.
+          # Prefer a least-privilege default: use Pod user namespaces and keep
+          # the runtime seccomp profile. We intentionally avoid privileged=true,
+          # but still allow the default root capability set because the
+          # entrypoint and sshd need standard root operations such as chown and
+          # setuid/setgid.
           securityContext:
-            privileged: true
+            allowPrivilegeEscalation: true
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             - containerPort: 2222
               name: ssh
@@ -478,6 +483,14 @@ test "\${EDITOR}" = "vim"
 test "\${VISUAL}" = "vim"
 test "\${GH_PAGER}" = "cat"
 test -f ~/.copilot/skills/control-plane-operations/SKILL.md
+test "\$(kubectl get deployment control-plane --namespace ${namespace} -o jsonpath='{.spec.template.spec.hostUsers}')" = "false"
+uid_map_host_uid="\$(awk 'NR==1 { print \$2 }' /proc/self/uid_map)"
+test -n "\${uid_map_host_uid}"
+test "\${uid_map_host_uid}" != "0"
+grep -qx 'graphroot = "/home/copilot/.copilot/containers/storage"' ~/.config/containers/storage.conf
+grep -qx 'runroot = "/home/copilot/.copilot/run/containers/storage"' ~/.config/containers/storage.conf
+test -d ~/.copilot/containers/storage/overlay
+test -d ~/.copilot/containers/storage/volumes
 kubectl auth can-i create jobs --namespace ${namespace} | grep -q '^yes$'
 EOF
 

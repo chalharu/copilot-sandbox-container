@@ -78,9 +78,17 @@ Control Plane イメージには `podman` / `kind` など
 `scripts/lint.sh` や `scripts/build-test.sh` に必要なコマンドを同梱しています。
 ただし nested build runner が実際に動くかは、外側の host / container runtime /
 Kubernetes securityContext 依存です。サンプルの Kubernetes Deployment では
-`securityContext.privileged: true` を付けてこの前提を取りやすくしています。
+least-privilege の既定値として `hostUsers: false` を使い、Pod user namespace 上で
+rootless Podman を動かしやすくしています。`privileged: true` は避けつつ、
+entrypoint の `chown` や `sshd` の setuid/setgid が必要なので container の
+default capability set は残し、`seccompProfile: RuntimeDefault` だけ明示します。
+`allowPrivilegeEscalation` は `newuidmap` / `newgidmap` のために `true` のままです。
 `capabilities.add: ["SETUID", "SETGID"]` だけでは `newuidmap` / `newgidmap`
-の代替にはならないため、このリポジトリのサンプルはそこには置き換えていません。非特権 Pod や
+の代替にはならず、outer runtime 側の user namespace や `/dev/fuse` も必要です。
+そのため local nested Podman / Kind は依然 best-effort です。そこで詰まる場合や、
+そもそも cluster が Pod user namespace をサポートしない場合は、GitHub Actions か
+host runner を使ってください。どうしても Pod 内ローカル実行を優先したい場合だけ
+`securityContext.privileged: true` を opt-in してください。非特権 Pod や
 privileged を禁止するクラスタでは rootless Podman が失敗し、
 `newuidmap ... Operation not permitted` が出る場合があります。その場合は Docker
 Buildx が使える host か GitHub Actions を使ってください。Control Plane
@@ -136,11 +144,10 @@ Enter だけで `/workspace` から `copilot --yolo` を始められます。ま
 `control-plane-operations` skill をイメージに同梱しているため、他のリポジトリを
 `/workspace` に mount した場合でも同じ運用ガイドを使えます。
 
-同じサンプル Deployment では Control Plane container に
-`securityContext.privileged: true` を入れているため、SSH で入ったあとに
-`scripts/lint.sh` や `scripts/build-test.sh` を Pod 内でそのまま実行しやすくして
-います。クラスタ policy で privileged を許可できない場合は、これらの検証は
-GitHub Actions 側で実行してください。
+同じサンプル Deployment では `hostUsers: false` と `RuntimeDefault` seccomp の
+`securityContext` を使っているため、SSH で入ったあとも権限を絞ったまま運用しやすく
+しています。local Podman / Kind は outer runtime 次第なので、`scripts/lint.sh`
+や `scripts/build-test.sh` が Pod 内で詰まる場合は GitHub Actions 側で実行してください。
 
 Control Plane イメージには `vim` も同梱され、ログイン shell では `EDITOR` /
 `VISUAL` を未設定時だけ `vim` に補います。Copilot CLI の multiline shortcut が
