@@ -154,7 +154,8 @@ spec:
           # Default to a containerd-compatible least-privilege SSH/Copilot
           # profile. Local nested Podman/Kind stays opt-in because runtimes
           # without Pod user namespaces still tend to need extra privileges such
-          # as /dev/fuse or privileged=true.
+          # as /dev/fuse or privileged=true. sshd still needs setuid/setgid plus
+          # CAP_SYS_CHROOT for its privilege-separation sandbox.
           securityContext:
             privileged: false
             runAsUser: 0
@@ -169,6 +170,7 @@ spec:
                 - FOWNER
                 - SETGID
                 - SETUID
+                - SYS_CHROOT
             seccompProfile:
               type: RuntimeDefault
           ports:

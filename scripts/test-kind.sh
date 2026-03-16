@@ -384,6 +384,7 @@ spec:
                 - FOWNER
                 - SETGID
                 - SETUID
+                - SYS_CHROOT
             seccompProfile:
               type: RuntimeDefault
           ports:

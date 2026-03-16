@@ -33,9 +33,11 @@
    Pod が再作成されても host key が変わりません。
 5. テンプレートは containerd でも使いやすい least-privilege の SSH / Copilot
    プロファイルを既定にしています。main container では `privileged: false` のまま
-   capability を `CHOWN` / `DAC_OVERRIDE` / `FOWNER` / `SETGID` / `SETUID`
+   capability を `CHOWN` / `DAC_OVERRIDE` / `FOWNER` / `SETGID` / `SETUID` /
+   `SYS_CHROOT`
    に絞り、`seccompProfile: RuntimeDefault` を使います。`allowPrivilegeEscalation`
-   は `sshd` の setuid/setgid と entrypoint の root 操作のため `true` のままです。
+   は `sshd` の setuid/setgid・privilege separation sandbox と entrypoint の root
+   操作のため `true` のままです。
 6. 同時に `CONTROL_PLANE_RUN_MODE=k8s-job` を入れているため、SSH ログイン後の
    既定経路は Kubernetes Job 実行です。containerd のように `hostUsers: false` を
    使えない環境でも SSH / Copilot / `k8s-job-*` はそのまま利用できます。
@@ -65,6 +67,7 @@ securityContext:
       - FOWNER
       - SETGID
       - SETUID
+      - SYS_CHROOT
   seccompProfile:
     type: RuntimeDefault
 ...
@@ -116,7 +119,8 @@ erase を既定化し、`tmux-256color` を含む terminfo も入れています
 このサンプルでは containerd でも成立する SSH / Copilot 用の最小権限を主軸にして
 います。`allowPrivilegeEscalation` は `sshd` の setuid/setgid と entrypoint の
 root 操作のため `true` のままですが、capability は `CHOWN` / `DAC_OVERRIDE` /
-`FOWNER` / `SETGID` / `SETUID` に絞っています。
+`FOWNER` / `SETGID` / `SETUID` / `SYS_CHROOT` に絞っています。`SYS_CHROOT` は
+sshd の privilege separation sandbox が pre-auth child を chroot するために必要です。
 
 一方で local Podman / Kind は別問題で、`SETUID` / `SETGID` だけでも
 `newuidmap` / `newgidmap` の代替にはなりません。outer host / container runtime
