@@ -113,6 +113,11 @@ wait_for_ssh() {
     sleep 1
   done
   printf 'Timed out waiting for SSH on port %s\n' "${ssh_port}" >&2
+  if [[ -f "${workdir}/port-forward.log" ]]; then
+    printf '%s\n' '--- kubectl port-forward log ---' >&2
+    cat "${workdir}/port-forward.log" >&2 || true
+  fi
+  dump_control_plane_diagnostics
   exit 1
 }
 
@@ -327,6 +332,8 @@ spec:
       labels:
         app.kubernetes.io/name: control-plane
     spec:
+      securityContext:
+        fsGroup: 1000
       serviceAccountName: control-plane
       initContainers:
         - name: init-state

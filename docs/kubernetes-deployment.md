@@ -32,7 +32,9 @@
 4. テンプレートは同じ PVC の `ssh-host-keys` subPath に SSH host key を置くため、
    Pod が再作成されても host key が変わりません。
 5. テンプレートは containerd でも使いやすい least-privilege の SSH / Copilot
-   プロファイルを既定にしています。main container では `privileged: false` のまま
+   プロファイルを既定にしています。Pod では `securityContext.fsGroup: 1000` を
+   使って projected service-account token を `copilot` shell から読めるようにし、
+   main container では `privileged: false` のまま
    capability を `CHOWN` / `DAC_OVERRIDE` / `FOWNER` / `SETGID` / `SETUID` /
    `SYS_CHROOT`
    に絞り、`seccompProfile: RuntimeDefault` を使います。`allowPrivilegeEscalation`
@@ -54,6 +56,9 @@
 
 ```yaml
 securityContext:
+  fsGroup: 1000
+...
+container securityContext:
   privileged: false
   runAsUser: 0
   runAsNonRoot: false
@@ -117,10 +122,12 @@ erase を既定化し、`tmux-256color` を含む terminfo も入れています
 `tmux` 経由で SSH 接続しても表示崩れを起こしにくくしています。
 
 このサンプルでは containerd でも成立する SSH / Copilot 用の最小権限を主軸にして
-います。`allowPrivilegeEscalation` は `sshd` の setuid/setgid と entrypoint の
-root 操作のため `true` のままですが、capability は `CHOWN` / `DAC_OVERRIDE` /
-`FOWNER` / `SETGID` / `SETUID` / `SYS_CHROOT` に絞っています。`SYS_CHROOT` は
-sshd の privilege separation sandbox が pre-auth child を chroot するために必要です。
+います。Pod の `fsGroup: 1000` で projected service-account token を `copilot`
+user から読めるようにしたうえで、`allowPrivilegeEscalation` は `sshd` の
+setuid/setgid と entrypoint の root 操作のため `true` のままにし、capability は
+`CHOWN` / `DAC_OVERRIDE` / `FOWNER` / `SETGID` / `SETUID` / `SYS_CHROOT`
+に絞っています。`SYS_CHROOT` は sshd の privilege separation sandbox が pre-auth
+child を chroot するために必要です。
 
 一方で local Podman / Kind は別問題で、`SETUID` / `SETGID` だけでも
 `newuidmap` / `newgidmap` の代替にはなりません。outer host / container runtime

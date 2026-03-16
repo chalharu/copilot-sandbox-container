@@ -100,6 +100,8 @@ spec:
       labels:
         app.kubernetes.io/name: control-plane
     spec:
+      securityContext:
+        fsGroup: 1000
       serviceAccountName: control-plane
       initContainers:
         - name: init-state
@@ -155,7 +157,9 @@ spec:
           # profile. Local nested Podman/Kind stays opt-in because runtimes
           # without Pod user namespaces still tend to need extra privileges such
           # as /dev/fuse or privileged=true. sshd still needs setuid/setgid plus
-          # CAP_SYS_CHROOT for its privilege-separation sandbox.
+          # CAP_SYS_CHROOT for its privilege-separation sandbox, while the Pod
+          # fsGroup keeps projected service-account credentials readable from the
+          # copilot shell.
           securityContext:
             privileged: false
             runAsUser: 0
