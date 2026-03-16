@@ -45,9 +45,10 @@ Types:
   repository's `containers/yamllint/` image to run `yamllint` v1.38.0.
 - `scripts/build-test.sh` is the supported local build/test entry point.
 - `scripts/build-test.sh` auto-detects a working Docker Buildx toolchain first,
-  then falls back to a Podman / Buildah toolchain.
+  then falls back to a Podman-based toolchain, using Buildah only when it is
+  already available on the host or CI runner.
 - Use `CONTROL_PLANE_TOOLCHAIN=docker` to force Docker / BuildKit, or
-  `CONTROL_PLANE_TOOLCHAIN=podman` to force Podman / Buildah.
+  `CONTROL_PLANE_TOOLCHAIN=podman` to force the Podman-based toolchain.
 - Use trusted upstream images when they already satisfy the contract; if only a
   third-party image exists, build a thin repository-managed image and publish it
   to GHCR for reuse.
@@ -57,5 +58,5 @@ Types:
   smoke / integration scripts used by `scripts/build-test.sh`.
 - When this repository is developed from inside a containerized tooling
   environment, keep these scripts unchanged and provide the required toolchain:
-  `docker`, or `podman` (with `buildah` used when available), together with
+  `docker`, or `podman` (with `buildah` used only when already available), together with
   `kind`, `kubectl`, `ssh`, and `ssh-keygen`.

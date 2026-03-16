@@ -8,8 +8,8 @@ if [ -f "${runtime_config_file}" ]; then
   set +a
 fi
 
+: "${LANG:=C.UTF-8}"
 : "${EDITOR:=vim}"
 : "${VISUAL:=${EDITOR}}"
-: "${BUILDAH_ISOLATION:=chroot}"
 : "${GH_PAGER:=cat}"
-export EDITOR VISUAL BUILDAH_ISOLATION GH_PAGER
+export LANG EDITOR VISUAL GH_PAGER

@@ -64,9 +64,9 @@ Control Plane イメージは `vim` を同梱し、ログイン shell で `EDITO
 通らないときでも、`Ctrl+G` ですぐ外部 editor を開けます。
 
 同じ login shell では `GH_PAGER=cat` も既定化しており、`gh` の pager 待ちで
-コマンドが止まって見える状況を避けます。あわせて `buildah` と `kind` も
-同梱しているため、このリポジトリの validation entry point を Control Plane 内で
-そのまま試しやすくしています。
+コマンドが止まって見える状況を避けます。あわせて `LANG` / `LC_*` も SSH client
+から受け取れ、client が送らない場合は login shell で `LANG=C.UTF-8` を補うため、
+日本語を含む UTF-8 テキストも表示しやすくしています。
 
 また、GNU Screen では `screen-256color` / UTF-8 / alt screen / background color
 erase を既定化し、`tmux-256color` を含む terminfo も入れています。そのため、
@@ -74,9 +74,12 @@ erase を既定化し、`tmux-256color` を含む terminfo も入れています
 
 ただし、Kubernetes 上の非特権 Pod では nested rootless Podman が host 側の
 user namespace 制約で失敗し、`newuidmap ... Operation not permitted` が出る
-場合があります。その場合は Control Plane 内で Podman を無理に使わず、
-Docker Buildx が使える host か GitHub Actions で lint / build / test を
-実行してください。
+場合があります。Control Plane イメージは `control-plane-run` 用の wrapper は
+持ちますが、`scripts/lint.sh` や `scripts/build-test.sh` を完結させる nested
+build runner までは持ちません。その場合は Control Plane 内で Podman を無理に
+使わず、Docker Buildx が使える host か GitHub Actions で lint / build / test を
+実行してください。Buildah を個別に使いたい場合は `quay.io/buildah/stable` のような
+upstream イメージを host / CI 側で利用してください。
 
 ただし Copilot CLI の multiline 入力 (`Shift+Enter`) 自体は upstream で Kitty
 protocol 対応 terminal を前提としており、対応 terminal では `/terminal-setup`

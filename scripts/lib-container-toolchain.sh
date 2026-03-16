@@ -12,6 +12,22 @@ docker_runtime_available() {
     && docker info >/dev/null 2>&1
 }
 
+running_inside_control_plane_image() {
+  [[ -x /usr/local/bin/control-plane-entrypoint ]] \
+    && [[ -x /usr/local/bin/control-plane-run ]]
+}
+
+report_missing_build_test_toolchain() {
+  printf 'Missing supported build/test toolchain. Provide a working docker buildx environment, or podman with image build support and a usable rootless runtime.\n' >&2
+
+  if running_inside_control_plane_image; then
+    printf '%s\n' \
+      'This control-plane image keeps Podman for execution-plane workflows, but scripts/lint.sh and scripts/build-test.sh still require a host or CI build runner.' \
+      'Run those validation entry points in GitHub Actions, or from a host with Docker Buildx or rootless Podman.' \
+      >&2
+  fi
+}
+
 report_podman_runtime_failure() {
   local output="$1"
 
@@ -152,6 +168,7 @@ detect_build_test_toolchain() {
     docker)
       docker_build_toolchain_available || {
         printf 'Docker toolchain requires a working docker CLI with buildx support.\n' >&2
+        report_missing_build_test_toolchain
         exit 1
       }
       printf 'docker\n'
@@ -160,6 +177,7 @@ detect_build_test_toolchain() {
     podman)
       podman_build_toolchain_available || {
         printf 'Podman toolchain requires podman with image build support and a usable rootless runtime.\n' >&2
+        report_missing_build_test_toolchain
         exit 1
       }
       printf 'podman\n'
@@ -183,7 +201,7 @@ detect_build_test_toolchain() {
     return
   fi
 
-  printf 'Missing supported build/test toolchain. Provide a working docker buildx environment, or podman with image build support and a usable rootless runtime.\n' >&2
+  report_missing_build_test_toolchain
   exit 1
 }
 

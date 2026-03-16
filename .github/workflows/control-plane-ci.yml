@@ -55,7 +55,7 @@ jobs:
       - name: Install Podman toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y podman buildah
+          sudo apt-get install -y podman
 
       - name: Restore DHI image cache
         uses: actions/cache@v5.0.3
@@ -88,7 +88,7 @@ jobs:
 
       - name: Build yamllint image for publishing
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: buildah bud --tag localhost/yamllint:test containers/yamllint
+        run: podman build --tag localhost/yamllint:test containers/yamllint
 
       - name: Read published image versions
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
