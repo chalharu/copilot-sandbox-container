@@ -9,6 +9,7 @@ ARG CONTROL_PLANE_GID=1000
 ARG CONTROL_PLANE_USER=copilot
 
 ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
     CONTROL_PLANE_USER=${CONTROL_PLANE_USER} \
     CONTROL_PLANE_HOME=/home/${CONTROL_PLANE_USER} \
     CONTROL_PLANE_WORKSPACE=/workspace
@@ -19,7 +20,6 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN apt-get update -o Acquire::Retries=3 \
     && apt-get install -y --no-install-recommends \
         bash \
-        buildah \
         ca-certificates \
         curl \
         fuse-overlayfs \

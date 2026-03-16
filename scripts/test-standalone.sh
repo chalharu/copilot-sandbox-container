@@ -156,7 +156,6 @@ command -v gh
 command -v kubectl
 command -v podman
 command -v docker
-command -v buildah
 command -v kind
 docker --version >/dev/null
 command -v sshd
@@ -172,9 +171,9 @@ command -v k8s-job-run
 test "$(TERM=xterm-256color tput colors)" -ge 256
 test "$(TERM=screen-256color tput colors)" -ge 256
 test "$(TERM=tmux-256color tput colors)" -ge 256
+printf '%s\n' "${LANG}" | grep -qi 'utf-8'
 test "${EDITOR}" = "vim"
 test "${VISUAL}" = "vim"
-test "${BUILDAH_ISOLATION}" = "chroot"
 test "${GH_PAGER}" = "cat"
 test -f /home/copilot/.copilot/skills/control-plane-operations/SKILL.md
 test -f /home/copilot/.copilot/skills/control-plane-operations/references/control-plane-run.md
@@ -184,9 +183,9 @@ EOF
 
 ssh_bash <<'EOF'
 set -euo pipefail
+printf '%s\n' "${LANG}" | grep -qi 'utf-8'
 test "${EDITOR}" = "vim"
 test "${VISUAL}" = "vim"
-test "${BUILDAH_ISOLATION}" = "chroot"
 test "${GH_PAGER}" = "cat"
 mkdir -p ~/.copilot ~/.config/gh /workspace
 echo standalone > ~/.copilot/state.txt
