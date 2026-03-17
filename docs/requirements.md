@@ -1,5 +1,8 @@
 # Copilot CLI Sandbox Container 要件
 
+運用ガイドと quick start は `README.md`、Kubernetes manifest の前提と配備時の
+トラブルシュートは `docs/kubernetes-deployment.md` を参照してください。
+
 ## 1. 目的
 
 本構成の目的は、Copilot CLI を中心とする Control Plane を、単独起動環境と Kubernetes 環境の両方で共通運用できるようにすることです。

@@ -60,3 +60,6 @@ Types:
   environment, keep these scripts unchanged and provide the required toolchain:
   `docker`, or `podman` (with `buildah` used only when already available), together with
   `kind`, `kubectl`, `ssh`, and `ssh-keygen`.
+- When behavior or operator guidance changes, keep `README.md`,
+  `docs/kubernetes-deployment.md`, and `docs/requirements.md` aligned in the
+  same PR.

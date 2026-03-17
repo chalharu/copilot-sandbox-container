@@ -4,6 +4,10 @@
 その前提条件を説明します。テンプレート本体は
 `deploy/kubernetes/control-plane.example.yaml` にあります。
 
+リポジトリ全体の概要、quick start、rootless Podman の背景説明は `README.md` を、
+契約レベルの要件は `docs/requirements.md` を参照してください。ここでは
+Kubernetes manifest と運用時の前提に絞って説明します。
+
 ## 含まれるもの
 
 - Control Plane 用 namespace
@@ -47,6 +51,9 @@ Job Pod が使う `serviceAccountName` は Job namespace 側のものです。Po
 - container `capabilities.add: [CHOWN, DAC_OVERRIDE, FOWNER, SETFCAP, SETGID, SETUID, SYS_CHROOT]`
 - `seccompProfile: RuntimeDefault`
 
+各 capability の役割や rootless Podman の背景は `README.md` にもまとめています。
+ここでは manifest に直接効く前提だけを残しています。
+
 `drop: ALL` だけでは SSH は成立しません。`sshd` の privilege separation には `SETUID` / `SETGID` / `SYS_CHROOT` が必要で、entrypoint の初期化や state volume の ownership 調整には `CHOWN` / `DAC_OVERRIDE` / `FOWNER` も必要です。サンプル manifest は、Linux 5.12+ の rootless Podman で UID 0 mapping に必要になる `SETFCAP` も追加しています。現在の entrypoint は SSH / state 初期化に必須の capability が欠けていると起動直後に明示的なエラーを出して停止します。
 
 それでも GNU Screen session picker が runtime 依存の理由で起動できない場合があるため、現在は picker の失敗時に通常の login shell へフォールバックします。これにより、picker の問題で SSH 接続そのものがすぐ切れにくくなっています。
@@ -54,6 +61,12 @@ Job Pod が使う `serviceAccountName` は Job namespace 側のものです。Po
 ## local Podman について
 
 Kubernetes 上の local nested Podman / Kind は、引き続き best-effort です。
+
+Control Plane イメージ内の `podman` と `docker` は `control-plane-podman` wrapper への
+symlink です。`cannot clone: Operation not permitted` や
+`invalid internal status ... cannot re-exec process` を検出すると、
+outer runtime 側の制約であることと `k8s-job` / GitHub Actions / host runner への
+切り替え候補を追加で案内します。
 
 - rootless Podman は outer host / runtime 側の user namespace、`newuidmap` / `newgidmap`、`/dev/fuse` に依存します
 - Linux 5.12+ では UID 0 mapping のため `SETFCAP` も必要です
@@ -129,7 +142,7 @@ control-plane-run \
 
 ### privileged でも Podman が `cannot set user namespace` で失敗する
 
-Pod 内ではなく outer runtime の制約です。rootless Podman を完全には保証できません。`control-plane-podman` / build-test の診断はこのケースを明示的に案内するようになっていますが、解決には outer runtime 側の user namespace 許可が必要です。`control-plane-run --mode k8s-job` か GitHub Actions / host runner を使ってください。
+Pod 内ではなく outer runtime の制約です。rootless Podman を完全には保証できません。`control-plane-podman` / build-test の診断はこのケースを明示的に案内するようになっていますが、解決には outer runtime 側の user namespace 許可が必要です。`control-plane-run --mode k8s-job` か GitHub Actions / host runner を使ってください。背景説明は `README.md` の「Rootless Podman / nested runtime の扱い」も参照してください。
 
 ### securityContext を変えたら overlay / vfs の警告が出た
 
