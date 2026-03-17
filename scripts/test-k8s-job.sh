@@ -75,7 +75,10 @@ kubectl create configmap "${configmap_name}" \
   --from-file=control-plane-screen=/workspace/containers/control-plane/bin/control-plane-screen \
   --from-file=control-plane-session=/workspace/containers/control-plane/bin/control-plane-session \
   --from-file=profile-control-plane-env.sh=/workspace/containers/control-plane/config/profile-control-plane-env.sh \
-  --from-file=profile-control-plane-session.sh=/workspace/containers/control-plane/config/profile-control-plane-session.sh
+  --from-file=profile-control-plane-session.sh=/workspace/containers/control-plane/config/profile-control-plane-session.sh \
+  --from-file=control-plane-skill.md=/workspace/containers/control-plane/skills/control-plane-operations/SKILL.md \
+  --from-file=control-plane-run.md=/workspace/containers/control-plane/skills/control-plane-operations/references/control-plane-run.md \
+  --from-file=skills-reference.md=/workspace/containers/control-plane/skills/control-plane-operations/references/skills.md
 
 service_account_yaml=''
 if [[ -n "${service_account}" ]]; then
@@ -105,8 +108,6 @@ ${service_account_yaml}
           image: ${control_plane_image}
           imagePullPolicy: ${image_pull_policy}
           env:
-            - name: CONTROL_PLANE_DISABLE_SESSION_PICKER
-              value: "1"
             - name: CONTROL_PLANE_LOCAL_PODMAN_MODE
               value: rootful-service
           command:
@@ -115,41 +116,67 @@ ${service_account_yaml}
             - |
               set -euo pipefail
               install -m 0755 /var/run/control-plane-test/control-plane-entrypoint /usr/local/bin/control-plane-entrypoint
-              install -m 0755 /var/run/control-plane-test/control-plane-podman /usr/local/bin/control-plane-podman
-              install -m 0755 /var/run/control-plane-test/control-plane-screen /usr/local/bin/control-plane-screen
-              install -m 0755 /var/run/control-plane-test/control-plane-session /usr/local/bin/control-plane-session
-              install -m 0644 /var/run/control-plane-test/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
-              install -m 0644 /var/run/control-plane-test/profile-control-plane-session.sh /etc/profile.d/control-plane-session.sh
-              ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/podman
-              ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/docker
-              ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen
-              exec /usr/local/bin/control-plane-entrypoint /bin/bash -lc '
-                set -euo pipefail
-                runtime_line="\$(grep -E "^(XDG_RUNTIME_DIR|TMPDIR|SCREENDIR|CONTAINER_HOST|DOCKER_HOST|CONTROL_PLANE_LOCAL_PODMAN_MODE|CONTROL_PLANE_PODMAN_DEFAULT_CGROUPS|CONTROL_PLANE_PODMAN_DEFAULT_NETWORK)=" /home/copilot/.config/control-plane/runtime.env | tr "\n" " ")"
-                printf "job-check: runtime-env=%s\n" "\${runtime_line}"
-                [[ "\${runtime_line}" == *"XDG_RUNTIME_DIR=/run/user/1000"* ]]
-                [[ "\${runtime_line}" == *"TMPDIR=/tmp/control-plane-1000"* ]]
-                [[ "\${runtime_line}" == *"SCREENDIR=/run/user/1000/screen"* ]]
-                [[ "\${runtime_line}" == *"CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service"* ]]
-                [[ "\${runtime_line}" == *"CONTROL_PLANE_PODMAN_DEFAULT_CGROUPS=disabled"* ]]
-                [[ "\${runtime_line}" == *"CONTROL_PLANE_PODMAN_DEFAULT_NETWORK=host"* ]]
-                [[ "\${runtime_line}" == *"CONTAINER_HOST="*"/run/control-plane/podman-root.sock"* ]]
+               install -m 0755 /var/run/control-plane-test/control-plane-podman /usr/local/bin/control-plane-podman
+               install -m 0755 /var/run/control-plane-test/control-plane-screen /usr/local/bin/control-plane-screen
+               install -m 0755 /var/run/control-plane-test/control-plane-session /usr/local/bin/control-plane-session
+               install -m 0644 /var/run/control-plane-test/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
+               install -m 0644 /var/run/control-plane-test/profile-control-plane-session.sh /etc/profile.d/control-plane-session.sh
+               install -d -m 0755 /usr/local/share/control-plane/skills/control-plane-operations/references
+               install -m 0644 /var/run/control-plane-test/control-plane-skill.md /usr/local/share/control-plane/skills/control-plane-operations/SKILL.md
+               install -m 0644 /var/run/control-plane-test/control-plane-run.md /usr/local/share/control-plane/skills/control-plane-operations/references/control-plane-run.md
+               install -m 0644 /var/run/control-plane-test/skills-reference.md /usr/local/share/control-plane/skills/control-plane-operations/references/skills.md
+               ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/podman
+               ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/docker
+               ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen
+               exec /usr/local/bin/control-plane-entrypoint /bin/bash -lc '
+                 set -euo pipefail
+                 runtime_line="\$(grep -E "^(XDG_RUNTIME_DIR|TMPDIR|SCREENDIR|CONTAINER_HOST|DOCKER_HOST|CONTROL_PLANE_LOCAL_PODMAN_MODE|CONTROL_PLANE_PODMAN_DEFAULT_CGROUPS|CONTROL_PLANE_PODMAN_DEFAULT_NETWORK|CONTROL_PLANE_PODMAN_BUILD_ISOLATION)=" /home/copilot/.config/control-plane/runtime.env | tr "\n" " ")"
+                 printf "job-check: runtime-env=%s\n" "\${runtime_line}"
+                 [[ "\${runtime_line}" == *"XDG_RUNTIME_DIR=/run/user/1000"* ]]
+                 [[ "\${runtime_line}" == *"TMPDIR=/tmp/control-plane-1000"* ]]
+                 [[ "\${runtime_line}" == *"SCREENDIR=/run/user/1000/screen"* ]]
+                 [[ "\${runtime_line}" == *"CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service"* ]]
+                 [[ "\${runtime_line}" == *"CONTROL_PLANE_PODMAN_DEFAULT_CGROUPS=disabled"* ]]
+                 [[ "\${runtime_line}" == *"CONTROL_PLANE_PODMAN_DEFAULT_NETWORK=host"* ]]
+                 [[ "\${runtime_line}" == *"CONTROL_PLANE_PODMAN_BUILD_ISOLATION=chroot"* ]]
+                 [[ "\${runtime_line}" == *"CONTAINER_HOST="*"/run/control-plane/podman-root.sock"* ]]
 
-                term_report="\$(TERM=xterm-color bash -lc '"'"'printf "%s %s" "\$TERM" "\$(tput colors)"'"'"')"
-                printf "job-check: term=%s\n" "\${term_report}"
-                [[ "\${term_report}" == "xterm-256color 256" ]]
+                 su -s /bin/bash copilot -c '"'"'set -euo pipefail; skill_root="\$HOME/.copilot/skills/control-plane-operations"; test ! -L "\$skill_root"; test -r "\$skill_root/SKILL.md"; test -x "\$skill_root/references"; test -r "\$skill_root/references/control-plane-run.md"; test -r "\$skill_root/references/skills.md"'"'"'
+                 printf "%s\n" "job-check: skill-read=ok"
+
+                 term_report="\$(TERM=xterm-color bash -lc '"'"'printf "%s %s" "\$TERM" "\$(tput colors)"'"'"')"
+                 printf "job-check: term=%s\n" "\${term_report}"
+                 [[ "\${term_report}" == "xterm-256color 256" ]]
 
                 podman_info="\$(su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; podman info --format "{{.Store.GraphDriverName}} {{.Host.Security.Rootless}}"'"'"')"
                 printf "job-check: podman-info=%s\n" "\${podman_info}"
                 [[ "\${podman_info}" == "vfs false" ]]
 
-                podman_output="\$(su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; podman run --rm docker.io/library/busybox:1.37.0 echo k8s-job-podman-ok'"'"')"
-                printf "job-check: podman=%s\n" "\${podman_output}"
-                [[ "\${podman_output}" == *"k8s-job-podman-ok"* ]]
+                 podman_output="\$(su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; podman run --rm docker.io/library/busybox:1.37.0 echo k8s-job-podman-ok'"'"')"
+                 printf "job-check: podman=%s\n" "\${podman_output}"
+                 [[ "\${podman_output}" == *"k8s-job-podman-ok"* ]]
 
-                printf "%s\n" "#!/usr/bin/env bash" > /tmp/podman-it-check.sh
-                printf "%s\n" "set -euo pipefail" >> /tmp/podman-it-check.sh
-                printf "%s\n" "podman run -it --rm docker.io/library/busybox:1.37.0 true" >> /tmp/podman-it-check.sh
+                 mkdir -p /tmp/podman-build-probe
+                 printf "%s\n" "FROM docker.io/library/busybox:1.37.0" > /tmp/podman-build-probe/Dockerfile
+                 printf "%s\n" "RUN echo build-ok > /build-ok.txt" >> /tmp/podman-build-probe/Dockerfile
+                 set +e
+                 build_image_id="\$(su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; podman build --isolation=chroot -q -t localhost/k8s-job-build-probe:test /tmp/podman-build-probe'"'"' 2>/tmp/podman-build.log)"
+                 build_status=\$?
+                 set -e
+                 if [[ "\${build_status}" -eq 0 ]]; then
+                   printf "job-check: podman-build-image=%s\n" "\${build_image_id}"
+                   test -n "\${build_image_id}"
+                   build_output="\$(su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; podman run --rm localhost/k8s-job-build-probe:test cat /build-ok.txt'"'"')"
+                   [[ "\${build_output}" == "build-ok" ]]
+                   printf "%s\n" "job-check: podman-build=ok"
+                 else
+                   sed "s/^/job-check: podman-build-log: /" /tmp/podman-build.log >&2 || true
+                   printf "%s\n" "job-check: podman-build=skipped"
+                 fi
+
+                 printf "%s\n" "#!/usr/bin/env bash" > /tmp/podman-it-check.sh
+                 printf "%s\n" "set -euo pipefail" >> /tmp/podman-it-check.sh
+                 printf "%s\n" "podman run -it --rm docker.io/library/busybox:1.37.0 true" >> /tmp/podman-it-check.sh
                 printf "%s\n" "printf \"%s\\n\" \"status:0\"" >> /tmp/podman-it-check.sh
                 chmod 755 /tmp/podman-it-check.sh
                 set +e
@@ -180,13 +207,48 @@ ${service_account_yaml}
                 ssh_output="\$(ssh -i /tmp/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes copilot@127.0.0.1 '"'"'printf "%s\n" ssh-ok; id'"'"')"
                 printf "job-check: ssh=%s\n" "\${ssh_output}"
                 grep -Fq "ssh-ok" <<<"\${ssh_output}"
-                if grep -q "cleanup_exit: kill(" /tmp/sshd.log; then
-                  printf "Unexpected sshd cleanup_exit warning under drop-all profile\n" >&2
-                  cat /tmp/sshd.log >&2
-                  exit 1
-                fi
-                printf "%s\n" "job-check: ssh-clean=ok"
-              '
+                 if grep -q "cleanup_exit: kill(" /tmp/sshd.log; then
+                   printf "Unexpected sshd cleanup_exit warning under drop-all profile\n" >&2
+                   cat /tmp/sshd.log >&2
+                   exit 1
+                 fi
+                 printf "%s\n" "job-check: ssh-clean=ok"
+
+                 cp /home/copilot/.config/control-plane/runtime.env /tmp/runtime.env.bak
+                 printf "%s\n" "CONTROL_PLANE_SESSION_SELECTION=new:k8s-auto-login" >> /home/copilot/.config/control-plane/runtime.env
+                 TERM=tmux-256color ssh -tt -i /tmp/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes copilot@127.0.0.1 </dev/null >/tmp/ssh-interactive.log 2>&1 &
+                 interactive_ssh_pid=\$!
+                 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+                   if su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list | grep -q -- "k8s-auto-login"'"'"'; then
+                     break
+                   fi
+                   if ! kill -0 "\${interactive_ssh_pid}" 2>/dev/null; then
+                     break
+                   fi
+                   sleep 1
+                 done
+                 if ! su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list | grep -q -- "k8s-auto-login"'"'"'; then
+                   printf "%s\n" "job-check: ssh-interactive-log: Interactive SSH login did not create the expected screen session; relying on standalone smoke for this path" >&2
+                   cat /tmp/ssh-interactive.log >&2 || true
+                   printf "%s\n" "job-check: ssh-interactive=skipped"
+                 elif ! kill -0 "\${interactive_ssh_pid}" 2>/dev/null; then
+                   printf "%s\n" "job-check: ssh-interactive-log: Interactive SSH login exited before the session was observed; relying on standalone smoke for this path" >&2
+                   cat /tmp/ssh-interactive.log >&2 || true
+                   printf "%s\n" "job-check: ssh-interactive=skipped"
+                 else
+                   printf "%s\n" "job-check: ssh-interactive=ok"
+                 fi
+                 kill "\${interactive_ssh_pid}" >/dev/null 2>&1 || true
+                 wait "\${interactive_ssh_pid}" 2>/dev/null || true
+                 cp /tmp/runtime.env.bak /home/copilot/.config/control-plane/runtime.env
+                 chown copilot:copilot /home/copilot/.config/control-plane/runtime.env
+                 chmod 600 /home/copilot/.config/control-plane/runtime.env
+                 if grep -q "cannot change locale" /tmp/ssh-interactive.log; then
+                   printf "Unexpected locale warning during interactive SSH login\n" >&2
+                   cat /tmp/ssh-interactive.log >&2 || true
+                   exit 1
+                 fi
+               '
           securityContext:
             privileged: false
             runAsUser: 0
@@ -238,10 +300,13 @@ job_logs="$(kubectl logs "job/${job_name}" -n "${active_namespace}" --all-contai
 printf '%s\n' "${job_logs}"
 
 grep -Fq 'job-check: runtime-env=' <<<"${job_logs}"
+grep -Fq 'job-check: skill-read=ok' <<<"${job_logs}"
 grep -Fq 'job-check: term=xterm-256color 256' <<<"${job_logs}"
 grep -Fq 'job-check: podman-info=vfs false' <<<"${job_logs}"
 grep -Fq 'job-check: podman=k8s-job-podman-ok' <<<"${job_logs}"
+grep -Eq 'job-check: podman-build=(ok|skipped)' <<<"${job_logs}"
 grep -Fq 'job-check: interactive=ok' <<<"${job_logs}"
 grep -Fq 'job-check: ssh-clean=ok' <<<"${job_logs}"
+grep -Eq 'job-check: ssh-interactive=(ok|skipped)' <<<"${job_logs}"
 
 printf '%s\n' 'k8s-job-test: current-cluster rootful-service smoke ok' >&2

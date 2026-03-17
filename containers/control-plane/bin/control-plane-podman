@@ -190,14 +190,104 @@ podman_run_has_option() {
         ;;
     esac
 
+    if podman_run_option_expects_value "${arg}"; then
+      expecting_value="${arg}"
+      continue
+    fi
+
     case "${arg}" in
-      --cgroups|--network|--net)
-        expecting_value="${arg}"
-        ;;
       -*)
         ;;
       *)
         break
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+podman_run_option_expects_value() {
+  case "${1:-}" in
+    --add-host|--annotation|--attach|--blkio-weight-device|--cgroup-parent|--cgroups|--cidfile|--conmon-pidfile|--cpus|--cpuset-cpus|--cpuset-mems|--device|--device-cgroup-rule|--device-read-bps|--device-read-iops|--device-write-bps|--device-write-iops|--dns|--dns-option|--dns-search|--entrypoint|--env|--env-file|--expose|--gidmap|--group-add|--health-cmd|--health-interval|--health-log-destination|--health-max-log-count|--health-max-log-size|--health-on-failure|--health-retries|--health-start-interval|--health-start-period|--health-timeout|--hostname|--hooks-dir|--ipc|--ip|--ip6|--label|--label-file|--log-driver|--log-opt|--mac-address|--memory|--memory-reservation|--memory-swap|--mount|--name|--network|--network-alias|--oom-score-adj|--pid|--platform|--pod|--publish|--pull|--restart|--runtime|--security-opt|--shm-size|--stop-signal|--stop-timeout|--storage-opt|--subgidname|--subuidname|--sysctl|--tmpfs|--ulimit|--uidmap|--user|--userns|--uts|--volume|--volumes-from|--workdir|-a|-c|-e|-h|-l|-m|-p|-u|-v|-w)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+podman_run_has_published_ports() {
+  local expecting_value=""
+  local arg
+
+  for arg in "$@"; do
+    if [[ -n "${expecting_value}" ]]; then
+      expecting_value=""
+      continue
+    fi
+
+    if [[ "${arg}" == "--" ]]; then
+      break
+    fi
+
+    case "${arg}" in
+      -p|--publish|-P|--publish-all|--publish=*|--publish-all=*|-p*)
+        return 0
+        ;;
+      -*)
+        if podman_run_option_expects_value "${arg}"; then
+          expecting_value="${arg}"
+        fi
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+podman_build_has_option() {
+  local option_name="$1"
+  shift
+  local expecting_value=""
+  local arg
+
+  for arg in "$@"; do
+    if [[ -n "${expecting_value}" ]]; then
+      expecting_value=""
+      continue
+    fi
+
+    if [[ "${arg}" == "--" ]]; then
+      break
+    fi
+
+    case "${option_name}" in
+      isolation)
+        case "${arg}" in
+          --isolation|--isolation=*)
+            return 0
+            ;;
+        esac
+        ;;
+    esac
+
+    case "${arg}" in
+      --isolation)
+        expecting_value="${arg}"
+        ;;
+      -*)
+        case "${arg}" in
+          -f|--file|-t|--tag|--build-arg|--target|--cache-from|--cache-to|--secret|--ssh|--volume|--ulimit|--userns-uid-map|--userns-gid-map)
+            expecting_value="${arg}"
+            ;;
+        esac
+        ;;
+      *)
+        continue
         ;;
     esac
   done
@@ -217,9 +307,25 @@ apply_default_run_options() {
   if [[ -n "${default_cgroups}" ]] && ! podman_run_has_option cgroups "${command_args[@]:1}"; then
     updated_args+=("--cgroups=${default_cgroups}")
   fi
-  if [[ -n "${default_network}" ]] && ! podman_run_has_option network "${command_args[@]:1}"; then
+  if [[ -n "${default_network}" ]] \
+    && ! podman_run_has_option network "${command_args[@]:1}" \
+    && ! podman_run_has_published_ports "${command_args[@]:1}"; then
     updated_args+=("--network=${default_network}")
   fi
+  updated_args+=("${command_args[@]:1}")
+  command_args=("${updated_args[@]}")
+}
+
+apply_default_build_options() {
+  local default_build_isolation="${CONTROL_PLANE_PODMAN_BUILD_ISOLATION:-}"
+  local updated_args=()
+
+  command_args=("$@")
+  [[ "${command_args[0]:-}" == "build" ]] || return 0
+  [[ -n "${default_build_isolation}" ]] || return 0
+  podman_build_has_option isolation "${command_args[@]:1}" && return 0
+
+  updated_args=(build "--isolation=${default_build_isolation}")
   updated_args+=("${command_args[@]:1}")
   command_args=("${updated_args[@]}")
 }
@@ -406,6 +512,7 @@ chmod 700 "${XDG_RUNTIME_DIR}"
 chmod 700 "${TMPDIR}"
 
 apply_default_run_options "$@"
+apply_default_build_options "${command_args[@]}"
 
 if podman_command_needs_direct_exec "${command_args[@]}"; then
   exec "${podman_bin}" "${command_args[@]}"

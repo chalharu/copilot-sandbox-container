@@ -3,6 +3,7 @@ set -euo pipefail
 
 control_plane_image="${1:?usage: scripts/test-standalone.sh <control-plane-image> <execution-plane-image>}"
 execution_plane_image="${2:?usage: scripts/test-standalone.sh <control-plane-image> <execution-plane-image>}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ssh_port="${CONTROL_PLANE_TEST_SSH_PORT:-2222}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-podman}"
 container_name="control-plane-standalone-test"
@@ -10,6 +11,9 @@ workdir="$(mktemp -d)"
 state_root="${workdir}/state"
 ssh_key="${workdir}/id_ed25519"
 container_env=()
+host_network_ssh=0
+custom_sshd_config=""
+ssh_opts=()
 
 cleanup() {
   "${container_bin}" rm -f "${container_name}" >/dev/null 2>&1 || true
@@ -24,14 +28,47 @@ require_command() {
   }
 }
 
-ssh_opts=(
-  -o StrictHostKeyChecking=no
-  -o UserKnownHostsFile=/dev/null
-  -o IdentitiesOnly=yes
-  -o SetEnv=LC_ALL=en_US.UTF8
-  -i "${ssh_key}"
-  -p "${ssh_port}"
-)
+read_runtime_var() {
+  local var_name="$1"
+  local runtime_env_file="${CONTROL_PLANE_RUNTIME_ENV_FILE:-${HOME:-/home/${USER:-copilot}}/.config/control-plane/runtime.env}"
+
+  [[ -f "${runtime_env_file}" ]] || return 1
+  sed -n "s/^${var_name}=//p" "${runtime_env_file}" | head -n 1
+}
+
+prepare_host_network_ssh() {
+  local runtime_mode=""
+  local default_network=""
+
+  runtime_mode="$(read_runtime_var CONTROL_PLANE_LOCAL_PODMAN_MODE || true)"
+  default_network="$(read_runtime_var CONTROL_PLANE_PODMAN_DEFAULT_NETWORK || true)"
+
+  [[ "${container_bin}" == "podman" ]] || return 0
+  [[ "${runtime_mode}" == "rootful-service" ]] || return 0
+  [[ "${default_network}" == "host" ]] || return 0
+
+  host_network_ssh=1
+  if [[ "${ssh_port}" == "2222" ]]; then
+    ssh_port="${CONTROL_PLANE_TEST_HOST_NETWORK_SSH_PORT:-22222}"
+  fi
+  custom_sshd_config="${workdir}/sshd_config"
+  sed \
+    -e "s/^Port .*/Port ${ssh_port}/" \
+    "${script_dir}/../containers/control-plane/config/sshd_config" \
+    > "${custom_sshd_config}"
+  printf 'standalone-test: using host-network SSH fallback on port %s\n' "${ssh_port}" >&2
+}
+
+set_ssh_opts() {
+  ssh_opts=(
+    -o StrictHostKeyChecking=no
+    -o UserKnownHostsFile=/dev/null
+    -o IdentitiesOnly=yes
+    -o SetEnv=LC_ALL=en_US.UTF8
+    -i "${ssh_key}"
+    -p "${ssh_port}"
+  )
+}
 
 ssh_cmd() {
   # shellcheck disable=SC2029
@@ -141,9 +178,17 @@ start_container() {
   local run_args=(
     run -d --rm
     --name "${container_name}"
-    -p "127.0.0.1:${ssh_port}:2222"
     -e SSH_PUBLIC_KEY="$(cat "${ssh_key}.pub")"
   )
+
+  if [[ "${host_network_ssh}" -eq 1 ]]; then
+    # The host-network fallback only activates when the outer podman wrapper already
+    # defaults local runs to `--network=host`; adding it again makes raw Podman reject
+    # the run as multiple network selections.
+    :
+  else
+    run_args+=(--network bridge -p "127.0.0.1:${ssh_port}:2222")
+  fi
 
   if ((${#container_env[@]} > 0)); then
     run_args+=("${container_env[@]}")
@@ -155,8 +200,13 @@ start_container() {
     -v "${state_root}/ssh:/home/copilot/.ssh"
     -v "${state_root}/ssh-host-keys:/var/lib/control-plane/ssh-host-keys"
     -v "${state_root}/workspace:/workspace"
-    "${control_plane_image}"
   )
+
+  if [[ "${host_network_ssh}" -eq 1 ]]; then
+    run_args+=(-v "${custom_sshd_config}:/etc/ssh/sshd_config:ro")
+  fi
+
+  run_args+=("${control_plane_image}")
 
   "${container_bin}" "${run_args[@]}" >/dev/null
 }
@@ -168,6 +218,8 @@ require_command ssh-keyscan
 
 mkdir -p "${state_root}/copilot" "${state_root}/gh" "${state_root}/ssh" "${state_root}/ssh-host-keys" "${state_root}/workspace"
 ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"
+prepare_host_network_ssh
+set_ssh_opts
 
 start_container
 wait_for_ssh
