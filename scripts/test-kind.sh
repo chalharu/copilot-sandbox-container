@@ -600,7 +600,7 @@ start_port_forward
 wait_for_ssh
 
 ssh_bash <<EOF
-set -euo pipefail
+set -xeuo pipefail
 command -v node
 command -v npm
 npm ls -g @github/copilot --depth=0 | grep -q '@github/copilot@'
