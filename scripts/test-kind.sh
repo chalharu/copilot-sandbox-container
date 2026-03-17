@@ -656,7 +656,7 @@ fi
 test -d "\${expected_state_dir}/storage/\${expected_driver}"
 test -d "\${expected_state_dir}/storage/volumes"
 test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
-awk 'NR == 1 { exit !($1 == 0 && $2 != 0 && $3 >= 65536) }' /proc/self/uid_map
+awk 'NR == 1 { exit !(\$1 == 0 && \$2 != 0 && \$3 >= 65536) }' /proc/self/uid_map
 EOF
 printf '%s\n' 'kind-test: initial remote assertions ok' >&2
 
