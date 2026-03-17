@@ -600,7 +600,7 @@ start_port_forward
 wait_for_ssh
 
 ssh_bash <<EOF
-set -xeuo pipefail
+set -euo pipefail
 command -v node
 command -v npm
 npm ls -g @github/copilot --depth=0 | grep -q '@github/copilot@'
@@ -640,7 +640,7 @@ else
   expected_driver=vfs
 fi
 expected_state_dir="/home/copilot/.copilot/containers/\${expected_driver}"
-test "$(readlink /home/copilot/.local/share/containers)" = "\${expected_state_dir}"
+test "\$(readlink /home/copilot/.local/share/containers)" = "\${expected_state_dir}"
 grep -qx "graphroot = \"\${expected_state_dir}/storage\"" ~/.config/containers/storage.conf
 grep -qx "runroot = \"/home/copilot/.copilot/run/\${expected_driver}/containers/storage\"" ~/.config/containers/storage.conf
 if [[ "\${expected_driver}" == "overlay" ]]; then
