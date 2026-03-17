@@ -4,16 +4,27 @@ metadata:
   name: copilot-sandbox
 ---
 apiVersion: v1
+kind: Namespace
+metadata:
+  name: copilot-sandbox-jobs
+---
+apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: control-plane
   namespace: copilot-sandbox
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: control-plane-job
+  namespace: copilot-sandbox-jobs
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: control-plane-jobs
-  namespace: copilot-sandbox
+  namespace: copilot-sandbox-jobs
 rules:
   - apiGroups: ["batch"]
     resources: ["jobs"]
@@ -24,12 +35,15 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: control-plane-jobs
-  namespace: copilot-sandbox
+  namespace: copilot-sandbox-jobs
 subjects:
   - kind: ServiceAccount
     name: control-plane
@@ -142,12 +156,24 @@ spec:
             #   value: you@example.com
             - name: CONTROL_PLANE_K8S_NAMESPACE
               value: copilot-sandbox
+            - name: CONTROL_PLANE_JOB_NAMESPACE
+              value: copilot-sandbox-jobs
             - name: CONTROL_PLANE_WORKSPACE_PVC
               value: control-plane-state-pvc
             - name: CONTROL_PLANE_WORKSPACE_SUBPATH
               value: workspace
+            # Optional: when the job namespace has its own shared workspace PVC
+            # that exposes the same repository contents, mount it into Jobs too.
+            # Otherwise keep Jobs stateless and hand small inputs over with
+            # `control-plane-run --mount-file ...`.
+            # - name: CONTROL_PLANE_JOB_WORKSPACE_PVC
+            #   value: control-plane-workspace-pvc
+            # - name: CONTROL_PLANE_JOB_WORKSPACE_SUBPATH
+            #   value: workspace
+            - name: CONTROL_PLANE_JOB_INPUT_MOUNT_PATH
+              value: /var/run/control-plane/job-inputs
             - name: CONTROL_PLANE_JOB_SERVICE_ACCOUNT
-              value: control-plane
+              value: control-plane-job
             # Keep Kubernetes Jobs as the default path in the least-privilege
             # profile. If you explicitly opt into privileged local Podman,
             # switch this to `auto` or pass --mode podman per command.
@@ -167,16 +193,13 @@ spec:
               value: 256Mi
             - name: CONTROL_PLANE_JOB_MEMORY_LIMIT
               value: 2Gi
-          # Default to a containerd-compatible least-privilege SSH/Copilot
-          # profile. Local nested Podman/Kind stays opt-in because runtimes
-          # without Pod user namespaces still tend to need extra privileges.
-          # When you do opt into privileged local Podman, short commands can
-          # route back through Podman by changing CONTROL_PLANE_RUN_MODE, and
-          # the entrypoint falls back to the `vfs` storage driver if /dev/fuse
-          # is unavailable. sshd still needs setuid/setgid plus CAP_SYS_CHROOT
-          # for its privilege-separation sandbox, while the Pod fsGroup keeps
-          # projected service-account credentials readable from the copilot
-          # shell.
+          # Keep a least-privilege SSH/Copilot profile by default. `drop: ALL`
+          # only works because we re-add CHOWN/DAC_OVERRIDE/FOWNER/SETGID/
+          # SETUID/SYS_CHROOT, and the entrypoint now exits early if they are
+          # missing. Local nested Podman/Kind remains best-effort even in
+          # privileged Pods because the outer runtime can still block user
+          # namespaces. Jobs default to a separate namespace; use a
+          # namespace-local workspace PVC there only when you really need one.
           securityContext:
             privileged: false
             runAsUser: 0

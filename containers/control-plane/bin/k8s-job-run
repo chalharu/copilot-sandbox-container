@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  k8s-job-run --namespace NAME --image IMAGE [--job-name NAME] [--timeout 300s] -- COMMAND [ARG...]
+  k8s-job-run --namespace NAME --image IMAGE [--job-name NAME] [--timeout 300s] [--input-mount-path PATH] [--mount-file SRC[:DEST]] -- COMMAND [ARG...]
 USAGE
 }
 
@@ -17,13 +17,28 @@ namespace="default"
 image=""
 job_name=""
 timeout="300s"
+input_mount_path="${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH:-/var/run/control-plane/job-inputs}"
 cleanup_policy="${CONTROL_PLANE_CLEANUP_JOBS:-always}"
 created_job=""
+mount_files=()
+
+# shellcheck disable=SC2329
+job_input_configmap_name() {
+  local current_job_name="$1"
+  local checksum
+  local prefix
+
+  checksum="$(printf '%s' "${current_job_name}" | cksum | awk '{ print $1 }')"
+  prefix="${current_job_name:0:45}"
+  prefix="${prefix%-}"
+  printf '%s-inputs-%s\n' "${prefix}" "${checksum}"
+}
 
 # shellcheck disable=SC2329,SC2317
 cleanup() {
   if [[ -n "${created_job}" ]] && [[ "${cleanup_policy}" == "always" ]]; then
     kubectl delete job --namespace "${namespace}" "${created_job}" --ignore-not-found >/dev/null 2>&1 || true
+    kubectl delete configmap --namespace "${namespace}" "$(job_input_configmap_name "${created_job}")" --ignore-not-found >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -46,6 +61,14 @@ while [[ $# -gt 0 ]]; do
       timeout="$2"
       shift 2
       ;;
+    --mount-file)
+      mount_files+=("$2")
+      shift 2
+      ;;
+    --input-mount-path)
+      input_mount_path="$2"
+      shift 2
+      ;;
     --help)
       usage
       exit 0
@@ -66,6 +89,12 @@ done
 start_args=(--namespace "${namespace}" --image "${image}")
 if [[ -n "${job_name}" ]]; then
   start_args+=(--job-name "${job_name}")
+fi
+if [[ ${#mount_files[@]} -gt 0 ]]; then
+  start_args+=(--input-mount-path "${input_mount_path}")
+  for mount_file in "${mount_files[@]}"; do
+    start_args+=(--mount-file "${mount_file}")
+  done
 fi
 
 created_job="$(k8s-job-start "${start_args[@]}" -- "$@" | tr -d '\n')"

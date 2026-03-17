@@ -100,6 +100,31 @@ EOF
   return 1
 }
 
+wait_for_remote_grep() {
+  local remote_pattern="$1"
+  local remote_path="$2"
+  local attempts="${3:-15}"
+  local remote_command
+  local _
+
+  printf -v remote_command 'REMOTE_PATTERN=%q REMOTE_PATH=%q bash -l -se' \
+    "${remote_pattern}" "${remote_path}"
+
+  for _ in $(seq 1 "${attempts}"); do
+    # shellcheck disable=SC2029
+    if ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_command}" <<'EOF' >/dev/null 2>&1
+set -euo pipefail
+grep -Eq -- "${REMOTE_PATTERN}" "${REMOTE_PATH}"
+EOF
+    then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
 ssh_host_fingerprint() {
   local fingerprint
 
@@ -182,20 +207,28 @@ test -f /home/copilot/.copilot/skills/control-plane-operations/SKILL.md
 test -f /home/copilot/.copilot/skills/control-plane-operations/references/control-plane-run.md
 grep -q "^copilot:" /etc/subuid
 grep -q "^copilot:" /etc/subgid
-test "$(readlink /home/copilot/.local/share/containers)" = "/home/copilot/.copilot/containers"
-grep -qx 'graphroot = "/home/copilot/.copilot/containers/storage"' /home/copilot/.config/containers/storage.conf
-grep -qx 'runroot = "/home/copilot/.copilot/run/containers/storage"' /home/copilot/.config/containers/storage.conf
 grep -qx 'cgroup_manager = "cgroupfs"' /home/copilot/.config/containers/containers.conf
 grep -qx 'events_logger = "file"' /home/copilot/.config/containers/containers.conf
+expected_driver=""
+expected_state_dir=""
 if [[ -e /dev/fuse ]]; then
+  expected_driver=overlay
+else
+  expected_driver=vfs
+fi
+expected_state_dir="/home/copilot/.copilot/containers/${expected_driver}"
+test "$(readlink /home/copilot/.local/share/containers)" = "${expected_state_dir}"
+grep -qx "graphroot = \"${expected_state_dir}/storage\"" /home/copilot/.config/containers/storage.conf
+grep -qx "runroot = \"/home/copilot/.copilot/run/${expected_driver}/containers/storage\"" /home/copilot/.config/containers/storage.conf
+if [[ "${expected_driver}" == "overlay" ]]; then
   grep -qx 'driver = "overlay"' /home/copilot/.config/containers/storage.conf
   grep -qx 'mount_program = "/usr/bin/fuse-overlayfs"' /home/copilot/.config/containers/storage.conf
 else
   grep -qx 'driver = "vfs"' /home/copilot/.config/containers/storage.conf
   ! grep -q 'mount_program' /home/copilot/.config/containers/storage.conf
 fi
-test -d /home/copilot/.copilot/containers/storage/overlay
-test -d /home/copilot/.copilot/containers/storage/volumes
+test -d "${expected_state_dir}/storage/${expected_driver}"
+test -d "${expected_state_dir}/storage/volumes"
 EOF
 
 ssh_bash <<'EOF'
@@ -231,24 +264,59 @@ EOF
   exit 1
 fi
 
-ssh_bash <<'EOF'
+if ! wait_for_remote_grep '^日本語★$' /workspace/screen-utf8.txt; then
+  ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
-grep -qx '日本語★' /workspace/screen-utf8.txt
+cat /workspace/screen-term.txt || true
+cat /workspace/screen-utf8.txt || true
+cat /workspace/screen.txt || true
 EOF
+  printf 'Expected smoke-session to persist UTF-8 screen output\n' >&2
+  exit 1
+fi
 
-ssh_bash <<EOF
+if ! wait_for_remote_grep '^screen-ok$' /workspace/screen.txt; then
+  ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
+cat /workspace/screen-term.txt || true
+cat /workspace/screen-utf8.txt || true
+cat /workspace/screen.txt || true
+EOF
+  printf 'Expected smoke-session to persist screen status output\n' >&2
+  exit 1
+fi
+
+printf '%s\n' 'standalone-test: screen output ready' >&2
+
+printf '%s\n' 'standalone-test: starting fake podman checks' >&2
+if ! ssh_bash <<EOF
+set -euo pipefail
+printf 'small input\n' > /workspace/job-input.txt
+printf 'colon input\n' > '/workspace/job:input.txt'
 cat > /tmp/fake-podman <<'INNER'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "\$@" > /tmp/fake-podman.log
 INNER
 chmod +x /tmp/fake-podman
-CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-run --mode auto --execution-hint short --workspace /workspace --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/podman-auto.txt short
+CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-run --mode auto --execution-hint short --workspace /workspace --mount-file /workspace/job-input.txt:inputs/job-input.txt --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/podman-auto.txt short
 grep -q '^run$' /tmp/fake-podman.log
 grep -q '${execution_plane_image}' /tmp/fake-podman.log
 grep -q '/workspace:/workspace' /tmp/fake-podman.log
+grep -Eq ':/var/run/control-plane/job-inputs:ro$' /tmp/fake-podman.log
+CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-run --mode auto --execution-hint short --workspace /workspace --mount-file '/workspace/job:input.txt' --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/podman-auto-colon.txt short
+grep -Eq ':/var/run/control-plane/job-inputs:ro$' /tmp/fake-podman.log
 EOF
+then
+  ssh_bash <<'EOF' >&2 || true
+set -euo pipefail
+cat /tmp/fake-podman.log || true
+ls -l /workspace || true
+EOF
+  printf 'Expected fake podman control-plane-run checks to succeed\n' >&2
+  exit 1
+fi
+printf '%s\n' 'standalone-test: fake podman checks done' >&2
 
 first_host_fingerprint="$(ssh_host_fingerprint)"
 
@@ -259,19 +327,58 @@ wait_for_ssh
 second_host_fingerprint="$(ssh_host_fingerprint)"
 [[ "${first_host_fingerprint}" == "${second_host_fingerprint}" ]]
 
-ssh_bash <<'EOF'
+printf '%s\n' 'standalone-test: checking persisted state after restart' >&2
+if ! ssh_bash <<'EOF'
 set -euo pipefail
 test -f ~/.copilot/state.txt
 test -f ~/.config/gh/state.txt
 test -f ~/.ssh/state.txt
 test -f /workspace/screen.txt
 EOF
+then
+  ssh_bash <<'EOF' >&2 || true
+set -euo pipefail
+ls -la ~/.copilot || true
+ls -la ~/.config/gh || true
+ls -la ~/.ssh || true
+ls -la /workspace || true
+cat /workspace/screen-term.txt || true
+cat /workspace/screen-utf8.txt || true
+cat /workspace/screen.txt || true
+EOF
+  printf 'Expected control-plane state to persist after restart\n' >&2
+  exit 1
+fi
+printf '%s\n' 'standalone-test: persisted state looks good' >&2
+
+set +e
+missing_caps_output="$("${container_bin}" run --rm --cap-drop ALL "${control_plane_image}" 2>&1)"
+missing_caps_status=$?
+set -e
+printf '%s\n' 'standalone-test: checking cap-drop diagnostics' >&2
+if [[ "${missing_caps_status}" -eq 0 ]]; then
+  printf 'Expected cap-drop ALL container startup to fail\n' >&2
+  printf '%s\n' "${missing_caps_output}" >&2
+  exit 1
+fi
+if ! grep -q 'Missing Linux capabilities for control-plane startup' <<<"${missing_caps_output}"; then
+  printf 'Expected missing capability diagnostic in cap-drop ALL output\n' >&2
+  printf '%s\n' "${missing_caps_output}" >&2
+  exit 1
+fi
+if ! grep -q 'SYS_CHROOT' <<<"${missing_caps_output}"; then
+  printf 'Expected SYS_CHROOT in cap-drop ALL output\n' >&2
+  printf '%s\n' "${missing_caps_output}" >&2
+  exit 1
+fi
+printf '%s\n' 'standalone-test: cap-drop diagnostics look good' >&2
 
 "${container_bin}" rm -f "${container_name}" >/dev/null
 container_env=(-e CONTROL_PLANE_SESSION_SELECTION=new:auto-login)
 start_container
 wait_for_ssh
 
+printf '%s\n' 'standalone-test: starting auto-login ssh flow' >&2
 TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 </dev/null >"${workdir}/ssh-login.log" 2>&1 &
 interactive_ssh_pid=$!
 if ! wait_for_screen_session auto-login; then
@@ -279,6 +386,7 @@ if ! wait_for_screen_session auto-login; then
   cat "${workdir}/ssh-login.log" >&2 || true
   exit 1
 fi
+printf '%s\n' 'standalone-test: auto-login session ready' >&2
 
 kill "${interactive_ssh_pid}" >/dev/null 2>&1 || true
 wait "${interactive_ssh_pid}" 2>/dev/null || true
@@ -287,6 +395,7 @@ if grep -q 'cannot change locale' "${workdir}/ssh-login.log"; then
   cat "${workdir}/ssh-login.log" >&2 || true
   exit 1
 fi
+printf '%s\n' 'standalone-test: auto-login locale ok' >&2
 
 "${container_bin}" rm -f "${container_name}" >/dev/null
 container_env=(
@@ -300,7 +409,8 @@ container_env=(
 start_container
 wait_for_ssh
 
-ssh_bash <<'EOF'
+printf '%s\n' 'standalone-test: preparing copilot picker state' >&2
+if ! ssh_bash <<'EOF'
 set -euo pipefail
 test -z "${COPILOT_GITHUB_TOKEN:-}"
 test "$(git config --global user.name)" = "Picker Test User"
@@ -346,7 +456,20 @@ if control-plane-session --list | grep -q 'picker-copilot'; then
   exit 1
 fi
 EOF
+then
+  ssh_bash <<'EOF' >&2 || true
+set -euo pipefail
+git config --global --list || true
+screen -list || true
+control-plane-session --list || true
+ls -la /workspace || true
+EOF
+  printf 'Expected Copilot picker preconditions to be configured correctly\n' >&2
+  exit 1
+fi
+printf '%s\n' 'standalone-test: copilot picker state prepared' >&2
 
+printf '%s\n' 'standalone-test: starting copilot ssh flow' >&2
 TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 </dev/null >"${workdir}/ssh-copilot.log" 2>&1 &
 copilot_ssh_pid=$!
 if ! ssh_bash <<'EOF'
@@ -374,6 +497,7 @@ then
   cat "${workdir}/ssh-copilot.log" >&2 || true
   exit 1
 fi
+printf '%s\n' 'standalone-test: copilot ssh flow ready' >&2
 
 kill "${copilot_ssh_pid}" >/dev/null 2>&1 || true
 wait "${copilot_ssh_pid}" 2>/dev/null || true
@@ -387,3 +511,4 @@ if grep -q 'cannot change locale' "${workdir}/ssh-copilot.log"; then
   cat "${workdir}/ssh-copilot.log" >&2 || true
   exit 1
 fi
+printf '%s\n' 'standalone-test: copilot ssh banner ok' >&2

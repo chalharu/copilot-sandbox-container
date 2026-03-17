@@ -7,10 +7,8 @@ control_plane_workspace="${CONTROL_PLANE_WORKSPACE:-/workspace}"
 containers_config_dir="${control_plane_home}/.config/containers"
 containers_storage_config_path="${containers_config_dir}/storage.conf"
 containers_engine_config_path="${containers_config_dir}/containers.conf"
-podman_state_dir="${control_plane_home}/.copilot/containers"
+podman_state_root="${control_plane_home}/.copilot/containers"
 runtime_dir="${XDG_RUNTIME_DIR:-${control_plane_home}/.copilot/run}"
-podman_graphroot="${podman_state_dir}/storage"
-podman_runroot="${runtime_dir}/containers/storage"
 tmp_dir="${TMPDIR:-${control_plane_home}/.copilot/tmp}"
 screen_dir="${SCREENDIR:-${control_plane_home}/.copilot/screen}"
 host_key_dir="${CONTROL_PLANE_HOST_KEY_DIR:-/var/lib/control-plane/ssh-host-keys}"
@@ -28,6 +26,11 @@ copilot_github_token="${COPILOT_GITHUB_TOKEN:-}"
 git_user_name="${CONTROL_PLANE_GIT_USER_NAME:-}"
 git_user_email="${CONTROL_PLANE_GIT_USER_EMAIL:-}"
 podman_storage_driver="${CONTROL_PLANE_PODMAN_STORAGE_DRIVER:-}"
+job_namespace="${CONTROL_PLANE_JOB_NAMESPACE:-${CONTROL_PLANE_K8S_NAMESPACE:-default}}"
+job_workspace_pvc="${CONTROL_PLANE_JOB_WORKSPACE_PVC:-}"
+job_workspace_mount_path="${CONTROL_PLANE_JOB_WORKSPACE_MOUNT_PATH:-${CONTROL_PLANE_WORKSPACE_MOUNT_PATH:-/workspace}}"
+job_workspace_subpath="${CONTROL_PLANE_JOB_WORKSPACE_SUBPATH:-${CONTROL_PLANE_WORKSPACE_SUBPATH:-workspace}}"
+job_input_mount_path="${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH:-/var/run/control-plane/job-inputs}"
 
 if [[ -z "${podman_storage_driver}" ]]; then
   if [[ -e /dev/fuse ]]; then
@@ -45,6 +48,10 @@ case "${podman_storage_driver}" in
     exit 1
     ;;
 esac
+
+podman_state_dir="${podman_state_root}/${podman_storage_driver}"
+podman_graphroot="${podman_state_dir}/storage"
+podman_runroot="${runtime_dir}/${podman_storage_driver}/containers/storage"
 
 write_runtime_var() {
   printf '%s=%q\n' "$1" "$2"
@@ -84,6 +91,92 @@ safe_chown_tree() {
 directory_has_entries() {
   local target="$1"
   find "${target}" -mindepth 1 -maxdepth 1 -print -quit | grep -q .
+}
+
+capability_bit() {
+  case "$1" in
+    CHOWN) printf '0\n' ;;
+    DAC_OVERRIDE) printf '1\n' ;;
+    FOWNER) printf '3\n' ;;
+    SETGID) printf '6\n' ;;
+    SETUID) printf '7\n' ;;
+    SYS_CHROOT) printf '18\n' ;;
+    *)
+      printf 'Unsupported capability name: %s\n' "$1" >&2
+      exit 1
+      ;;
+  esac
+}
+
+has_effective_capability() {
+  local capability_name="$1"
+  local capability_mask="$2"
+  local bit
+
+  bit="$(capability_bit "${capability_name}")"
+  (( (16#${capability_mask} & (1 << bit)) != 0 ))
+}
+
+require_container_capabilities() {
+  local capability_mask
+  local missing=()
+  local capability_name
+
+  [[ "$(id -u)" -eq 0 ]] || return 0
+  capability_mask="$(awk '/^CapEff:/ { print $2 }' /proc/self/status)"
+  [[ -n "${capability_mask}" ]] || return 0
+
+  for capability_name in CHOWN DAC_OVERRIDE FOWNER SETGID SETUID SYS_CHROOT; do
+    if ! has_effective_capability "${capability_name}" "${capability_mask}"; then
+      missing+=("${capability_name}")
+    fi
+  done
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    printf 'Missing Linux capabilities for control-plane startup: %s\n' "${missing[*]}" >&2
+    printf '%s\n' \
+      'Keep drop: ALL only when you re-add CHOWN,DAC_OVERRIDE,FOWNER,SETGID,SETUID,SYS_CHROOT, or run the container privileged.' \
+      'SSH requires SETUID/SETGID plus SYS_CHROOT for privilege separation, and the entrypoint still needs ownership-related capabilities on mounted state.' \
+      >&2
+    exit 1
+  fi
+}
+
+detect_legacy_podman_storage_driver() {
+  local legacy_state_root="$1"
+  local storage_root="${legacy_state_root}/storage"
+
+  if [[ ! -d "${storage_root}" ]]; then
+    return 1
+  fi
+
+  if [[ -d "${storage_root}/overlay" ]] || compgen -G "${storage_root}/overlay-*" >/dev/null; then
+    printf 'overlay\n'
+    return 0
+  fi
+
+  if [[ -d "${storage_root}/vfs" ]] || compgen -G "${storage_root}/vfs-*" >/dev/null; then
+    printf 'vfs\n'
+    return 0
+  fi
+
+  return 1
+}
+
+migrate_legacy_podman_state() {
+  local legacy_state_root="$1"
+  local detected_driver
+
+  [[ -d "${legacy_state_root}/storage" ]] || return 0
+  [[ ! -e "${podman_graphroot}" ]] || return 0
+
+  detected_driver="$(detect_legacy_podman_storage_driver "${legacy_state_root}" || true)"
+  if [[ -z "${detected_driver}" ]] || [[ "${detected_driver}" != "${podman_storage_driver}" ]]; then
+    return 0
+  fi
+
+  mkdir -p "${podman_state_dir}"
+  mv "${legacy_state_root}/storage" "${podman_graphroot}"
 }
 
 write_private_file() {
@@ -222,6 +315,8 @@ configure_git() {
   chmod 600 "${git_config_path}"
 }
 
+require_container_capabilities
+
 mkdir -p \
   "${control_plane_home}/.copilot" \
   "${containers_config_dir}" \
@@ -232,15 +327,19 @@ mkdir -p \
   "${control_plane_home}/.ssh" \
   "${copilot_skills_dir}" \
   "${control_plane_workspace}" \
+  "${podman_state_root}" \
   "${podman_state_dir}" \
-  "${podman_graphroot}" \
-  "${podman_graphroot}/overlay" \
-  "${podman_graphroot}/volumes" \
   "${screen_dir}" \
   "${tmp_dir}" \
   "${host_key_dir}" \
   /run/sshd \
-  "${runtime_dir}" \
+  "${runtime_dir}"
+migrate_legacy_podman_state "${podman_state_root}"
+
+mkdir -p \
+  "${podman_graphroot}" \
+  "${podman_graphroot}/${podman_storage_driver}" \
+  "${podman_graphroot}/volumes" \
   "${podman_runroot}"
 
 safe_chown_tree "${control_plane_user}:${control_plane_user}" \
@@ -251,7 +350,7 @@ safe_chown_tree "${control_plane_user}:${control_plane_user}" \
   "${control_plane_home}/.ssh" \
   "${copilot_skills_dir}" \
   "${control_plane_workspace}" \
-  "${podman_state_dir}" \
+  "${podman_state_root}" \
   "${screen_dir}" \
   "${tmp_dir}" \
   "${runtime_dir}"
@@ -326,10 +425,15 @@ fi
 
 {
   write_runtime_var CONTROL_PLANE_K8S_NAMESPACE "${CONTROL_PLANE_K8S_NAMESPACE:-default}"
+  write_runtime_var CONTROL_PLANE_JOB_NAMESPACE "${job_namespace}"
   write_runtime_var CONTROL_PLANE_WORKSPACE "${CONTROL_PLANE_WORKSPACE:-/workspace}"
   write_runtime_var CONTROL_PLANE_WORKSPACE_PVC "${CONTROL_PLANE_WORKSPACE_PVC:-}"
   write_runtime_var CONTROL_PLANE_WORKSPACE_MOUNT_PATH "${CONTROL_PLANE_WORKSPACE_MOUNT_PATH:-/workspace}"
   write_runtime_var CONTROL_PLANE_WORKSPACE_SUBPATH "${CONTROL_PLANE_WORKSPACE_SUBPATH:-workspace}"
+  write_runtime_var CONTROL_PLANE_JOB_WORKSPACE_PVC "${job_workspace_pvc}"
+  write_runtime_var CONTROL_PLANE_JOB_WORKSPACE_MOUNT_PATH "${job_workspace_mount_path}"
+  write_runtime_var CONTROL_PLANE_JOB_WORKSPACE_SUBPATH "${job_workspace_subpath}"
+  write_runtime_var CONTROL_PLANE_JOB_INPUT_MOUNT_PATH "${job_input_mount_path}"
   write_runtime_var CONTROL_PLANE_HOST_KEY_DIR "${host_key_dir}"
   if [[ -n "${CONTROL_PLANE_SCREEN_SESSION:-}" ]]; then
     write_runtime_var CONTROL_PLANE_SCREEN_SESSION "${CONTROL_PLANE_SCREEN_SESSION}"

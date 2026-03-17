@@ -5,6 +5,7 @@ control_plane_image="${1:?usage: scripts/test-kind.sh <control-plane-image> <exe
 execution_plane_image="${2:?usage: scripts/test-kind.sh <control-plane-image> <execution-plane-image> [cluster-name]}"
 cluster_name="${3:-control-plane-ci}"
 namespace="${CONTROL_PLANE_TEST_NAMESPACE:-control-plane-ci}"
+job_namespace="${CONTROL_PLANE_TEST_JOB_NAMESPACE:-${namespace}-jobs}"
 ssh_port="${CONTROL_PLANE_TEST_SSH_PORT:-32222}"
 kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-podman}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-${kind_provider}}"
@@ -148,6 +149,31 @@ EOF
   return 1
 }
 
+wait_for_remote_grep() {
+  local remote_pattern="$1"
+  local remote_path="$2"
+  local attempts="${3:-15}"
+  local remote_command
+  local _
+
+  printf -v remote_command 'REMOTE_PATTERN=%q REMOTE_PATH=%q bash -l -se' \
+    "${remote_pattern}" "${remote_path}"
+
+  for _ in $(seq 1 "${attempts}"); do
+    # shellcheck disable=SC2029
+    if ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_command}" <<'EOF' >/dev/null 2>&1
+set -euo pipefail
+grep -Eq -- "${REMOTE_PATTERN}" "${REMOTE_PATH}"
+EOF
+    then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
 ssh_host_fingerprint() {
   local fingerprint
 
@@ -223,16 +249,27 @@ metadata:
   name: ${namespace}
 ---
 apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${job_namespace}
+---
+apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: control-plane
   namespace: ${namespace}
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: control-plane-job
+  namespace: ${job_namespace}
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: control-plane-jobs
-  namespace: ${namespace}
+  namespace: ${job_namespace}
 rules:
   - apiGroups: ["batch"]
     resources: ["jobs"]
@@ -243,12 +280,15 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: control-plane-jobs
-  namespace: ${namespace}
+  namespace: ${job_namespace}
 subjects:
   - kind: ServiceAccount
     name: control-plane
@@ -274,6 +314,21 @@ spec:
     type: DirectoryOrCreate
 ---
 apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: control-plane-workspace-control-pv
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: control-plane-control-workspace-manual
+  hostPath:
+    path: /tmp/control-plane-workspace
+    type: DirectoryOrCreate
+---
+apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: control-plane-state-pvc
@@ -286,6 +341,51 @@ spec:
       storage: 2Gi
   storageClassName: control-plane-manual
   volumeName: control-plane-state-pv
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: control-plane-workspace-pvc
+  namespace: ${namespace}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: control-plane-control-workspace-manual
+  volumeName: control-plane-workspace-control-pv
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: control-plane-workspace-job-pv
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: control-plane-job-workspace-manual
+  # Intentionally use the same hostPath as the control-plane workspace PV so
+  # the Kind test can simulate a shared RW filesystem across namespaces.
+  hostPath:
+    path: /tmp/control-plane-workspace
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: control-plane-workspace-pvc
+  namespace: ${job_namespace}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: control-plane-job-workspace-manual
+  volumeName: control-plane-workspace-job-pv
 ---
 apiVersion: v1
 kind: Secret
@@ -342,7 +442,7 @@ spec:
           command:
             - sh
             - -c
-            - umask 077 && mkdir -p /state/copilot /state/gh /state/ssh /state/ssh-host-keys /state/workspace
+            - umask 077 && mkdir -p /state/copilot /state/gh /state/ssh /state/ssh-host-keys /workspace-state/workspace
           securityContext:
             privileged: false
             runAsUser: 0
@@ -356,6 +456,8 @@ spec:
           volumeMounts:
             - name: state
               mountPath: /state
+            - name: workspace
+              mountPath: /workspace-state
       containers:
         - name: control-plane
           image: ${control_plane_image}
@@ -365,12 +467,18 @@ spec:
               value: /var/run/control-plane-auth/ssh-public-key
             - name: CONTROL_PLANE_K8S_NAMESPACE
               value: ${namespace}
+            - name: CONTROL_PLANE_JOB_NAMESPACE
+              value: ${job_namespace}
             - name: CONTROL_PLANE_WORKSPACE_PVC
-              value: control-plane-state-pvc
+              value: control-plane-workspace-pvc
             - name: CONTROL_PLANE_WORKSPACE_SUBPATH
               value: workspace
+            - name: CONTROL_PLANE_JOB_WORKSPACE_PVC
+              value: control-plane-workspace-pvc
+            - name: CONTROL_PLANE_JOB_WORKSPACE_SUBPATH
+              value: workspace
             - name: CONTROL_PLANE_JOB_SERVICE_ACCOUNT
-              value: control-plane
+              value: control-plane-job
             - name: CONTROL_PLANE_RUN_MODE
               value: k8s-job
             - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
@@ -428,7 +536,7 @@ spec:
             - name: state
               mountPath: /var/lib/control-plane/ssh-host-keys
               subPath: ssh-host-keys
-            - name: state
+            - name: workspace
               mountPath: /workspace
               subPath: workspace
             - name: control-plane-auth
@@ -438,6 +546,9 @@ spec:
         - name: state
           persistentVolumeClaim:
             claimName: control-plane-state-pvc
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: control-plane-workspace-pvc
         - name: control-plane-auth
           secret:
             secretName: control-plane-auth
@@ -447,7 +558,10 @@ EOF
 cleanup() {
   stop_port_forward
   kubectl delete namespace "${namespace}" --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete namespace "${job_namespace}" --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete pv control-plane-state-pv --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete pv control-plane-workspace-control-pv --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete pv control-plane-workspace-job-pv --ignore-not-found >/dev/null 2>&1 || true
   if [[ "${created_cluster}" -eq 1 ]]; then
     kind_cmd delete cluster --name "${cluster_name}" >/dev/null 2>&1 || true
   fi
@@ -493,6 +607,10 @@ npm ls -g @github/copilot --depth=0 | grep -q '@github/copilot@'
 command -v git
 command -v gh
 command -v kubectl
+command -v k8s-job-start
+command -v k8s-job-wait
+command -v k8s-job-pod
+command -v k8s-job-logs
 command -v podman
 command -v docker
 command -v kind
@@ -512,21 +630,58 @@ test "\${EDITOR}" = "vim"
 test "\${VISUAL}" = "vim"
 test "\${GH_PAGER}" = "cat"
 test -f ~/.copilot/skills/control-plane-operations/SKILL.md
-grep -qx 'graphroot = "/home/copilot/.copilot/containers/storage"' ~/.config/containers/storage.conf
-grep -qx 'runroot = "/home/copilot/.copilot/run/containers/storage"' ~/.config/containers/storage.conf
 grep -qx 'cgroup_manager = "cgroupfs"' ~/.config/containers/containers.conf
 grep -qx 'events_logger = "file"' ~/.config/containers/containers.conf
+expected_driver=""
+expected_state_dir=""
 if [[ -e /dev/fuse ]]; then
+  expected_driver=overlay
+else
+  expected_driver=vfs
+fi
+expected_state_dir="/home/copilot/.copilot/containers/\${expected_driver}"
+test "\$(readlink /home/copilot/.local/share/containers)" = "\${expected_state_dir}"
+grep -qx "graphroot = \"\${expected_state_dir}/storage\"" ~/.config/containers/storage.conf
+grep -qx "runroot = \"/home/copilot/.copilot/run/\${expected_driver}/containers/storage\"" ~/.config/containers/storage.conf
+if [[ "\${expected_driver}" == "overlay" ]]; then
   grep -qx 'driver = "overlay"' ~/.config/containers/storage.conf
   grep -qx 'mount_program = "/usr/bin/fuse-overlayfs"' ~/.config/containers/storage.conf
 else
   grep -qx 'driver = "vfs"' ~/.config/containers/storage.conf
   ! grep -q 'mount_program' ~/.config/containers/storage.conf
 fi
-test -d ~/.copilot/containers/storage/overlay
-test -d ~/.copilot/containers/storage/volumes
-kubectl auth can-i create jobs --namespace ${namespace} | grep -q '^yes$'
+test -d "\${expected_state_dir}/storage/\${expected_driver}"
+test -d "\${expected_state_dir}/storage/volumes"
+test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
 EOF
+printf '%s\n' 'kind-test: initial remote assertions ok' >&2
+
+ssh_bash <<EOF
+set -euo pipefail
+set +e
+jobs_access="\$(kubectl auth can-i create jobs --namespace ${job_namespace} 2>&1)"
+jobs_status=\$?
+set -e
+if [[ "\${jobs_status}" -ne 0 ]] || [[ "\${jobs_access}" != "yes" ]]; then
+  printf 'Expected control-plane service account to create jobs in namespace %s\n' "${job_namespace}" >&2
+  printf 'kubectl auth can-i exit status: %s\n' "\${jobs_status}" >&2
+  printf '%s\n' "\${jobs_access}" >&2
+  kubectl config current-context >&2 || true
+  exit 1
+fi
+set +e
+configmaps_access="\$(kubectl auth can-i create configmaps --namespace ${job_namespace} 2>&1)"
+configmaps_status=\$?
+set -e
+if [[ "\${configmaps_status}" -ne 0 ]] || [[ "\${configmaps_access}" != "yes" ]]; then
+  printf 'Expected control-plane service account to create configmaps in namespace %s\n' "${job_namespace}" >&2
+  printf 'kubectl auth can-i exit status: %s\n' "\${configmaps_status}" >&2
+  printf '%s\n' "\${configmaps_access}" >&2
+  kubectl config current-context >&2 || true
+  exit 1
+fi
+EOF
+printf '%s\n' 'kind-test: rbac assertions ok' >&2
 
 utf8_roundtrip="$(ssh_bash <<'EOF'
 set -euo pipefail
@@ -534,6 +689,7 @@ printf '日本語★\n'
 EOF
 )"
 [[ "${utf8_roundtrip}" == "日本語★" ]]
+printf '%s\n' 'kind-test: utf8 roundtrip ok' >&2
 
 ssh_bash <<'EOF'
 set -euo pipefail
@@ -543,6 +699,7 @@ echo gh > ~/.config/gh/state.txt
 echo ssh > ~/.ssh/state.txt
 screen -T screen-256color -dmS kind-session sh -lc 'printf "%s\n" "$TERM" > /workspace/k8s-screen-term.txt; printf "日本語★\n" > /workspace/k8s-screen-utf8.txt; echo k8s-screen > /workspace/k8s-screen.txt; sleep 30'
 EOF
+printf '%s\n' 'kind-test: screen session started' >&2
 
 if ! wait_for_screen_term kind-session /workspace/k8s-screen-term.txt; then
   ssh_bash <<'EOF' >&2 || true
@@ -554,27 +711,64 @@ EOF
   printf 'Expected kind-session to report a screen-256color TERM variant\n' >&2
   exit 1
 fi
+printf '%s\n' 'kind-test: screen term ready' >&2
 
-ssh_bash <<'EOF'
+if ! wait_for_remote_grep '^日本語★$' /workspace/k8s-screen-utf8.txt; then
+  ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
-grep -qx '日本語★' /workspace/k8s-screen-utf8.txt
+cat /workspace/k8s-screen-term.txt || true
+cat /workspace/k8s-screen-utf8.txt || true
+cat /workspace/k8s-screen.txt || true
 EOF
+  printf 'Expected kind-session to persist UTF-8 screen output\n' >&2
+  exit 1
+fi
+printf '%s\n' 'kind-test: screen utf8 ready' >&2
 
-job_name="$(ssh_bash <<EOF
+if ! wait_for_remote_grep '^k8s-screen$' /workspace/k8s-screen.txt; then
+  ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
-k8s-job-start --namespace ${namespace} --job-name ci-manual-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/manual-job.txt manual
+cat /workspace/k8s-screen-term.txt || true
+cat /workspace/k8s-screen-utf8.txt || true
+cat /workspace/k8s-screen.txt || true
 EOF
-)"
+  printf 'Expected kind-session to persist screen status output\n' >&2
+  exit 1
+fi
+printf '%s\n' 'kind-test: screen output ready' >&2
+
+printf '%s\n' 'kind-test: starting manual job' >&2
+if ! job_name="$(ssh_bash <<EOF
+set -euo pipefail
+k8s-job-start --namespace ${job_namespace} --job-name ci-manual-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/manual-job.txt manual
+EOF
+)";
+then
+  ssh_bash <<EOF >&2 || true
+set -euxo pipefail
+command -v k8s-job-start
+kubectl config current-context
+kubectl get namespace ${job_namespace}
+kubectl get serviceaccount control-plane-job --namespace ${job_namespace}
+kubectl get pvc control-plane-workspace-pvc --namespace ${job_namespace}
+kubectl auth can-i create jobs --namespace ${job_namespace}
+kubectl delete job --namespace ${job_namespace} ci-manual-job --ignore-not-found >/dev/null 2>&1 || true
+bash -x "\$(command -v k8s-job-start)" --namespace ${job_namespace} --job-name ci-manual-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/manual-job.txt manual
+EOF
+  dump_control_plane_diagnostics
+  exit 1
+fi
 job_name="$(printf '%s' "${job_name}" | tr -d '\r\n')"
+printf '%s\n' 'kind-test: manual job created' >&2
 
 ssh_bash <<EOF
 set -euo pipefail
-k8s-job-wait --namespace ${namespace} --job-name ${job_name} --timeout 180s
+k8s-job-wait --namespace ${job_namespace} --job-name ${job_name} --timeout 180s
 EOF
 
 pod_name="$(ssh_bash <<EOF
 set -euo pipefail
-k8s-job-pod --namespace ${namespace} --job-name ${job_name}
+k8s-job-pod --namespace ${job_namespace} --job-name ${job_name}
 EOF
 )"
 pod_name="$(printf '%s' "${pod_name}" | tr -d '\r\n')"
@@ -582,7 +776,7 @@ pod_name="$(printf '%s' "${pod_name}" | tr -d '\r\n')"
 
 logs="$(ssh_bash <<EOF
 set -euo pipefail
-k8s-job-logs --namespace ${namespace} --job-name ${job_name}
+k8s-job-logs --namespace ${job_namespace} --job-name ${job_name}
 EOF
 )"
 grep -q 'manual' <<<"${logs}"
@@ -594,7 +788,7 @@ EOF
 
 auto_output="$(ssh_bash <<EOF
 set -euo pipefail
-control-plane-run --mode auto --execution-hint long --namespace ${namespace} --job-name ci-auto-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/auto-job.txt auto
+control-plane-run --mode auto --execution-hint long --namespace ${job_namespace} --job-name ci-auto-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/auto-job.txt auto
 EOF
 )"
 grep -q 'auto' <<<"${auto_output}"
@@ -606,7 +800,7 @@ EOF
 
 default_mode_output="$(ssh_bash <<EOF
 set -euo pipefail
-control-plane-run --namespace ${namespace} --job-name ci-default-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/default-job.txt default
+control-plane-run --job-name ci-default-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/default-job.txt default
 EOF
 )"
 grep -q 'default' <<<"${default_mode_output}"
@@ -618,16 +812,27 @@ EOF
 
 ssh_bash <<EOF
 set -euo pipefail
+printf 'job input from configmap\n' > /workspace/job-input.txt
+printf 'colon input\n' > '/workspace/job:input.txt'
 cat > /tmp/fake-podman <<'INNER'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "\$@" > /tmp/fake-podman.log
 INNER
 chmod +x /tmp/fake-podman
-CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-run --mode auto --execution-hint short --workspace /workspace --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/short-auto.txt short
+CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-run --mode auto --execution-hint short --workspace /workspace --mount-file /workspace/job-input.txt:inputs/job-input.txt --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/short-auto.txt short
 grep -q '^run$' /tmp/fake-podman.log
 grep -q '${execution_plane_image}' /tmp/fake-podman.log
+grep -Eq ':/var/run/control-plane/job-inputs:ro$' /tmp/fake-podman.log
+CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-run --mode auto --execution-hint short --workspace /workspace --mount-file '/workspace/job:input.txt' --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/short-auto-colon.txt short
+grep -Eq ':/var/run/control-plane/job-inputs:ro$' /tmp/fake-podman.log
+control-plane-run --mode auto --execution-hint long --namespace ${job_namespace} --job-name ci-configmap-job --mount-file /workspace/job-input.txt:inputs/job-input.txt --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke exec bash -lc 'grep -qx "job input from configmap" /var/run/control-plane/job-inputs/inputs/job-input.txt'
 EOF
+
+if kubectl get configmaps --namespace "${job_namespace}" -l job-name=ci-configmap-job -o jsonpath='{.items[*].metadata.name}' | grep -q .; then
+  printf 'Expected ci-configmap-job input ConfigMap to be cleaned up\n' >&2
+  exit 1
+fi
 
 first_host_fingerprint="$(ssh_host_fingerprint)"
 

@@ -32,11 +32,14 @@ report_missing_build_test_toolchain() {
 report_podman_runtime_failure() {
   local output="$1"
 
-  if grep -Fq 'newuidmap' <<<"${output}" && grep -Fq 'Operation not permitted' <<<"${output}"; then
+  if {
+    grep -Fq 'newuidmap' <<<"${output}" && grep -Fq 'Operation not permitted' <<<"${output}";
+  } || grep -Fqi 'cannot set user namespace' <<<"${output}"; then
     printf '%s\n' \
-      "Podman is installed but unusable in this environment: nested user namespace setup is blocked (\`newuidmap\` failed)." \
+      "Podman is installed but unusable in this environment: nested user namespace setup is blocked." \
       'Entries in /etc/subuid and /etc/subgid inside the nested container are not enough; the outer host/runtime still has to allow user namespaces and newuidmap/newgidmap.' \
-      'Use the sample least-privilege deployment for SSH/Copilot plus Kubernetes Jobs, or fall back to GitHub Actions / a host runner. If you must run local Podman in-cluster, extra runtime support or privileged mode remains a last-resort override.' \
+      'Even privileged Pods can still fail here when the outer host/runtime blocks nested user namespaces.' \
+      'Use the sample SSH/Copilot plus Kubernetes Job path, or fall back to GitHub Actions / a host runner. If you must run local Podman in-cluster, the outer runtime still needs to permit nested user namespaces and related helpers.' \
       >&2
   fi
 }
