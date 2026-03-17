@@ -10,6 +10,17 @@ container_bin=""
 renovate_image="${CONTROL_PLANE_RENOVATE_IMAGE:-ghcr.io/renovatebot/renovate:43.76.5@sha256:8d1aebba75a0367a4ede67c6177bd2c760d431bbeb88940cb7dd55029a40af53}"
 base_dir=""
 log_file=""
+renovate_env=()
+
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "${value}"
+}
 
 cleanup() {
   local cleanup_container_bin="${container_bin:-}"
@@ -46,6 +57,13 @@ chmod 0777 "${base_dir}"
 
 require_command "${container_bin}"
 
+if [[ -n "${DOCKERHUB_USERNAME:-}" ]] && [[ -n "${DOCKERHUB_TOKEN:-}" ]]; then
+  printf -v renovate_host_rules '[{"matchHost":"dhi.io","username":"%s","password":"%s"}]' \
+    "$(json_escape "${DOCKERHUB_USERNAME}")" \
+    "$(json_escape "${DOCKERHUB_TOKEN}")"
+  renovate_env+=(-e "RENOVATE_HOST_RULES=${renovate_host_rules}")
+fi
+
 "${container_bin}" run --rm \
   -v "${PWD}:/workspace:ro" \
   -w /workspace \
@@ -54,6 +72,7 @@ require_command "${container_bin}"
   --strict --no-global /workspace/renovate.json5
 
 if ! "${container_bin}" run --rm \
+  "${renovate_env[@]}" \
   -e LOG_LEVEL=debug \
   -e RENOVATE_CONFIG_FILE=/workspace/renovate.json5 \
   -e RENOVATE_BASE_DIR=/tmp/renovate-base \

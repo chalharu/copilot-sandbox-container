@@ -41,6 +41,8 @@ jobs:
       - name: Run lint
         env:
           CONTROL_PLANE_TOOLCHAIN: podman
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: ./scripts/lint.sh
 
   integration:
