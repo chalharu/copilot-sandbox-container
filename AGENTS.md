@@ -13,9 +13,9 @@
 
 <!-- Update this section as the project takes shape -->
 
-**Project type:** [To be determined - e.g., web app, CLI tool, library]
-**Primary language:** [To be determined]
-**Key dependencies:** [To be determined]
+**Project type:** Container image and shell-script repository for a Copilot Control Plane and reference Execution Planes
+**Primary language:** Bash with Dockerfiles and Kubernetes manifests
+**Key dependencies:** Podman/Buildah, Docker Buildx, kubectl, Kind, gh, GNU Screen
 
 ---
 
@@ -52,8 +52,11 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 
 <!-- Major architecture changes MUST trigger a rewrite of this section -->
 
-```
-[Add directory structure overview when it stabilizes]
+```text
+/containers/control-plane         Control Plane image, entrypoints, bundled skills
+/containers/execution-plane-*     Reference Execution Plane images
+/deploy/kubernetes                Sample deployment manifests
+/scripts                          Supported lint/build/test entry points
 ```
 
 ---

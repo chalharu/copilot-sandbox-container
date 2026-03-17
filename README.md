@@ -1,14 +1,35 @@
 # copilot-sandbox-container
 
-Control Plane / Execution Plane の要件は `docs/requirements.md` にあります。
+`copilot-sandbox-container` は、Copilot CLI 向けの Control Plane イメージ、
+用途別の Execution Plane 参照実装、それらを lint / build / test / publish する
+スクリプト群をまとめたリポジトリです。
+
+まず全体像を掴みたい場合は、次を先に読むと迷いにくくなります。
+
+- 要件と契約: `docs/requirements.md`
+- Kubernetes 配備の詳細: `docs/kubernetes-deployment.md`
+- 変更ルール: `CONTRIBUTING.md`
+- `control-plane-run` の使い分け: `containers/control-plane/skills/control-plane-operations/references/control-plane-run.md`
 
 ## 概要
 
-このリポジトリは、Copilot 向けの `control-plane` イメージと、用途別の
-Execution Plane 参照実装、それらを lint / build / test / publish する
-スクリプト群をまとめたものです。
+このリポジトリは、次の 2 層を前提にしています。
 
-## 含まれるもの
+- **Control Plane**: Copilot CLI、`gh`、`git`、`kubectl`、rootless Podman wrapper、
+  SSH、GNU Screen をまとめた長寿命の操作面
+- **Execution Plane**: 実際の build / test / lint / 実行を担当する用途別コンテナ
+
+設計上の基本方針は次のとおりです。
+
+- Control Plane は、単独起動環境と Kubernetes 環境でできるだけ同じ運用感を保つ
+- 短時間で局所的な処理は local Podman 系、長時間または信頼性を優先する処理は
+  Kubernetes Job に寄せる
+- サンプルの least-privilege Kubernetes Deployment では、
+  `CONTROL_PLANE_RUN_MODE=k8s-job` を既定にして Job 実行を主経路にする
+- local nested Podman / Kind は best-effort であり、outer runtime の制約を越えて
+  完全保証はしない
+
+## リポジトリに含まれるもの
 
 ### 公開イメージ
 
@@ -27,8 +48,8 @@ Execution Plane 参照実装、それらを lint / build / test / publish する
 
 ### 主要スクリプト
 
-- `scripts/lint.sh`: `hadolint` / `shellcheck` / `biome` / `yamllint` と Renovate 設定検証を実行
-- `scripts/build-test.sh`: build / standalone smoke / Kind integration を実行
+- `scripts/lint.sh`: `hadolint` / `shellcheck` / `biome` / `yamllint` と Renovate 設定検証
+- `scripts/build-test.sh`: build / standalone smoke / Kind integration
 - `scripts/test-standalone.sh`: 単独起動モードの下位 smoke test
 - `scripts/test-kind.sh`: Kind 上の下位 integration test
 
@@ -45,15 +66,14 @@ Execution Plane 参照実装、それらを lint / build / test / publish する
 ./scripts/lint.sh
 ```
 
-Podman 系を固定したい場合:
+Podman 系を明示したい場合:
 
 ```bash
 CONTROL_PLANE_TOOLCHAIN=podman ./scripts/lint.sh
 ```
 
-`scripts/lint.sh` は、信頼できる upstream イメージである
-`hadolint` / `shellcheck` / `biome` は upstream image を直接使い、
-`yamllint` についてはリポジトリ内の `containers/yamllint/` を build して使います。
+`scripts/lint.sh` は、`hadolint` / `shellcheck` / `biome` を trusted upstream image で実行し、
+`yamllint` はこのリポジトリの `containers/yamllint/` を build して使います。
 
 ### build / test
 
@@ -61,155 +81,211 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/lint.sh
 ./scripts/build-test.sh
 ```
 
-系統を明示したい場合:
+系統を固定したい場合:
 
 ```bash
 CONTROL_PLANE_TOOLCHAIN=docker ./scripts/build-test.sh
 CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 ```
 
-`scripts/build-test.sh` は `docker buildx` が利用可能なら Docker / BuildKit を使い、
-それ以外では Podman 系へフォールバックします。Buildah は host / CI 側に既にある
-場合だけ利用し、Control Plane イメージ自体には同梱しません。内部では
+`scripts/build-test.sh` は `docker buildx` を優先し、使えない場合に Podman 系へ
+フォールバックします。Buildah は host / CI 側に既にある場合だけ利用し、
+Control Plane イメージ自体には同梱しません。内部では
 `containers/control-plane` と `containers/execution-plane-smoke` を build し、
 `scripts/test-standalone.sh` と `scripts/test-kind.sh` を順に呼び出します。
 
-Control Plane イメージには `podman` / `kind` など
-`scripts/lint.sh` や `scripts/build-test.sh` に必要なコマンドを同梱しています。
-ただし nested build runner が実際に動くかは、外側の host / container runtime /
-Kubernetes securityContext 依存です。サンプルの Kubernetes Deployment は
-containerd でも使いやすい least-privilege の SSH/Copilot プロファイルを既定にし、
-Pod の `securityContext.fsGroup` を `1000` にして projected service-account token を
-`copilot` shell から読めるようにしたうえで、container 側は
-`privileged: false` のまま `capabilities.drop: [ALL]` と
-`capabilities.add: [CHOWN, DAC_OVERRIDE, FOWNER, SETFCAP, SETGID, SETUID, SYS_CHROOT]` を使います。
-`allowPrivilegeEscalation` は `sshd` の privilege separation と entrypoint の root 操作の
-ため `true` のままです。entrypoint は必要 capability が欠けている場合に起動直後に
+### `control-plane-run` の典型パターン
+
+短いローカル実行:
+
+```bash
+control-plane-run --mode auto --execution-hint short \
+  --workspace /workspace \
+  --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:latest \
+  -- /usr/local/bin/execution-plane-smoke write-marker /workspace/short.txt short
+```
+
+Kubernetes Job 実行:
+
+```bash
+control-plane-run --mode auto --execution-hint long \
+  --namespace copilot-sandbox-jobs \
+  --job-name smoke-job \
+  --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:latest \
+  -- /usr/local/bin/execution-plane-smoke write-marker /workspace/long.txt long
+```
+
+小さい補助ファイルを Job に渡す:
+
+```bash
+control-plane-run --mode k8s-job \
+  --namespace copilot-sandbox-jobs \
+  --mount-file ./script.sh:scripts/script.sh \
+  --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:latest \
+  -- /usr/local/bin/execution-plane-smoke exec bash -lc \
+     'bash /var/run/control-plane/job-inputs/scripts/script.sh'
+```
+
+サンプルの Kubernetes Deployment では `CONTROL_PLANE_RUN_MODE=k8s-job` と
+`CONTROL_PLANE_JOB_NAMESPACE=copilot-sandbox-jobs` を設定しているため、
+オプションを付けない `control-plane-run ...` でも Job 経路へ寄ります。local Podman を明示したいときだけ
+`--mode podman` または `CONTROL_PLANE_RUN_MODE=auto` を使ってください。
+
+## Rootless Podman / nested runtime の扱い
+
+Control Plane イメージ内の `/usr/local/bin/podman` と `/usr/local/bin/docker` は、
+どちらも `control-plane-podman` wrapper への symlink です。これは rootless Podman の
+失敗に対して、outer runtime 側が原因であることを分かりやすく補足するためです。
+
+たとえば `podman pull hello-world:latest` で次のようなエラーが出る場合:
+
+- `cannot clone: Operation not permitted`
+- `invalid internal status ... cannot re-exec process`
+- `cannot set user namespace`
+
+多くは **Pod 内の設定不足ではなく、outer host / runtime が nested rootless Podman を許可していない**
+ことが原因です。次の点に注意してください。
+
+- `SETFCAP` のような capability の再追加は Linux 5.12+ では必要になり得るが、それだけでは不十分
+- outer runtime 側で nested user namespaces、`newuidmap` / `newgidmap`、
+  必要な seccomp / sysctl、状況によっては `/dev/fuse` も許可されている必要がある
+- `securityContext.privileged: true` でも outer runtime が user namespace を禁止していれば失敗する
+
+そのため、Kubernetes 上では local nested Podman / Kind を best-effort 扱いにしています。
+詰まった場合は、次のいずれかへ切り替えてください。
+
+- `control-plane-run --mode k8s-job`
+- GitHub Actions
+- rootless Podman が正しく動く host runner
+
+どうしても Pod 内ローカル実行を優先したい場合だけ、
+`CONTROL_PLANE_RUN_MODE=auto` へ切り替えるか `control-plane-run --mode podman` を使ってください。
+
+Podman storage は driver ごとに分離しています。
+
+- overlay: `~/.copilot/containers/overlay/storage`
+- vfs: `~/.copilot/containers/vfs/storage`
+
+これにより、`/dev/fuse` の有無や securityContext の違いで overlay / vfs が切り替わっても、
+DB の衝突を起こしにくくしています。Podman 系では Kind 内の image 名と合わせるため、
+既定の image tag に `localhost/` 接頭辞を使います。
+
+## Kubernetes 配備
+
+Kubernetes 配備の詳細とサンプル manifest の前提は `docs/kubernetes-deployment.md` にまとめています。
+ここでは最初に把握しておきたい点だけを抜き出します。
+
+### 配備の要点
+
+- テンプレート: `deploy/kubernetes/control-plane.example.yaml`
+- 既定 namespace: Control Plane は `copilot-sandbox`、Job は `copilot-sandbox-jobs`
+- 構成: Secret / Service / Deployment / PVC をまとめた単一レプリカ構成
+- SSH 公開鍵は Secret から渡し、必要なら `COPILOT_GITHUB_TOKEN` も同じ Secret で注入できる
+- `COPILOT_GITHUB_TOKEN` は login shell へ export せず、Copilot 起動時だけ
+  `--secret-env-vars=COPILOT_GITHUB_TOKEN` 経由で渡す
+- `CONTROL_PLANE_GIT_USER_NAME` / `CONTROL_PLANE_GIT_USER_EMAIL` を env に入れると、
+  entrypoint が `~/.gitconfig` と GitHub credential helper を事前設定する
+- SSH host key は PVC 上に永続化されるため、Pod の再作成でも fingerprint が変わりにくい
+
+### セキュリティとセッションの既定値
+
+サンプル Deployment は containerd でも使いやすい least-privilege の SSH / Copilot
+プロファイルを既定にしています。
+
+- Pod `securityContext.fsGroup: 1000`
+- container `allowPrivilegeEscalation: true`
+- container `capabilities.drop: [ALL]`
+- container `capabilities.add: [CHOWN, DAC_OVERRIDE, FOWNER, SETFCAP, SETGID, SETUID, SYS_CHROOT]`
+- `seccompProfile: RuntimeDefault`
+
+`allowPrivilegeEscalation` は `sshd` の privilege separation と entrypoint の root 操作のため
+`true` のままです。entrypoint は必要 capability が欠けている場合に、起動直後に
 明示的なエラーを出します。
 
-また、SSH ログイン時の GNU Screen session picker が runtime 依存の理由で失敗しても、
-現在は通常の login shell にフォールバックするため、そのまま接続が閉じにくくなっています。
+対話的な SSH ログインでは GNU Screen の session picker が起動します。picker が
+runtime 依存の理由で失敗しても、現在は通常の login shell にフォールバックするため、
+SSH 接続そのものが閉じにくくなっています。Copilot セッションが無い場合は picker に
+`Copilot (/workspace, --yolo)` が追加され、Enter だけで `/workspace` から
+`copilot --yolo` を始められます。
 
-そのため、Kubernetes 上の既定構成では SSH / Copilot / `k8s-job-*` が主経路です。
-`CONTROL_PLANE_RUN_MODE=k8s-job` を入れているので、`control-plane-run` を明示せず使っても
-Job 実行へ寄ります。サンプルでは Job namespace も Control Plane namespace から分離し、
-小さいファイルは `control-plane-run --mount-file ...` で ConfigMap 経由にできます。
+### shell / terminal の既定値
 
-local nested Podman / Kind は依然 best-effort で、outer runtime 側の user namespace、
-`newuidmap` / `newgidmap`、`/dev/fuse` などが必要です。Linux 5.12+ では UID 0 mapping の
-ため `SETFCAP` も必要になるので、サンプル manifest ではそれも re-add していますが、
-`securityContext.privileged: true`
-でも outer runtime が nested user namespace を止めていれば
-`cannot set user namespace` で失敗します。そこで詰まる場合は GitHub Actions か host
-runner を使ってください。どうしても Pod 内ローカル実行を優先したい場合だけ
-`CONTROL_PLANE_RUN_MODE=auto` へ切り替えるか `control-plane-run --mode podman` を
-使ってください。Podman storage は `~/.copilot/containers/<overlay|vfs>/storage` に
-driver ごとに分離するため、securityContext の違いで overlay / vfs が切り替わっても
-DB と衝突しにくくしています。
+- `EDITOR` / `VISUAL` は未設定時だけ `vim`
+- `GH_PAGER=cat`
+- login shell では `LANG=C.UTF-8` を補い、イメージ側で `en_US.UTF-8` と `ja_JP.UTF-8` を生成
+- GNU Screen は `screen-256color` / UTF-8 / alt screen / background color erase を既定化
+- `tmux-256color` や `xterm-256color` を含む追加 terminfo を同梱
+- `control-plane-operations` skill をイメージに同梱し、起動時に `~/.copilot/skills/` へ同期
 
-Podman 系では Kind 内の image 名と一致させるため、デフォルトの tag に
-`localhost/` 接頭辞を使います。
+Copilot CLI の multiline 入力 (`Shift+Enter`) は upstream では Kitty protocol 対応 terminal を
+前提とします。対応 terminal では `/terminal-setup` を実行してください。`tmux` / GNU Screen
+越しでは key event が転送されず、`Shift+Enter` や `Ctrl+Enter` が安定しない場合があります。
+その場合は paste か `Ctrl+G` を使ってください。
 
-## イメージ方針
+### Job に `/workspace` を見せる方法
 
-- 契約を満たす trusted upstream image がある場合は、それをそのまま使います。
-- 使えるのが third-party image だけ、またはこのリポジトリ専用の薄い調整が必要な
-  場合は、リポジトリ内で最小イメージを build します。
-- そのようなリポジトリ管理イメージは GHCR に公開して再利用します。
+Job namespace を分けたまま `/workspace` を共有したい場合は、Job namespace 側にも shared
+storage を用意して `CONTROL_PLANE_JOB_WORKSPACE_PVC` を設定してください。小さい補助ファイル
+だけで足りる場合は `control-plane-run --mount-file ...` で ConfigMap 経由にできます。
+
+## イメージ方針と公開
+
+- 契約を満たす trusted upstream image がある場合は、それをそのまま使う
+- third-party image しかない、またはこのリポジトリ専用の薄い調整が必要な場合だけ
+  リポジトリ内で最小イメージを build する
+- そのようなリポジトリ管理イメージは GHCR に公開して再利用する
 
 現時点の GHCR 公開対象:
 
 - `control-plane`
 - `yamllint`
 
-`main` への push が成功すると、GitHub Actions は x64 / arm64 の matrix で
-lint / build / test を実行し、その結果を使って
-`ghcr.io/chalharu/copilot-sandbox-container/<image>` に amd64 / arm64 を含む
-multi-arch manifest として公開します。公開 tag は `latest` と commit SHA に加え、
-同梱ツールの version tag も更新します。
+`main` への push が成功すると、GitHub Actions は x64 / arm64 の matrix で lint / build / test
+を実行し、その結果を使って
+`ghcr.io/chalharu/copilot-sandbox-container/<image>` に multi-arch manifest を公開します。
+公開 tag は `latest`、commit SHA、同梱ツールの version tag です。
 
 - `control-plane`: `copilot-<COPILOT_CLI_VERSION>`
 - `yamllint`: `<YAMLLINT_VERSION>`
 
-これらの version tag は「どのツール version を同梱しているか」を示す利便用です。
-厳密な再現性が必要な場合は、引き続き commit SHA tag を使ってください。
-なお GitHub Actions は GHCR の古い package version を自動削除し、各イメージにつき
-直近 30 version を保持します。
-また、`containers/yamllint/` の DHI base image pull には
-`DOCKERHUB_USERNAME` と `DOCKERHUB_TOKEN` を使い、GitHub Actions 上で
-pull 結果を cache して rate limit を避けます。
-
-## Kubernetes 配備
-
-テンプレートは `deploy/kubernetes/control-plane.example.yaml` にあります。
-この例は raw Pod ではなく、Secret / Service / Deployment / PVC をまとめた
-単一レプリカ構成です。Control Plane は `copilot-sandbox`、Job は
-`copilot-sandbox-jobs` を既定 namespace にします。SSH 公開鍵は Secret から渡し、
-必要なら同じ Secret で `COPILOT_GITHUB_TOKEN` も注入できます。この token は login
-shell へ export せず、Copilot 起動時だけ `--secret-env-vars=COPILOT_GITHUB_TOKEN`
-経由で渡します。
-さらに `CONTROL_PLANE_GIT_USER_NAME` / `CONTROL_PLANE_GIT_USER_EMAIL` を env に入れると、
-entrypoint が `~/.gitconfig` の `user.name` / `user.email` と
-`gh auth setup-git` 相当の credential helper (`github.com` / `gist.github.com`) を
-事前設定します。SSH host key も同じ PVC 上に永続化されるため、Pod の再作成で
-fingerprint が変わりません。
-
-対話的な SSH ログインでは GNU Screen の session picker が起動します。既存の
-Copilot セッションが無い場合は picker に `Copilot (/workspace, --yolo)` が追加され、
-Enter だけで `/workspace` から `copilot --yolo` を始められます。Copilot 用の
-Screen session は detached ではなく SSH TTY に直接 attach した状態で起動するため、
-ログイン直後に応答が消えにくくなっています。また、
-`control-plane-operations` skill をイメージに同梱しているため、他のリポジトリを
-`/workspace` に mount した場合でも同じ運用ガイドを使えます。
-
-同じサンプル Deployment では `RuntimeDefault` seccomp と `fsGroup: 1000`、
-`CONTROL_PLANE_RUN_MODE=k8s-job` を使い、SSH に必要な capability だけを再追加して
-権限を絞っています。Job namespace を分けたまま `/workspace` を共有したい場合は、
-Job namespace 側にも shared storage を用意して `CONTROL_PLANE_JOB_WORKSPACE_PVC` を
-設定してください。小さい補助ファイルだけで足りる場合は
-`control-plane-run --mount-file ...` で ConfigMap 経由にできます。local Podman / Kind は
-outer runtime 次第なので、`scripts/lint.sh` や `scripts/build-test.sh` が Pod 内で
-詰まる場合は GitHub Actions 側で実行してください。サンプルの Service は
-`LoadBalancer` ですが、`EXTERNAL-IP` が付く前でも
-`kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox`
-で同じ Service 経由の SSH を使えます。
-
-Control Plane イメージには `vim` も同梱され、ログイン shell では `EDITOR` /
-`VISUAL` を未設定時だけ `vim` に補います。Copilot CLI の multiline shortcut が
-通らない環境でも、`Ctrl+G` で外部 editor を開く運用をすぐ使えます。
-
-`gh` については SSH / GNU Screen 越しでも pager 待ちで止まって見えにくいよう、
-login shell では `GH_PAGER=cat` を既定化しています。
-
-また、SSHD は `LANG` / `LC_*` を受け取り、client が送らない場合でも login shell
-では `LANG=C.UTF-8` を補います。イメージ側では `en_US.UTF-8` と `ja_JP.UTF-8`
-も生成してあるため、`LC_ALL=en_US.UTF8` のような SSH client 由来の locale でも
-warning を出しにくく、日本語や記号を含む UTF-8 テキストを SSH / GNU Screen
-越しで表示しやすくしています。
-
-GNU Screen には `/etc/screenrc` で `screen-256color` / UTF-8 / alt screen /
-background color erase を既定で設定し、Control Plane イメージには
-`tmux-256color` や `xterm-256color` を含む追加 terminfo も入れています。これにより
-`tmux` 経由の SSH ログインでも表示崩れを起こしにくくしています。
-
-一方で、Copilot CLI の multiline 入力 (`Shift+Enter`) は upstream では Kitty
-protocol 対応 terminal を前提とします。対応 terminal では `/terminal-setup` を
-実行してください。`tmux` / GNU Screen 経由では key event が転送されず、
-`Shift+Enter` や `Ctrl+Enter` が安定しない場合があります。その場合は paste か
-`Ctrl+G` を使ってください。
-
-既定の Control Plane イメージは
-`ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest` です。
-`copilot-<COPILOT_CLI_VERSION>` tag も使えますが、再現性を優先する場合は
-`latest` ではなく commit SHA tag を使ってください。なお公開イメージは
-直近 30 version を保持し、それ以前の package version は自動削除されます。
+version tag は「どのツール version を同梱しているか」を示す利便用です。厳密な再現性が必要な場合は、
+引き続き commit SHA tag を使ってください。GitHub Actions は古い GHCR package version を
+自動削除し、各イメージにつき直近 30 version を保持します。`containers/yamllint/` の
+DHI base image pull には `DOCKERHUB_USERNAME` と `DOCKERHUB_TOKEN` を使い、
+GitHub Actions 上で cache して rate limit を避けます。
 
 ## Execution Plane について
 
 同梱している Execution Plane は、Control Plane 連携を確認するための参照実装です。
-一覧を固定することが目的ではありません。`/workspace` 共有や、対象 workflow に
-必要なコマンド群まで含めて契約を満たす upstream イメージがあるなら、それを
-直接使って構いません。不足がある場合だけ、薄いラッパーイメージを用意します。
+一覧を固定することが目的ではありません。`/workspace` 共有や、対象 workflow に必要な
+コマンド群まで含めて契約を満たす upstream イメージがあるなら、それを直接使って構いません。
+不足がある場合だけ、薄いラッパーイメージを用意します。
 
 より細かい挙動を確認したい場合だけ、下位の `scripts/test-standalone.sh` /
 `scripts/test-kind.sh` を直接使ってください。
+
+## トラブルシュート
+
+### `podman pull hello-world:latest` が失敗する
+
+`cannot clone: Operation not permitted` や `cannot re-exec process` は、outer runtime が
+nested rootless Podman を止めているときの典型例です。まずは `control-plane-run --mode k8s-job`
+または GitHub Actions / host runner へ切り替えてください。
+
+### `drop: ALL` にしたら SSH できない
+
+`capabilities.add` に `CHOWN` / `DAC_OVERRIDE` / `FOWNER` / `SETGID` / `SETUID` /
+`SYS_CHROOT` を戻してください。`SETFCAP` は local rootless Podman 向けです。
+
+### `LoadBalancer` の `EXTERNAL-IP` がまだ付かない
+
+次で同じ Service 経由の SSH を使えます。
+
+```bash
+kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox
+```
+
+### Copilot CLI の multiline shortcut が安定しない
+
+Kitty protocol 対応 terminal では `/terminal-setup` を実行してください。`tmux` /
+GNU Screen 越しでは paste か `Ctrl+G` を使うほうが安定します。
