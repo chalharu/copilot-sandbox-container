@@ -32,7 +32,7 @@
       pinDigests: false,
     },
     {
-      description: "Keep DHI base images aligned across yamllint and cache preparation",
+      description: "Keep DHI base images aligned across yamllint",
       matchPackageNames: ["dhi.io/python"],
       groupName: "yamllint DHI python images",
       groupSlug: "yamllint-dhi-python",

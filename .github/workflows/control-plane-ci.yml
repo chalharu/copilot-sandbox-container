@@ -22,8 +22,6 @@ jobs:
             runner: ubuntu-24.04-arm
     permissions:
       contents: read
-    env:
-      CONTROL_PLANE_DHI_CACHE_DIR: ${{ github.workspace }}/.cache/control-plane/dhi-images
 
     steps:
       - name: Check out repository
@@ -33,12 +31,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y podman
-
-      - name: Restore DHI image cache
-        uses: actions/cache@v5.0.3
-        with:
-          path: ${{ env.CONTROL_PLANE_DHI_CACHE_DIR }}
-          key: ${{ runner.os }}-${{ matrix.image_arch }}-dhi-python-${{ hashFiles('containers/yamllint/Dockerfile', 'scripts/prepare-dhi-images.sh') }}
 
       - name: Prepare DHI images
         env:
@@ -68,8 +60,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    env:
-      CONTROL_PLANE_DHI_CACHE_DIR: ${{ github.workspace }}/.cache/control-plane/dhi-images
     steps:
       - name: Check out repository
         uses: actions/checkout@v6.0.2
@@ -78,12 +68,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y podman
-
-      - name: Restore DHI image cache
-        uses: actions/cache@v5.0.3
-        with:
-          path: ${{ env.CONTROL_PLANE_DHI_CACHE_DIR }}
-          key: ${{ runner.os }}-${{ matrix.image_arch }}-dhi-python-${{ hashFiles('containers/yamllint/Dockerfile', 'scripts/prepare-dhi-images.sh') }}
 
       - name: Prepare DHI images
         env:
