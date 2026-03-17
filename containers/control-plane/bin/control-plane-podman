@@ -12,7 +12,7 @@ podman_bin="${CONTROL_PLANE_PODMAN_BIN:-/usr/bin/podman}"
 podman_reports_userns_failure() {
   local stderr_path="$1"
 
-  grep -Eq 'cannot clone: Operation not permitted|cannot re-exec process|cannot set user namespace|newuidmap.*Operation not permitted|newgidmap.*Operation not permitted' "${stderr_path}"
+  grep -Eiq 'cannot clone: Operation not permitted|cannot re-exec process|cannot set user namespace|creating new namespace.*Operation not permitted|newuidmap.*Operation not permitted|newgidmap.*Operation not permitted' "${stderr_path}"
 }
 
 podman_requests_migrate() {
