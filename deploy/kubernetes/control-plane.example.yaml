@@ -115,6 +115,8 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: control-plane
+      annotations:
+        container.apparmor.security.beta.kubernetes.io/control-plane: unconfined
     spec:
       # Opt into Kubernetes Pod user namespaces so root in the Pod maps to a
       # non-root host UID/GID. This materially improves the chance that nested
@@ -203,10 +205,12 @@ spec:
           # Keep a least-privilege SSH/Copilot profile by default. `drop: ALL`
           # only works because we re-add CHOWN/DAC_OVERRIDE/FOWNER/SETFCAP/
           # SETGID/SETUID/SYS_CHROOT. `SETFCAP` keeps rootless Podman closer to
-          # working on Linux 5.12+, but local nested Podman/Kind remains
-          # best-effort even in privileged Pods because the outer runtime can
-          # still block user namespaces. Jobs default to a separate namespace; use a
-          # namespace-local workspace PVC there only when you really need one.
+          # working on Linux 5.12+, and the unconfined seccomp profile keeps
+          # nested user namespace re-exec closer to working without going fully
+          # privileged. Local nested Podman/Kind still remains best-effort
+          # because the outer runtime can still block user namespaces. Jobs
+          # default to a separate namespace; use a namespace-local workspace PVC
+          # there only when you really need one.
           securityContext:
             privileged: false
             runAsUser: 0
@@ -224,7 +228,7 @@ spec:
                 - SETUID
                 - SYS_CHROOT
             seccompProfile:
-              type: RuntimeDefault
+              type: Unconfined
           ports:
             - containerPort: 2222
               name: ssh

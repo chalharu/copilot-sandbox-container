@@ -52,8 +52,9 @@ Types:
 - Use trusted upstream images when they already satisfy the contract; if only a
   third-party image exists, build a thin repository-managed image and publish it
   to GHCR for reuse.
-- GitHub Actions needs `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` to pull DHI
-  base images for `containers/yamllint/`, and caches those pulls between runs.
+- GitHub Actions needs `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` for the DHI
+  image pulls used by `containers/yamllint/` and the Renovate dry-run validation
+  inside `scripts/lint.sh`.
 - `scripts/test-standalone.sh` and `scripts/test-kind.sh` remain the lower-level
   smoke / integration scripts used by `scripts/build-test.sh`.
 - When this repository is developed from inside a containerized tooling

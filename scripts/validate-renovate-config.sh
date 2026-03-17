@@ -10,6 +10,17 @@ container_bin=""
 renovate_image="${CONTROL_PLANE_RENOVATE_IMAGE:-ghcr.io/renovatebot/renovate:43.76.5@sha256:8d1aebba75a0367a4ede67c6177bd2c760d431bbeb88940cb7dd55029a40af53}"
 base_dir=""
 log_file=""
+renovate_env=()
+
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "${value}"
+}
 
 cleanup() {
   local cleanup_container_bin="${container_bin:-}"
@@ -46,6 +57,13 @@ chmod 0777 "${base_dir}"
 
 require_command "${container_bin}"
 
+if [[ -n "${DOCKERHUB_USERNAME:-}" ]] && [[ -n "${DOCKERHUB_TOKEN:-}" ]]; then
+  printf -v renovate_host_rules '[{"matchHost":"dhi.io","username":"%s","password":"%s"}]' \
+    "$(json_escape "${DOCKERHUB_USERNAME}")" \
+    "$(json_escape "${DOCKERHUB_TOKEN}")"
+  renovate_env+=(-e "RENOVATE_HOST_RULES=${renovate_host_rules}")
+fi
+
 "${container_bin}" run --rm \
   -v "${PWD}:/workspace:ro" \
   -w /workspace \
@@ -53,7 +71,11 @@ require_command "${container_bin}"
   "${renovate_image}" \
   --strict --no-global /workspace/renovate.json5
 
-if ! "${container_bin}" run --rm \
+renovate_status=0
+
+set +e
+"${container_bin}" run --rm \
+  "${renovate_env[@]}" \
   -e LOG_LEVEL=debug \
   -e RENOVATE_CONFIG_FILE=/workspace/renovate.json5 \
   -e RENOVATE_BASE_DIR=/tmp/renovate-base \
@@ -66,14 +88,24 @@ if ! "${container_bin}" run --rm \
   --dry-run=full \
   --onboarding=false \
   --repository-cache=reset \
-  >"${log_file}" 2>&1; then
-  cat "${log_file}" >&2
-  exit 1
+  >"${log_file}" 2>&1
+renovate_status=$?
+set -e
+
+if [[ "${renovate_status}" -ne 0 ]]; then
+  if grep -Fq 'Cannot sync git when platform=local' "${log_file}" \
+    && ! grep -Eq 'Package lookup failures|Request failed with status code|Failed to look up docker package' "${log_file}"; then
+    printf '%s\n' \
+      'Renovate local dry-run hit the known platform=local git sync limitation; validating the captured dependency report instead.' \
+      >&2
+  else
+    cat "${log_file}" >&2
+    exit 1
+  fi
 fi
 
 expected_dependencies=(
   "@github/copilot"
-  "actions/cache"
   "actions/checkout"
   "azure/setup-kubectl"
   "busybox"

@@ -8,6 +8,27 @@ if [ -f "${runtime_config_file}" ]; then
   set +a
 fi
 
+ensure_compatible_term() {
+  current_term="${TERM:-}"
+
+  if [ -n "${current_term}" ] && TERM="${current_term}" tput clear >/dev/null 2>&1; then
+    return 0
+  fi
+
+  for candidate in xterm-256color xterm; do
+    if TERM="${candidate}" tput clear >/dev/null 2>&1; then
+      TERM="${candidate}"
+      export TERM
+      return 0
+    fi
+  done
+
+  TERM=xterm
+  export TERM
+}
+
+ensure_compatible_term
+
 : "${LANG:=C.UTF-8}"
 : "${EDITOR:=vim}"
 : "${VISUAL:=${EDITOR}}"
