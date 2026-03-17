@@ -286,7 +286,10 @@ EOF
   exit 1
 fi
 
-ssh_bash <<EOF
+printf '%s\n' 'standalone-test: screen output ready' >&2
+
+printf '%s\n' 'standalone-test: starting fake podman checks' >&2
+if ! ssh_bash <<EOF
 set -euo pipefail
 printf 'small input\n' > /workspace/job-input.txt
 printf 'colon input\n' > '/workspace/job:input.txt'
@@ -304,6 +307,16 @@ grep -Eq ':/var/run/control-plane/job-inputs:ro$' /tmp/fake-podman.log
 CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-run --mode auto --execution-hint short --workspace /workspace --mount-file '/workspace/job:input.txt' --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/podman-auto-colon.txt short
 grep -Eq ':/var/run/control-plane/job-inputs:ro$' /tmp/fake-podman.log
 EOF
+then
+  ssh_bash <<'EOF' >&2 || true
+set -euo pipefail
+cat /tmp/fake-podman.log || true
+ls -l /workspace || true
+EOF
+  printf 'Expected fake podman control-plane-run checks to succeed\n' >&2
+  exit 1
+fi
+printf '%s\n' 'standalone-test: fake podman checks done' >&2
 
 first_host_fingerprint="$(ssh_host_fingerprint)"
 
@@ -314,21 +327,51 @@ wait_for_ssh
 second_host_fingerprint="$(ssh_host_fingerprint)"
 [[ "${first_host_fingerprint}" == "${second_host_fingerprint}" ]]
 
-ssh_bash <<'EOF'
+printf '%s\n' 'standalone-test: checking persisted state after restart' >&2
+if ! ssh_bash <<'EOF'
 set -euo pipefail
 test -f ~/.copilot/state.txt
 test -f ~/.config/gh/state.txt
 test -f ~/.ssh/state.txt
 test -f /workspace/screen.txt
 EOF
+then
+  ssh_bash <<'EOF' >&2 || true
+set -euo pipefail
+ls -la ~/.copilot || true
+ls -la ~/.config/gh || true
+ls -la ~/.ssh || true
+ls -la /workspace || true
+cat /workspace/screen-term.txt || true
+cat /workspace/screen-utf8.txt || true
+cat /workspace/screen.txt || true
+EOF
+  printf 'Expected control-plane state to persist after restart\n' >&2
+  exit 1
+fi
+printf '%s\n' 'standalone-test: persisted state looks good' >&2
 
 set +e
 missing_caps_output="$("${container_bin}" run --rm --cap-drop ALL "${control_plane_image}" 2>&1)"
 missing_caps_status=$?
 set -e
-[[ "${missing_caps_status}" -ne 0 ]]
-grep -q 'Missing Linux capabilities for control-plane startup' <<<"${missing_caps_output}"
-grep -q 'SYS_CHROOT' <<<"${missing_caps_output}"
+printf '%s\n' 'standalone-test: checking cap-drop diagnostics' >&2
+if [[ "${missing_caps_status}" -eq 0 ]]; then
+  printf 'Expected cap-drop ALL container startup to fail\n' >&2
+  printf '%s\n' "${missing_caps_output}" >&2
+  exit 1
+fi
+if ! grep -q 'Missing Linux capabilities for control-plane startup' <<<"${missing_caps_output}"; then
+  printf 'Expected missing capability diagnostic in cap-drop ALL output\n' >&2
+  printf '%s\n' "${missing_caps_output}" >&2
+  exit 1
+fi
+if ! grep -q 'SYS_CHROOT' <<<"${missing_caps_output}"; then
+  printf 'Expected SYS_CHROOT in cap-drop ALL output\n' >&2
+  printf '%s\n' "${missing_caps_output}" >&2
+  exit 1
+fi
+printf '%s\n' 'standalone-test: cap-drop diagnostics look good' >&2
 
 "${container_bin}" rm -f "${container_name}" >/dev/null
 container_env=(-e CONTROL_PLANE_SESSION_SELECTION=new:auto-login)
