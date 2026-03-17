@@ -37,6 +37,17 @@ render_yaml_list() {
   done
 }
 
+append_yaml_block() {
+  local existing="$1"
+  local block="$2"
+
+  if [[ -n "${existing}" ]]; then
+    printf '%s\n%s' "${existing}" "${block}"
+  else
+    printf '%s' "${block}"
+  fi
+}
+
 validate_relative_path() {
   local relative_path="$1"
   local allow_colon="${2:-0}"
@@ -226,18 +237,18 @@ EOF
 )
 
 if [[ -n "${workspace_pvc}" ]]; then
-  volume_mount_entries+=$(cat <<EOF
+  volume_mount_entries="$(append_yaml_block "${volume_mount_entries}" "$(cat <<EOF
             - name: workspace
               mountPath: $(yaml_quote "${workspace_mount_path}")
               subPath: $(yaml_quote "${workspace_subpath}")
 EOF
-  )
-  volume_entries+=$(cat <<EOF
+  )")"
+  volume_entries="$(append_yaml_block "${volume_entries}" "$(cat <<EOF
         - name: workspace
           persistentVolumeClaim:
             claimName: $(yaml_quote "${workspace_pvc}")
 EOF
-  )
+  )")"
 fi
 
 if [[ -n "${job_service_account}" ]]; then
@@ -263,20 +274,20 @@ binaryData:
 $(render_configmap_binary_data '  ' "${mount_files[@]}")
 EOF
 
-  volume_mount_entries+=$(cat <<EOF
+  volume_mount_entries="$(append_yaml_block "${volume_mount_entries}" "$(cat <<EOF
             - name: job-inputs
               mountPath: $(yaml_quote "${input_mount_path}")
               readOnly: true
 EOF
-  )
-  volume_entries+=$(cat <<EOF
+  )")"
+  volume_entries="$(append_yaml_block "${volume_entries}" "$(cat <<EOF
         - name: job-inputs
           configMap:
             name: $(yaml_quote "${created_input_configmap}")
             items:
 $(render_configmap_items '              ' "${mount_files[@]}")
 EOF
-  )
+  )")"
 fi
 
 if [[ -n "${volume_mount_entries}" ]]; then
