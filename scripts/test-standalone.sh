@@ -378,6 +378,7 @@ container_env=(-e CONTROL_PLANE_SESSION_SELECTION=new:auto-login)
 start_container
 wait_for_ssh
 
+printf '%s\n' 'standalone-test: starting auto-login ssh flow' >&2
 TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 </dev/null >"${workdir}/ssh-login.log" 2>&1 &
 interactive_ssh_pid=$!
 if ! wait_for_screen_session auto-login; then
@@ -385,6 +386,7 @@ if ! wait_for_screen_session auto-login; then
   cat "${workdir}/ssh-login.log" >&2 || true
   exit 1
 fi
+printf '%s\n' 'standalone-test: auto-login session ready' >&2
 
 kill "${interactive_ssh_pid}" >/dev/null 2>&1 || true
 wait "${interactive_ssh_pid}" 2>/dev/null || true
@@ -393,6 +395,7 @@ if grep -q 'cannot change locale' "${workdir}/ssh-login.log"; then
   cat "${workdir}/ssh-login.log" >&2 || true
   exit 1
 fi
+printf '%s\n' 'standalone-test: auto-login locale ok' >&2
 
 "${container_bin}" rm -f "${container_name}" >/dev/null
 container_env=(
@@ -406,7 +409,8 @@ container_env=(
 start_container
 wait_for_ssh
 
-ssh_bash <<'EOF'
+printf '%s\n' 'standalone-test: preparing copilot picker state' >&2
+if ! ssh_bash <<'EOF'
 set -euo pipefail
 test -z "${COPILOT_GITHUB_TOKEN:-}"
 test "$(git config --global user.name)" = "Picker Test User"
@@ -452,7 +456,20 @@ if control-plane-session --list | grep -q 'picker-copilot'; then
   exit 1
 fi
 EOF
+then
+  ssh_bash <<'EOF' >&2 || true
+set -euo pipefail
+git config --global --list || true
+screen -list || true
+control-plane-session --list || true
+ls -la /workspace || true
+EOF
+  printf 'Expected Copilot picker preconditions to be configured correctly\n' >&2
+  exit 1
+fi
+printf '%s\n' 'standalone-test: copilot picker state prepared' >&2
 
+printf '%s\n' 'standalone-test: starting copilot ssh flow' >&2
 TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 </dev/null >"${workdir}/ssh-copilot.log" 2>&1 &
 copilot_ssh_pid=$!
 if ! ssh_bash <<'EOF'
@@ -480,6 +497,7 @@ then
   cat "${workdir}/ssh-copilot.log" >&2 || true
   exit 1
 fi
+printf '%s\n' 'standalone-test: copilot ssh flow ready' >&2
 
 kill "${copilot_ssh_pid}" >/dev/null 2>&1 || true
 wait "${copilot_ssh_pid}" 2>/dev/null || true
@@ -493,3 +511,4 @@ if grep -q 'cannot change locale' "${workdir}/ssh-copilot.log"; then
   cat "${workdir}/ssh-copilot.log" >&2 || true
   exit 1
 fi
+printf '%s\n' 'standalone-test: copilot ssh banner ok' >&2
