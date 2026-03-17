@@ -109,6 +109,38 @@ grep -qx 'test-token' "${workdir}/login.stdin"
 grep -qx 'image exists dhi.io/python:3-alpine3.23-dev' "${workdir}/image-exists.args"
 grep -qx 'pull dhi.io/python:3-alpine3.23-dev' "${workdir}/pull.args"
 
+printf '%s\n' 'regression-test: verifying interactive podman run returns promptly' >&2
+cat > "${workdir}/fake-bin/podman-run-interactive" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "run" ]] && [[ "${2:-}" == "-it" ]]; then
+  {
+    sleep 5
+  } >&2 &
+  printf '%s\n' 'interactive-ok'
+  exit 0
+fi
+printf 'unexpected fake podman command: %s\n' "$*" >&2
+exit 1
+EOF
+chmod +x "${workdir}/fake-bin/podman-run-interactive"
+
+set +e
+interactive_output="$(
+  CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+    CONTROL_PLANE_PODMAN_BIN="${workdir}/fake-bin/podman-run-interactive" \
+    timeout 2s "${script_dir}/../containers/control-plane/bin/control-plane-podman" run -it quay.io/example/test:latest 2>&1
+)"
+interactive_status=$?
+set -e
+
+if [[ "${interactive_status}" -ne 0 ]]; then
+  printf 'Expected interactive control-plane-podman run to return promptly\n' >&2
+  printf '%s\n' "${interactive_output}" >&2
+  exit 1
+fi
+grep -q 'interactive-ok' <<<"${interactive_output}"
+
 printf '%s\n' 'regression-test: verifying detached podman run propagates failures' >&2
 cat > "${workdir}/fake-bin/podman-run-fail" <<'EOF'
 #!/usr/bin/env bash

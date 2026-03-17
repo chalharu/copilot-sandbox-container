@@ -43,6 +43,12 @@ pod_uses_identity_user_namespace() {
   [[ "${container_start}" == "0" ]] && [[ "${host_start}" == "0" ]] && [[ "${map_size}" == "4294967295" ]]
 }
 
+podman_reports_rootful_service_constraint() {
+  local stderr_path="$1"
+
+  grep -Eiq 'open /proc/sys/net/ipv4/ping_group_range: Read-only file system|opening file .*/sys/fs/cgroup/cgroup\.subtree_control.*Read-only file system|ioctl\(SIOCSIFFLAGS\): Operation not permitted|prctl drop bounding: Operation not permitted|remount /, flags: 0x44000: permission denied' "${stderr_path}"
+}
+
 run_podman_with_live_stderr() {
   local stderr_path="$1"
   shift
@@ -94,6 +100,128 @@ run_podman_capture_stdout_live_stderr() {
   wait "${tee_pid}"
 
   return "${status}"
+}
+
+podman_command_needs_direct_exec() {
+  local subcommand="${1:-}"
+  local expecting_value=0
+  local arg
+
+  case "${subcommand}" in
+    attach)
+      return 0
+      ;;
+    exec|run)
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  shift
+
+  for arg in "$@"; do
+    if [[ "${expecting_value}" -eq 1 ]]; then
+      if [[ "${arg}" == stdin ]]; then
+        return 0
+      fi
+      expecting_value=0
+      continue
+    fi
+
+    if [[ "${arg}" == "--" ]]; then
+      break
+    fi
+
+    if [[ "${arg}" =~ ^-[^-]*[it][^-]*$ ]]; then
+      return 0
+    fi
+
+    case "${arg}" in
+      -i|--interactive|-t|--tty|--interactive=*|--tty=*)
+        return 0
+        ;;
+      -a|--attach)
+        expecting_value=1
+        ;;
+      --attach=stdin|--attach=stdin,*|--attach=*,stdin|--attach=*,stdin,*)
+        return 0
+        ;;
+      -*)
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+podman_run_has_option() {
+  local option_name="$1"
+  shift
+  local expecting_value=""
+  local arg
+
+  for arg in "$@"; do
+    if [[ -n "${expecting_value}" ]]; then
+      expecting_value=""
+      continue
+    fi
+
+    if [[ "${arg}" == "--" ]]; then
+      break
+    fi
+
+    case "${option_name}" in
+      cgroups)
+        case "${arg}" in
+          --cgroups|--cgroups=*)
+            return 0
+            ;;
+        esac
+        ;;
+      network)
+        case "${arg}" in
+          --network|--network=*|--net|--net=*)
+            return 0
+            ;;
+        esac
+        ;;
+    esac
+
+    case "${arg}" in
+      --cgroups|--network|--net)
+        expecting_value="${arg}"
+        ;;
+      -*)
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+apply_default_run_options() {
+  local default_cgroups="${CONTROL_PLANE_PODMAN_DEFAULT_CGROUPS:-}"
+  local default_network="${CONTROL_PLANE_PODMAN_DEFAULT_NETWORK:-}"
+  local updated_args=()
+
+  command_args=("$@")
+  [[ "${command_args[0]:-}" == "run" ]] || return 0
+
+  updated_args=(run)
+  if [[ -n "${default_cgroups}" ]] && ! podman_run_has_option cgroups "${command_args[@]:1}"; then
+    updated_args+=("--cgroups=${default_cgroups}")
+  fi
+  if [[ -n "${default_network}" ]] && ! podman_run_has_option network "${command_args[@]:1}"; then
+    updated_args+=("--network=${default_network}")
+  fi
+  updated_args+=("${command_args[@]:1}")
+  command_args=("${updated_args[@]}")
 }
 
 podman_run_can_use_detached_workaround() {
@@ -277,12 +405,16 @@ mkdir -p "${TMPDIR}"
 chmod 700 "${XDG_RUNTIME_DIR}"
 chmod 700 "${TMPDIR}"
 
+apply_default_run_options "$@"
+
+if podman_command_needs_direct_exec "${command_args[@]}"; then
+  exec "${podman_bin}" "${command_args[@]}"
+fi
+
 stdout_path="$(mktemp)"
 stderr_path="$(mktemp)"
 migrate_stderr_path="$(mktemp)"
 trap 'rm -f "${stdout_path}" "${stderr_path}" "${migrate_stderr_path}"' EXIT
-
-command_args=("$@")
 
 if invoke_podman_command "${stderr_path}" "${stdout_path}"; then
   exit 0
@@ -329,6 +461,13 @@ if running_in_kubernetes && { podman_reports_network_device_failure "${stderr_pa
   printf '%s\n' \
     'control-plane-podman: rootless Podman networking could not start because `slirp4netns` could not open `/dev/net/tun`.' \
     'Mount `/dev/net/tun` (or a compatible device-plugin resource) when you need default rootless networking inside the Pod, or use `--network=none` for networkless local runs.' \
+    >&2
+fi
+
+if [[ "${CONTROL_PLANE_LOCAL_PODMAN_MODE:-}" == "rootful-service" ]] && { podman_reports_rootful_service_constraint "${stderr_path}" || podman_reports_rootful_service_constraint "${migrate_stderr_path}"; }; then
+  printf '%s\n' \
+    'control-plane-podman: the rootful Podman service is active, but the cluster still blocked one of its nested runtime requirements.' \
+    "Use the current-cluster profile: capabilities add [CHOWN, DAC_OVERRIDE, FOWNER, KILL, MKNOD, NET_ADMIN, SETFCAP, SETGID, SETPCAP, SETUID, SYS_ADMIN, SYS_CHROOT], seccomp/appArmor unconfined, and let the wrapper keep its default \`--cgroups=disabled --network=host\` flags unless you know the node runtime supports other combinations." \
     >&2
 fi
 

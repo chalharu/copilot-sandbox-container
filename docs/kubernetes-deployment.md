@@ -43,30 +43,42 @@ Job Pod が使う `serviceAccountName` は Job namespace 側のものです。Po
 
 ## securityContext の考え方
 
-サンプルは `privileged: false` のまま SSH / Copilot を成立させる least-privilege 構成です。
-あわせて `spec.hostUsers: false` を設定し、Kubernetes Pod user namespace を有効にします。
-これにより root in Pod は host 側の non-root UID/GID に map され、nested rootless Podman が
-user namespace を切り直せる条件に近づきます。
+サンプルは `privileged: false` のまま SSH / Copilot と local Podman を成立させる
+current-cluster 互換構成です。
+
+このクラスタでは `spec.hostUsers: false` の Pod/Job が `ContainerCreating` から進まなかったため、
+sample manifest は Pod user namespace へ依存しません。代わりに
+`CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service` を使い、control-plane container の中で
+rootful Podman remote service を立てて `copilot` ユーザーから `CONTAINER_HOST` 経由で使います。
 
 - Pod `securityContext.fsGroup: 1000`
 - container `allowPrivilegeEscalation: true`
 - container `capabilities.drop: [ALL]`
-- container `capabilities.add: [CHOWN, DAC_OVERRIDE, FOWNER, SETFCAP, SETGID, SETUID, SYS_CHROOT]`
+- container `capabilities.add: [CHOWN, DAC_OVERRIDE, FOWNER, KILL, MKNOD, NET_ADMIN, SETFCAP, SETGID, SETPCAP, SETUID, SYS_ADMIN, SYS_CHROOT]`
 - control-plane container `seccompProfile: Unconfined`
 - control-plane container `appArmorProfile.type: Unconfined`
 
 各 capability の役割や rootless Podman の背景は `README.md` にもまとめています。
 ここでは manifest に直接効く前提だけを残しています。
 
-`drop: ALL` だけでは SSH は成立しません。`sshd` の privilege separation には `SETUID` / `SETGID` / `SYS_CHROOT` が必要で、entrypoint の初期化や state volume の ownership 調整には `CHOWN` / `DAC_OVERRIDE` / `FOWNER` も必要です。サンプル manifest は、Linux 5.12+ の rootless Podman で UID 0 mapping に必要になる `SETFCAP` も追加しています。さらに local rootless Podman を `privileged: false` のまま通しやすくするため、control-plane container だけ `seccompProfile: Unconfined` と `appArmorProfile.type: Unconfined` を使います。現在の entrypoint は SSH / state 初期化に必須の capability が欠けていると起動直後に明示的なエラーを出して停止します。
+`drop: ALL` だけでは SSH は成立しません。`sshd` の privilege separation には
+`SETUID` / `SETGID` / `SYS_CHROOT` が必要で、entrypoint の初期化や state volume の ownership
+調整には `CHOWN` / `DAC_OVERRIDE` / `FOWNER` も必要です。current-cluster の local Podman
+fallback では、さらに `KILL` / `MKNOD` / `NET_ADMIN` / `SETFCAP` / `SETPCAP` / `SYS_ADMIN`
+も必要でした。現在の entrypoint は mode に応じて必須 capability が欠けていると、
+起動直後に明示的なエラーを出して停止します。
 
-`spec.hostUsers: false` を実際に使うには、cluster/node 側も Pod user namespace をサポートしている必要があります。OCI runtime と CRI の対応、idmap mount を扱える node filesystem、service account token や Secret を mount する tmpfs 側の要件などが揃っていないと、Pod が起動しないか local Podman が引き続き失敗します。
+rootless Podman をどうしても続けたい場合だけ、`spec.hostUsers: false` と
+`CONTROL_PLANE_LOCAL_PODMAN_MODE=rootless` へ切り替えてください。ただし、このクラスタ実測では
+`hostUsers: false` Pod 自体が起動しませんでした。OCI runtime / CRI / idmap mount / projected
+volume の組み合わせがそろっている cluster でのみ有効化してください。
 
 それでも GNU Screen session picker が runtime 依存の理由で起動できない場合があるため、現在は picker の失敗時に通常の login shell へフォールバックします。一方、picker から入った Screen を `exit` した場合は SSH もそのまま閉じ、余計な login shell へ戻らないようにしています。
 
 ## local Podman について
 
-Kubernetes 上の local nested Podman / Kind は、引き続き best-effort です。
+Kubernetes 上の local nested Podman / Kind は、引き続き best-effort です。ただし current
+cluster 向け sample manifest は rootless ではなく **rootful remote-service fallback** を使います。
 
 Control Plane イメージ内の `podman` と `docker` は `control-plane-podman` wrapper への
 symlink です。`cannot clone: Operation not permitted` や
@@ -74,14 +86,18 @@ symlink です。`cannot clone: Operation not permitted` や
 outer runtime 側の制約であることに加え、Pod user namespace が有効かどうか、
 `podman system migrate` で回復できる stale state かどうかも追加で案内します。
 
-- sample manifest は `spec.hostUsers: false` を使います
-- rootless Podman は outer host / runtime 側の user namespace、`newuidmap` / `newgidmap`、`/dev/fuse`、必要に応じて `/dev/net/tun` に依存します
-- Linux 5.12+ では UID 0 mapping のため `SETFCAP` も必要です
-- sample manifest は control-plane container だけ `seccompProfile: Unconfined` と `appArmorProfile.type: Unconfined` を使います
-- `securityContext.privileged: true` でも outer runtime が nested user namespace を禁止していれば `cannot set user namespace` で失敗します
+- current-cluster sample は `CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service` を使います
+- wrapper は current-cluster fallback 中だけ `CONTAINER_HOST` / `DOCKER_HOST` を rootful service socket へ向け、`podman run` に `--cgroups=disabled --network=host` を既定で足します
+- rootful service は `vfs` storage driver を使うので `/dev/fuse` なしでも動きます
+- `securityContext.privileged: false` のままでも、上記 capability と unconfined seccomp/AppArmor をそろえれば current cluster で `podman run` が通ります
+- rootless profile に戻す場合だけ outer host / runtime 側の user namespace、`newuidmap` / `newgidmap`、`/dev/fuse`、必要に応じて `/dev/net/tun` が重要になります
 - そのため、サンプルの既定経路は `CONTROL_PLANE_RUN_MODE=k8s-job` です
 
-どうしても Pod 内ローカル実行を優先したい場合だけ `CONTROL_PLANE_RUN_MODE=auto` へ切り替えるか `control-plane-run --mode podman` を使ってください。ただし、`privileged` は十分条件ではありません。`/dev/fuse` を mount できる cluster では、それも追加したほうが `fuse-overlayfs` を使いやすくなります。default networking も使いたい場合は `/dev/net/tun` も追加してください。network が不要な短い local run なら `podman run --network=none ...` で済むことがあります。
+どうしても Pod 内ローカル実行を優先したい場合だけ `CONTROL_PLANE_RUN_MODE=auto` へ切り替えるか
+`control-plane-run --mode podman` を使ってください。current-cluster sample では local Podman は
+rootful remote service 経路へ流れます。rootless profile に戻す場合は `privileged` は十分条件ではなく、
+`hostUsers: false`、outer runtime の userns 許可、必要に応じて `/dev/fuse` / `/dev/net/tun`
+までそろえてください。
 
 Podman storage は driver ごとに分離しています。
 
@@ -146,11 +162,21 @@ control-plane-run \
 
 ### `drop: ALL` にしたら SSH できない
 
-`capabilities.add` に `CHOWN` / `DAC_OVERRIDE` / `FOWNER` / `SETFCAP` / `SETGID` / `SETUID` / `SYS_CHROOT` を戻してください。SSH 自体に最低限必要なのは `CHOWN` / `DAC_OVERRIDE` / `FOWNER` / `SETGID` / `SETUID` / `SYS_CHROOT` で、`SETFCAP` は local rootless Podman 向けです。さらに sample manifest どおり control-plane container を `seccompProfile: Unconfined` にし、必要なら `appArmorProfile.type: Unconfined` も維持してください。session picker が失敗しても現在は通常 shell へフォールバックしますが、picker 自体を完全に避けたい場合は `CONTROL_PLANE_DISABLE_SESSION_PICKER=1` を設定してください。
+`capabilities.add` に `CHOWN` / `DAC_OVERRIDE` / `FOWNER` / `KILL` / `SETGID` / `SETUID` /
+`SYS_CHROOT` を戻してください。current-cluster sample の local Podman fallback まで含めるなら、
+さらに `MKNOD` / `NET_ADMIN` / `SETFCAP` / `SETPCAP` / `SYS_ADMIN` も戻してください。
+sample manifest どおり control-plane container を `seccompProfile: Unconfined` と
+`appArmorProfile.type: Unconfined` にし、session picker を完全に避けたい場合は
+`CONTROL_PLANE_DISABLE_SESSION_PICKER=1` を設定してください。
 
 ### privileged でも Podman が `cannot set user namespace` で失敗する
 
-Pod 内ではなく outer runtime の制約です。rootless Podman を完全には保証できません。まず `cat /proc/self/uid_map` で Pod user namespace が効いているか確認してください。1 行目が `0 0 4294967295` のままなら `spec.hostUsers: false` が効いていません。そこが解消済みでも失敗する場合は outer runtime 側の user namespace、seccomp、AppArmor の許可が必要です。sample manifest は control-plane container を `seccompProfile: Unconfined` にし、`appArmorProfile.type: Unconfined` も付けています。さらに `slirp4netns` が `/dev/net/tun` を開けないと networking 付き `podman run` は失敗します。それでも失敗する場合は `control-plane-run --mode k8s-job` か GitHub Actions / host runner を使ってください。背景説明は `README.md` の「Rootless Podman / nested runtime の扱い」も参照してください。
+Pod 内ではなく outer runtime の制約です。current cluster では rootless Podman の前提である
+`spec.hostUsers: false` がそもそも使えなかったため、sample manifest は rootful remote-service
+fallback を既定にしました。rootless に戻したい場合は `cat /proc/self/uid_map` で Pod user namespace
+が効いているか確認し、1 行目が `0 0 4294967295` のままなら `spec.hostUsers: false` が効いていないと
+考えてください。そこが解消済みでも失敗する場合は outer runtime 側の userns / `newuidmap` /
+`newgidmap` / seccomp / AppArmor 条件が足りていません。
 
 ### securityContext を変えたら overlay / vfs の警告が出た
 
@@ -158,7 +184,7 @@ Pod 内ではなく outer runtime の制約です。rootless Podman を完全に
 
 ## 補足
 
-- 既存 cluster 上で sample manifest 相当の least-privilege Podman / TERM 回帰をまとめて確かめたい場合は、`scripts/test-k8s-job.sh` を使ってください。現在の Pod image を既定値として拾い、修正済みスクリプトを ConfigMap 経由で一時 Job へ注入して `control-plane-entrypoint` / `control-plane-podman` の smoke を実行します。
+- current cluster 上で sample manifest 相当の rootful-service Podman / interactive `-it` / SSH 回帰をまとめて確かめたい場合は、`scripts/test-k8s-job.sh` を使ってください。現在の Pod image を既定値として拾い、修正済みスクリプトを ConfigMap 経由で一時 Job へ注入して `control-plane-entrypoint` / `control-plane-podman` / localhost SSH の smoke を実行します。
 - サンプルの Service は `LoadBalancer` です。`EXTERNAL-IP` が付く前でも `kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox` で SSH できます。
 - SSH login shell は使えない `TERM` を `xterm-256color` / `xterm` へ補正し、`xterm-color` のような low-color term も 256 色 terminfo へ引き上げます。GNU Screen では 10000 行 scrollback と mouse tracking を既定化しています。
 - Copilot CLI の multiline shortcut (`Shift+Enter`) は upstream 側で Kitty protocol 対応 terminal を前提とします。`tmux` / GNU Screen 越しでは安定しない場合があるため、必要なら `Ctrl+G` で外部 editor を使ってください。
