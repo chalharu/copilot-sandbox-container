@@ -700,6 +700,18 @@ EOF
 fi
 printf '%s\n' 'kind-test: screen utf8 ready' >&2
 
+if ! wait_for_remote_grep '^k8s-screen$' /workspace/k8s-screen.txt; then
+  ssh_bash <<'EOF' >&2 || true
+set -euo pipefail
+cat /workspace/k8s-screen-term.txt || true
+cat /workspace/k8s-screen-utf8.txt || true
+cat /workspace/k8s-screen.txt || true
+EOF
+  printf 'Expected kind-session to persist screen status output\n' >&2
+  exit 1
+fi
+printf '%s\n' 'kind-test: screen output ready' >&2
+
 printf '%s\n' 'kind-test: starting manual job' >&2
 if ! job_name="$(ssh_bash <<EOF
 set -euo pipefail

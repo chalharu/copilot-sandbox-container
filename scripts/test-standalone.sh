@@ -275,6 +275,17 @@ EOF
   exit 1
 fi
 
+if ! wait_for_remote_grep '^screen-ok$' /workspace/screen.txt; then
+  ssh_bash <<'EOF' >&2 || true
+set -euo pipefail
+cat /workspace/screen-term.txt || true
+cat /workspace/screen-utf8.txt || true
+cat /workspace/screen.txt || true
+EOF
+  printf 'Expected smoke-session to persist screen status output\n' >&2
+  exit 1
+fi
+
 ssh_bash <<EOF
 set -euo pipefail
 printf 'small input\n' > /workspace/job-input.txt
