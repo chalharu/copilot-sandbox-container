@@ -31,6 +31,18 @@ dockerhub_token="${DOCKERHUB_TOKEN:-}"
 git_user_name="${CONTROL_PLANE_GIT_USER_NAME:-}"
 git_user_email="${CONTROL_PLANE_GIT_USER_EMAIL:-}"
 podman_storage_driver="${CONTROL_PLANE_PODMAN_STORAGE_DRIVER:-}"
+local_podman_mode="${CONTROL_PLANE_LOCAL_PODMAN_MODE:-rootless}"
+rootful_podman_storage_driver="${CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER:-vfs}"
+rootful_podman_runtime_dir="${CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR:-/run/control-plane}"
+rootful_podman_socket="${CONTROL_PLANE_ROOTFUL_PODMAN_SOCKET:-${rootful_podman_runtime_dir}/podman-root.sock}"
+rootful_podman_state_root="${CONTROL_PLANE_ROOTFUL_PODMAN_STATE_ROOT:-${podman_state_root}/rootful-${rootful_podman_storage_driver}}"
+rootful_podman_graphroot="${rootful_podman_state_root}/storage"
+rootful_podman_runroot="${rootful_podman_runtime_dir}/runroot"
+rootful_podman_storage_config_path="${rootful_podman_runtime_dir}/storage.conf"
+rootful_podman_log_path="${rootful_podman_runtime_dir}/podman-root.log"
+rootful_podman_default_cgroups="${CONTROL_PLANE_ROOTFUL_PODMAN_DEFAULT_CGROUPS:-disabled}"
+rootful_podman_default_network="${CONTROL_PLANE_ROOTFUL_PODMAN_DEFAULT_NETWORK:-host}"
+podman_bin="${CONTROL_PLANE_PODMAN_BIN:-/usr/bin/podman}"
 job_namespace="${CONTROL_PLANE_JOB_NAMESPACE:-${CONTROL_PLANE_K8S_NAMESPACE:-default}}"
 job_workspace_pvc="${CONTROL_PLANE_JOB_WORKSPACE_PVC:-}"
 job_workspace_mount_path="${CONTROL_PLANE_JOB_WORKSPACE_MOUNT_PATH:-${CONTROL_PLANE_WORKSPACE_MOUNT_PATH:-/workspace}}"
@@ -50,6 +62,24 @@ case "${podman_storage_driver}" in
     ;;
   *)
     printf 'Unsupported CONTROL_PLANE_PODMAN_STORAGE_DRIVER: %s\n' "${podman_storage_driver}" >&2
+    exit 1
+    ;;
+esac
+
+case "${local_podman_mode}" in
+  rootless|rootful-service)
+    ;;
+  *)
+    printf 'Unsupported CONTROL_PLANE_LOCAL_PODMAN_MODE: %s\n' "${local_podman_mode}" >&2
+    exit 1
+    ;;
+esac
+
+case "${rootful_podman_storage_driver}" in
+  overlay|vfs)
+    ;;
+  *)
+    printf 'Unsupported CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER: %s\n' "${rootful_podman_storage_driver}" >&2
     exit 1
     ;;
 esac
@@ -83,6 +113,19 @@ events_logger = "file"
 EOF
 }
 
+write_rootful_storage_conf() {
+  {
+    printf '%s\n' '[storage]'
+    printf 'driver = "%s"\n' "${rootful_podman_storage_driver}"
+    printf 'graphroot = "%s"\n' "${rootful_podman_graphroot}"
+    printf 'runroot = "%s"\n' "${rootful_podman_runroot}"
+    if [[ "${rootful_podman_storage_driver}" == "overlay" ]]; then
+      printf '\n%s\n' '[storage.options]'
+      printf '%s\n' 'mount_program = "/usr/bin/fuse-overlayfs"'
+    fi
+  } > "${rootful_podman_storage_config_path}"
+}
+
 safe_chown_tree() {
   local owner="$1"
   shift
@@ -103,9 +146,15 @@ capability_bit() {
     CHOWN) printf '0\n' ;;
     DAC_OVERRIDE) printf '1\n' ;;
     FOWNER) printf '3\n' ;;
+    KILL) printf '5\n' ;;
     SETGID) printf '6\n' ;;
+    SETPCAP) printf '8\n' ;;
     SETUID) printf '7\n' ;;
+    NET_ADMIN) printf '12\n' ;;
     SYS_CHROOT) printf '18\n' ;;
+    SYS_ADMIN) printf '21\n' ;;
+    MKNOD) printf '27\n' ;;
+    SETFCAP) printf '31\n' ;;
     *)
       printf 'Unsupported capability name: %s\n' "$1" >&2
       exit 1
@@ -137,10 +186,19 @@ require_container_capabilities() {
     fi
   done
 
+  if [[ "${local_podman_mode}" == "rootful-service" ]]; then
+    for capability_name in KILL MKNOD NET_ADMIN SETFCAP SETPCAP SYS_ADMIN; do
+      if ! has_effective_capability "${capability_name}" "${capability_mask}"; then
+        missing+=("${capability_name}")
+      fi
+    done
+  fi
+
   if [[ ${#missing[@]} -gt 0 ]]; then
     printf 'Missing Linux capabilities for control-plane startup: %s\n' "${missing[*]}" >&2
     printf '%s\n' \
       'Keep drop: ALL only when you re-add CHOWN,DAC_OVERRIDE,FOWNER,SETGID,SETUID,SYS_CHROOT, or run the container privileged.' \
+      'When CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service, also re-add KILL,MKNOD,NET_ADMIN,SETFCAP,SETPCAP,SYS_ADMIN so the nested Podman service can launch containers on clusters that block Pod user namespaces.' \
       'SSH requires SETUID/SETGID plus SYS_CHROOT for privilege separation, and the entrypoint still needs ownership-related capabilities on mounted state.' \
       >&2
     exit 1
@@ -200,6 +258,47 @@ write_private_file() {
   )
   chown "${owner}" "${target_path}"
   chmod 600 "${target_path}"
+}
+
+start_rootful_podman_service() {
+  local service_pid
+  local wait_count=0
+
+  [[ "${local_podman_mode}" == "rootful-service" ]] || return 0
+
+  mkdir -p "${rootful_podman_runtime_dir}" "${rootful_podman_graphroot}" "${rootful_podman_runroot}"
+  chmod 755 "${rootful_podman_runtime_dir}"
+  write_rootful_storage_conf
+  rm -f "${rootful_podman_socket}"
+
+  env -u CONTAINER_HOST -u DOCKER_HOST -u _CONTAINERS_USERNS_CONFIGURED \
+    XDG_RUNTIME_DIR="${rootful_podman_runtime_dir}" \
+    CONTAINERS_STORAGE_CONF="${rootful_podman_storage_config_path}" \
+    "${podman_bin}" \
+      --storage-driver "${rootful_podman_storage_driver}" \
+      --root "${rootful_podman_graphroot}" \
+      --runroot "${rootful_podman_runroot}" \
+      system service --time=0 "unix://${rootful_podman_socket}" \
+      > "${rootful_podman_log_path}" 2>&1 &
+  service_pid=$!
+
+  while [[ ! -S "${rootful_podman_socket}" ]]; do
+    if ! kill -0 "${service_pid}" 2>/dev/null; then
+      printf 'control-plane-entrypoint: failed to start rootful Podman service.\n' >&2
+      cat "${rootful_podman_log_path}" >&2 || true
+      exit 1
+    fi
+    wait_count=$((wait_count + 1))
+    if [[ "${wait_count}" -ge 100 ]]; then
+      printf 'control-plane-entrypoint: timed out waiting for rootful Podman socket %s\n' "${rootful_podman_socket}" >&2
+      cat "${rootful_podman_log_path}" >&2 || true
+      exit 1
+    fi
+    sleep 0.1
+  done
+
+  chown "${control_plane_user}:${control_plane_user}" "${rootful_podman_socket}"
+  chmod 660 "${rootful_podman_socket}"
 }
 
 ensure_podman_storage_link() {
@@ -278,7 +377,7 @@ install_bundled_control_plane_skill() {
   local source_dir="${bundled_skills_dir}/${skill_name}"
   local target_dir="${copilot_skills_dir}/${skill_name}"
 
-  [[ -d "${source_dir}" ]] || return
+  [[ -d "${source_dir}" ]] || return 0
 
   mkdir -p "${copilot_skills_dir}"
   rm -rf "${target_dir}"
@@ -338,6 +437,7 @@ mkdir -p \
   "${tmp_dir}" \
   "${host_key_dir}" \
   "/run/user/${control_plane_uid}" \
+  "${rootful_podman_runtime_dir}" \
   /run/sshd \
   "${runtime_dir}"
 migrate_legacy_podman_state "${podman_state_root}"
@@ -471,6 +571,7 @@ fi
   if [[ -n "${CONTROL_PLANE_RUN_MODE:-}" ]]; then
     write_runtime_var CONTROL_PLANE_RUN_MODE "${CONTROL_PLANE_RUN_MODE}"
   fi
+  write_runtime_var CONTROL_PLANE_LOCAL_PODMAN_MODE "${local_podman_mode}"
   if [[ -n "${CONTROL_PLANE_EXECUTION_HINT:-}" ]]; then
     write_runtime_var CONTROL_PLANE_EXECUTION_HINT "${CONTROL_PLANE_EXECUTION_HINT}"
   fi
@@ -487,6 +588,12 @@ fi
   write_runtime_var XDG_RUNTIME_DIR "${runtime_dir}"
   write_runtime_var TMPDIR "${tmp_dir}"
   write_runtime_var SCREENDIR "${screen_dir}"
+  if [[ "${local_podman_mode}" == "rootful-service" ]]; then
+    write_runtime_var CONTAINER_HOST "unix://${rootful_podman_socket}"
+    write_runtime_var DOCKER_HOST "unix://${rootful_podman_socket}"
+    write_runtime_var CONTROL_PLANE_PODMAN_DEFAULT_CGROUPS "${rootful_podman_default_cgroups}"
+    write_runtime_var CONTROL_PLANE_PODMAN_DEFAULT_NETWORK "${rootful_podman_default_network}"
+  fi
   write_runtime_var KUBECONFIG "${KUBECONFIG:-}"
   if [[ -n "${copilot_github_token}" ]]; then
     write_runtime_var CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE "${copilot_token_path}"
@@ -513,6 +620,7 @@ configure_git
 ensure_ssh_host_key rsa ssh_host_rsa_key
 ensure_ssh_host_key ecdsa ssh_host_ecdsa_key
 ensure_ssh_host_key ed25519 ssh_host_ed25519_key
+start_rootful_podman_service
 
 if [[ $# -eq 0 ]]; then
   set -- /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config

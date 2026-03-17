@@ -17,7 +17,9 @@
 - **Execution Plane**: 実際のビルド・テスト・実行を担当する実行環境。Podman コンテナまたは Kubernetes Job として提供される
 - **単独起動モード**: Control Plane をローカル環境、Docker、または Podman 上で動かすモード
 - **Kubernetes モード**: 同じ Control Plane を Kubernetes 上の Pod として動かすモード
-- **Podman 実行**: 高速で短時間の処理を `rootless Podman` 経由で実行する方式
+- **Podman 実行**: 高速で短時間の処理を local Podman 経由で実行する方式。
+  rootless Podman を優先しつつ、Pod user namespace を使えない Kubernetes
+  クラスタでは rootful Podman remote service fallback を使えるものとする
 - **K8s Job 実行**: 長時間の処理を Kubernetes Job として実行する方式
 
 ## 3. 全体方針
@@ -42,7 +44,7 @@ Control Plane は、以下を含む必要があります。
 - `Node.js (LTS)` と `npm`
 - `@github/copilot`
 - `gh` と `git`
-- `docker` CLI 互換を備えた `rootless Podman`
+- `docker` CLI 互換を備えた local Podman
 - `kubectl`
 - SSH サーバー (`sshd`)
 - `GNU Screen` または `tmux`
@@ -202,14 +204,19 @@ Kubernetes モードで Job namespace を分ける場合、Control Plane namespa
 
 ### 4.9 安全性と運用要件
 
-- 既定で `privileged` を前提にしないこと（sample deployment は
-  `spec.hostUsers: false` による Pod user namespace を基本にし、
-  local rootless Podman が必要な control-plane container だけ
-  `seccompProfile: Unconfined` と AppArmor の unconfined 設定を使い、
-  `securityContext.privileged` は本当に必要なときだけ明示的な opt-in として許容する）
+- 既定で `privileged` を前提にしないこと（sample deployment は current
+  cluster 互換の `hostUsers: true` + rootful Podman remote service fallback を
+  基本とし、`securityContext.privileged` は本当に必要なときだけ明示的な opt-in
+  として許容する）
+- current cluster 互換の local Podman fallback では、少なくとも
+  `CHOWN,DAC_OVERRIDE,FOWNER,KILL,MKNOD,NET_ADMIN,SETFCAP,SETGID,SETPCAP,SETUID,SYS_ADMIN,SYS_CHROOT`
+  を再追加し、seccomp / AppArmor の unconfined 設定と
+  `vfs + --cgroups=disabled + --network=host` を前提にできること
 - `securityContext.privileged: true` でも nested user namespace が保証されるとは
   限らないこと。outer runtime が `newuidmap` / `newgidmap` や user namespace を
   禁止している場合、rootless Podman は失敗し得る
+- Pod user namespace を使えるクラスタでは、より少権限な `spec.hostUsers: false`
+  - rootless Podman profile を追加で選べてもよい
 - Docker-in-Docker のような root 権限依存の構成を避けること
 - 言語間の依存関係衝突を防げること
 - Control Plane と Execution Plane を独立して更新できること
@@ -259,7 +266,7 @@ Host
 │  └─ /workspace
 └─ Control Plane
    ├─ Copilot CLI / gh / git
-   ├─ rootless Podman (docker CLI 互換)
+   ├─ local Podman (docker CLI 互換; rootless 優先、必要なら rootful fallback)
    ├─ kubectl
    ├─ sshd
    ├─ GNU Screen
@@ -276,7 +283,7 @@ Cluster
 │  └─ /workspace
 ├─ Control Plane Pod
 │  ├─ Copilot CLI / gh / git
-│  ├─ rootless Podman (docker CLI 互換)
+│  ├─ local Podman (docker CLI 互換; rootless 優先、必要なら rootful fallback)
 │  ├─ kubectl
 │  ├─ sshd
 │  ├─ GNU Screen
@@ -292,4 +299,5 @@ Cluster
 - Copilot CLI の会話履歴と GitHub CLI の認証状態を保持できる
 - 短時間処理は高速に、長時間処理は堅牢に実行できる
 - 言語別実行環境を個別に追加・更新できる
-- `rootless Podman` により、より安全に運用できる
+- rootless Podman を優先しつつ、クラスタ制約に応じて rootful fallback でも
+  `privileged` を避けて運用できる

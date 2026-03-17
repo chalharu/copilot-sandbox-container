@@ -432,7 +432,6 @@ spec:
       labels:
         app.kubernetes.io/name: control-plane
     spec:
-      hostUsers: false
       securityContext:
         fsGroup: 1000
       serviceAccountName: control-plane
@@ -482,13 +481,14 @@ spec:
               value: control-plane-job
             - name: CONTROL_PLANE_RUN_MODE
               value: k8s-job
+            - name: CONTROL_PLANE_LOCAL_PODMAN_MODE
+              value: rootful-service
             - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
               value: Never
-          # Keep the Kind test on the same least-privilege SSH/Copilot profile as
-          # the sample manifest, including SETFCAP for rootless Podman on Linux
-          # 5.12+ and an unconfined seccomp profile so nested user namespaces can
-          # re-exec on runtimes that support them. Local nested Podman still
-          # remains opt-in elsewhere.
+          # Keep the Kind test on the same current-cluster-compatible profile as
+          # the sample manifest: drop: ALL, explicit capability re-adds, and a
+          # rootful local Podman remote-service fallback instead of nested
+          # rootless Podman.
           securityContext:
             privileged: false
             runAsUser: 0
@@ -501,9 +501,14 @@ spec:
                 - CHOWN
                 - DAC_OVERRIDE
                 - FOWNER
+                - KILL
+                - MKNOD
+                - NET_ADMIN
                 - SETFCAP
                 - SETGID
+                - SETPCAP
                 - SETUID
+                - SYS_ADMIN
                 - SYS_CHROOT
             seccompProfile:
               type: Unconfined
@@ -666,75 +671,26 @@ printf '%s\n' 'kind-test: initial remote assertions ok' >&2
 
 if ! ssh_bash <<'EOF'
 set -euo pipefail
-result_file=/workspace/k8s-podman-smoke-result.txt
-podman_driver_status=0
-podman_unshare_status=0
-podman_smoke_result=unexpected
-
-if podman info --format '{{.Store.GraphDriverName}}' > /workspace/k8s-podman-driver.txt 2> /workspace/k8s-podman-info.log; then
-  podman_driver_status=0
-else
-  podman_driver_status=$?
-fi
-
-if podman unshare sh -c 'cat /proc/self/uid_map' > /workspace/k8s-podman-unshare-uid-map.txt 2> /workspace/k8s-podman-unshare.log; then
-  podman_unshare_status=0
-else
-  podman_unshare_status=$?
-fi
-
-if [[ "${podman_driver_status}" -eq 0 ]] && [[ "${podman_unshare_status}" -eq 0 ]]; then
-  if grep -Eq '^(overlay|vfs)$' /workspace/k8s-podman-driver.txt && awk 'NR == 1 { exit !($1 == 0 && $2 != 0 && $3 >= 1) }' /workspace/k8s-podman-unshare-uid-map.txt; then
-    podman_smoke_result=success
-  fi
-elif grep -Eiq 'cannot clone: Operation not permitted|cannot re-exec process|cannot set user namespace|creating new namespace.*Operation not permitted|newuidmap.*Operation not permitted|newgidmap.*Operation not permitted' /workspace/k8s-podman-info.log /workspace/k8s-podman-unshare.log; then
-  podman_smoke_result=blocked
-fi
-
-printf '%s\n' "${podman_smoke_result}" > "${result_file}"
-[[ "${podman_smoke_result}" != "unexpected" ]]
+podman info --format '{{.Store.GraphDriverName}} {{.Host.Security.Rootless}}' > /workspace/k8s-podman-info-summary.txt 2> /workspace/k8s-podman-info.log
+grep -qx 'vfs false' /workspace/k8s-podman-info-summary.txt
+timeout 30s podman pull docker.io/library/hello-world:latest > /workspace/k8s-actual-podman-pull.log 2>&1
+timeout 20s podman run --rm docker.io/library/hello-world:latest > /workspace/k8s-actual-podman-run.log 2>&1
+grep -q 'Hello from Docker!' /workspace/k8s-actual-podman-run.log
 EOF
 then
   ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
-cat /proc/self/uid_map || true
 cat /workspace/k8s-podman-info.log || true
-cat /workspace/k8s-podman-unshare.log || true
-ls -l /dev/fuse || true
+cat /workspace/k8s-podman-info-summary.txt || true
+cat /workspace/k8s-actual-podman-pull.log || true
+cat /workspace/k8s-actual-podman-run.log || true
 podman info || true
-podman unshare true || true
+podman ps -a || true
 EOF
   dump_control_plane_diagnostics
   exit 1
 fi
-podman_smoke_result="$(ssh_bash <<'EOF'
-set -euo pipefail
-cat /workspace/k8s-podman-smoke-result.txt
-EOF
-)"
-podman_smoke_result="$(printf '%s' "${podman_smoke_result}" | tr -d '\r\n')"
-if [[ "${podman_smoke_result}" == "success" ]]; then
-  printf '%s\n' 'kind-test: podman user namespace smoke ok' >&2
-  if ! ssh_bash <<'EOF'
-set -euo pipefail
-timeout 30s podman pull docker.io/library/hello-world:latest > /workspace/k8s-actual-podman-pull.log 2>&1
-timeout 20s podman run --rm --network=none docker.io/library/hello-world:latest > /workspace/k8s-actual-podman-run.log 2>&1
-grep -q 'Hello from Docker!' /workspace/k8s-actual-podman-run.log
-EOF
-  then
-    ssh_bash <<'EOF' >&2 || true
-set -euo pipefail
-cat /workspace/k8s-actual-podman-pull.log || true
-cat /workspace/k8s-actual-podman-run.log || true
-podman ps -a || true
-EOF
-    printf 'Expected actual podman pull/run to complete without hanging in kind mode\n' >&2
-    exit 1
-  fi
-  printf '%s\n' 'kind-test: actual podman run returns' >&2
-else
-  printf '%s\n' 'kind-test: local podman is blocked by the outer runtime; continuing with k8s-job coverage' >&2
-fi
+printf '%s\n' 'kind-test: rootful local podman smoke ok' >&2
 
 ssh_bash <<EOF
 set -euo pipefail

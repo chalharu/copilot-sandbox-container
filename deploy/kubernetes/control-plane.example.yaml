@@ -121,11 +121,10 @@ spec:
       labels:
         app.kubernetes.io/name: control-plane
     spec:
-      # Opt into Kubernetes Pod user namespaces so root in the Pod maps to a
-      # non-root host UID/GID. This materially improves the chance that nested
-      # rootless Podman can create its own user namespace when the node runtime
-      # supports it.
-      hostUsers: false
+      # The current cluster leaves `hostUsers: false` Pods stuck in
+      # ContainerCreating, so this sample keeps the default `hostUsers: true`
+      # path and uses a rootful Podman remote service for local in-Pod
+      # containers instead of relying on nested rootless user namespaces.
       securityContext:
         fsGroup: 1000
       serviceAccountName: control-plane
@@ -189,16 +188,16 @@ spec:
             - name: CONTROL_PLANE_JOB_SERVICE_ACCOUNT
               value: control-plane-job
             # Keep Kubernetes Jobs as the default path in the least-privilege
-            # profile. If you explicitly opt into privileged local Podman,
-            # switch this to `auto` or pass --mode podman per command.
+            # profile. Local Podman still works on the current cluster through a
+            # rootful remote service when you explicitly opt into `podman`.
             - name: CONTROL_PLANE_RUN_MODE
               value: k8s-job
-            # Optional: force the local Podman storage driver. When /dev/fuse is
-            # unavailable, the entrypoint now falls back to `vfs` automatically.
-            # This does not solve user-namespace failures by itself; keep
-            # `hostUsers: false` and the outer runtime prerequisites in place.
-            # - name: CONTROL_PLANE_PODMAN_STORAGE_DRIVER
-            #   value: vfs
+            # Current-cluster local Podman profile: run a rootful remote service
+            # inside the control-plane container. The entrypoint exports
+            # CONTAINER_HOST/DOCKER_HOST plus safe defaults
+            # (`--cgroups=disabled --network=host`) into runtime.env.
+            - name: CONTROL_PLANE_LOCAL_PODMAN_MODE
+              value: rootful-service
             - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
               value: IfNotPresent
             - name: CONTROL_PLANE_JOB_CPU_REQUEST
@@ -209,15 +208,15 @@ spec:
               value: 256Mi
             - name: CONTROL_PLANE_JOB_MEMORY_LIMIT
               value: 2Gi
-          # Keep a least-privilege SSH/Copilot profile by default. `drop: ALL`
-          # only works because we re-add CHOWN/DAC_OVERRIDE/FOWNER/SETFCAP/
-          # SETGID/SETUID/SYS_CHROOT. `SETFCAP` keeps rootless Podman closer to
-          # working on Linux 5.12+, and the unconfined seccomp profile keeps
-          # nested user namespace re-exec closer to working without going fully
-          # privileged. Local nested Podman/Kind still remains best-effort
-          # because the outer runtime can still block user namespaces. Jobs
-          # default to a separate namespace; use a namespace-local workspace PVC
-          # there only when you really need one.
+          # Keep `drop: ALL`, but re-add the capabilities that SSH startup and
+          # the current-cluster rootful Podman remote-service fallback need.
+          # This stays `privileged: false`, yet still lets local `podman run`
+          # work on the current node runtime by combining:
+          # - KILL for sshd preauth cleanup
+          # - MKNOD / NET_ADMIN / SETFCAP / SETPCAP / SYS_ADMIN for nested
+          #   rootful Podman on this cluster
+          # - unconfined seccomp/AppArmor so the nested runtime can manage its
+          #   own cgroups and network namespace details
           securityContext:
             privileged: false
             runAsUser: 0
@@ -230,9 +229,14 @@ spec:
                 - CHOWN
                 - DAC_OVERRIDE
                 - FOWNER
+                - KILL
+                - MKNOD
+                - NET_ADMIN
                 - SETFCAP
                 - SETGID
+                - SETPCAP
                 - SETUID
+                - SYS_ADMIN
                 - SYS_CHROOT
             seccompProfile:
               type: Unconfined
@@ -275,14 +279,15 @@ spec:
             - name: state
               mountPath: /workspace
               subPath: workspace
-            # Optional: expose /dev/fuse when the cluster allows it so local
-            # rootless Podman can use fuse-overlayfs instead of always falling
-            # back to the vfs storage driver.
+            # Optional advanced rootless profile: if your cluster really
+            # supports `hostUsers: false`, `/dev/fuse`, and nested user
+            # namespaces, you can switch CONTROL_PLANE_LOCAL_PODMAN_MODE back to
+            # `rootless` and mount /dev/fuse for fuse-overlayfs.
             # - name: fuse-device
             #   mountPath: /dev/fuse
-            # Optional: expose /dev/net/tun when the cluster allows it so
-            # rootless Podman networking can use slirp4netns without falling
-            # back to `--network=none`.
+            # Optional advanced rootless profile: /dev/net/tun enables
+            # slirp4netns networking when you are not using the current-cluster
+            # rootful-service fallback.
             # - name: tun-device
             #   mountPath: /dev/net/tun
             - name: control-plane-auth
@@ -292,16 +297,16 @@ spec:
         - name: state
           persistentVolumeClaim:
             claimName: control-plane-state-pvc
-        # Optional: if your cluster policy allows hostPath devices, mount
-        # /dev/fuse for fuse-overlayfs. On stricter clusters use a device
-        # plugin-backed resource instead.
+        # Optional advanced rootless profile: if your cluster policy allows
+        # hostPath devices, mount /dev/fuse for fuse-overlayfs. On stricter
+        # clusters use a device plugin-backed resource instead.
         # - name: fuse-device
         #   hostPath:
         #     path: /dev/fuse
         #     type: CharDevice
-        # Optional: if your cluster policy allows hostPath devices, mount
-        # /dev/net/tun for slirp4netns. On stricter clusters use a device
-        # plugin-backed resource instead, or rely on `podman run --network=none`.
+        # Optional advanced rootless profile: if your cluster policy allows
+        # hostPath devices, mount /dev/net/tun for slirp4netns. On stricter
+        # clusters use a device plugin-backed resource instead.
         # - name: tun-device
         #   hostPath:
         #     path: /dev/net/tun
