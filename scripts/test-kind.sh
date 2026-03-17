@@ -663,26 +663,32 @@ printf '%s\n' 'kind-test: initial remote assertions ok' >&2
 if ! ssh_bash <<'EOF'
 set -euo pipefail
 result_file=/workspace/k8s-podman-smoke-result.txt
-set +e
-podman info --format '{{.Store.GraphDriverName}}' > /workspace/k8s-podman-driver.txt 2> /workspace/k8s-podman-info.log
-podman_driver_status=$?
-podman unshare sh -c 'cat /proc/self/uid_map' > /workspace/k8s-podman-unshare-uid-map.txt 2> /workspace/k8s-podman-unshare.log
-podman_unshare_status=$?
-set -e
+podman_driver_status=0
+podman_unshare_status=0
+podman_smoke_result=unexpected
+
+if podman info --format '{{.Store.GraphDriverName}}' > /workspace/k8s-podman-driver.txt 2> /workspace/k8s-podman-info.log; then
+  podman_driver_status=0
+else
+  podman_driver_status=$?
+fi
+
+if podman unshare sh -c 'cat /proc/self/uid_map' > /workspace/k8s-podman-unshare-uid-map.txt 2> /workspace/k8s-podman-unshare.log; then
+  podman_unshare_status=0
+else
+  podman_unshare_status=$?
+fi
 
 if [[ "${podman_driver_status}" -eq 0 ]] && [[ "${podman_unshare_status}" -eq 0 ]]; then
-  grep -Eq '^(overlay|vfs)$' /workspace/k8s-podman-driver.txt
-  awk 'NR == 1 { exit !($1 == 0 && $2 != 0 && $3 >= 1) }' /workspace/k8s-podman-unshare-uid-map.txt
-  printf '%s\n' success > "${result_file}"
-  exit 0
+  if grep -Eq '^(overlay|vfs)$' /workspace/k8s-podman-driver.txt && awk 'NR == 1 { exit !($1 == 0 && $2 != 0 && $3 >= 1) }' /workspace/k8s-podman-unshare-uid-map.txt; then
+    podman_smoke_result=success
+  fi
+elif grep -Eiq 'cannot clone: Operation not permitted|cannot re-exec process|cannot set user namespace|creating new namespace.*Operation not permitted|newuidmap.*Operation not permitted|newgidmap.*Operation not permitted' /workspace/k8s-podman-info.log /workspace/k8s-podman-unshare.log; then
+  podman_smoke_result=blocked
 fi
 
-if grep -Eiq 'cannot clone: Operation not permitted|cannot re-exec process|cannot set user namespace|creating new namespace.*Operation not permitted|newuidmap.*Operation not permitted|newgidmap.*Operation not permitted' /workspace/k8s-podman-info.log /workspace/k8s-podman-unshare.log; then
-  printf '%s\n' blocked > "${result_file}"
-  exit 0
-fi
-
-exit 1
+printf '%s\n' "${podman_smoke_result}" > "${result_file}"
+[[ "${podman_smoke_result}" != "unexpected" ]]
 EOF
 then
   ssh_bash <<'EOF' >&2 || true
