@@ -71,12 +71,12 @@ fi
 
 if podman_requests_migrate "${stderr_path}"; then
   printf '%s\n' \
-    'control-plane-podman: detected stale rootless Podman state; attempting `podman system migrate` once.' \
+    "control-plane-podman: detected stale rootless Podman state; attempting \`podman system migrate\` once." \
     >&2
   if run_podman_with_live_stderr "${migrate_stderr_path}" system migrate; then
     if run_podman_with_live_stderr "${stderr_path}" "${command_args[@]}"; then
       printf '%s\n' \
-        'control-plane-podman: `podman system migrate` repaired the local Podman state.' \
+        "control-plane-podman: \`podman system migrate\` repaired the local Podman state." \
         >&2
       exit 0
     else
@@ -93,12 +93,12 @@ if podman_reports_userns_failure "${stderr_path}" || podman_reports_userns_failu
     >&2
   if running_in_kubernetes && pod_uses_identity_user_namespace; then
     printf '%s\n' \
-      'This Pod does not appear to be using Kubernetes Pod user namespaces. Enable `spec.hostUsers: false` when your cluster/runtime supports Pod user namespaces; otherwise nested rootless Podman often fails during re-exec.' \
+      "This Pod does not appear to be using Kubernetes Pod user namespaces. Enable \`spec.hostUsers: false\` when your cluster/runtime supports Pod user namespaces; otherwise nested rootless Podman often fails during re-exec." \
       >&2
   fi
   if running_in_kubernetes && [[ ! -e /dev/fuse ]]; then
     printf '%s\n' \
-      'This Pod also lacks `/dev/fuse`, so local Podman will fall back to the `vfs` storage driver even after user namespace issues are resolved. Mount `/dev/fuse` or a compatible device-plugin resource when you want `fuse-overlayfs`.' \
+      "This Pod also lacks \`/dev/fuse\`, so local Podman will fall back to the \`vfs\` storage driver even after user namespace issues are resolved. Mount \`/dev/fuse\` or a compatible device-plugin resource when you want \`fuse-overlayfs\`." \
       >&2
   fi
 fi
