@@ -2,15 +2,16 @@
 set -euo pipefail
 
 control_plane_user="${CONTROL_PLANE_USER:-copilot}"
+control_plane_uid="$(id -u "${control_plane_user}")"
 control_plane_home="$(getent passwd "${control_plane_user}" | cut -d: -f6)"
 control_plane_workspace="${CONTROL_PLANE_WORKSPACE:-/workspace}"
 containers_config_dir="${control_plane_home}/.config/containers"
 containers_storage_config_path="${containers_config_dir}/storage.conf"
 containers_engine_config_path="${containers_config_dir}/containers.conf"
 podman_state_root="${control_plane_home}/.copilot/containers"
-runtime_dir="${XDG_RUNTIME_DIR:-${control_plane_home}/.copilot/run}"
-tmp_dir="${TMPDIR:-${control_plane_home}/.copilot/tmp}"
-screen_dir="${SCREENDIR:-${control_plane_home}/.copilot/screen}"
+runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${control_plane_uid}}"
+tmp_dir="${TMPDIR:-/tmp/control-plane-${control_plane_uid}}"
+screen_dir="${SCREENDIR:-${runtime_dir}/screen}"
 host_key_dir="${CONTROL_PLANE_HOST_KEY_DIR:-/var/lib/control-plane/ssh-host-keys}"
 bundled_skills_dir="/usr/local/share/control-plane/skills"
 copilot_skills_dir="${control_plane_home}/.copilot/skills"
@@ -21,8 +22,12 @@ service_account_dir="/var/run/secrets/kubernetes.io/serviceaccount"
 runtime_config_dir="${control_plane_home}/.config/control-plane"
 runtime_config_path="${runtime_config_dir}/runtime.env"
 copilot_token_path="${runtime_config_dir}/copilot-github-token"
+dockerhub_username_path="${runtime_config_dir}/dockerhub-username"
+dockerhub_token_path="${runtime_config_dir}/dockerhub-token"
 git_config_path="${control_plane_home}/.gitconfig"
 copilot_github_token="${COPILOT_GITHUB_TOKEN:-}"
+dockerhub_username="${DOCKERHUB_USERNAME:-}"
+dockerhub_token="${DOCKERHUB_TOKEN:-}"
 git_user_name="${CONTROL_PLANE_GIT_USER_NAME:-}"
 git_user_email="${CONTROL_PLANE_GIT_USER_EMAIL:-}"
 podman_storage_driver="${CONTROL_PLANE_PODMAN_STORAGE_DRIVER:-}"
@@ -84,7 +89,7 @@ safe_chown_tree() {
   local target
   for target in "$@"; do
     [[ -e "${target}" ]] || continue
-    find "${target}" ! -type s -exec chown "${owner}" {} +
+    find "${target}" \( -type l -o -type s \) -prune -o -exec chown "${owner}" {} +
   done
 }
 
@@ -332,6 +337,7 @@ mkdir -p \
   "${screen_dir}" \
   "${tmp_dir}" \
   "${host_key_dir}" \
+  "/run/user/${control_plane_uid}" \
   /run/sshd \
   "${runtime_dir}"
 migrate_legacy_podman_state "${podman_state_root}"
@@ -355,6 +361,8 @@ safe_chown_tree "${control_plane_user}:${control_plane_user}" \
   "${tmp_dir}" \
   "${runtime_dir}"
 chown "${control_plane_user}:${control_plane_user}" \
+  "/run/user/${control_plane_uid}" \
+  "${control_plane_home}" \
   "${control_plane_home}/.local" \
   "${control_plane_home}/.local/share"
 
@@ -362,7 +370,10 @@ ensure_podman_storage_link "${control_plane_home}/.local/share/containers" "${po
 
 chown -h "${control_plane_user}:${control_plane_user}" "${control_plane_home}/.local/share/containers"
 chown root:root "${host_key_dir}"
+chown root:root /run/sshd
+chmod 755 "${control_plane_home}"
 chmod 700 "${control_plane_home}/.ssh" "${runtime_dir}" "${tmp_dir}" "${screen_dir}" "${host_key_dir}"
+chmod 755 /run/sshd
 export XDG_RUNTIME_DIR="${runtime_dir}"
 export TMPDIR="${tmp_dir}"
 export SCREENDIR="${screen_dir}"
@@ -387,7 +398,17 @@ if [[ -z "${copilot_github_token}" ]] && [[ -n "${COPILOT_GITHUB_TOKEN_FILE:-}" 
   IFS= read -r copilot_github_token < "${COPILOT_GITHUB_TOKEN_FILE}" || true
 fi
 
+if [[ -z "${dockerhub_username}" ]] && [[ -n "${DOCKERHUB_USERNAME_FILE:-}" ]] && [[ -f "${DOCKERHUB_USERNAME_FILE}" ]]; then
+  IFS= read -r dockerhub_username < "${DOCKERHUB_USERNAME_FILE}" || true
+fi
+
+if [[ -z "${dockerhub_token}" ]] && [[ -n "${DOCKERHUB_TOKEN_FILE:-}" ]] && [[ -f "${DOCKERHUB_TOKEN_FILE}" ]]; then
+  IFS= read -r dockerhub_token < "${DOCKERHUB_TOKEN_FILE}" || true
+fi
+
 write_private_file "${copilot_token_path}" "${copilot_github_token}" "${control_plane_user}:${control_plane_user}"
+write_private_file "${dockerhub_username_path}" "${dockerhub_username}" "${control_plane_user}:${control_plane_user}"
+write_private_file "${dockerhub_token_path}" "${dockerhub_token}" "${control_plane_user}:${control_plane_user}"
 
 if [[ -z "${KUBECONFIG:-}" ]] \
   && [[ -n "${KUBERNETES_SERVICE_HOST:-}" ]] \
@@ -469,6 +490,12 @@ fi
   write_runtime_var KUBECONFIG "${KUBECONFIG:-}"
   if [[ -n "${copilot_github_token}" ]]; then
     write_runtime_var CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE "${copilot_token_path}"
+  fi
+  if [[ -n "${dockerhub_username}" ]]; then
+    write_runtime_var DOCKERHUB_USERNAME_FILE "${dockerhub_username_path}"
+  fi
+  if [[ -n "${dockerhub_token}" ]]; then
+    write_runtime_var DOCKERHUB_TOKEN_FILE "${dockerhub_token_path}"
   fi
 } > "${runtime_config_path}"
 chown "${control_plane_user}:${control_plane_user}" "${runtime_config_path}"

@@ -26,7 +26,8 @@ ensure_compatible_term() {
 
 ensure_compatible_term
 
-export SCREENDIR="${SCREENDIR:-${HOME:-/tmp}/.copilot/screen}"
+screen_runtime_root="${XDG_RUNTIME_DIR:-${HOME:-/tmp}/.copilot/run}"
+export SCREENDIR="${SCREENDIR:-${screen_runtime_root%/}/screen}"
 mkdir -p "${SCREENDIR}"
 chmod 700 "${SCREENDIR}"
 

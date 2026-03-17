@@ -80,6 +80,11 @@ stringData:
   # The entrypoint copies it into a private runtime file and only injects it
   # into the Copilot process via --secret-env-vars=COPILOT_GITHUB_TOKEN.
   # copilot-github-token: github_pat_... replace-me
+  # Optional: Docker Hub credentials for DHI image pulls. The entrypoint copies
+  # them into private runtime files and `scripts/prepare-dhi-images.sh` reads
+  # the file paths without exporting the raw secret values into the login shell.
+  # dockerhub-username: your-dockerhub-user
+  # dockerhub-token: dckr_pat_... replace-me
 ---
 apiVersion: v1
 kind: Service
@@ -115,8 +120,6 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: control-plane
-      annotations:
-        container.apparmor.security.beta.kubernetes.io/control-plane: unconfined
     spec:
       # Opt into Kubernetes Pod user namespaces so root in the Pod maps to a
       # non-root host UID/GID. This materially improves the chance that nested
@@ -156,6 +159,10 @@ spec:
               value: /var/run/control-plane-auth/ssh-public-key
             - name: COPILOT_GITHUB_TOKEN_FILE
               value: /var/run/control-plane-auth/copilot-github-token
+            - name: DOCKERHUB_USERNAME_FILE
+              value: /var/run/control-plane-auth/dockerhub-username
+            - name: DOCKERHUB_TOKEN_FILE
+              value: /var/run/control-plane-auth/dockerhub-token
             # Optional: preseed ~/.gitconfig inside the control plane.
             # - name: CONTROL_PLANE_GIT_USER_NAME
             #   value: Your Name
@@ -229,6 +236,8 @@ spec:
                 - SYS_CHROOT
             seccompProfile:
               type: Unconfined
+            appArmorProfile:
+              type: Unconfined
           ports:
             - containerPort: 2222
               name: ssh
@@ -271,6 +280,11 @@ spec:
             # back to the vfs storage driver.
             # - name: fuse-device
             #   mountPath: /dev/fuse
+            # Optional: expose /dev/net/tun when the cluster allows it so
+            # rootless Podman networking can use slirp4netns without falling
+            # back to `--network=none`.
+            # - name: tun-device
+            #   mountPath: /dev/net/tun
             - name: control-plane-auth
               mountPath: /var/run/control-plane-auth
               readOnly: true
@@ -284,6 +298,13 @@ spec:
         # - name: fuse-device
         #   hostPath:
         #     path: /dev/fuse
+        #     type: CharDevice
+        # Optional: if your cluster policy allows hostPath devices, mount
+        # /dev/net/tun for slirp4netns. On stricter clusters use a device
+        # plugin-backed resource instead, or rely on `podman run --network=none`.
+        # - name: tun-device
+        #   hostPath:
+        #     path: /dev/net/tun
         #     type: CharDevice
         - name: control-plane-auth
           secret:

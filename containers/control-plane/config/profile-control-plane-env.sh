@@ -10,13 +10,27 @@ fi
 
 ensure_compatible_term() {
   current_term="${TERM:-}"
+  current_colors=0
 
   if [ -n "${current_term}" ] && TERM="${current_term}" tput clear >/dev/null 2>&1; then
-    return 0
+    current_colors="$(TERM="${current_term}" tput colors 2>/dev/null || printf '0')"
+    case "${current_colors}" in
+      ''|*[!0-9]*) current_colors=0 ;;
+    esac
+    if [ "${current_colors}" -ge 256 ]; then
+      return 0
+    fi
   fi
 
   for candidate in xterm-256color xterm; do
     if TERM="${candidate}" tput clear >/dev/null 2>&1; then
+      candidate_colors="$(TERM="${candidate}" tput colors 2>/dev/null || printf '0')"
+      case "${candidate_colors}" in
+        ''|*[!0-9]*) candidate_colors=0 ;;
+      esac
+      if [ "${candidate}" != "xterm" ] && [ "${candidate_colors}" -lt 256 ]; then
+        continue
+      fi
       TERM="${candidate}"
       export TERM
       return 0

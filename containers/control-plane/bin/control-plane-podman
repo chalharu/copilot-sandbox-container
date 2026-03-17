@@ -18,7 +18,13 @@ podman_reports_userns_failure() {
 podman_requests_migrate() {
   local stderr_path="$1"
 
-  grep -Fq 'invalid internal status, try resetting the pause process with "/usr/bin/podman system migrate"' "${stderr_path}"
+  grep -Eiq 'invalid internal status, try resetting the pause process with "/usr/bin/podman system migrate"|unknown FS magic on ".*/run/netns/' "${stderr_path}"
+}
+
+podman_reports_network_device_failure() {
+  local stderr_path="$1"
+
+  grep -Eiq 'slirp4netns failed: .*open\("/dev/net/tun"\): No such file or directory|/dev/net/tun' "${stderr_path}"
 }
 
 running_in_kubernetes() {
@@ -63,6 +69,207 @@ run_podman_with_live_stderr() {
   return "${status}"
 }
 
+run_podman_capture_stdout_live_stderr() {
+  local stdout_path="$1"
+  local stderr_path="$2"
+  shift 2
+  local stderr_dir
+  local stderr_fifo
+  local tee_pid
+  local status
+
+  stderr_dir="$(mktemp -d "${TMPDIR%/}/control-plane-podman.stderr.XXXXXX")"
+  stderr_fifo="${stderr_dir}/stderr"
+  mkfifo "${stderr_fifo}"
+  tee "${stderr_path}" < "${stderr_fifo}" >&2 &
+  tee_pid=$!
+
+  set +e
+  "${podman_bin}" "$@" > "${stdout_path}" 2> "${stderr_fifo}"
+  status=$?
+  set -e
+
+  rm -f "${stderr_fifo}"
+  rmdir "${stderr_dir}"
+  wait "${tee_pid}"
+
+  return "${status}"
+}
+
+podman_run_can_use_detached_workaround() {
+  local workaround_mode="${CONTROL_PLANE_PODMAN_RUN_DETACH_WORKAROUND:-auto}"
+  local expecting_value=0
+  local arg
+
+  [[ "${workaround_mode}" != "never" ]] || return 1
+  if [[ "${workaround_mode}" != "always" ]]; then
+    running_in_kubernetes || return 1
+  fi
+
+  [[ "${1:-}" == "run" ]] || return 1
+  shift
+
+  for arg in "$@"; do
+    if [[ "${expecting_value}" -eq 1 ]]; then
+      expecting_value=0
+      continue
+    fi
+
+    if [[ "${arg}" == "--" ]]; then
+      break
+    fi
+
+    if [[ "${arg}" =~ ^-[^-]*[it][^-]*$ ]]; then
+      return 1
+    fi
+
+    case "${arg}" in
+      -i|--interactive|-t|--tty|-d|--detach|--sig-proxy|--sig-proxy=*|--interactive=*|--tty=*|--detach=*)
+        return 1
+        ;;
+      -a|--attach)
+        expecting_value=1
+        ;;
+      --attach=*)
+        if [[ "${arg}" == *=stdin* ]]; then
+          return 1
+        fi
+        ;;
+      --rm|--rm=true|--rm=false)
+        ;;
+      --cidfile|--cgroup-parent|--cgroups|--conmon-pidfile|--cpus|--cpuset-cpus|--device|--dns|--dns-option|--dns-search|--entrypoint|--env|--env-file|--group-add|--health-cmd|--health-on-failure|--health-start-period|--healthcheck-command|--hostname|--ip|--ipc|--label|--log-driver|--log-opt|--memory|--mount|--name|--network|--network-alias|--pid|--platform|--pod|--publish|--pull|--replace|--restart|--runtime|--security-opt|--shm-size|--stop-signal|--stop-timeout|--sysctl|--tmpfs|--ulimit|--user|--userns|--uts|--volume|--workdir|-c|-e|-h|-l|-m|-p|-u|-v|-w)
+        expecting_value=1
+        ;;
+      --*=*)
+        ;;
+      -*)
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  return 0
+}
+
+detached_run_args=()
+detached_run_remove_after=0
+
+prepare_detached_run_args() {
+  local arg
+
+  detached_run_args=(run -d)
+  detached_run_remove_after=0
+
+  for arg in "${@:2}"; do
+    case "${arg}" in
+      --rm|--rm=true)
+        detached_run_remove_after=1
+        ;;
+      --rm=false)
+        ;;
+      *)
+        detached_run_args+=("${arg}")
+        ;;
+    esac
+  done
+}
+
+run_noninteractive_podman_run() {
+  local stdout_path="$1"
+  local stderr_path="$2"
+  local cid=""
+  local inspect_output=""
+  local inspect_status=0
+  local exit_code=""
+  local running_state=""
+
+  # shellcheck disable=SC2329
+  stop_detached_container() {
+    local signal_status="$1"
+
+    if [[ -n "${cid}" ]]; then
+      "${podman_bin}" stop --time 0 "${cid}" >/dev/null 2>&1 || true
+      if [[ "${detached_run_remove_after}" -eq 1 ]]; then
+        "${podman_bin}" rm -f "${cid}" >/dev/null 2>&1 || true
+      fi
+    fi
+
+    exit "${signal_status}"
+  }
+
+  prepare_detached_run_args "${command_args[@]}"
+
+  if run_podman_capture_stdout_live_stderr "${stdout_path}" "${stderr_path}" "${detached_run_args[@]}"; then
+    :
+  else
+    local status=$?
+    return "${status}"
+  fi
+
+  cid="$(tail -n 1 "${stdout_path}" | tr -d '\r\n')"
+  if [[ -z "${cid}" ]]; then
+    printf '%s\n' 'control-plane-podman: detached run did not return a container ID.' >&2
+    return 125
+  fi
+
+  trap 'stop_detached_container 130' INT
+  trap 'stop_detached_container 143' TERM
+
+  while true; do
+    set +e
+    inspect_output="$("${podman_bin}" inspect --type container --format '{{.State.Running}} {{.State.ExitCode}}' "${cid}" 2>&1)"
+    inspect_status=$?
+    set -e
+
+    if [[ "${inspect_status}" -ne 0 ]]; then
+      trap - INT TERM
+      printf '%s\n' "${inspect_output}" >&2
+      return "${inspect_status}"
+    fi
+
+    running_state="${inspect_output%% *}"
+    if [[ "${running_state}" == "false" ]]; then
+      break
+    fi
+
+    sleep 0.2
+  done
+
+  trap - INT TERM
+
+  "${podman_bin}" logs "${cid}"
+
+  if [[ "${detached_run_remove_after}" -eq 1 ]]; then
+    "${podman_bin}" rm -f "${cid}" >/dev/null 2>&1 || true
+  fi
+
+  exit_code="$(printf '%s\n' "${inspect_output}" | tail -n 1 | awk '{print $2}' | tr -d '\r\n')"
+  case "${exit_code}" in
+    ''|*[!0-9]*)
+      # shellcheck disable=SC2016
+      printf 'control-plane-podman: unexpected `podman inspect` output: %s\n' "${inspect_output}" >&2
+      return 125
+      ;;
+  esac
+
+  return "${exit_code}"
+}
+
+invoke_podman_command() {
+  local stderr_path="$1"
+  local stdout_path="$2"
+
+  : > "${stdout_path}"
+  if podman_run_can_use_detached_workaround "${command_args[@]}"; then
+    run_noninteractive_podman_run "${stdout_path}" "${stderr_path}"
+    return $?
+  fi
+
+  run_podman_with_live_stderr "${stderr_path}" "${command_args[@]}"
+}
+
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/podman-run-$(id -u)}"
 export TMPDIR="${TMPDIR:-${HOME:-/tmp}/.copilot/tmp}"
 mkdir -p "${XDG_RUNTIME_DIR}"
@@ -70,13 +277,14 @@ mkdir -p "${TMPDIR}"
 chmod 700 "${XDG_RUNTIME_DIR}"
 chmod 700 "${TMPDIR}"
 
+stdout_path="$(mktemp)"
 stderr_path="$(mktemp)"
 migrate_stderr_path="$(mktemp)"
-trap 'rm -f "${stderr_path}" "${migrate_stderr_path}"' EXIT
+trap 'rm -f "${stdout_path}" "${stderr_path}" "${migrate_stderr_path}"' EXIT
 
 command_args=("$@")
 
-if run_podman_with_live_stderr "${stderr_path}" "${command_args[@]}"; then
+if invoke_podman_command "${stderr_path}" "${stdout_path}"; then
   exit 0
 else
   status=$?
@@ -87,7 +295,7 @@ if podman_requests_migrate "${stderr_path}"; then
     "control-plane-podman: detected stale rootless Podman state; attempting \`podman system migrate\` once." \
     >&2
   if run_podman_with_live_stderr "${migrate_stderr_path}" system migrate; then
-    if run_podman_with_live_stderr "${stderr_path}" "${command_args[@]}"; then
+    if invoke_podman_command "${stderr_path}" "${stdout_path}"; then
       printf '%s\n' \
         "control-plane-podman: \`podman system migrate\` repaired the local Podman state." \
         >&2
@@ -114,6 +322,14 @@ if podman_reports_userns_failure "${stderr_path}" || podman_reports_userns_failu
       "This Pod also lacks \`/dev/fuse\`, so local Podman will fall back to the \`vfs\` storage driver even after user namespace issues are resolved. Mount \`/dev/fuse\` or a compatible device-plugin resource when you want \`fuse-overlayfs\`." \
       >&2
   fi
+fi
+
+if running_in_kubernetes && { podman_reports_network_device_failure "${stderr_path}" || podman_reports_network_device_failure "${migrate_stderr_path}"; }; then
+  # shellcheck disable=SC2016
+  printf '%s\n' \
+    'control-plane-podman: rootless Podman networking could not start because `slirp4netns` could not open `/dev/net/tun`.' \
+    'Mount `/dev/net/tun` (or a compatible device-plugin resource) when you need default rootless networking inside the Pod, or use `--network=none` for networkless local runs.' \
+    >&2
 fi
 
 exit "${status}"
