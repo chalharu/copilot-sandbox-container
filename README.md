@@ -82,10 +82,13 @@ containerd でも使いやすい least-privilege の SSH/Copilot プロファイ
 Pod の `securityContext.fsGroup` を `1000` にして projected service-account token を
 `copilot` shell から読めるようにしたうえで、container 側は
 `privileged: false` のまま `capabilities.drop: [ALL]` と
-`capabilities.add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID, SYS_CHROOT]` を使います。
+`capabilities.add: [CHOWN, DAC_OVERRIDE, FOWNER, SETFCAP, SETGID, SETUID, SYS_CHROOT]` を使います。
 `allowPrivilegeEscalation` は `sshd` の privilege separation と entrypoint の root 操作の
 ため `true` のままです。entrypoint は必要 capability が欠けている場合に起動直後に
 明示的なエラーを出します。
+
+また、SSH ログイン時の GNU Screen session picker が runtime 依存の理由で失敗しても、
+現在は通常の login shell にフォールバックするため、そのまま接続が閉じにくくなっています。
 
 そのため、Kubernetes 上の既定構成では SSH / Copilot / `k8s-job-*` が主経路です。
 `CONTROL_PLANE_RUN_MODE=k8s-job` を入れているので、`control-plane-run` を明示せず使っても
@@ -93,7 +96,9 @@ Job 実行へ寄ります。サンプルでは Job namespace も Control Plane n
 小さいファイルは `control-plane-run --mount-file ...` で ConfigMap 経由にできます。
 
 local nested Podman / Kind は依然 best-effort で、outer runtime 側の user namespace、
-`newuidmap` / `newgidmap`、`/dev/fuse` などが必要です。`securityContext.privileged: true`
+`newuidmap` / `newgidmap`、`/dev/fuse` などが必要です。Linux 5.12+ では UID 0 mapping の
+ため `SETFCAP` も必要になるので、サンプル manifest ではそれも re-add していますが、
+`securityContext.privileged: true`
 でも outer runtime が nested user namespace を止めていれば
 `cannot set user namespace` で失敗します。そこで詰まる場合は GitHub Actions か host
 runner を使ってください。どうしても Pod 内ローカル実行を優先したい場合だけ

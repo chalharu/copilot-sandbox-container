@@ -7,6 +7,14 @@ if [[ -f "${runtime_config_file}" ]]; then
   source "${runtime_config_file}"
 fi
 
+podman_bin="${CONTROL_PLANE_PODMAN_BIN:-/usr/bin/podman}"
+
+podman_reports_userns_failure() {
+  local stderr_path="$1"
+
+  grep -Eq 'cannot clone: Operation not permitted|cannot re-exec process|cannot set user namespace|newuidmap.*Operation not permitted|newgidmap.*Operation not permitted' "${stderr_path}"
+}
+
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/podman-run-$(id -u)}"
 export TMPDIR="${TMPDIR:-${HOME:-/tmp}/.copilot/tmp}"
 mkdir -p "${XDG_RUNTIME_DIR}"
@@ -14,4 +22,24 @@ mkdir -p "${TMPDIR}"
 chmod 700 "${XDG_RUNTIME_DIR}"
 chmod 700 "${TMPDIR}"
 
-exec /usr/bin/podman "$@"
+stderr_path="$(mktemp)"
+trap 'rm -f "${stderr_path}"' EXIT
+
+set +e
+"${podman_bin}" "$@" 2> >(tee "${stderr_path}" >&2)
+status=$?
+set -e
+
+if [[ "${status}" -eq 0 ]]; then
+  exit 0
+fi
+
+if podman_reports_userns_failure "${stderr_path}"; then
+  printf '%s\n' \
+    'control-plane-podman: rootless Podman is blocked by the outer runtime in this environment.' \
+    'Re-adding capabilities inside the Pod may be necessary (for example SETFCAP on Linux 5.12+), but it is not sufficient on its own; the outer host/runtime still has to allow nested user namespaces, newuidmap/newgidmap, and the required seccomp/sysctl settings.' \
+    'Prefer Kubernetes Jobs (CONTROL_PLANE_RUN_MODE=k8s-job or control-plane-run --mode k8s-job), GitHub Actions, or a host runner with a working rootless Podman setup.' \
+    >&2
+fi
+
+exit "${status}"

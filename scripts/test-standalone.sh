@@ -288,6 +288,26 @@ fi
 
 printf '%s\n' 'standalone-test: screen output ready' >&2
 
+printf '%s\n' 'standalone-test: verifying session picker fallback' >&2
+if ! TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
+  "CONTROL_PLANE_SESSION_SELECTION=9999 bash -lic 'printf \"%s\n\" fallback-shell-ok'" \
+  </dev/null >"${workdir}/ssh-picker-fallback.log" 2>&1; then
+  cat "${workdir}/ssh-picker-fallback.log" >&2 || true
+  printf 'Expected SSH login to fall back to a shell when the session picker fails\n' >&2
+  exit 1
+fi
+if ! grep -q 'fallback-shell-ok' "${workdir}/ssh-picker-fallback.log"; then
+  printf 'Expected fallback-shell-ok marker in standalone SSH fallback log\n' >&2
+  cat "${workdir}/ssh-picker-fallback.log" >&2 || true
+  exit 1
+fi
+if ! grep -q 'session picker failed; continuing with the login shell' "${workdir}/ssh-picker-fallback.log"; then
+  printf 'Expected session picker fallback warning in standalone SSH fallback log\n' >&2
+  cat "${workdir}/ssh-picker-fallback.log" >&2 || true
+  exit 1
+fi
+printf '%s\n' 'standalone-test: session picker fallback ok' >&2
+
 printf '%s\n' 'standalone-test: starting fake podman checks' >&2
 if ! ssh_bash <<EOF
 set -euo pipefail
@@ -296,6 +316,12 @@ printf 'colon input\n' > '/workspace/job:input.txt'
 cat > /tmp/fake-podman <<'INNER'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "\${1:-}" == "pull" ]]; then
+  printf '%s\n' 'WARN[0000] "/" is not a shared mount, this could cause issues or missing mounts with rootless containers' >&2
+  printf '%s\n' 'cannot clone: Operation not permitted' >&2
+  printf '%s\n' 'ERRO[0000] invalid internal status, try resetting the pause process with "/usr/bin/podman system migrate": cannot re-exec process' >&2
+  exit 125
+fi
 printf '%s\n' "\$@" > /tmp/fake-podman.log
 INNER
 chmod +x /tmp/fake-podman
@@ -306,11 +332,25 @@ grep -q '/workspace:/workspace' /tmp/fake-podman.log
 grep -Eq ':/var/run/control-plane/job-inputs:ro$' /tmp/fake-podman.log
 CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-run --mode auto --execution-hint short --workspace /workspace --mount-file '/workspace/job:input.txt' --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/podman-auto-colon.txt short
 grep -Eq ':/var/run/control-plane/job-inputs:ro$' /tmp/fake-podman.log
+set +e
+fake_podman_output="\$(CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-podman pull quay.io/example/test:latest 2>&1)"
+fake_podman_status=\$?
+set -e
+printf '%s\n' "\${fake_podman_output}" > /tmp/fake-podman-pull.log
+if [[ "\${fake_podman_status}" -eq 0 ]]; then
+  printf 'Expected fake control-plane-podman pull to fail\n' >&2
+  exit 1
+fi
+grep -q 'cannot clone: Operation not permitted' /tmp/fake-podman-pull.log
+grep -q 'rootless Podman is blocked by the outer runtime' /tmp/fake-podman-pull.log
+grep -q 'SETFCAP' /tmp/fake-podman-pull.log
+grep -q 'CONTROL_PLANE_RUN_MODE=k8s-job' /tmp/fake-podman-pull.log
 EOF
 then
   ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
 cat /tmp/fake-podman.log || true
+cat /tmp/fake-podman-pull.log || true
 ls -l /workspace || true
 EOF
   printf 'Expected fake podman control-plane-run checks to succeed\n' >&2
