@@ -12,7 +12,42 @@ podman_bin="${CONTROL_PLANE_PODMAN_BIN:-/usr/bin/podman}"
 podman_reports_userns_failure() {
   local stderr_path="$1"
 
-  grep -Eq 'cannot clone: Operation not permitted|cannot re-exec process|cannot set user namespace|newuidmap.*Operation not permitted|newgidmap.*Operation not permitted' "${stderr_path}"
+  grep -Eiq 'cannot clone: Operation not permitted|cannot re-exec process|cannot set user namespace|creating new namespace.*Operation not permitted|newuidmap.*Operation not permitted|newgidmap.*Operation not permitted' "${stderr_path}"
+}
+
+podman_requests_migrate() {
+  local stderr_path="$1"
+
+  grep -Fq 'invalid internal status, try resetting the pause process with "/usr/bin/podman system migrate"' "${stderr_path}"
+}
+
+running_in_kubernetes() {
+  [[ -n "${KUBERNETES_SERVICE_HOST:-}" ]] || [[ -d /var/run/secrets/kubernetes.io/serviceaccount ]]
+}
+
+pod_uses_identity_user_namespace() {
+  local container_start=""
+  local host_start=""
+  local map_size=""
+
+  if ! read -r container_start host_start map_size _ < /proc/self/uid_map; then
+    return 1
+  fi
+
+  [[ "${container_start}" == "0" ]] && [[ "${host_start}" == "0" ]] && [[ "${map_size}" == "4294967295" ]]
+}
+
+run_podman_with_live_stderr() {
+  local stderr_path="$1"
+  shift
+  local status
+
+  set +e
+  "${podman_bin}" "$@" 2> >(tee "${stderr_path}" >&2)
+  status=$?
+  set -e
+
+  return "${status}"
 }
 
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/podman-run-$(id -u)}"
@@ -23,23 +58,49 @@ chmod 700 "${XDG_RUNTIME_DIR}"
 chmod 700 "${TMPDIR}"
 
 stderr_path="$(mktemp)"
-trap 'rm -f "${stderr_path}"' EXIT
+migrate_stderr_path="$(mktemp)"
+trap 'rm -f "${stderr_path}" "${migrate_stderr_path}"' EXIT
 
-set +e
-"${podman_bin}" "$@" 2> >(tee "${stderr_path}" >&2)
-status=$?
-set -e
+command_args=("$@")
 
-if [[ "${status}" -eq 0 ]]; then
+if run_podman_with_live_stderr "${stderr_path}" "${command_args[@]}"; then
   exit 0
+else
+  status=$?
 fi
 
-if podman_reports_userns_failure "${stderr_path}"; then
+if podman_requests_migrate "${stderr_path}"; then
+  printf '%s\n' \
+    "control-plane-podman: detected stale rootless Podman state; attempting \`podman system migrate\` once." \
+    >&2
+  if run_podman_with_live_stderr "${migrate_stderr_path}" system migrate; then
+    if run_podman_with_live_stderr "${stderr_path}" "${command_args[@]}"; then
+      printf '%s\n' \
+        "control-plane-podman: \`podman system migrate\` repaired the local Podman state." \
+        >&2
+      exit 0
+    else
+      status=$?
+    fi
+  fi
+fi
+
+if podman_reports_userns_failure "${stderr_path}" || podman_reports_userns_failure "${migrate_stderr_path}"; then
   printf '%s\n' \
     'control-plane-podman: rootless Podman is blocked by the outer runtime in this environment.' \
     'Re-adding capabilities inside the Pod may be necessary (for example SETFCAP on Linux 5.12+), but it is not sufficient on its own; the outer host/runtime still has to allow nested user namespaces, newuidmap/newgidmap, and the required seccomp/sysctl settings.' \
     'Prefer Kubernetes Jobs (CONTROL_PLANE_RUN_MODE=k8s-job or control-plane-run --mode k8s-job), GitHub Actions, or a host runner with a working rootless Podman setup.' \
     >&2
+  if running_in_kubernetes && pod_uses_identity_user_namespace; then
+    printf '%s\n' \
+      "This Pod does not appear to be using Kubernetes Pod user namespaces. Enable \`spec.hostUsers: false\` when your cluster/runtime supports Pod user namespaces; otherwise nested rootless Podman often fails during re-exec." \
+      >&2
+  fi
+  if running_in_kubernetes && [[ ! -e /dev/fuse ]]; then
+    printf '%s\n' \
+      "This Pod also lacks \`/dev/fuse\`, so local Podman will fall back to the \`vfs\` storage driver even after user namespace issues are resolved. Mount \`/dev/fuse\` or a compatible device-plugin resource when you want \`fuse-overlayfs\`." \
+      >&2
+  fi
 fi
 
 exit "${status}"

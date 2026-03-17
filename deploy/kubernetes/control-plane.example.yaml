@@ -116,6 +116,11 @@ spec:
       labels:
         app.kubernetes.io/name: control-plane
     spec:
+      # Opt into Kubernetes Pod user namespaces so root in the Pod maps to a
+      # non-root host UID/GID. This materially improves the chance that nested
+      # rootless Podman can create its own user namespace when the node runtime
+      # supports it.
+      hostUsers: false
       securityContext:
         fsGroup: 1000
       serviceAccountName: control-plane
@@ -181,6 +186,8 @@ spec:
               value: k8s-job
             # Optional: force the local Podman storage driver. When /dev/fuse is
             # unavailable, the entrypoint now falls back to `vfs` automatically.
+            # This does not solve user-namespace failures by itself; keep
+            # `hostUsers: false` and the outer runtime prerequisites in place.
             # - name: CONTROL_PLANE_PODMAN_STORAGE_DRIVER
             #   value: vfs
             - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
@@ -255,6 +262,11 @@ spec:
             - name: state
               mountPath: /workspace
               subPath: workspace
+            # Optional: expose /dev/fuse when the cluster allows it so local
+            # rootless Podman can use fuse-overlayfs instead of always falling
+            # back to the vfs storage driver.
+            # - name: fuse-device
+            #   mountPath: /dev/fuse
             - name: control-plane-auth
               mountPath: /var/run/control-plane-auth
               readOnly: true
@@ -262,6 +274,13 @@ spec:
         - name: state
           persistentVolumeClaim:
             claimName: control-plane-state-pvc
+        # Optional: if your cluster policy allows hostPath devices, mount
+        # /dev/fuse for fuse-overlayfs. On stricter clusters use a device
+        # plugin-backed resource instead.
+        # - name: fuse-device
+        #   hostPath:
+        #     path: /dev/fuse
+        #     type: CharDevice
         - name: control-plane-auth
           secret:
             secretName: control-plane-auth

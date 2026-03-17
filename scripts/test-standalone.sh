@@ -345,12 +345,46 @@ grep -q 'cannot clone: Operation not permitted' /tmp/fake-podman-pull.log
 grep -q 'rootless Podman is blocked by the outer runtime' /tmp/fake-podman-pull.log
 grep -q 'SETFCAP' /tmp/fake-podman-pull.log
 grep -q 'CONTROL_PLANE_RUN_MODE=k8s-job' /tmp/fake-podman-pull.log
+cat > /tmp/fake-podman-migrate <<'INNER'
+#!/usr/bin/env bash
+set -euo pipefail
+state_file=/tmp/fake-podman-migrate-state
+if [[ "\${1:-}" == "system" ]] && [[ "\${2:-}" == "migrate" ]]; then
+  : > "\${state_file}"
+  exit 0
+fi
+if [[ "\${1:-}" == "pull" ]]; then
+  if [[ ! -f "\${state_file}" ]]; then
+    printf '%s\n' 'ERRO[0000] invalid internal status, try resetting the pause process with "/usr/bin/podman system migrate": cannot re-exec process' >&2
+    exit 125
+  fi
+  printf '%s\n' "\$@" > /tmp/fake-podman-migrate.log
+  exit 0
+fi
+printf '%s\n' "\$@" > /tmp/fake-podman-migrate.log
+INNER
+chmod +x /tmp/fake-podman-migrate
+set +e
+fake_migrate_output="\$(CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman-migrate control-plane-podman pull quay.io/example/test:latest 2>&1)"
+fake_migrate_status=\$?
+set -e
+printf '%s\n' "\${fake_migrate_output}" > /tmp/fake-podman-migrate-output.log
+if [[ "\${fake_migrate_status}" -ne 0 ]]; then
+  printf 'Expected control-plane-podman to recover after podman system migrate\n' >&2
+  exit 1
+fi
+grep -q '^pull$' /tmp/fake-podman-migrate.log
+grep -q '^quay.io/example/test:latest$' /tmp/fake-podman-migrate.log
+grep -q 'detected stale rootless Podman state' /tmp/fake-podman-migrate-output.log
+grep -q 'repaired the local Podman state' /tmp/fake-podman-migrate-output.log
 EOF
 then
   ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
 cat /tmp/fake-podman.log || true
 cat /tmp/fake-podman-pull.log || true
+cat /tmp/fake-podman-migrate.log || true
+cat /tmp/fake-podman-migrate-output.log || true
 ls -l /workspace || true
 EOF
   printf 'Expected fake podman control-plane-run checks to succeed\n' >&2
