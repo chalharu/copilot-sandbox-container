@@ -653,10 +653,35 @@ fi
 test -d "\${expected_state_dir}/storage/\${expected_driver}"
 test -d "\${expected_state_dir}/storage/volumes"
 test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
-kubectl auth can-i create jobs --namespace ${job_namespace} | grep -q '^yes$'
-kubectl auth can-i create configmaps --namespace ${job_namespace} | grep -q '^yes$'
 EOF
 printf '%s\n' 'kind-test: initial remote assertions ok' >&2
+
+ssh_bash <<EOF
+set -euo pipefail
+set +e
+jobs_access="\$(kubectl auth can-i create jobs --namespace ${job_namespace} 2>&1)"
+jobs_status=\$?
+set -e
+if [[ "\${jobs_status}" -ne 0 ]] || [[ "\${jobs_access}" != "yes" ]]; then
+  printf 'Expected control-plane service account to create jobs in namespace %s\n' "${job_namespace}" >&2
+  printf 'kubectl auth can-i exit status: %s\n' "\${jobs_status}" >&2
+  printf '%s\n' "\${jobs_access}" >&2
+  kubectl config current-context >&2 || true
+  exit 1
+fi
+set +e
+configmaps_access="\$(kubectl auth can-i create configmaps --namespace ${job_namespace} 2>&1)"
+configmaps_status=\$?
+set -e
+if [[ "\${configmaps_status}" -ne 0 ]] || [[ "\${configmaps_access}" != "yes" ]]; then
+  printf 'Expected control-plane service account to create configmaps in namespace %s\n' "${job_namespace}" >&2
+  printf 'kubectl auth can-i exit status: %s\n' "\${configmaps_status}" >&2
+  printf '%s\n' "\${configmaps_access}" >&2
+  kubectl config current-context >&2 || true
+  exit 1
+fi
+EOF
+printf '%s\n' 'kind-test: rbac assertions ok' >&2
 
 utf8_roundtrip="$(ssh_bash <<'EOF'
 set -euo pipefail
