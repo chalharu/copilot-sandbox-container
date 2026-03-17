@@ -315,6 +315,8 @@ configure_git() {
   chmod 600 "${git_config_path}"
 }
 
+require_container_capabilities
+
 mkdir -p \
   "${control_plane_home}/.copilot" \
   "${containers_config_dir}" \
@@ -332,8 +334,6 @@ mkdir -p \
   "${host_key_dir}" \
   /run/sshd \
   "${runtime_dir}"
-
-require_container_capabilities
 migrate_legacy_podman_state "${podman_state_root}"
 
 mkdir -p \
