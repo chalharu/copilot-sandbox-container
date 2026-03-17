@@ -71,7 +71,9 @@ fi
   "${renovate_image}" \
   --strict --no-global /workspace/renovate.json5
 
-if ! "${container_bin}" run --rm \
+renovate_status=0
+
+if "${container_bin}" run --rm \
   "${renovate_env[@]}" \
   -e LOG_LEVEL=debug \
   -e RENOVATE_CONFIG_FILE=/workspace/renovate.json5 \
@@ -86,8 +88,21 @@ if ! "${container_bin}" run --rm \
   --onboarding=false \
   --repository-cache=reset \
   >"${log_file}" 2>&1; then
-  cat "${log_file}" >&2
-  exit 1
+  :
+else
+  renovate_status=$?
+fi
+
+if [[ "${renovate_status}" -ne 0 ]]; then
+  if grep -Fq 'Cannot sync git when platform=local' "${log_file}" \
+    && ! grep -Eq 'Package lookup failures|Request failed with status code|Failed to look up docker package' "${log_file}"; then
+    printf '%s\n' \
+      'Renovate local dry-run hit the known platform=local git sync limitation; validating the captured dependency report instead.' \
+      >&2
+  else
+    cat "${log_file}" >&2
+    exit 1
+  fi
 fi
 
 expected_dependencies=(
