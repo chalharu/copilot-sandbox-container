@@ -44,16 +44,19 @@ Job Pod が使う `serviceAccountName` は Job namespace 側のものです。Po
 - Pod `securityContext.fsGroup: 1000`
 - container `allowPrivilegeEscalation: true`
 - container `capabilities.drop: [ALL]`
-- container `capabilities.add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID, SYS_CHROOT]`
+- container `capabilities.add: [CHOWN, DAC_OVERRIDE, FOWNER, SETFCAP, SETGID, SETUID, SYS_CHROOT]`
 - `seccompProfile: RuntimeDefault`
 
-`drop: ALL` だけでは SSH は成立しません。`sshd` の privilege separation には `SETUID` / `SETGID` / `SYS_CHROOT` が必要で、entrypoint の初期化や state volume の ownership 調整には `CHOWN` / `DAC_OVERRIDE` / `FOWNER` も必要です。現在の entrypoint は、これらが欠けていると起動直後に明示的なエラーを出して停止します。
+`drop: ALL` だけでは SSH は成立しません。`sshd` の privilege separation には `SETUID` / `SETGID` / `SYS_CHROOT` が必要で、entrypoint の初期化や state volume の ownership 調整には `CHOWN` / `DAC_OVERRIDE` / `FOWNER` も必要です。サンプル manifest は、Linux 5.12+ の rootless Podman で UID 0 mapping に必要になる `SETFCAP` も追加しています。現在の entrypoint は SSH / state 初期化に必須の capability が欠けていると起動直後に明示的なエラーを出して停止します。
+
+それでも GNU Screen session picker が runtime 依存の理由で起動できない場合があるため、現在は picker の失敗時に通常の login shell へフォールバックします。これにより、picker の問題で SSH 接続そのものがすぐ切れにくくなっています。
 
 ## local Podman について
 
 Kubernetes 上の local nested Podman / Kind は、引き続き best-effort です。
 
 - rootless Podman は outer host / runtime 側の user namespace、`newuidmap` / `newgidmap`、`/dev/fuse` に依存します
+- Linux 5.12+ では UID 0 mapping のため `SETFCAP` も必要です
 - `securityContext.privileged: true` でも outer runtime が nested user namespace を禁止していれば `cannot set user namespace` で失敗します
 - そのため、サンプルの既定経路は `CONTROL_PLANE_RUN_MODE=k8s-job` です
 
@@ -122,11 +125,11 @@ control-plane-run \
 
 ### `drop: ALL` にしたら SSH できない
 
-`capabilities.add` に `CHOWN` / `DAC_OVERRIDE` / `FOWNER` / `SETGID` / `SETUID` / `SYS_CHROOT` を戻してください。`SYS_CHROOT` だけでなく `SETUID` / `SETGID` も必要です。
+`capabilities.add` に `CHOWN` / `DAC_OVERRIDE` / `FOWNER` / `SETFCAP` / `SETGID` / `SETUID` / `SYS_CHROOT` を戻してください。SSH 自体に最低限必要なのは `CHOWN` / `DAC_OVERRIDE` / `FOWNER` / `SETGID` / `SETUID` / `SYS_CHROOT` で、`SETFCAP` は local rootless Podman 向けです。session picker が失敗しても現在は通常 shell へフォールバックしますが、picker 自体を完全に避けたい場合は `CONTROL_PLANE_DISABLE_SESSION_PICKER=1` を設定してください。
 
 ### privileged でも Podman が `cannot set user namespace` で失敗する
 
-Pod 内ではなく outer runtime の制約です。rootless Podman を完全には保証できません。`control-plane-run --mode k8s-job` か GitHub Actions / host runner を使ってください。
+Pod 内ではなく outer runtime の制約です。rootless Podman を完全には保証できません。`control-plane-podman` / build-test の診断はこのケースを明示的に案内するようになっていますが、解決には outer runtime 側の user namespace 許可が必要です。`control-plane-run --mode k8s-job` か GitHub Actions / host runner を使ってください。
 
 ### securityContext を変えたら overlay / vfs の警告が出た
 

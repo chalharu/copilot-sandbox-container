@@ -194,11 +194,11 @@ spec:
             - name: CONTROL_PLANE_JOB_MEMORY_LIMIT
               value: 2Gi
           # Keep a least-privilege SSH/Copilot profile by default. `drop: ALL`
-          # only works because we re-add CHOWN/DAC_OVERRIDE/FOWNER/SETGID/
-          # SETUID/SYS_CHROOT, and the entrypoint now exits early if they are
-          # missing. Local nested Podman/Kind remains best-effort even in
-          # privileged Pods because the outer runtime can still block user
-          # namespaces. Jobs default to a separate namespace; use a
+          # only works because we re-add CHOWN/DAC_OVERRIDE/FOWNER/SETFCAP/
+          # SETGID/SETUID/SYS_CHROOT. `SETFCAP` keeps rootless Podman closer to
+          # working on Linux 5.12+, but local nested Podman/Kind remains
+          # best-effort even in privileged Pods because the outer runtime can
+          # still block user namespaces. Jobs default to a separate namespace; use a
           # namespace-local workspace PVC there only when you really need one.
           securityContext:
             privileged: false
@@ -212,6 +212,7 @@ spec:
                 - CHOWN
                 - DAC_OVERRIDE
                 - FOWNER
+                - SETFCAP
                 - SETGID
                 - SETUID
                 - SYS_CHROOT

@@ -29,15 +29,26 @@ report_missing_build_test_toolchain() {
   fi
 }
 
+podman_reports_userns_failure() {
+  local output="$1"
+
+  {
+    grep -Fq 'newuidmap' <<<"${output}" && grep -Fq 'Operation not permitted' <<<"${output}";
+  } || {
+    grep -Fq 'newgidmap' <<<"${output}" && grep -Fq 'Operation not permitted' <<<"${output}";
+  } || grep -Fqi 'cannot set user namespace' <<<"${output}" \
+    || grep -Fq 'cannot clone: Operation not permitted' <<<"${output}" \
+    || grep -Fq 'cannot re-exec process' <<<"${output}"
+}
+
 report_podman_runtime_failure() {
   local output="$1"
 
-  if {
-    grep -Fq 'newuidmap' <<<"${output}" && grep -Fq 'Operation not permitted' <<<"${output}";
-  } || grep -Fqi 'cannot set user namespace' <<<"${output}"; then
+  if podman_reports_userns_failure "${output}"; then
     printf '%s\n' \
-      "Podman is installed but unusable in this environment: nested user namespace setup is blocked." \
-      'Entries in /etc/subuid and /etc/subgid inside the nested container are not enough; the outer host/runtime still has to allow user namespaces and newuidmap/newgidmap.' \
+      'Podman is installed but unusable in this environment: rootless user-namespace setup is blocked.' \
+      'On Linux 5.12+, SETFCAP is also required to map UID 0 in a new user namespace, but re-adding capabilities inside the nested container is not sufficient by itself.' \
+      'Entries in /etc/subuid and /etc/subgid inside the nested container are not enough; the outer host/runtime still has to allow user namespaces, newuidmap/newgidmap, and the required seccomp/sysctl settings.' \
       'Even privileged Pods can still fail here when the outer host/runtime blocks nested user namespaces.' \
       'Use the sample SSH/Copilot plus Kubernetes Job path, or fall back to GitHub Actions / a host runner. If you must run local Podman in-cluster, the outer runtime still needs to permit nested user namespaces and related helpers.' \
       >&2
