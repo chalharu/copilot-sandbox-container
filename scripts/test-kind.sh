@@ -432,6 +432,7 @@ spec:
       labels:
         app.kubernetes.io/name: control-plane
     spec:
+      hostUsers: false
       securityContext:
         fsGroup: 1000
       serviceAccountName: control-plane
@@ -655,8 +656,29 @@ fi
 test -d "\${expected_state_dir}/storage/\${expected_driver}"
 test -d "\${expected_state_dir}/storage/volumes"
 test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
+awk 'NR == 1 { exit !($1 == 0 && $2 != 0 && $3 >= 65536) }' /proc/self/uid_map
 EOF
 printf '%s\n' 'kind-test: initial remote assertions ok' >&2
+
+if ! ssh_bash <<'EOF'
+set -euo pipefail
+podman info --format '{{.Store.GraphDriverName}}' > /workspace/k8s-podman-driver.txt
+grep -Eq '^(overlay|vfs)$' /workspace/k8s-podman-driver.txt
+podman unshare sh -c 'cat /proc/self/uid_map > /workspace/k8s-podman-unshare-uid-map.txt'
+awk 'NR == 1 { exit !($1 == 0 && $2 != 0 && $3 >= 1) }' /workspace/k8s-podman-unshare-uid-map.txt
+EOF
+then
+  ssh_bash <<'EOF' >&2 || true
+set -euo pipefail
+cat /proc/self/uid_map || true
+ls -l /dev/fuse || true
+podman info || true
+podman unshare true || true
+EOF
+  dump_control_plane_diagnostics
+  exit 1
+fi
+printf '%s\n' 'kind-test: podman user namespace smoke ok' >&2
 
 ssh_bash <<EOF
 set -euo pipefail
@@ -867,6 +889,38 @@ grep -q 'cannot clone: Operation not permitted' /tmp/fake-podman-pull.log
 grep -q 'rootless Podman is blocked by the outer runtime' /tmp/fake-podman-pull.log
 grep -q 'SETFCAP' /tmp/fake-podman-pull.log
 grep -q 'CONTROL_PLANE_RUN_MODE=k8s-job' /tmp/fake-podman-pull.log
+cat > /tmp/fake-podman-migrate <<'INNER'
+#!/usr/bin/env bash
+set -euo pipefail
+state_file=/tmp/fake-podman-migrate-state
+if [[ "\${1:-}" == "system" ]] && [[ "\${2:-}" == "migrate" ]]; then
+  : > "\${state_file}"
+  exit 0
+fi
+if [[ "\${1:-}" == "pull" ]]; then
+  if [[ ! -f "\${state_file}" ]]; then
+    printf '%s\n' 'ERRO[0000] invalid internal status, try resetting the pause process with "/usr/bin/podman system migrate": cannot re-exec process' >&2
+    exit 125
+  fi
+  printf '%s\n' "\$@" > /tmp/fake-podman-migrate.log
+  exit 0
+fi
+printf '%s\n' "\$@" > /tmp/fake-podman-migrate.log
+INNER
+chmod +x /tmp/fake-podman-migrate
+set +e
+fake_migrate_output="\$(CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman-migrate control-plane-podman pull quay.io/example/test:latest 2>&1)"
+fake_migrate_status=\$?
+set -e
+printf '%s\n' "\${fake_migrate_output}" > /tmp/fake-podman-migrate-output.log
+if [[ "\${fake_migrate_status}" -ne 0 ]]; then
+  printf 'Expected control-plane-podman to recover after podman system migrate\n' >&2
+  exit 1
+fi
+grep -q '^pull$' /tmp/fake-podman-migrate.log
+grep -q '^quay.io/example/test:latest$' /tmp/fake-podman-migrate.log
+grep -q 'detected stale rootless Podman state' /tmp/fake-podman-migrate-output.log
+grep -q 'repaired the local Podman state' /tmp/fake-podman-migrate-output.log
 control-plane-run --mode auto --execution-hint long --namespace ${job_namespace} --job-name ci-configmap-job --mount-file /workspace/job-input.txt:inputs/job-input.txt --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke exec bash -lc 'grep -qx "job input from configmap" /var/run/control-plane/job-inputs/inputs/job-input.txt'
 EOF
 

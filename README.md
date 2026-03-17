@@ -26,6 +26,8 @@
   Kubernetes Job に寄せる
 - サンプルの least-privilege Kubernetes Deployment では、
   `CONTROL_PLANE_RUN_MODE=k8s-job` を既定にして Job 実行を主経路にする
+- サンプルの Kubernetes Deployment では `spec.hostUsers: false` を設定し、
+  Pod user namespace を有効にして local rootless Podman の成立可能性を上げる
 - local nested Podman / Kind は best-effort であり、outer runtime の制約を越えて
   完全保証はしない
 
@@ -143,10 +145,15 @@ Control Plane イメージ内の `/usr/local/bin/podman` と `/usr/local/bin/doc
 - `invalid internal status ... cannot re-exec process`
 - `cannot set user namespace`
 
-多くは **Pod 内の設定不足ではなく、outer host / runtime が nested rootless Podman を許可していない**
-ことが原因です。次の点に注意してください。
+`control-plane-podman` wrapper は `invalid internal status ... podman system migrate` を含む
+stale state を見つけると、`podman system migrate` を 1 回だけ自動で試します。それでも
+失敗する場合は、次の原因を疑ってください。
+
+多くは **Pod 内設定と outer host / runtime 制約の組み合わせ** が原因です。まず sample manifest
+どおりに `spec.hostUsers: false` で Pod user namespace を有効化したうえで、次の点に注意してください。
 
 - `SETFCAP` のような capability の再追加は Linux 5.12+ では必要になり得るが、それだけでは不十分
+- sample manifest では `spec.hostUsers: false` を設定し、Kubernetes Pod user namespace を明示的に使う
 - outer runtime 側で nested user namespaces、`newuidmap` / `newgidmap`、
   必要な seccomp / sysctl、状況によっては `/dev/fuse` も許可されている必要がある
 - `securityContext.privileged: true` でも outer runtime が user namespace を禁止していれば失敗する
@@ -180,6 +187,7 @@ Kubernetes 配備の詳細とサンプル manifest の前提は `docs/kubernetes
 - テンプレート: `deploy/kubernetes/control-plane.example.yaml`
 - 既定 namespace: Control Plane は `copilot-sandbox`、Job は `copilot-sandbox-jobs`
 - 構成: Secret / Service / Deployment / PVC をまとめた単一レプリカ構成
+- `spec.hostUsers: false` を設定し、Pod user namespace を使う
 - SSH 公開鍵は Secret から渡し、必要なら `COPILOT_GITHUB_TOKEN` も同じ Secret で注入できる
 - `COPILOT_GITHUB_TOKEN` は login shell へ export せず、Copilot 起動時だけ
   `--secret-env-vars=COPILOT_GITHUB_TOKEN` 経由で渡す
@@ -201,6 +209,11 @@ Kubernetes 配備の詳細とサンプル manifest の前提は `docs/kubernetes
 `allowPrivilegeEscalation` は `sshd` の privilege separation と entrypoint の root 操作のため
 `true` のままです。entrypoint は必要 capability が欠けている場合に、起動直後に
 明示的なエラーを出します。
+
+さらに sample manifest は `spec.hostUsers: false` を入れています。これは root in Pod を
+host 側の non-root UID/GID に map する Kubernetes Pod user namespace で、nested rootless
+Podman が user namespace を切り直しやすくするための前提です。cluster 側が Pod user namespace
+をサポートしていない場合は、Pod 自体が起動しないか、local Podman が引き続き失敗します。
 
 対話的な SSH ログインでは GNU Screen の session picker が起動します。picker が
 runtime 依存の理由で失敗しても、現在は通常の login shell にフォールバックするため、
@@ -269,8 +282,11 @@ GitHub Actions 上で cache して rate limit を避けます。
 ### `podman pull hello-world:latest` が失敗する
 
 `cannot clone: Operation not permitted` や `cannot re-exec process` は、outer runtime が
-nested rootless Podman を止めているときの典型例です。まずは `control-plane-run --mode k8s-job`
-または GitHub Actions / host runner へ切り替えてください。
+nested rootless Podman を止めているときの典型例です。まず `cat /proc/self/uid_map` で
+Pod user namespace が有効か確認し、sample manifest の `spec.hostUsers: false` が入っているかを
+見てください。そのうえでまだ失敗するなら、outer runtime 側の userns / `newuidmap` /
+`newgidmap` / seccomp 条件が足りていません。`control-plane-run --mode k8s-job` または
+GitHub Actions / host runner へ切り替えてください。
 
 ### `drop: ALL` にしたら SSH できない
 
