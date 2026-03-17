@@ -4,6 +4,8 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 yamllint_dockerfile="${CONTROL_PLANE_YAMLLINT_DOCKERFILE:-${script_dir}/../containers/yamllint/Dockerfile}"
 dhi_images=()
+dockerhub_username="${DOCKERHUB_USERNAME:-}"
+dockerhub_token="${DOCKERHUB_TOKEN:-}"
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -33,6 +35,22 @@ if [[ "${#dhi_images[@]}" -eq 0 ]]; then
   exit 1
 fi
 
+if [[ -z "${dockerhub_username}" ]] && [[ -n "${DOCKERHUB_USERNAME_FILE:-}" ]]; then
+  [[ -f "${DOCKERHUB_USERNAME_FILE}" ]] || {
+    printf 'DOCKERHUB_USERNAME_FILE does not exist: %s\n' "${DOCKERHUB_USERNAME_FILE}" >&2
+    exit 1
+  }
+  IFS= read -r dockerhub_username < "${DOCKERHUB_USERNAME_FILE}" || true
+fi
+
+if [[ -z "${dockerhub_token}" ]] && [[ -n "${DOCKERHUB_TOKEN_FILE:-}" ]]; then
+  [[ -f "${DOCKERHUB_TOKEN_FILE}" ]] || {
+    printf 'DOCKERHUB_TOKEN_FILE does not exist: %s\n' "${DOCKERHUB_TOKEN_FILE}" >&2
+    exit 1
+  }
+  IFS= read -r dockerhub_token < "${DOCKERHUB_TOKEN_FILE}" || true
+fi
+
 logged_in=0
 
 login_dhi() {
@@ -40,13 +58,13 @@ login_dhi() {
     return
   fi
 
-  : "${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required to pull uncached DHI images}"
-  : "${DOCKERHUB_TOKEN:?DOCKERHUB_TOKEN is required to pull uncached DHI images}"
+  : "${dockerhub_username:?DOCKERHUB_USERNAME or DOCKERHUB_USERNAME_FILE is required to pull uncached DHI images}"
+  : "${dockerhub_token:?DOCKERHUB_TOKEN or DOCKERHUB_TOKEN_FILE is required to pull uncached DHI images}"
   local max_attempts=5
   local attempt
 
   for attempt in $(seq 1 "${max_attempts}"); do
-    if printf '%s' "${DOCKERHUB_TOKEN}" | podman login dhi.io -u "${DOCKERHUB_USERNAME}" --password-stdin >/dev/null; then
+    if printf '%s' "${dockerhub_token}" | podman login dhi.io -u "${dockerhub_username}" --password-stdin >/dev/null; then
       logged_in=1
       return 0
     fi

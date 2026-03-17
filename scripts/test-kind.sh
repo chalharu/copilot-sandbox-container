@@ -431,8 +431,6 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: control-plane
-      annotations:
-        container.apparmor.security.beta.kubernetes.io/control-plane: unconfined
     spec:
       hostUsers: false
       securityContext:
@@ -508,6 +506,8 @@ spec:
                 - SETUID
                 - SYS_CHROOT
             seccompProfile:
+              type: Unconfined
+            appArmorProfile:
               type: Unconfined
           ports:
             - containerPort: 2222
@@ -649,7 +649,7 @@ fi
 expected_state_dir="/home/copilot/.copilot/containers/\${expected_driver}"
 test "\$(readlink /home/copilot/.local/share/containers)" = "\${expected_state_dir}"
 grep -qx "graphroot = \"\${expected_state_dir}/storage\"" ~/.config/containers/storage.conf
-grep -qx "runroot = \"/home/copilot/.copilot/run/\${expected_driver}/containers/storage\"" ~/.config/containers/storage.conf
+grep -qx "runroot = \"/run/user/1000/\${expected_driver}/containers/storage\"" ~/.config/containers/storage.conf
 if [[ "\${expected_driver}" == "overlay" ]]; then
   grep -qx 'driver = "overlay"' ~/.config/containers/storage.conf
   grep -qx 'mount_program = "/usr/bin/fuse-overlayfs"' ~/.config/containers/storage.conf
@@ -715,6 +715,23 @@ EOF
 podman_smoke_result="$(printf '%s' "${podman_smoke_result}" | tr -d '\r\n')"
 if [[ "${podman_smoke_result}" == "success" ]]; then
   printf '%s\n' 'kind-test: podman user namespace smoke ok' >&2
+  if ! ssh_bash <<'EOF'
+set -euo pipefail
+timeout 30s podman pull docker.io/library/hello-world:latest > /workspace/k8s-actual-podman-pull.log 2>&1
+timeout 20s podman run --rm --network=none docker.io/library/hello-world:latest > /workspace/k8s-actual-podman-run.log 2>&1
+grep -q 'Hello from Docker!' /workspace/k8s-actual-podman-run.log
+EOF
+  then
+    ssh_bash <<'EOF' >&2 || true
+set -euo pipefail
+cat /workspace/k8s-actual-podman-pull.log || true
+cat /workspace/k8s-actual-podman-run.log || true
+podman ps -a || true
+EOF
+    printf 'Expected actual podman pull/run to complete without hanging in kind mode\n' >&2
+    exit 1
+  fi
+  printf '%s\n' 'kind-test: actual podman run returns' >&2
 else
   printf '%s\n' 'kind-test: local podman is blocked by the outer runtime; continuing with k8s-job coverage' >&2
 fi
@@ -787,6 +804,30 @@ EOF
   exit 1
 fi
 printf '%s\n' 'kind-test: login TERM fallback ok' >&2
+
+printf '%s\n' 'kind-test: verifying login TERM upgrade to 256 colors' >&2
+if ! TERM=xterm-color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
+  "CONTROL_PLANE_DISABLE_SESSION_PICKER=1 bash -lic 'printf \"%s\n\" \"\$TERM\" > /workspace/k8s-login-term-upgrade.txt; tput colors > /workspace/k8s-login-term-upgrade-colors.txt'" \
+  </dev/null >"${workdir}/ssh-login-term-upgrade.log" 2>&1; then
+  cat "${workdir}/ssh-login-term-upgrade.log" >&2 || true
+  printf 'Expected kind login TERM upgrade to succeed over SSH\n' >&2
+  exit 1
+fi
+if ! ssh_bash <<'EOF'
+set -euo pipefail
+grep -qx 'xterm-256color' /workspace/k8s-login-term-upgrade.txt
+awk 'NR == 1 { exit !($1 >= 256) }' /workspace/k8s-login-term-upgrade-colors.txt
+EOF
+then
+  ssh_bash <<'EOF' >&2 || true
+set -euo pipefail
+cat /workspace/k8s-login-term-upgrade.txt || true
+cat /workspace/k8s-login-term-upgrade-colors.txt || true
+EOF
+  printf 'Expected kind login TERM upgrade files to report xterm-256color with 256 colors\n' >&2
+  exit 1
+fi
+printf '%s\n' 'kind-test: login TERM upgrade ok' >&2
 
 if ! wait_for_screen_term kind-session /workspace/k8s-screen-term.txt; then
   ssh_bash <<'EOF' >&2 || true

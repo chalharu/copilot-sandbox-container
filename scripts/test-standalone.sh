@@ -219,7 +219,7 @@ fi
 expected_state_dir="/home/copilot/.copilot/containers/${expected_driver}"
 test "$(readlink /home/copilot/.local/share/containers)" = "${expected_state_dir}"
 grep -qx "graphroot = \"${expected_state_dir}/storage\"" /home/copilot/.config/containers/storage.conf
-grep -qx "runroot = \"/home/copilot/.copilot/run/${expected_driver}/containers/storage\"" /home/copilot/.config/containers/storage.conf
+grep -qx "runroot = \"/run/user/1000/${expected_driver}/containers/storage\"" /home/copilot/.config/containers/storage.conf
 if [[ "${expected_driver}" == "overlay" ]]; then
   grep -qx 'driver = "overlay"' /home/copilot/.config/containers/storage.conf
   grep -qx 'mount_program = "/usr/bin/fuse-overlayfs"' /home/copilot/.config/containers/storage.conf
@@ -269,6 +269,30 @@ EOF
   exit 1
 fi
 printf '%s\n' 'standalone-test: login TERM fallback ok' >&2
+
+printf '%s\n' 'standalone-test: verifying login TERM upgrade to 256 colors' >&2
+if ! TERM=xterm-color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
+  "CONTROL_PLANE_DISABLE_SESSION_PICKER=1 bash -lic 'printf \"%s\n\" \"\$TERM\" > /workspace/login-term-upgrade.txt; tput colors > /workspace/login-term-upgrade-colors.txt'" \
+  </dev/null >"${workdir}/ssh-login-term-upgrade.log" 2>&1; then
+  cat "${workdir}/ssh-login-term-upgrade.log" >&2 || true
+  printf 'Expected login shell TERM upgrade to succeed over SSH\n' >&2
+  exit 1
+fi
+if ! ssh_bash <<'EOF'
+set -euo pipefail
+grep -qx 'xterm-256color' /workspace/login-term-upgrade.txt
+awk 'NR == 1 { exit !($1 >= 256) }' /workspace/login-term-upgrade-colors.txt
+EOF
+then
+  ssh_bash <<'EOF' >&2 || true
+set -euo pipefail
+cat /workspace/login-term-upgrade.txt || true
+cat /workspace/login-term-upgrade-colors.txt || true
+EOF
+  printf 'Expected login TERM upgrade files to report xterm-256color with 256 colors\n' >&2
+  exit 1
+fi
+printf '%s\n' 'standalone-test: login TERM upgrade ok' >&2
 
 utf8_roundtrip="$(ssh_bash <<'EOF'
 set -euo pipefail
@@ -454,6 +478,55 @@ EOF
   exit 1
 fi
 printf '%s\n' 'standalone-test: fake podman checks done' >&2
+
+printf '%s\n' 'standalone-test: verifying actual podman run returns' >&2
+if ! ssh_bash <<'EOF'
+set -euo pipefail
+actual_podman_status=success
+set +e
+timeout 20s podman info --format '{{.Store.GraphDriverName}}' >/tmp/actual-podman-info.log 2>&1
+info_status=$?
+timeout 20s podman unshare true >/tmp/actual-podman-unshare.log 2>&1
+unshare_status=$?
+set -e
+if [[ "${info_status}" -ne 0 ]] || [[ "${unshare_status}" -ne 0 ]]; then
+  if grep -Eiq 'cannot clone: Operation not permitted|cannot re-exec process|cannot set user namespace|creating new namespace.*Operation not permitted|newuidmap.*Operation not permitted|newgidmap.*Operation not permitted' /tmp/actual-podman-info.log /tmp/actual-podman-unshare.log; then
+    actual_podman_status=blocked
+  else
+    exit 1
+  fi
+fi
+if [[ "${actual_podman_status}" == "success" ]]; then
+  timeout 30s podman pull docker.io/library/hello-world:latest >/tmp/actual-podman-pull.log 2>&1
+  timeout 20s podman run --rm --network=none docker.io/library/hello-world:latest >/tmp/actual-podman-run.log 2>&1
+  grep -q 'Hello from Docker!' /tmp/actual-podman-run.log
+fi
+printf '%s\n' "${actual_podman_status}" > /tmp/actual-podman-status.txt
+EOF
+then
+  ssh_bash <<'EOF' >&2 || true
+set -euo pipefail
+cat /tmp/actual-podman-status.txt || true
+cat /tmp/actual-podman-info.log || true
+cat /tmp/actual-podman-unshare.log || true
+cat /tmp/actual-podman-pull.log || true
+cat /tmp/actual-podman-run.log || true
+podman ps -a || true
+EOF
+  printf 'Expected actual podman pull/run to complete without hanging in standalone mode\n' >&2
+  exit 1
+fi
+actual_podman_status="$(ssh_bash <<'EOF'
+set -euo pipefail
+cat /tmp/actual-podman-status.txt
+EOF
+)"
+actual_podman_status="$(printf '%s' "${actual_podman_status}" | tr -d '\r\n')"
+if [[ "${actual_podman_status}" == "success" ]]; then
+  printf '%s\n' 'standalone-test: actual podman run returns' >&2
+else
+  printf '%s\n' 'standalone-test: local podman is blocked by the outer runtime; skipping attached run regression in standalone mode' >&2
+fi
 
 first_host_fingerprint="$(ssh_host_fingerprint)"
 
