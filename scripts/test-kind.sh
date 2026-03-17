@@ -431,6 +431,8 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: control-plane
+      annotations:
+        container.apparmor.security.beta.kubernetes.io/control-plane: unconfined
     spec:
       hostUsers: false
       securityContext:
@@ -486,7 +488,9 @@ spec:
               value: Never
           # Keep the Kind test on the same least-privilege SSH/Copilot profile as
           # the sample manifest, including SETFCAP for rootless Podman on Linux
-          # 5.12+. Local nested Podman still remains opt-in elsewhere.
+          # 5.12+ and an unconfined seccomp profile so nested user namespaces can
+          # re-exec on runtimes that support them. Local nested Podman still
+          # remains opt-in elsewhere.
           securityContext:
             privileged: false
             runAsUser: 0
@@ -504,7 +508,7 @@ spec:
                 - SETUID
                 - SYS_CHROOT
             seccompProfile:
-              type: RuntimeDefault
+              type: Unconfined
           ports:
             - containerPort: 2222
               name: ssh
@@ -760,6 +764,30 @@ screen -T screen-256color -dmS kind-session sh -lc 'printf "%s\n" "$TERM" > /wor
 EOF
 printf '%s\n' 'kind-test: screen session started' >&2
 
+printf '%s\n' 'kind-test: verifying login TERM fallback' >&2
+if ! TERM=bogusterm ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
+  "CONTROL_PLANE_DISABLE_SESSION_PICKER=1 bash -lic 'printf \"%s\n\" \"\$TERM\" > /workspace/k8s-login-term.txt; tput colors > /workspace/k8s-login-colors.txt'" \
+  </dev/null >"${workdir}/ssh-login-term.log" 2>&1; then
+  cat "${workdir}/ssh-login-term.log" >&2 || true
+  printf 'Expected kind login shell TERM fallback to succeed over SSH\n' >&2
+  exit 1
+fi
+if ! ssh_bash <<'EOF'
+set -euo pipefail
+grep -Eq '^(xterm-256color|xterm)$' /workspace/k8s-login-term.txt
+awk 'NR == 1 { exit !($1 >= 8) }' /workspace/k8s-login-colors.txt
+EOF
+then
+  ssh_bash <<'EOF' >&2 || true
+set -euo pipefail
+cat /workspace/k8s-login-term.txt || true
+cat /workspace/k8s-login-colors.txt || true
+EOF
+  printf 'Expected kind login TERM fallback files to report a usable terminal\n' >&2
+  exit 1
+fi
+printf '%s\n' 'kind-test: login TERM fallback ok' >&2
+
 if ! wait_for_screen_term kind-session /workspace/k8s-screen-term.txt; then
   ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
@@ -815,6 +843,32 @@ if ! grep -q 'session picker failed; continuing with the login shell' "${workdir
   exit 1
 fi
 printf '%s\n' 'kind-test: session picker fallback ok' >&2
+
+printf '%s\n' 'kind-test: verifying picker menu options' >&2
+if ! ssh_bash <<'EOF'
+set -euo pipefail
+screen -T screen-256color -dmS shell bash -lc 'sleep 30'
+EOF
+then
+  printf 'Expected shell session fixture for kind picker menu test\n' >&2
+  exit 1
+fi
+set +e
+printf '9999\n' | TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
+  "control-plane-session --select" >"${workdir}/ssh-picker-menu.log" 2>&1
+picker_menu_status=$?
+set -e
+if [[ "${picker_menu_status}" -eq 0 ]]; then
+  printf 'Expected kind picker menu probe to fail on invalid selection\n' >&2
+  cat "${workdir}/ssh-picker-menu.log" >&2 || true
+  exit 1
+fi
+if ! grep -Fq 'Copilot (/workspace, --yolo)' "${workdir}/ssh-picker-menu.log"; then
+  printf 'Expected kind picker menu to show the Copilot option when only shell sessions exist\n' >&2
+  cat "${workdir}/ssh-picker-menu.log" >&2 || true
+  exit 1
+fi
+printf '%s\n' 'kind-test: picker menu shows Copilot option' >&2
 
 printf '%s\n' 'kind-test: starting manual job' >&2
 if ! job_name="$(ssh_bash <<EOF
@@ -893,6 +947,17 @@ ssh_bash <<EOF
 set -euo pipefail
 printf 'job input from configmap\n' > /workspace/job-input.txt
 printf 'colon input\n' > '/workspace/job:input.txt'
+cat > /tmp/fake-podman-success <<'INNER'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' 'fake success stderr' >&2
+printf '%s\n' "\$@" > /tmp/fake-podman-success.log
+INNER
+chmod +x /tmp/fake-podman-success
+timeout 10s bash -lc 'CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman-success control-plane-podman info' \
+  >/tmp/fake-podman-success.stdout 2>/tmp/fake-podman-success.stderr
+grep -qx 'info' /tmp/fake-podman-success.log
+grep -q 'fake success stderr' /tmp/fake-podman-success.stderr
 cat > /tmp/fake-podman <<'INNER'
 #!/usr/bin/env bash
 set -euo pipefail

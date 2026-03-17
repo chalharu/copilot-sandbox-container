@@ -1,6 +1,8 @@
 # Prefer a 256-color UTF-8 terminal inside Screen so TUIs such as Copilot CLI and vim
-# render predictably, including full-screen redraws.
+# render predictably while still keeping useful scrollback in shell sessions.
 defutf8 on
 term screen-256color
 defbce on
+defscrollback 10000
+mousetrack on
 altscreen on

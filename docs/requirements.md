@@ -203,9 +203,10 @@ Kubernetes モードで Job namespace を分ける場合、Control Plane namespa
 ### 4.9 安全性と運用要件
 
 - 既定で `privileged` を前提にしないこと（sample deployment は
-  `spec.hostUsers: false` による Pod user namespace と `RuntimeDefault`
-  seccomp を基本にし、`securityContext.privileged` は本当に
-  必要なときだけ明示的な opt-in として許容する）
+  `spec.hostUsers: false` による Pod user namespace を基本にし、
+  local rootless Podman が必要な control-plane container だけ
+  `seccompProfile: Unconfined` と AppArmor の unconfined 設定を使い、
+  `securityContext.privileged` は本当に必要なときだけ明示的な opt-in として許容する）
 - `securityContext.privileged: true` でも nested user namespace が保証されるとは
   限らないこと。outer runtime が `newuidmap` / `newgidmap` や user namespace を
   禁止している場合、rootless Podman は失敗し得る

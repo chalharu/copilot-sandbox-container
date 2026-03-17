@@ -7,9 +7,9 @@ if [[ -f "${runtime_config_file}" ]]; then
   source "${runtime_config_file}"
 fi
 
-session_name="${CONTROL_PLANE_SCREEN_SESSION:-copilot}"
+session_name="${CONTROL_PLANE_SCREEN_SESSION:-shell}"
 selection_override="${CONTROL_PLANE_SESSION_SELECTION:-}"
-copilot_session_name="${CONTROL_PLANE_COPILOT_SESSION:-${session_name}}"
+copilot_session_name="${CONTROL_PLANE_COPILOT_SESSION:-copilot}"
 copilot_workspace="${CONTROL_PLANE_COPILOT_WORKSPACE:-${CONTROL_PLANE_WORKSPACE:-/workspace}}"
 copilot_bin="${CONTROL_PLANE_COPILOT_BIN:-copilot}"
 copilot_github_token_file="${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE:-}"
@@ -21,7 +21,7 @@ prune_dead_sessions() {
 attach_session() {
   local target_session="$1"
 
-  exec screen -D -RR "${target_session}"
+  exec screen -T screen-256color -D -RR "${target_session}"
 }
 
 list_sessions() {
@@ -33,7 +33,7 @@ create_session() {
   local new_session_name="${1:-${session_name}}"
 
   [[ -n "${new_session_name}" ]] || new_session_name="${session_name}"
-  exec screen -S "${new_session_name}"
+  exec screen -T screen-256color -S "${new_session_name}"
 }
 
 create_copilot_session() {

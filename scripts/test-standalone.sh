@@ -246,6 +246,30 @@ echo ssh > ~/.ssh/state.txt
 screen -T screen-256color -dmS smoke-session sh -lc 'printf "%s\n" "$TERM" > /workspace/screen-term.txt; printf "日本語★\n" > /workspace/screen-utf8.txt; echo screen-ok > /workspace/screen.txt; sleep 30'
 EOF
 
+printf '%s\n' 'standalone-test: verifying login TERM fallback' >&2
+if ! TERM=bogusterm ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
+  "CONTROL_PLANE_DISABLE_SESSION_PICKER=1 bash -lic 'printf \"%s\n\" \"\$TERM\" > /workspace/login-term.txt; tput colors > /workspace/login-colors.txt'" \
+  </dev/null >"${workdir}/ssh-login-term.log" 2>&1; then
+  cat "${workdir}/ssh-login-term.log" >&2 || true
+  printf 'Expected login shell TERM fallback to succeed over SSH\n' >&2
+  exit 1
+fi
+if ! ssh_bash <<'EOF'
+set -euo pipefail
+grep -Eq '^(xterm-256color|xterm)$' /workspace/login-term.txt
+awk 'NR == 1 { exit !($1 >= 8) }' /workspace/login-colors.txt
+EOF
+then
+  ssh_bash <<'EOF' >&2 || true
+set -euo pipefail
+cat /workspace/login-term.txt || true
+cat /workspace/login-colors.txt || true
+EOF
+  printf 'Expected login shell TERM fallback files to report a usable terminal\n' >&2
+  exit 1
+fi
+printf '%s\n' 'standalone-test: login TERM fallback ok' >&2
+
 utf8_roundtrip="$(ssh_bash <<'EOF'
 set -euo pipefail
 printf '日本語★\n'
@@ -308,11 +332,48 @@ if ! grep -q 'session picker failed; continuing with the login shell' "${workdir
 fi
 printf '%s\n' 'standalone-test: session picker fallback ok' >&2
 
+printf '%s\n' 'standalone-test: verifying picker menu options' >&2
+if ! ssh_bash <<'EOF'
+set -euo pipefail
+screen -T screen-256color -dmS shell bash -lc 'sleep 30'
+EOF
+then
+  printf 'Expected shell session fixture for picker menu test\n' >&2
+  exit 1
+fi
+set +e
+printf '9999\n' | TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
+  "control-plane-session --select" >"${workdir}/ssh-picker-menu.log" 2>&1
+picker_menu_status=$?
+set -e
+if [[ "${picker_menu_status}" -eq 0 ]]; then
+  printf 'Expected picker menu probe to fail on invalid selection\n' >&2
+  cat "${workdir}/ssh-picker-menu.log" >&2 || true
+  exit 1
+fi
+if ! grep -Fq 'Copilot (/workspace, --yolo)' "${workdir}/ssh-picker-menu.log"; then
+  printf 'Expected picker menu to show the Copilot option when only shell sessions exist\n' >&2
+  cat "${workdir}/ssh-picker-menu.log" >&2 || true
+  exit 1
+fi
+printf '%s\n' 'standalone-test: picker menu shows Copilot option' >&2
+
 printf '%s\n' 'standalone-test: starting fake podman checks' >&2
 if ! ssh_bash <<EOF
 set -euo pipefail
 printf 'small input\n' > /workspace/job-input.txt
 printf 'colon input\n' > '/workspace/job:input.txt'
+cat > /tmp/fake-podman-success <<'INNER'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' 'fake success stderr' >&2
+printf '%s\n' "\$@" > /tmp/fake-podman-success.log
+INNER
+chmod +x /tmp/fake-podman-success
+timeout 10s bash -lc 'CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman-success control-plane-podman info' \
+  >/tmp/fake-podman-success.stdout 2>/tmp/fake-podman-success.stderr
+grep -qx 'info' /tmp/fake-podman-success.log
+grep -q 'fake success stderr' /tmp/fake-podman-success.stderr
 cat > /tmp/fake-podman <<'INNER'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -382,6 +443,8 @@ then
   ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
 cat /tmp/fake-podman.log || true
+cat /tmp/fake-podman-success.log || true
+cat /tmp/fake-podman-success.stderr || true
 cat /tmp/fake-podman-pull.log || true
 cat /tmp/fake-podman-migrate.log || true
 cat /tmp/fake-podman-migrate-output.log || true
