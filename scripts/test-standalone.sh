@@ -100,6 +100,31 @@ EOF
   return 1
 }
 
+wait_for_remote_grep() {
+  local remote_pattern="$1"
+  local remote_path="$2"
+  local attempts="${3:-15}"
+  local remote_command
+  local _
+
+  printf -v remote_command 'REMOTE_PATTERN=%q REMOTE_PATH=%q bash -l -se' \
+    "${remote_pattern}" "${remote_path}"
+
+  for _ in $(seq 1 "${attempts}"); do
+    # shellcheck disable=SC2029
+    if ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_command}" <<'EOF' >/dev/null 2>&1
+set -euo pipefail
+grep -Eq -- "${REMOTE_PATTERN}" "${REMOTE_PATH}"
+EOF
+    then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
 ssh_host_fingerprint() {
   local fingerprint
 
@@ -239,10 +264,16 @@ EOF
   exit 1
 fi
 
-ssh_bash <<'EOF'
+if ! wait_for_remote_grep '^日本語★$' /workspace/screen-utf8.txt; then
+  ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
-grep -qx '日本語★' /workspace/screen-utf8.txt
+cat /workspace/screen-term.txt || true
+cat /workspace/screen-utf8.txt || true
+cat /workspace/screen.txt || true
 EOF
+  printf 'Expected smoke-session to persist UTF-8 screen output\n' >&2
+  exit 1
+fi
 
 ssh_bash <<EOF
 set -euo pipefail
