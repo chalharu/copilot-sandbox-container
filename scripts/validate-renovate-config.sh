@@ -11,6 +11,8 @@ renovate_image="${CONTROL_PLANE_RENOVATE_IMAGE:-ghcr.io/renovatebot/renovate:43.
 base_dir=""
 log_file=""
 renovate_env=()
+dockerhub_username="${DOCKERHUB_USERNAME:-}"
+dockerhub_token="${DOCKERHUB_TOKEN:-}"
 
 json_escape() {
   local value="$1"
@@ -57,10 +59,26 @@ chmod 0777 "${base_dir}"
 
 require_command "${container_bin}"
 
-if [[ -n "${DOCKERHUB_USERNAME:-}" ]] && [[ -n "${DOCKERHUB_TOKEN:-}" ]]; then
+if [[ -z "${dockerhub_username}" ]] && [[ -n "${DOCKERHUB_USERNAME_FILE:-}" ]]; then
+  [[ -f "${DOCKERHUB_USERNAME_FILE}" ]] || {
+    printf 'DOCKERHUB_USERNAME_FILE does not exist: %s\n' "${DOCKERHUB_USERNAME_FILE}" >&2
+    exit 1
+  }
+  IFS= read -r dockerhub_username < "${DOCKERHUB_USERNAME_FILE}" || true
+fi
+
+if [[ -z "${dockerhub_token}" ]] && [[ -n "${DOCKERHUB_TOKEN_FILE:-}" ]]; then
+  [[ -f "${DOCKERHUB_TOKEN_FILE}" ]] || {
+    printf 'DOCKERHUB_TOKEN_FILE does not exist: %s\n' "${DOCKERHUB_TOKEN_FILE}" >&2
+    exit 1
+  }
+  IFS= read -r dockerhub_token < "${DOCKERHUB_TOKEN_FILE}" || true
+fi
+
+if [[ -n "${dockerhub_username}" ]] && [[ -n "${dockerhub_token}" ]]; then
   printf -v renovate_host_rules '[{"matchHost":"dhi.io","username":"%s","password":"%s"}]' \
-    "$(json_escape "${DOCKERHUB_USERNAME}")" \
-    "$(json_escape "${DOCKERHUB_TOKEN}")"
+    "$(json_escape "${dockerhub_username}")" \
+    "$(json_escape "${dockerhub_token}")"
   renovate_env+=(-e "RENOVATE_HOST_RULES=${renovate_host_rules}")
 fi
 

@@ -7,6 +7,22 @@ require_command() {
   }
 }
 
+control_plane_runtime_env_file() {
+  printf '%s\n' "${CONTROL_PLANE_RUNTIME_ENV_FILE:-${HOME:-/home/${USER:-copilot}}/.config/control-plane/runtime.env}"
+}
+
+load_control_plane_runtime_env() {
+  local runtime_config_file
+
+  runtime_config_file="$(control_plane_runtime_env_file)"
+  [[ -f "${runtime_config_file}" ]] || return 0
+
+  set -a
+  # shellcheck disable=SC1090
+  source "${runtime_config_file}"
+  set +a
+}
+
 docker_runtime_available() {
   command -v docker >/dev/null 2>&1 \
     && docker info >/dev/null 2>&1
@@ -113,6 +129,8 @@ build_command_for_toolchain() {
 }
 
 detect_container_runtime() {
+  load_control_plane_runtime_env
+
   local requested_runtime="${CONTROL_PLANE_CONTAINER_BIN:-}"
   local requested_toolchain="${CONTROL_PLANE_TOOLCHAIN:-}"
 
@@ -178,6 +196,8 @@ detect_container_runtime() {
 }
 
 detect_build_test_toolchain() {
+  load_control_plane_runtime_env
+
   local requested_toolchain="${CONTROL_PLANE_TOOLCHAIN:-}"
 
   case "${requested_toolchain}" in
@@ -225,6 +245,13 @@ build_image_for_toolchain() {
   local toolchain="$1"
   local image_tag="$2"
   local context_dir="$3"
+  local build_isolation=""
+
+  load_control_plane_runtime_env
+  build_isolation="${CONTROL_PLANE_PODMAN_BUILD_ISOLATION:-}"
+  if [[ -z "${build_isolation}" ]] && [[ "${CONTROL_PLANE_LOCAL_PODMAN_MODE:-}" == "rootful-service" ]]; then
+    build_isolation="chroot"
+  fi
 
   case "${toolchain}" in
     docker)
@@ -232,9 +259,17 @@ build_image_for_toolchain() {
       ;;
     podman)
       if command -v buildah >/dev/null 2>&1; then
-        buildah bud --tag "${image_tag}" "${context_dir}"
+        if [[ -n "${build_isolation}" ]] && [[ -z "${BUILDAH_ISOLATION:-}" ]]; then
+          BUILDAH_ISOLATION="${build_isolation}" buildah bud --tag "${image_tag}" "${context_dir}"
+        else
+          buildah bud --tag "${image_tag}" "${context_dir}"
+        fi
       else
-        podman build --tag "${image_tag}" "${context_dir}"
+        if [[ -n "${build_isolation}" ]] && [[ -z "${BUILDAH_ISOLATION:-}" ]]; then
+          BUILDAH_ISOLATION="${build_isolation}" podman build --tag "${image_tag}" "${context_dir}"
+        else
+          podman build --tag "${image_tag}" "${context_dir}"
+        fi
       fi
       ;;
     *)

@@ -114,7 +114,7 @@ COPY --chmod=644 config/screenrc /etc/screenrc
 COPY --chmod=644 config/storage.conf /home/${CONTROL_PLANE_USER}/.config/containers/storage.conf
 COPY --chmod=644 config/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
 COPY --chmod=644 config/profile-control-plane-session.sh /etc/profile.d/control-plane-session.sh
-COPY --chmod=644 skills/control-plane-operations/ /usr/local/share/control-plane/skills/control-plane-operations/
+COPY skills/control-plane-operations/ /usr/local/share/control-plane/skills/control-plane-operations/
 COPY --chmod=755 bin/control-plane-podman /usr/local/bin/control-plane-podman
 COPY --chmod=755 bin/control-plane-screen /usr/local/bin/control-plane-screen
 COPY --chmod=755 bin/control-plane-entrypoint /usr/local/bin/control-plane-entrypoint
@@ -129,6 +129,8 @@ COPY --chmod=755 bin/k8s-job-run /usr/local/bin/k8s-job-run
 RUN ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/podman \
     && ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/docker \
     && ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen \
+    && find /usr/local/share/control-plane/skills -type d -exec chmod 755 {} + \
+    && find /usr/local/share/control-plane/skills -type f -exec chmod 644 {} + \
     && chown -R "${CONTROL_PLANE_USER}:${CONTROL_PLANE_USER}" "/home/${CONTROL_PLANE_USER}/.config"
 
 WORKDIR /workspace

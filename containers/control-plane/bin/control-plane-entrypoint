@@ -42,6 +42,7 @@ rootful_podman_storage_config_path="${rootful_podman_runtime_dir}/storage.conf"
 rootful_podman_log_path="${rootful_podman_runtime_dir}/podman-root.log"
 rootful_podman_default_cgroups="${CONTROL_PLANE_ROOTFUL_PODMAN_DEFAULT_CGROUPS:-disabled}"
 rootful_podman_default_network="${CONTROL_PLANE_ROOTFUL_PODMAN_DEFAULT_NETWORK:-host}"
+rootful_podman_build_isolation="${CONTROL_PLANE_ROOTFUL_PODMAN_BUILD_ISOLATION:-chroot}"
 podman_bin="${CONTROL_PLANE_PODMAN_BIN:-/usr/bin/podman}"
 job_namespace="${CONTROL_PLANE_JOB_NAMESPACE:-${CONTROL_PLANE_K8S_NAMESPACE:-default}}"
 job_workspace_pvc="${CONTROL_PLANE_JOB_WORKSPACE_PVC:-}"
@@ -381,7 +382,11 @@ install_bundled_control_plane_skill() {
 
   mkdir -p "${copilot_skills_dir}"
   rm -rf "${target_dir}"
-  ln -s "${source_dir}" "${target_dir}"
+  mkdir -p "${target_dir}"
+  cp -R "${source_dir}/." "${target_dir}/"
+  find "${target_dir}" -type d -exec chmod 755 {} +
+  find "${target_dir}" -type f -exec chmod 644 {} +
+  safe_chown_tree "${control_plane_user}:${control_plane_user}" "${target_dir}"
 }
 
 configure_git_credential_helper() {
@@ -593,6 +598,7 @@ fi
     write_runtime_var DOCKER_HOST "unix://${rootful_podman_socket}"
     write_runtime_var CONTROL_PLANE_PODMAN_DEFAULT_CGROUPS "${rootful_podman_default_cgroups}"
     write_runtime_var CONTROL_PLANE_PODMAN_DEFAULT_NETWORK "${rootful_podman_default_network}"
+    write_runtime_var CONTROL_PLANE_PODMAN_BUILD_ISOLATION "${rootful_podman_build_isolation}"
   fi
   write_runtime_var KUBECONFIG "${KUBECONFIG:-}"
   if [[ -n "${copilot_github_token}" ]]; then

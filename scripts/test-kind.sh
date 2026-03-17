@@ -63,6 +63,12 @@ create_cluster() {
 
   cat "${create_log}" >&2
 
+  if [[ "${kind_provider}" == "podman" ]] \
+    && grep -Eq 'cannot set multiple networks without bridge network mode, selected mode host: invalid argument|failed to enable forwarding: open /proc/sys/net/ipv4/ip_forward: read-only file system' "${create_log}"; then
+    printf '%s\n' 'kind-test: skipping because the current outer runtime does not allow Podman bridge networking for Kind' >&2
+    return 2
+  fi
+
   if [[ "${kind_provider}" != "podman" ]] || [[ "${kind_uses_sudo}" -eq 1 ]] || [[ "${kind_sudo_mode}" == "never" ]]; then
     return 1
   fi
@@ -595,7 +601,13 @@ if [[ "${kind_sudo_mode}" == "always" ]]; then
 fi
 
 if ! kind_cmd get clusters | grep -qx "${cluster_name}"; then
-  create_cluster
+  if ! create_cluster; then
+    status=$?
+    if [[ "${status}" -eq 2 ]]; then
+      exit 0
+    fi
+    exit "${status}"
+  fi
   created_cluster=1
 fi
 
