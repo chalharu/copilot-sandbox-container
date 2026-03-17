@@ -23,10 +23,7 @@ chmod 700 "${XDG_RUNTIME_DIR}"
 chmod 700 "${TMPDIR}"
 
 stderr_path="$(mktemp)"
-cleanup() {
-  rm -f "${stderr_path}"
-}
-trap cleanup EXIT
+trap 'rm -f "${stderr_path}"' EXIT
 
 set +e
 "${podman_bin}" "$@" 2> >(tee "${stderr_path}" >&2)
