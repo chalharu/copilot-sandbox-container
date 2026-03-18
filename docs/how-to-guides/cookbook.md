@@ -40,6 +40,7 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 この 2 本で、少なくとも次を確認できます。
 
 - bundled skill の `references/` が読める
+- `COPILOT_CONFIG_JSON_FILE` と `GH_HOSTS_YML_FILE` / `GH_GITHUB_TOKEN_FILE` による設定注入が podman / Kubernetes の両方で効く
 - `drop: ALL` 系 capability 構成で interactive SSH login が接続維持後も入力を受け付ける
 - rootful-service の Podman graphroot が `~/.copilot/containers` ではなく ephemeral path を使う
 - rootful-service 下の `podman build` と `podman run` が通る
@@ -49,8 +50,10 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 1. `deploy/kubernetes/control-plane.example.yaml` の `image` は `replace-me-with-commit-sha` の placeholder なので、使いたい published commit SHA tag に更新する
 2. 再現性を重視するなら `latest` ではなく commit SHA tag を使う
 3. `control-plane-auth` Secret の `ssh-public-key` を自分の公開鍵へ差し替える
-4. 必要なら `dockerhub-username` / `dockerhub-token` と `copilot-github-token` も入れる
-5. `storageClassName` と PVC サイズをクラスタに合わせる
+4. `gh` 認証は Secret 側で管理し、簡単な GitHub.com 用なら `gh-github-token`、複数 host や `git_protocol: ssh` を含めたいなら `gh-hosts.yml` を使う
+5. Copilot CLI の追加設定は `control-plane-config` ConfigMap の `copilot-config.json` へ書き、PVC 上の既存 `~/.copilot/config.json` へ merge させる
+6. 必要なら `dockerhub-username` / `dockerhub-token` と `copilot-github-token` も入れる
+7. `storageClassName` と PVC サイズをクラスタに合わせる
 
 反映:
 

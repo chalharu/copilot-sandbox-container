@@ -140,3 +140,28 @@ kubectl get svc -n copilot-sandbox
 ### 意味
 
 LoadBalancer の割り当て待ちです。SSH 自体の検証は `kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox` で先に進められます。
+
+## 10. injected Copilot config が壊れている
+
+### 代表ログ
+
+```text
+Expected injected Copilot config at /var/run/control-plane-config/copilot-config.json to contain a top-level JSON object
+```
+
+### 意味
+
+`COPILOT_CONFIG_JSON_FILE` へ渡したファイルが JSON object ではないか、JSON 自体が壊れています。entrypoint は PVC 上の既存 `~/.copilot/config.json` と deep-merge する前提なので、top-level array / string / invalid JSON は受け付けません。
+
+## 11. gh Secret の指定が足りない
+
+### 代表ログ
+
+```text
+Expected gh GitHub token source at /var/run/control-plane-auth/gh-github-token
+Refusing to install an empty gh hosts source from /var/run/control-plane-auth/gh-hosts.yml
+```
+
+### 意味
+
+`GH_GITHUB_TOKEN_FILE` または `GH_HOSTS_YML_FILE` を env で指定したのに、対応する Secret key が無いか空です。`gh-hosts.yml` を使う場合はその file が優先され、無ければ `gh-github-token` から最小 `~/.config/gh/hosts.yml` を生成する、という順序で動きます。

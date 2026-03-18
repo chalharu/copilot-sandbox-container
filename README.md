@@ -31,7 +31,7 @@
 - `docker buildx` または `podman`
 - current-cluster を触る場合は、対象 namespace に対する `kubectl` 権限
 
-このリポジトリを current-cluster 上の Control Plane コンテナ内で扱う場合は、entrypoint が `~/.config/control-plane/runtime.env` を生成し、rootful Podman remote service、秘密情報の file path、Job 実行先 namespace などを login shell へ引き渡します。
+このリポジトリを current-cluster 上の Control Plane コンテナ内で扱う場合は、entrypoint が `~/.config/control-plane/runtime.env` を生成し、rootful Podman remote service、秘密情報の file path、Job 実行先 namespace などを login shell へ引き渡します。あわせて、`COPILOT_CONFIG_JSON_FILE` で渡した ConfigMap JSON を既存 `~/.copilot/config.json` へ deep-merge し、`GH_HOSTS_YML_FILE` または `GH_GITHUB_TOKEN_FILE` から `~/.config/gh/hosts.yml` を反映できます。
 
 ## ステップ 2: lint を実行する
 
@@ -72,6 +72,7 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 
 - `scripts/test-standalone.sh`
 - `scripts/test-regressions.sh`
+- `scripts/test-config-injection.sh`
 - `scripts/test-podman-startup.sh`
 - `scripts/test-entrypoint-capabilities.sh`
 - `scripts/test-kind.sh`
@@ -90,6 +91,8 @@ Kubernetes 上の current-cluster smoke は次で実行します。
 - bundled skill の `references/` 可読性
 - rootful-service の Podman graphroot が `/run/control-plane/state-vfs/storage` の ephemeral path を使う
 - rootful-service 下の `podman build`
+
+sample manifest では、`control-plane-auth` Secret に `ssh-public-key` と必要な Secret 値 (`gh-github-token` または `gh-hosts.yml`, `copilot-github-token`, DockerHub 認証情報) を入れ、`control-plane-config` ConfigMap に `copilot-config.json` overlay を置きます。entrypoint は ConfigMap 側 JSON を PVC 上の既存 `~/.copilot/config.json` へ merge し、`gh-hosts.yml` があればそれを優先、無ければ `gh-github-token` から最小 `hosts.yml` を生成します。
 
 すでに Control Plane Pod の中から作業している場合は、追加の spot check として次も使えます。
 

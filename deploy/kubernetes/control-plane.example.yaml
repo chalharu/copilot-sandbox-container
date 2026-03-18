@@ -75,6 +75,17 @@ type: Opaque
 stringData:
   ssh-public-key: |
     ssh-ed25519 AAAA... replace-me
+  # Optional: a fine-grained PAT for gh CLI. The entrypoint renders
+  # ~/.config/gh/hosts.yml from this Secret unless you provide gh-hosts.yml.
+  # gh-github-token: github_pat_... replace-me
+  # Optional: provide a full gh hosts.yml when you need custom git_protocol,
+  # multiple hosts, or GitHub Enterprise entries. This file wins over
+  # gh-github-token when both are present.
+  # gh-hosts.yml: |
+  #   github.com:
+  #     oauth_token: github_pat_... replace-me
+  #     git_protocol: ssh
+  #     user: octocat
   # Optional: add a fine-grained PAT with Copilot access when you want the
   # control plane to start with COPILOT_GITHUB_TOKEN configured.
   # The entrypoint copies it into a private runtime file and only injects it
@@ -85,6 +96,19 @@ stringData:
   # the file paths without exporting the raw secret values into the login shell.
   # dockerhub-username: your-dockerhub-user
   # dockerhub-token: dckr_pat_... replace-me
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: control-plane-config
+  namespace: copilot-sandbox
+data:
+  # The entrypoint deep-merges this object onto any existing
+  # ~/.copilot/config.json stored on the PVC.
+  copilot-config.json: |
+    {
+      "telemetry": false
+    }
 ---
 apiVersion: v1
 kind: Service
@@ -158,6 +182,15 @@ spec:
           env:
             - name: SSH_PUBLIC_KEY_FILE
               value: /var/run/control-plane-auth/ssh-public-key
+            - name: COPILOT_CONFIG_JSON_FILE
+              value: /var/run/control-plane-config/copilot-config.json
+            # Optional: uncomment when the Secret contains gh-github-token.
+            # - name: GH_GITHUB_TOKEN_FILE
+            #   value: /var/run/control-plane-auth/gh-github-token
+            # Optional: uncomment when the Secret contains gh-hosts.yml.
+            # This full file wins over GH_GITHUB_TOKEN_FILE.
+            # - name: GH_HOSTS_YML_FILE
+            #   value: /var/run/control-plane-auth/gh-hosts.yml
             - name: COPILOT_GITHUB_TOKEN_FILE
               value: /var/run/control-plane-auth/copilot-github-token
             - name: DOCKERHUB_USERNAME_FILE
@@ -298,6 +331,9 @@ spec:
             - name: control-plane-auth
               mountPath: /var/run/control-plane-auth
               readOnly: true
+            - name: control-plane-config
+              mountPath: /var/run/control-plane-config
+              readOnly: true
       volumes:
         - name: state
           persistentVolumeClaim:
@@ -319,3 +355,6 @@ spec:
         - name: control-plane-auth
           secret:
             secretName: control-plane-auth
+        - name: control-plane-config
+          configMap:
+            name: control-plane-config

@@ -404,6 +404,35 @@ type: Opaque
 stringData:
   ssh-public-key: |
     ${public_key}
+  gh-hosts.yml: |
+    github.com:
+      oauth_token: kind-secret-hosts-token
+      git_protocol: ssh
+      user: kind-bot
+  gh-github-token: kind-secret-token-fallback
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: control-plane-config
+  namespace: ${namespace}
+data:
+  copilot-config.json: |
+    {
+      "features": {
+        "persisted": false,
+        "overlayOnly": true
+      },
+      "nested": {
+        "replace": {
+          "fromOverlay": true
+        },
+        "array": [
+          "overlay"
+        ]
+      },
+      "topLevelOverlay": "kind"
+    }
 ---
 apiVersion: v1
 kind: Service
@@ -450,7 +479,35 @@ spec:
           command:
             - sh
             - -c
-            - umask 077 && mkdir -p /state/copilot /state/gh /state/ssh /state/ssh-host-keys /workspace-state/workspace
+            - |
+              set -eu
+              umask 077
+              mkdir -p /state/copilot /state/gh /state/ssh /state/ssh-host-keys /workspace-state/workspace
+              cat <<'JSON' > /state/copilot/config.json
+              {
+                "auth": {
+                  "provider": "github"
+                },
+                "features": {
+                  "persisted": true,
+                  "sessionPicker": true
+                },
+                "nested": {
+                  "keep": 1,
+                  "replace": {
+                    "fromBase": true
+                  },
+                  "array": [
+                    "base"
+                  ]
+                }
+              }
+              JSON
+              cat <<'YAML' > /state/gh/hosts.yml
+              github.com:
+                oauth_token: stale-kind-token
+                git_protocol: https
+              YAML
           securityContext:
             privileged: false
             runAsUser: 0
@@ -473,6 +530,12 @@ spec:
           env:
             - name: SSH_PUBLIC_KEY_FILE
               value: /var/run/control-plane-auth/ssh-public-key
+            - name: COPILOT_CONFIG_JSON_FILE
+              value: /var/run/control-plane-config/copilot-config.json
+            - name: GH_HOSTS_YML_FILE
+              value: /var/run/control-plane-auth/gh-hosts.yml
+            - name: GH_GITHUB_TOKEN_FILE
+              value: /var/run/control-plane-auth/gh-github-token
             - name: CONTROL_PLANE_K8S_NAMESPACE
               value: ${namespace}
             - name: CONTROL_PLANE_JOB_NAMESPACE
@@ -563,6 +626,9 @@ spec:
             - name: control-plane-auth
               mountPath: /var/run/control-plane-auth
               readOnly: true
+            - name: control-plane-config
+              mountPath: /var/run/control-plane-config
+              readOnly: true
       volumes:
         - name: state
           persistentVolumeClaim:
@@ -573,6 +639,9 @@ spec:
         - name: control-plane-auth
           secret:
             secretName: control-plane-auth
+        - name: control-plane-config
+          configMap:
+            name: control-plane-config
 EOF
 }
 
@@ -657,6 +726,23 @@ test "\${EDITOR}" = "vim"
 test "\${VISUAL}" = "vim"
 test "\${GH_PAGER}" = "cat"
 test -f ~/.copilot/skills/control-plane-operations/SKILL.md
+test -f ~/.copilot/config.json
+test -f ~/.config/gh/hosts.yml
+test "\$(stat -c '%a %U %G' ~/.copilot/config.json)" = '600 copilot copilot'
+test "\$(stat -c '%a %U %G' ~/.config/gh/hosts.yml)" = '600 copilot copilot'
+jq -e '.auth.provider == "github"' ~/.copilot/config.json >/dev/null
+jq -e '.features.sessionPicker == true' ~/.copilot/config.json >/dev/null
+jq -e '.features.persisted == false' ~/.copilot/config.json >/dev/null
+jq -e '.features.overlayOnly == true' ~/.copilot/config.json >/dev/null
+jq -e '.nested.keep == 1' ~/.copilot/config.json >/dev/null
+jq -e '.nested.replace.fromBase == true and .nested.replace.fromOverlay == true' ~/.copilot/config.json >/dev/null
+jq -e '.nested.array == ["overlay"]' ~/.copilot/config.json >/dev/null
+jq -e '.topLevelOverlay == "kind"' ~/.copilot/config.json >/dev/null
+grep -Fq 'oauth_token: kind-secret-hosts-token' ~/.config/gh/hosts.yml
+grep -Fq 'git_protocol: ssh' ~/.config/gh/hosts.yml
+grep -Fq 'user: kind-bot' ~/.config/gh/hosts.yml
+! grep -Fq 'stale-kind-token' ~/.config/gh/hosts.yml
+! grep -Fq 'kind-secret-token-fallback' ~/.config/gh/hosts.yml
 grep -qx 'cgroup_manager = "cgroupfs"' ~/.config/containers/containers.conf
 grep -qx 'events_logger = "file"' ~/.config/containers/containers.conf
 expected_driver=""

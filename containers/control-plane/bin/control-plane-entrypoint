@@ -5,6 +5,9 @@ control_plane_user="${CONTROL_PLANE_USER:-copilot}"
 control_plane_uid="$(id -u "${control_plane_user}")"
 control_plane_home="$(getent passwd "${control_plane_user}" | cut -d: -f6)"
 control_plane_workspace="${CONTROL_PLANE_WORKSPACE:-/workspace}"
+copilot_config_path="${control_plane_home}/.copilot/config.json"
+gh_config_dir="${control_plane_home}/.config/gh"
+gh_hosts_path="${gh_config_dir}/hosts.yml"
 containers_config_dir="${control_plane_home}/.config/containers"
 containers_storage_config_path="${containers_config_dir}/storage.conf"
 containers_engine_config_path="${containers_config_dir}/containers.conf"
@@ -25,6 +28,10 @@ copilot_token_path="${runtime_config_dir}/copilot-github-token"
 dockerhub_username_path="${runtime_config_dir}/dockerhub-username"
 dockerhub_token_path="${runtime_config_dir}/dockerhub-token"
 git_config_path="${control_plane_home}/.gitconfig"
+copilot_config_json_file="${COPILOT_CONFIG_JSON_FILE:-}"
+gh_github_token="${GH_GITHUB_TOKEN:-}"
+gh_github_token_file="${GH_GITHUB_TOKEN_FILE:-}"
+gh_hosts_yml_file="${GH_HOSTS_YML_FILE:-}"
 copilot_github_token="${COPILOT_GITHUB_TOKEN:-}"
 dockerhub_username="${DOCKERHUB_USERNAME:-}"
 dockerhub_token="${DOCKERHUB_TOKEN:-}"
@@ -320,6 +327,140 @@ write_private_file() {
   chmod 600 "${target_path}"
 }
 
+require_regular_file_or_absent() {
+  local target_path="$1"
+  local description="$2"
+
+  if [[ -e "${target_path}" ]] && [[ ! -f "${target_path}" ]]; then
+    printf 'Refusing to use non-file %s at %s\n' "${description}" "${target_path}" >&2
+    exit 1
+  fi
+}
+
+require_regular_file() {
+  local target_path="$1"
+  local description="$2"
+
+  if [[ ! -e "${target_path}" ]]; then
+    printf 'Expected %s at %s\n' "${description}" "${target_path}" >&2
+    exit 1
+  fi
+
+  if [[ ! -f "${target_path}" ]]; then
+    printf 'Refusing to use non-file %s at %s\n' "${description}" "${target_path}" >&2
+    exit 1
+  fi
+}
+
+require_json_object_file() {
+  local target_path="$1"
+  local description="$2"
+
+  if ! jq -e 'type == "object"' "${target_path}" >/dev/null; then
+    printf 'Expected %s at %s to contain a top-level JSON object\n' "${description}" "${target_path}" >&2
+    exit 1
+  fi
+}
+
+merge_json_object_file() {
+  local target_path="$1"
+  local overlay_path="$2"
+  local owner="$3"
+  local base_tmp
+  local merged_tmp
+
+  [[ -n "${overlay_path}" ]] || return 0
+
+  require_regular_file_or_absent "${target_path}" "Copilot config path"
+  require_regular_file "${overlay_path}" "Copilot config source"
+
+  base_tmp="$(mktemp)"
+  merged_tmp="$(mktemp)"
+
+  if [[ -f "${target_path}" ]]; then
+    cp "${target_path}" "${base_tmp}"
+  else
+    printf '%s\n' '{}' > "${base_tmp}"
+  fi
+
+  require_json_object_file "${base_tmp}" "existing Copilot config"
+  require_json_object_file "${overlay_path}" "injected Copilot config"
+
+  if ! jq -s '
+    def deepmerge($base; $overlay):
+      if ($base | type) == "object" and ($overlay | type) == "object" then
+        reduce (($base + $overlay) | keys_unsorted[]) as $key
+          ({};
+           .[$key] =
+             if ($base | has($key)) and ($overlay | has($key)) then
+               deepmerge($base[$key]; $overlay[$key])
+             elif ($overlay | has($key)) then
+               $overlay[$key]
+             else
+               $base[$key]
+             end)
+      else
+        $overlay
+      end;
+    deepmerge(.[0]; .[1])
+  ' "${base_tmp}" "${overlay_path}" > "${merged_tmp}"; then
+    rm -f "${base_tmp}" "${merged_tmp}"
+    exit 1
+  fi
+
+  mv "${merged_tmp}" "${target_path}"
+  chown "${owner}" "${target_path}"
+  chmod 600 "${target_path}"
+  rm -f "${base_tmp}"
+}
+
+write_gh_hosts_from_token() {
+  local target_path="$1"
+  local github_token="$2"
+  local owner="$3"
+  local gh_hosts_content
+
+  [[ -n "${github_token}" ]] || return 0
+
+  printf -v gh_hosts_content '%s\n%s\n%s\n' \
+    'github.com:' \
+    "    oauth_token: ${github_token}" \
+    '    git_protocol: https'
+  write_private_file "${target_path}" "${gh_hosts_content}" "${owner}"
+}
+
+configure_gh_hosts() {
+  local gh_hosts_content=""
+
+  require_regular_file_or_absent "${gh_hosts_path}" "gh hosts config path"
+
+  if [[ -n "${gh_hosts_yml_file}" ]]; then
+    require_regular_file "${gh_hosts_yml_file}" "gh hosts source"
+    gh_hosts_content="$(cat "${gh_hosts_yml_file}")"
+    if [[ -z "${gh_hosts_content}" ]]; then
+      printf 'Refusing to install an empty gh hosts source from %s\n' "${gh_hosts_yml_file}" >&2
+      exit 1
+    fi
+    write_private_file "${gh_hosts_path}" "${gh_hosts_content}" "${control_plane_user}:${control_plane_user}"
+    return
+  fi
+
+  if [[ -z "${gh_github_token}" ]] && [[ -n "${gh_github_token_file}" ]]; then
+    require_regular_file "${gh_github_token_file}" "gh GitHub token source"
+    IFS= read -r gh_github_token < "${gh_github_token_file}" || true
+    if [[ -z "${gh_github_token}" ]]; then
+      printf 'Refusing to install an empty gh GitHub token from %s\n' "${gh_github_token_file}" >&2
+      exit 1
+    fi
+  fi
+
+  write_gh_hosts_from_token "${gh_hosts_path}" "${gh_github_token}" "${control_plane_user}:${control_plane_user}"
+}
+
+configure_copilot() {
+  merge_json_object_file "${copilot_config_path}" "${copilot_config_json_file}" "${control_plane_user}:${control_plane_user}"
+}
+
 start_rootful_podman_service() {
   local service_pid
   local wait_count=0
@@ -488,7 +629,7 @@ require_container_capabilities "$@"
 mkdir -p \
   "${control_plane_home}/.copilot" \
   "${containers_config_dir}" \
-  "${control_plane_home}/.config/gh" \
+  "${gh_config_dir}" \
   "${control_plane_home}/.local/share" \
   "${runtime_config_dir}" \
   "${kube_dir}" \
@@ -689,6 +830,8 @@ chown "${control_plane_user}:${control_plane_user}" "${containers_engine_config_
 chmod 644 "${containers_engine_config_path}"
 
 install_bundled_control_plane_skill
+configure_copilot
+configure_gh_hosts
 configure_git
 ensure_ssh_host_key rsa ssh_host_rsa_key
 ensure_ssh_host_key ecdsa ssh_host_ecdsa_key
