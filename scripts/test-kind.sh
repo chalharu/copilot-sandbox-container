@@ -483,31 +483,35 @@ spec:
               set -eu
               umask 077
               mkdir -p /state/copilot /state/gh /state/ssh /state/ssh-host-keys /workspace-state/workspace
-              cat <<'JSON' > /state/copilot/config.json
-              {
-                "auth": {
-                  "provider": "github"
-                },
-                "features": {
-                  "persisted": true,
-                  "sessionPicker": true
-                },
-                "nested": {
-                  "keep": 1,
-                  "replace": {
-                    "fromBase": true
+              if [ ! -f /state/copilot/config.json ]; then
+                cat <<'JSON' > /state/copilot/config.json
+                {
+                  "auth": {
+                    "provider": "github"
                   },
-                  "array": [
-                    "base"
-                  ]
+                  "features": {
+                    "persisted": true,
+                    "sessionPicker": true
+                  },
+                  "nested": {
+                    "keep": 1,
+                    "replace": {
+                      "fromBase": true
+                    },
+                    "array": [
+                      "base"
+                    ]
+                  }
                 }
-              }
-              JSON
-              cat <<'YAML' > /state/gh/hosts.yml
-              github.com:
-                oauth_token: stale-kind-token
-                git_protocol: https
-              YAML
+                JSON
+              fi
+              if [ ! -f /state/gh/hosts.yml ]; then
+                cat <<'YAML' > /state/gh/hosts.yml
+                github.com:
+                  oauth_token: stale-kind-token
+                  git_protocol: https
+                YAML
+              fi
           securityContext:
             privileged: false
             runAsUser: 0
