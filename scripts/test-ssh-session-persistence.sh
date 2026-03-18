@@ -108,6 +108,17 @@ local_ssh_session_exists() {
   screen -list 2>/dev/null | grep -q -- "[.]${local_screen_session}[[:space:]]"
 }
 
+wait_for_local_ssh_session() {
+  for _ in $(seq 1 "${attempts}"); do
+    if local_ssh_session_exists; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  fail "local SSH screen session ${local_screen_session} did not start"
+}
+
 ssh_log_has_prompt() {
   grep -Eq ':[^[:cntrl:]]*[#$][[:space:]]' "${ssh_log}" 2>/dev/null
 }
@@ -281,6 +292,7 @@ chmod 700 "${workdir}/run-ssh.sh"
 screen -DmL -Logfile "${ssh_log}" -S "${local_screen_session}" bash "${workdir}/run-ssh.sh" &
 local_screen_pid=$!
 
+wait_for_local_ssh_session
 wait_for_screen_session
 wait_for_marker "${marker_token_pre}" "initial"
 sleep "${hold_seconds}"
