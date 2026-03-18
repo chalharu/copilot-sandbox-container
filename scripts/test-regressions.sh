@@ -32,6 +32,9 @@ require_command() {
 require_command "${container_bin}"
 require_command awk
 
+# shellcheck source=scripts/lib-container-toolchain.sh
+source "${script_dir}/lib-container-toolchain.sh"
+
 printf '%s\n' 'regression-test: verifying broken overlay symlink startup handling' >&2
 mkdir -p \
   "${workdir}/state/copilot/containers/overlay/storage/overlay/l" \
@@ -224,6 +227,44 @@ if grep -q -- '--isolation=chroot' "${workdir}/build.args"; then
   cat "${workdir}/build.args" >&2
   exit 1
 fi
+
+printf '%s\n' 'regression-test: verifying rootful-service build prefers remote podman over buildah' >&2
+cat > "${workdir}/fake-bin/buildah" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" > "${TEST_REGRESSION_LOG_DIR:?}/buildah.args"
+exit 97
+EOF
+chmod +x "${workdir}/fake-bin/buildah"
+
+cat > "${workdir}/fake-bin/podman" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'CONTAINER_HOST=%s\n' "${CONTAINER_HOST:-}" > "${TEST_REGRESSION_LOG_DIR:?}/remote-build.env"
+printf '%s\n' "$@" > "${TEST_REGRESSION_LOG_DIR:?}/remote-build.args"
+exit 0
+EOF
+chmod +x "${workdir}/fake-bin/podman"
+
+(
+  export PATH="${workdir}/fake-bin:${PATH}"
+  export TEST_REGRESSION_LOG_DIR="${workdir}"
+  export CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null
+  export CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service
+  export CONTAINER_HOST='unix:///run/control-plane/podman-root.sock'
+  export DOCKER_HOST='unix:///run/control-plane/podman-root.sock'
+  selected_build_bin="$(build_command_for_toolchain podman)"
+  [[ "${selected_build_bin}" == "podman" ]]
+  build_image_for_toolchain podman quay.io/example/test:latest /tmp
+)
+
+test ! -f "${workdir}/buildah.args"
+grep -qx 'CONTAINER_HOST=unix:///run/control-plane/podman-root.sock' "${workdir}/remote-build.env"
+grep -qx 'build' "${workdir}/remote-build.args"
+grep -qx -- '--tag' "${workdir}/remote-build.args"
+grep -qx -- '--isolation=chroot' "${workdir}/remote-build.args"
+grep -qx 'quay.io/example/test:latest' "${workdir}/remote-build.args"
+grep -qx '/tmp' "${workdir}/remote-build.args"
 
 printf '%s\n' 'regression-test: verifying interactive podman run returns promptly' >&2
 cat > "${workdir}/fake-bin/podman-run-interactive" <<'EOF'

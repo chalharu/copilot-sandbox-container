@@ -173,20 +173,44 @@ has_effective_capability() {
   (( (16#${capability_mask} & (1 << bit)) != 0 ))
 }
 
+command_uses_sshd() {
+  local command_basename
+
+  if [[ $# -eq 0 ]]; then
+    return 0
+  fi
+
+  command_basename="$(basename -- "$1")"
+  [[ "${command_basename}" == "sshd" ]]
+}
+
 require_container_capabilities() {
   local capability_mask
   local missing=()
   local capability_name
+  local ssh_command=0
 
   [[ "$(id -u)" -eq 0 ]] || return 0
   capability_mask="$(awk '/^CapEff:/ { print $2 }' /proc/self/status)"
   [[ -n "${capability_mask}" ]] || return 0
 
-  for capability_name in AUDIT_WRITE CHOWN DAC_OVERRIDE FOWNER SETGID SETUID SYS_CHROOT; do
+  if command_uses_sshd "$@"; then
+    ssh_command=1
+  fi
+
+  for capability_name in CHOWN DAC_OVERRIDE FOWNER; do
     if ! has_effective_capability "${capability_name}" "${capability_mask}"; then
       missing+=("${capability_name}")
     fi
   done
+
+  if [[ "${ssh_command}" -eq 1 ]]; then
+    for capability_name in AUDIT_WRITE SETGID SETUID SYS_CHROOT; do
+      if ! has_effective_capability "${capability_name}" "${capability_mask}"; then
+        missing+=("${capability_name}")
+      fi
+    done
+  fi
 
   if [[ "${local_podman_mode}" == "rootful-service" ]]; then
     for capability_name in KILL MKNOD NET_ADMIN SETFCAP SETPCAP SYS_ADMIN; do
@@ -198,11 +222,18 @@ require_container_capabilities() {
 
   if [[ ${#missing[@]} -gt 0 ]]; then
     printf 'Missing Linux capabilities for control-plane startup: %s\n' "${missing[*]}" >&2
-    printf '%s\n' \
-      'Keep drop: ALL only when you re-add AUDIT_WRITE,CHOWN,DAC_OVERRIDE,FOWNER,SETGID,SETUID,SYS_CHROOT, or run the container privileged.' \
-      'When CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service, also re-add KILL,MKNOD,NET_ADMIN,SETFCAP,SETPCAP,SYS_ADMIN so the nested Podman service can launch containers on clusters that block Pod user namespaces.' \
-      'SSH requires AUDIT_WRITE plus SETUID/SETGID and SYS_CHROOT for privilege separation and PTY login accounting, and the entrypoint still needs ownership-related capabilities on mounted state.' \
-      >&2
+    if [[ "${ssh_command}" -eq 1 ]]; then
+      printf '%s\n' \
+        'Keep drop: ALL only when you re-add AUDIT_WRITE,CHOWN,DAC_OVERRIDE,FOWNER,SETGID,SETUID,SYS_CHROOT, or run the container privileged.' \
+        'When CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service, also re-add KILL,MKNOD,NET_ADMIN,SETFCAP,SETPCAP,SYS_ADMIN so the nested Podman service can launch containers on clusters that block Pod user namespaces.' \
+        'SSH requires AUDIT_WRITE plus SETUID/SETGID and SYS_CHROOT for privilege separation and PTY login accounting, and the entrypoint still needs ownership-related capabilities on mounted state.' \
+        >&2
+    else
+      printf '%s\n' \
+        'Non-SSH startup still needs CHOWN,DAC_OVERRIDE,FOWNER on mounted state. Direct sshd startup adds AUDIT_WRITE,SETGID,SETUID,SYS_CHROOT on top of that.' \
+        'When CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service, also re-add KILL,MKNOD,NET_ADMIN,SETFCAP,SETPCAP,SYS_ADMIN so the nested Podman service can launch containers on clusters that block Pod user namespaces.' \
+        >&2
+    fi
     exit 1
   fi
 }
@@ -425,7 +456,7 @@ configure_git() {
   chmod 600 "${git_config_path}"
 }
 
-require_container_capabilities
+require_container_capabilities "$@"
 
 mkdir -p \
   "${control_plane_home}/.copilot" \

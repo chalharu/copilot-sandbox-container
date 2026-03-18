@@ -53,7 +53,7 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/lint.sh
 - `shellcheck`
 - `yamllint`
 
-current-cluster の rootful-service では、DHI base image の事前 pull と build isolation の調整を自動で行います。
+current-cluster の rootful-service では、remote Podman socket を優先しつつ、DHI base image の事前 pull と build isolation の調整を自動で行います。
 
 ## ステップ 3: build とテストを実行する
 
@@ -72,6 +72,7 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 
 - `scripts/test-standalone.sh`
 - `scripts/test-regressions.sh`
+- `scripts/test-entrypoint-capabilities.sh`
 - `scripts/test-kind.sh`
 
 ## ステップ 4: current-cluster を確認する
