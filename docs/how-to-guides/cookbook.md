@@ -18,7 +18,7 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 
 ### current-cluster で詰まりやすい点
 
-- Podman build は rootful-service で `BUILDAH_ISOLATION=chroot` を既定に使う
+- Podman build は rootful-service で remote Podman socket と `--isolation=chroot` を既定に使う
 - `yamllint` image の DHI base image は `scripts/prepare-dhi-images.sh` で事前 pull する
 - `hadolint` と `shellcheck` は fully-qualified image 名で pull する
 

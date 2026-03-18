@@ -115,7 +115,7 @@ build_command_for_toolchain() {
       printf 'docker\n'
       ;;
     podman)
-      if command -v buildah >/dev/null 2>&1; then
+      if command -v buildah >/dev/null 2>&1 && ! prefer_podman_remote_build; then
         printf 'buildah\n'
       else
         printf 'podman\n'
@@ -126,6 +126,12 @@ build_command_for_toolchain() {
       exit 1
       ;;
   esac
+}
+
+prefer_podman_remote_build() {
+  [[ -n "${CONTAINER_HOST:-}" ]] \
+    || [[ -n "${DOCKER_HOST:-}" ]] \
+    || [[ "${CONTROL_PLANE_LOCAL_PODMAN_MODE:-}" == "rootful-service" ]]
 }
 
 detect_container_runtime() {
@@ -246,27 +252,29 @@ build_image_for_toolchain() {
   local image_tag="$2"
   local context_dir="$3"
   local build_isolation=""
+  local build_bin=""
 
   load_control_plane_runtime_env
   build_isolation="${CONTROL_PLANE_PODMAN_BUILD_ISOLATION:-}"
   if [[ -z "${build_isolation}" ]] && [[ "${CONTROL_PLANE_LOCAL_PODMAN_MODE:-}" == "rootful-service" ]]; then
     build_isolation="chroot"
   fi
+  build_bin="$(build_command_for_toolchain "${toolchain}")"
 
   case "${toolchain}" in
     docker)
       docker buildx build --load -t "${image_tag}" "${context_dir}"
       ;;
     podman)
-      if command -v buildah >/dev/null 2>&1; then
+      if [[ "${build_bin}" == "buildah" ]]; then
         if [[ -n "${build_isolation}" ]] && [[ -z "${BUILDAH_ISOLATION:-}" ]]; then
           BUILDAH_ISOLATION="${build_isolation}" buildah bud --tag "${image_tag}" "${context_dir}"
         else
           buildah bud --tag "${image_tag}" "${context_dir}"
         fi
       else
-        if [[ -n "${build_isolation}" ]] && [[ -z "${BUILDAH_ISOLATION:-}" ]]; then
-          BUILDAH_ISOLATION="${build_isolation}" podman build --tag "${image_tag}" "${context_dir}"
+        if [[ -n "${build_isolation}" ]]; then
+          podman build --isolation="${build_isolation}" --tag "${image_tag}" "${context_dir}"
         else
           podman build --tag "${image_tag}" "${context_dir}"
         fi

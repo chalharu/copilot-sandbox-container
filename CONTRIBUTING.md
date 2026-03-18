@@ -46,7 +46,7 @@ Types:
 - `scripts/build-test.sh` is the supported local build/test entry point.
 - `scripts/build-test.sh` auto-detects a working Docker Buildx toolchain first,
   then falls back to a Podman-based toolchain, using Buildah only when it is
-  already available on the host or CI runner.
+  already available on the host or CI runner and no remote Podman service is active.
 - Use `CONTROL_PLANE_TOOLCHAIN=docker` to force Docker / BuildKit, or
   `CONTROL_PLANE_TOOLCHAIN=podman` to force the Podman-based toolchain.
 - Use trusted upstream images when they already satisfy the contract; if only a
@@ -59,7 +59,8 @@ Types:
   smoke / integration scripts used by `scripts/build-test.sh`.
 - When this repository is developed from inside a containerized tooling
   environment, keep these scripts unchanged and provide the required toolchain:
-  `docker`, or `podman` (with `buildah` used only when already available), together with
+  `docker`, or `podman` (with `buildah` used only when already available and the
+  build stays local), together with
   `kind`, `kubectl`, `ssh`, and `ssh-keygen`.
 - When behavior or operator guidance changes, keep `README.md`,
   `docs/how-to-guides/cookbook.md`, `docs/explanation/knowledge.md`, and
