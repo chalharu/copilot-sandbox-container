@@ -12,6 +12,7 @@ job_name_prefix="${3:-control-plane-k8s-smoke}"
 control_plane_image="${1:-${CONTROL_PLANE_K8S_TEST_IMAGE:-}}"
 workdir="$(mktemp -d)"
 ssh_key="${workdir}/id_ed25519"
+ssh_probe_log="${workdir}/ssh-probe.log"
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -263,7 +264,7 @@ ${service_account_yaml}
                   printf "\n%s\n" "CONTROL_PLANE_SESSION_SELECTION=new:k8s-auto-login" >> /home/copilot/.config/control-plane/runtime.env
                   rm -f /tmp/ssh-interactive-marker.txt
                   rm -f /tmp/control-plane-ssh-shell.log
-                  printf "%s\n" "job-check: ssh-interactive-ready=ok"
+                  printf "%s\n" "job-check: ssh-interactive-probe-ready=ok"
                   for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60; do
                     if grep -Fq "mode=login action=session-picker" /tmp/control-plane-ssh-shell.log 2>/dev/null \
                       && su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list 2>/dev/null | grep -q -- k8s-auto-login'"'"'; then
@@ -278,12 +279,13 @@ ${service_account_yaml}
                     cat /tmp/control-plane-ssh-shell.log >&2 || true
                     su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; rm -f /tmp/control-plane-session.log; timeout 10s script -qefc "control-plane-session --select" /tmp/control-plane-session.log'"'"' >&2 || true
                     cat /tmp/control-plane-session.log >&2 || true
-                    su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list'"'"' >&2 || true
-                    exit 1
-                  fi
-                  cp /tmp/runtime.env.bak /home/copilot/.config/control-plane/runtime.env
-                  chown copilot:copilot /home/copilot/.config/control-plane/runtime.env
-                  chmod 600 /home/copilot/.config/control-plane/runtime.env
+                     su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list'"'"' >&2 || true
+                     exit 1
+                   fi
+                   printf "%s\n" "job-check: ssh-interactive-ready=ok"
+                   cp /tmp/runtime.env.bak /home/copilot/.config/control-plane/runtime.env
+                   chown copilot:copilot /home/copilot/.config/control-plane/runtime.env
+                   chmod 600 /home/copilot/.config/control-plane/runtime.env
                   printf "%s\n" "job-check: ssh-interactive=ok"
                 '
           securityContext:
@@ -360,7 +362,7 @@ for _ in $(seq 1 30); do
 done
 
 for _ in $(seq 1 30); do
-  if kubectl logs "job/${job_name}" -n "${active_namespace}" --all-containers=true 2>/dev/null | grep -Fq 'job-check: ssh-interactive-ready=ok'; then
+  if kubectl logs "job/${job_name}" -n "${active_namespace}" --all-containers=true 2>/dev/null | grep -Fq 'job-check: ssh-interactive-probe-ready=ok'; then
     break
   fi
   pod_phase="$(kubectl get pod "${job_pod_name}" -n "${active_namespace}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
@@ -370,11 +372,11 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 
-if ! kubectl logs "job/${job_name}" -n "${active_namespace}" --all-containers=true 2>/dev/null | grep -Fq 'job-check: ssh-interactive-ready=ok'; then
+if ! kubectl logs "job/${job_name}" -n "${active_namespace}" --all-containers=true 2>/dev/null | grep -Fq 'job-check: ssh-interactive-probe-ready=ok'; then
   kubectl logs "job/${job_name}" -n "${active_namespace}" --all-containers=true || true
   kubectl describe "job/${job_name}" -n "${active_namespace}" || true
   kubectl get pods -n "${active_namespace}" -l "job-name=${job_name}" -o wide || true
-  printf 'Job %s never reported ssh-interactive-ready=ok\n' "${job_name}" >&2
+  printf 'Job %s never reported ssh-interactive-probe-ready=ok\n' "${job_name}" >&2
   exit 1
 fi
 
@@ -385,7 +387,8 @@ set +e
   --port 2222 \
   --session-name k8s-auto-login \
   --marker-path /tmp/ssh-interactive-marker.txt \
-  --no-remote-check
+  --no-remote-check \
+  >"${ssh_probe_log}" 2>&1
 ssh_probe_status=$?
 set -e
 
@@ -420,6 +423,7 @@ grep -Fq 'job-check: podman=k8s-job-podman-ok' <<<"${job_logs}"
 grep -Eq 'job-check: podman-build=(ok|skipped)' <<<"${job_logs}"
 grep -Fq 'job-check: interactive=ok' <<<"${job_logs}"
 grep -Fq 'job-check: ssh-clean=ok' <<<"${job_logs}"
+grep -Fq 'job-check: ssh-interactive-probe-ready=ok' <<<"${job_logs}"
 grep -Fq 'job-check: ssh-interactive-ready=ok' <<<"${job_logs}"
 grep -Fq 'job-check: ssh-interactive=ok' <<<"${job_logs}"
 

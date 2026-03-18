@@ -112,6 +112,12 @@ ssh_log_has_prompt() {
   grep -Eq ':[^[:cntrl:]]*[#$][[:space:]]' "${ssh_log}" 2>/dev/null
 }
 
+ssh_log_has_token() {
+  local token="$1"
+
+  grep -Fq -- "${token}" "${ssh_log}" 2>/dev/null
+}
+
 wait_for_screen_session() {
   if [[ "${use_remote_check}" -eq 0 ]]; then
     for _ in $(seq 1 "${attempts}"); do
@@ -144,9 +150,9 @@ send_probe_command() {
   local probe_command=""
 
   printf -v probe_command 'echo %q > %q' "${token}" "${marker_path}"
-  screen -S "${local_screen_session}" -X stuff "${probe_command}"
+  screen -S "${local_screen_session}" -X stuff "${probe_command}" >/dev/null 2>&1
   # GNU Screen expects carriage return here to emulate an actual Enter keypress.
-  screen -S "${local_screen_session}" -X stuff $'\r'
+  screen -S "${local_screen_session}" -X stuff $'\r' >/dev/null 2>&1
 }
 
 wait_for_marker() {
@@ -155,16 +161,17 @@ wait_for_marker() {
 
   if [[ "${use_remote_check}" -eq 0 ]]; then
     for _ in $(seq 1 "${attempts}"); do
-      if ssh_log_has_prompt; then
+      send_probe_command "${token}"
+      sleep 1
+      if ssh_log_has_token "${token}"; then
         return 0
       fi
       if ! local_ssh_session_exists; then
-        fail "interactive SSH exited before the ${label} hold completed"
+        fail "interactive SSH exited before the ${label} probe reached the shell"
       fi
-      sleep 1
     done
 
-    fail "interactive SSH did not stay attached long enough for the ${label} hold"
+    fail "interactive SSH did not echo the ${label} probe command in the SSH log"
   fi
 
   for _ in $(seq 1 "${attempts}"); do
