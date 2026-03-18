@@ -13,7 +13,7 @@ hadolint_image="${CONTROL_PLANE_HADOLINT_IMAGE:-docker.io/hadolint/hadolint:v2.1
 # renovate: datasource=docker depName=docker.io/koalaman/shellcheck versioning=docker
 shellcheck_image="${CONTROL_PLANE_SHELLCHECK_IMAGE:-docker.io/koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d}"
 # renovate: datasource=docker depName=ghcr.io/biomejs/biome versioning=docker
-biome_image="${CONTROL_PLANE_BIOME_IMAGE:-ghcr.io/biomejs/biome:2.4.7@sha256:4b28c34cd586f8df09191a94b35f4818b88e99b13a8fea7d6c12225782bf8b72}"
+biome_image="${CONTROL_PLANE_BIOME_IMAGE:-ghcr.io/biomejs/biome:2.4.7@sha256:3f12308bf6ba10bccb7e16111fd53849ceda68f0d6513e947c0051a01719282f}"
 yamllint_image="${CONTROL_PLANE_YAMLLINT_IMAGE_TAG:-localhost/yamllint:test}"
 yamllint_config="${CONTROL_PLANE_YAMLLINT_CONFIG:-/workspace/.yamllint}"
 dockerfiles=()
