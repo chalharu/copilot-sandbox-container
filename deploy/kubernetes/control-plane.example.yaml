@@ -151,7 +151,9 @@ spec:
               mountPath: /state
       containers:
         - name: control-plane
-          image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest
+          # Pin deployments to a published commit SHA tag so the running image
+          # matches the revision you intend to operate.
+          image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha
           imagePullPolicy: IfNotPresent
           env:
             - name: SSH_PUBLIC_KEY_FILE
@@ -212,7 +214,7 @@ spec:
           # the current-cluster rootful Podman remote-service fallback need.
           # This stays `privileged: false`, yet still lets local `podman run`
           # work on the current node runtime by combining:
-          # - KILL for sshd preauth cleanup
+          # - AUDIT_WRITE plus KILL for sshd PTY login accounting and preauth cleanup
           # - MKNOD / NET_ADMIN / SETFCAP / SETPCAP / SYS_ADMIN for nested
           #   rootful Podman on this cluster
           # - unconfined seccomp/AppArmor so the nested runtime can manage its
@@ -226,6 +228,7 @@ spec:
               drop:
                 - ALL
               add:
+                - AUDIT_WRITE
                 - CHOWN
                 - DAC_OVERRIDE
                 - FOWNER

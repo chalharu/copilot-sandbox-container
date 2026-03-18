@@ -31,7 +31,7 @@ Missing Linux capabilities for control-plane startup: CHOWN DAC_OVERRIDE FOWNER 
 
 ### 意味
 
-`drop: ALL` は有効でも、SSH と entrypoint の初期化に必要な capability が戻っていません。`CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service` のときは追加で `KILL MKNOD NET_ADMIN SETFCAP SETPCAP SYS_ADMIN` も必要です。
+`drop: ALL` は有効でも、SSH と entrypoint の初期化に必要な capability が戻っていません。最低でも `AUDIT_WRITE CHOWN DAC_OVERRIDE FOWNER SETGID SETUID SYS_CHROOT` が必要で、`CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service` のときは追加で `KILL MKNOD NET_ADMIN SETFCAP SETPCAP SYS_ADMIN` も必要です。
 
 ## 3. interactive SSH で切れる / `sshd` cleanup 警告が出る
 
@@ -43,7 +43,7 @@ cleanup_exit: kill(...): Operation not permitted
 
 ### 意味
 
-preauth cleanup か privilege separation 周辺で capability が不足しています。`drop: ALL` でも `KILL`, `SETUID`, `SETGID`, `SYS_CHROOT` などを戻す必要があります。
+preauth cleanup か privilege separation / PTY login accounting 周辺で capability が不足しています。`drop: ALL` でも `AUDIT_WRITE`, `KILL`, `SETUID`, `SETGID`, `SYS_CHROOT` などを戻す必要があります。
 
 ### 回帰テストの目印
 
@@ -51,6 +51,8 @@ preauth cleanup か privilege separation 周辺で capability が不足してい
 job-check: ssh-clean=ok
 job-check: ssh-interactive=ok
 ```
+
+`scripts/test-ssh-session-persistence.sh` は SSH 接続をしばらく保持したまま、接続後に追加の入力を流して marker file を更新します。`job-check: ssh-interactive=ok` は「session が見えた」だけでなく、SSH login が十分に維持されて post-login input も処理できたことを意味します。
 
 ## 4. rootless Podman が outer runtime に止められている
 
