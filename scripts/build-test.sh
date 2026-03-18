@@ -35,6 +35,9 @@ CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
 CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
   "${script_dir}/test-regressions.sh" "${control_plane_image}"
 
+CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
+  "${script_dir}/test-entrypoint-capabilities.sh" "${control_plane_image}"
+
 KIND_EXPERIMENTAL_PROVIDER="${kind_provider}" \
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
   "${script_dir}/test-kind.sh" "${control_plane_image}" "${execution_plane_image}" "${cluster_name}"
