@@ -574,7 +574,7 @@ fi
 if [[ "${CONTROL_PLANE_LOCAL_PODMAN_MODE:-}" == "rootful-service" ]] && { podman_reports_rootful_service_constraint "${stderr_path}" || podman_reports_rootful_service_constraint "${migrate_stderr_path}"; }; then
   printf '%s\n' \
     'control-plane-podman: the rootful Podman service is active, but the cluster still blocked one of its nested runtime requirements.' \
-    "Use the current-cluster profile: capabilities add [CHOWN, DAC_OVERRIDE, FOWNER, KILL, MKNOD, NET_ADMIN, SETFCAP, SETGID, SETPCAP, SETUID, SYS_ADMIN, SYS_CHROOT], seccomp/appArmor unconfined, and let the wrapper keep its default \`--cgroups=disabled --network=host\` flags unless you know the node runtime supports other combinations." \
+    "Use the current-cluster profile: capabilities add [AUDIT_WRITE, CHOWN, DAC_OVERRIDE, FOWNER, KILL, MKNOD, NET_ADMIN, SETFCAP, SETGID, SETPCAP, SETUID, SYS_ADMIN, SYS_CHROOT], seccomp/appArmor unconfined, and let the wrapper keep its default \`--cgroups=disabled --network=host\` flags unless you know the node runtime supports other combinations." \
     >&2
 fi
 

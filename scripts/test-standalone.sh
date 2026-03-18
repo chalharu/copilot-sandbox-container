@@ -178,6 +178,7 @@ start_container() {
   local run_args=(
     run -d --rm
     --name "${container_name}"
+    --cap-add AUDIT_WRITE
     -e SSH_PUBLIC_KEY="$(cat "${ssh_key}.pub")"
   )
 
@@ -628,6 +629,11 @@ if ! grep -q 'Missing Linux capabilities for control-plane startup' <<<"${missin
   printf '%s\n' "${missing_caps_output}" >&2
   exit 1
 fi
+if ! grep -q 'AUDIT_WRITE' <<<"${missing_caps_output}"; then
+  printf 'Expected AUDIT_WRITE in cap-drop ALL output\n' >&2
+  printf '%s\n' "${missing_caps_output}" >&2
+  exit 1
+fi
 if ! grep -q 'SYS_CHROOT' <<<"${missing_caps_output}"; then
   printf 'Expected SYS_CHROOT in cap-drop ALL output\n' >&2
   printf '%s\n' "${missing_caps_output}" >&2
@@ -641,22 +647,12 @@ start_container
 wait_for_ssh
 
 printf '%s\n' 'standalone-test: starting auto-login ssh flow' >&2
-TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 </dev/null >"${workdir}/ssh-login.log" 2>&1 &
-interactive_ssh_pid=$!
-if ! wait_for_screen_session auto-login; then
-  printf 'Expected auto-login screen session to be created during SSH login\n' >&2
-  cat "${workdir}/ssh-login.log" >&2 || true
-  exit 1
-fi
+"${script_dir}/test-ssh-session-persistence.sh" \
+  --identity "${ssh_key}" \
+  --port "${ssh_port}" \
+  --session-name auto-login \
+  --marker-path /workspace/standalone-auto-login-marker.txt
 printf '%s\n' 'standalone-test: auto-login session ready' >&2
-
-kill "${interactive_ssh_pid}" >/dev/null 2>&1 || true
-wait "${interactive_ssh_pid}" 2>/dev/null || true
-if grep -q 'cannot change locale' "${workdir}/ssh-login.log"; then
-  printf 'Unexpected locale warning during SSH login\n' >&2
-  cat "${workdir}/ssh-login.log" >&2 || true
-  exit 1
-fi
 printf '%s\n' 'standalone-test: auto-login locale ok' >&2
 
 "${container_bin}" rm -f "${container_name}" >/dev/null

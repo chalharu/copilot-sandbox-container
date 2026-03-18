@@ -39,12 +39,12 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 この 2 本で、少なくとも次を確認できます。
 
 - bundled skill の `references/` が読める
-- `drop: ALL` 系 capability 構成で interactive SSH login が落ちない
+- `drop: ALL` 系 capability 構成で interactive SSH login が接続維持後も入力を受け付ける
 - rootful-service 下の `podman build` と `podman run` が通る
 
 ## 3. sample manifest を current-cluster 向けに更新する
 
-1. `deploy/kubernetes/control-plane.example.yaml` の `image` を使いたい tag に更新する
+1. `deploy/kubernetes/control-plane.example.yaml` の `image` は `replace-me-with-commit-sha` の placeholder なので、使いたい published commit SHA tag に更新する
 2. 再現性を重視するなら `latest` ではなく commit SHA tag を使う
 3. `control-plane-auth` Secret の `ssh-public-key` を自分の公開鍵へ差し替える
 4. 必要なら `dockerhub-username` / `dockerhub-token` と `copilot-github-token` も入れる

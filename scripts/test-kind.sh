@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 control_plane_image="${1:?usage: scripts/test-kind.sh <control-plane-image> <execution-plane-image> [cluster-name]}"
 execution_plane_image="${2:?usage: scripts/test-kind.sh <control-plane-image> <execution-plane-image> [cluster-name]}"
 cluster_name="${3:-control-plane-ci}"
@@ -13,6 +14,7 @@ control_plane_selector="app.kubernetes.io/name=control-plane"
 workdir="$(mktemp -d)"
 ssh_key="${workdir}/id_ed25519"
 kubeconfig_path="${workdir}/kubeconfig"
+kind_auto_login_session="k8s-auto-login-${RANDOM}"
 port_forward_pid=""
 created_cluster=0
 kind_uses_sudo=0
@@ -504,6 +506,7 @@ spec:
               drop:
                 - ALL
               add:
+                - AUDIT_WRITE
                 - CHOWN
                 - DAC_OVERRIDE
                 - FOWNER
@@ -852,6 +855,43 @@ if ! grep -q 'session picker failed; continuing with the login shell' "${workdir
   exit 1
 fi
 printf '%s\n' 'kind-test: session picker fallback ok' >&2
+
+printf '%s\n' 'kind-test: verifying interactive SSH auto-login' >&2
+if ! ssh_bash <<EOF
+set -euo pipefail
+cp ~/.config/control-plane/runtime.env /workspace/k8s-runtime.env.bak
+printf '\nCONTROL_PLANE_SESSION_SELECTION=new:%s\n' "${kind_auto_login_session}" >> ~/.config/control-plane/runtime.env
+EOF
+then
+  printf 'Expected kind runtime.env backup/setup to succeed before SSH auto-login probe\n' >&2
+  exit 1
+fi
+
+set +e
+"${script_dir}/test-ssh-session-persistence.sh" \
+  --identity "${ssh_key}" \
+  --port "${ssh_port}" \
+  --session-name "${kind_auto_login_session}" \
+  --marker-path /workspace/k8s-auto-login-marker.txt
+kind_auto_login_status=$?
+set -e
+
+if ! ssh_bash <<'EOF'
+set -euo pipefail
+cp /workspace/k8s-runtime.env.bak ~/.config/control-plane/runtime.env
+chmod 600 ~/.config/control-plane/runtime.env
+rm -f /workspace/k8s-runtime.env.bak
+EOF
+then
+  printf 'Expected kind runtime.env restore to succeed after SSH auto-login probe\n' >&2
+  exit 1
+fi
+
+if [[ "${kind_auto_login_status}" -ne 0 ]]; then
+  printf 'Expected kind interactive SSH auto-login to stay attached and accept input\n' >&2
+  exit 1
+fi
+printf '%s\n' 'kind-test: interactive SSH auto-login ok' >&2
 
 printf '%s\n' 'kind-test: verifying picker menu options' >&2
 if ! ssh_bash <<'EOF'

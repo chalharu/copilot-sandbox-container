@@ -6,6 +6,15 @@ control_plane_image="${1:?usage: scripts/test-regressions.sh <control-plane-imag
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-podman}"
 workdir="$(mktemp -d)"
 container_name="control-plane-regression-test"
+startup_caps=(
+  --cap-add AUDIT_WRITE
+  --cap-add CHOWN
+  --cap-add DAC_OVERRIDE
+  --cap-add FOWNER
+  --cap-add SETGID
+  --cap-add SETUID
+  --cap-add SYS_CHROOT
+)
 
 cleanup() {
   "${container_bin}" rm -f "${container_name}" >/dev/null 2>&1 || true
@@ -35,6 +44,7 @@ ln -s /nonexistent/overlay-target "${workdir}/state/copilot/containers/overlay/s
 set +e
 broken_symlink_output="$("${container_bin}" run --rm \
   --name "${container_name}" \
+  "${startup_caps[@]}" \
   -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForRegressionOnly control-plane-regression' \
   -v "${workdir}/state/copilot:/home/copilot/.copilot" \
   -v "${workdir}/state/gh:/home/copilot/.config/gh" \
@@ -69,6 +79,7 @@ mkdir -p \
 set +e
 skill_output="$("${container_bin}" run --rm \
   --name "${container_name}" \
+  "${startup_caps[@]}" \
   -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForRegressionOnly control-plane-regression' \
   -v "${workdir}/skill-state/copilot:/home/copilot/.copilot" \
   -v "${workdir}/skill-state/gh:/home/copilot/.config/gh" \

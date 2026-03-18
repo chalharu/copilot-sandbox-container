@@ -120,6 +120,7 @@ COPY --chmod=755 bin/control-plane-screen /usr/local/bin/control-plane-screen
 COPY --chmod=755 bin/control-plane-entrypoint /usr/local/bin/control-plane-entrypoint
 COPY --chmod=755 bin/control-plane-run /usr/local/bin/control-plane-run
 COPY --chmod=755 bin/control-plane-session /usr/local/bin/control-plane-session
+COPY --chmod=755 bin/control-plane-ssh-shell /usr/local/bin/control-plane-ssh-shell
 COPY --chmod=755 bin/k8s-job-start /usr/local/bin/k8s-job-start
 COPY --chmod=755 bin/k8s-job-wait /usr/local/bin/k8s-job-wait
 COPY --chmod=755 bin/k8s-job-pod /usr/local/bin/k8s-job-pod
@@ -129,6 +130,7 @@ COPY --chmod=755 bin/k8s-job-run /usr/local/bin/k8s-job-run
 RUN ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/podman \
     && ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/docker \
     && ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen \
+    && usermod --shell /usr/local/bin/control-plane-ssh-shell "${CONTROL_PLANE_USER}" \
     && find /usr/local/share/control-plane/skills -type d -exec chmod 755 {} + \
     && find /usr/local/share/control-plane/skills -type f -exec chmod 644 {} + \
     && chown -R "${CONTROL_PLANE_USER}:${CONTROL_PLANE_USER}" "/home/${CONTROL_PLANE_USER}/.config"

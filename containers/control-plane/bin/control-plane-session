@@ -33,6 +33,13 @@ create_session() {
   local new_session_name="${1:-${session_name}}"
 
   [[ -n "${new_session_name}" ]] || new_session_name="${session_name}"
+  if [[ -n "${selection_override}" ]]; then
+    # Scripted selection overrides are test-only entry points, so keep the
+    # explicit login shell but stay attached from the beginning like a real SSH
+    # login instead of detached-then-reattach.
+    exec screen -T screen-256color -S "${new_session_name}" \
+      env CONTROL_PLANE_DISABLE_SESSION_PICKER=1 bash -il
+  fi
   exec screen -T screen-256color -S "${new_session_name}"
 }
 

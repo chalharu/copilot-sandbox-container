@@ -84,7 +84,7 @@ Kubernetes 上の current-cluster smoke は次で実行します。
 
 このスクリプトは、現在の Control Plane Pod が使っている image を既定値として拾い、修正済みの entrypoint / wrapper / skill ファイルを ConfigMap 経由で一時 Job に注入して検証します。今回の回帰ポイントである次の項目も確認します。
 
-- `drop: ALL` 系 profile での interactive SSH login
+- `drop: ALL` 系 profile での interactive SSH login が接続維持後も入力を受け付ける
 - bundled skill の `references/` 可読性
 - rootful-service 下の `podman build`
 
@@ -101,7 +101,7 @@ Kubernetes 上の current-cluster smoke は次で実行します。
 ```bash
 control-plane-run --mode auto --execution-hint short \
   --workspace /workspace \
-  --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:latest \
+  --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:replace-me-with-commit-sha \
   -- /usr/local/bin/execution-plane-smoke write-marker /workspace/short.txt short
 ```
 
@@ -111,7 +111,7 @@ control-plane-run --mode auto --execution-hint short \
 control-plane-run --mode auto --execution-hint long \
   --namespace copilot-sandbox-jobs \
   --job-name smoke-job \
-  --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:latest \
+  --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:replace-me-with-commit-sha \
   -- /usr/local/bin/execution-plane-smoke write-marker /workspace/long.txt long
 ```
 

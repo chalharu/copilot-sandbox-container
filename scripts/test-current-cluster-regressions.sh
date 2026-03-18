@@ -9,17 +9,12 @@ runtime_config_file="${CONTROL_PLANE_RUNTIME_ENV_FILE:-${HOME:-/home/${USER:-cop
 namespace_file="/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 ssh_port="${CONTROL_PLANE_SSH_PORT:-2222}"
 build_probe_image="${CONTROL_PLANE_BUILD_PROBE_IMAGE:-localhost/current-cluster-build-probe:test}"
-session_name="current-cluster-regression"
+session_name="current-cluster-regression-$$"
 workdir="$(mktemp -d)"
 runtime_backup="${workdir}/runtime.env.bak"
 authorized_keys_backup="${workdir}/authorized_keys.bak"
-interactive_ssh_pid=""
 
 cleanup() {
-  if [[ -n "${interactive_ssh_pid}" ]]; then
-    kill "${interactive_ssh_pid}" >/dev/null 2>&1 || true
-    wait "${interactive_ssh_pid}" 2>/dev/null || true
-  fi
   if [[ -f "${runtime_backup}" ]]; then
     cp "${runtime_backup}" "${runtime_config_file}" >/dev/null 2>&1 || true
     chmod 600 "${runtime_config_file}" >/dev/null 2>&1 || true
@@ -102,44 +97,16 @@ printf '\nCONTROL_PLANE_SESSION_SELECTION=new:%s\n' "${session_name}" >> "${runt
 ssh-keygen -q -t ed25519 -N '' -f "${workdir}/id_ed25519" >/dev/null
 cat "${workdir}/id_ed25519.pub" >> "${HOME}/.ssh/authorized_keys"
 chmod 600 "${HOME}/.ssh/authorized_keys"
-
-TERM=tmux-256color ssh -tt \
-  -i "${workdir}/id_ed25519" \
-  -p "${ssh_port}" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  -o BatchMode=yes \
-  copilot@127.0.0.1 \
-  </dev/null >"${workdir}/ssh.log" 2>&1 &
-interactive_ssh_pid=$!
-
-for _ in $(seq 1 15); do
-  if screen -list 2>/dev/null | grep -q -- "${session_name}"; then
-    break
-  fi
-  if ! kill -0 "${interactive_ssh_pid}" 2>/dev/null; then
-    break
-  fi
-  sleep 1
-done
-
-screen -list 2>/dev/null | grep -q -- "${session_name}"
-kill -0 "${interactive_ssh_pid}"
-
-kill "${interactive_ssh_pid}" >/dev/null 2>&1 || true
-wait "${interactive_ssh_pid}" 2>/dev/null || true
-interactive_ssh_pid=""
+"${script_dir}/test-ssh-session-persistence.sh" \
+  --identity "${workdir}/id_ed25519" \
+  --port "${ssh_port}" \
+  --session-name "${session_name}" \
+  --marker-path /tmp/current-cluster-ssh-marker.txt
 
 cp "${runtime_backup}" "${runtime_config_file}"
 chmod 600 "${runtime_config_file}"
 cp "${authorized_keys_backup}" "${HOME}/.ssh/authorized_keys"
 chmod 600 "${HOME}/.ssh/authorized_keys"
-
-if grep -q 'cannot change locale' "${workdir}/ssh.log"; then
-  printf 'Unexpected locale warning during interactive SSH login\n' >&2
-  cat "${workdir}/ssh.log" >&2 || true
-  exit 1
-fi
 
 printf '%s\n' 'current-cluster-test: ssh-interactive=ok'
 printf '%s\n' 'current-cluster-test: current cluster regressions ok' >&2

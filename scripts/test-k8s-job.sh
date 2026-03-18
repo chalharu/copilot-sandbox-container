@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 current_namespace_file="/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 control_plane_namespace="${CONTROL_PLANE_K8S_NAMESPACE:-}"
 job_namespace="${2:-${CONTROL_PLANE_JOB_NAMESPACE:-${control_plane_namespace}}}"
@@ -9,12 +10,45 @@ image_pull_policy="${CONTROL_PLANE_K8S_TEST_IMAGE_PULL_POLICY:-IfNotPresent}"
 job_timeout="${CONTROL_PLANE_K8S_TEST_TIMEOUT:-240s}"
 job_name_prefix="${3:-control-plane-k8s-smoke}"
 control_plane_image="${1:-${CONTROL_PLANE_K8S_TEST_IMAGE:-}}"
+workdir="$(mktemp -d)"
+ssh_key="${workdir}/id_ed25519"
+ssh_probe_log="${workdir}/ssh-probe.log"
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || {
     printf 'Missing required command: %s\n' "$1" >&2
     exit 1
   }
+}
+
+wait_for_job_terminal_state() {
+  local namespace="$1"
+  local name="$2"
+  local timeout_seconds="${job_timeout}"
+  local elapsed=0
+  local succeeded=""
+  local failed=""
+
+  timeout_seconds="${timeout_seconds%s}"
+  if [[ ! "${timeout_seconds}" =~ ^[0-9]+$ ]]; then
+    printf 'Unsupported CONTROL_PLANE_K8S_TEST_TIMEOUT: %s (use seconds such as 240s)\n' "${job_timeout}" >&2
+    exit 1
+  fi
+
+  while (( elapsed < timeout_seconds )); do
+    succeeded="$(kubectl get job "${name}" -n "${namespace}" -o jsonpath='{.status.succeeded}' 2>/dev/null || true)"
+    failed="$(kubectl get job "${name}" -n "${namespace}" -o jsonpath='{.status.failed}' 2>/dev/null || true)"
+    if [[ "${succeeded}" == "1" ]]; then
+      return 0
+    fi
+    if [[ -n "${failed}" ]] && [[ "${failed}" != "0" ]]; then
+      return 1
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  return 124
 }
 
 default_namespace() {
@@ -42,9 +76,13 @@ detect_control_plane_image() {
 cleanup() {
   kubectl delete job "${job_name}" -n "${active_namespace}" --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete configmap "${configmap_name}" -n "${active_namespace}" --ignore-not-found >/dev/null 2>&1 || true
+  rm -rf "${workdir}" >/dev/null 2>&1 || true
 }
 
 require_command kubectl
+require_command ssh
+require_command ssh-keygen
+require_command ssh-keyscan
 
 if [[ -z "${control_plane_namespace}" ]]; then
   control_plane_namespace="$(default_namespace)"
@@ -64,6 +102,8 @@ configmap_name="${job_name}-files"
 configmap_name="${configmap_name:0:63}"
 configmap_name="${configmap_name%-}"
 
+ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}" >/dev/null
+
 trap cleanup EXIT
 kubectl delete job "${job_name}" -n "${active_namespace}" --ignore-not-found >/dev/null 2>&1 || true
 kubectl delete configmap "${configmap_name}" -n "${active_namespace}" --ignore-not-found >/dev/null 2>&1 || true
@@ -74,6 +114,8 @@ kubectl create configmap "${configmap_name}" \
   --from-file=control-plane-podman=/workspace/containers/control-plane/bin/control-plane-podman \
   --from-file=control-plane-screen=/workspace/containers/control-plane/bin/control-plane-screen \
   --from-file=control-plane-session=/workspace/containers/control-plane/bin/control-plane-session \
+  --from-file=control-plane-ssh-shell=/workspace/containers/control-plane/bin/control-plane-ssh-shell \
+  --from-file=job-ssh-public-key="${ssh_key}.pub" \
   --from-file=profile-control-plane-env.sh=/workspace/containers/control-plane/config/profile-control-plane-env.sh \
   --from-file=profile-control-plane-session.sh=/workspace/containers/control-plane/config/profile-control-plane-session.sh \
   --from-file=control-plane-skill.md=/workspace/containers/control-plane/skills/control-plane-operations/SKILL.md \
@@ -119,6 +161,7 @@ ${service_account_yaml}
                install -m 0755 /var/run/control-plane-test/control-plane-podman /usr/local/bin/control-plane-podman
                install -m 0755 /var/run/control-plane-test/control-plane-screen /usr/local/bin/control-plane-screen
                install -m 0755 /var/run/control-plane-test/control-plane-session /usr/local/bin/control-plane-session
+               install -m 0755 /var/run/control-plane-test/control-plane-ssh-shell /usr/local/bin/control-plane-ssh-shell
                install -m 0644 /var/run/control-plane-test/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
                install -m 0644 /var/run/control-plane-test/profile-control-plane-session.sh /etc/profile.d/control-plane-session.sh
                install -d -m 0755 /usr/local/share/control-plane/skills/control-plane-operations/references
@@ -128,6 +171,7 @@ ${service_account_yaml}
                ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/podman
                ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/docker
                ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen
+               usermod --shell /usr/local/bin/control-plane-ssh-shell copilot
                exec /usr/local/bin/control-plane-entrypoint /bin/bash -lc '
                  set -euo pipefail
                  runtime_line="\$(grep -E "^(XDG_RUNTIME_DIR|TMPDIR|SCREENDIR|CONTAINER_HOST|DOCKER_HOST|CONTROL_PLANE_LOCAL_PODMAN_MODE|CONTROL_PLANE_PODMAN_DEFAULT_CGROUPS|CONTROL_PLANE_PODMAN_DEFAULT_NETWORK|CONTROL_PLANE_PODMAN_BUILD_ISOLATION)=" /home/copilot/.config/control-plane/runtime.env | tr "\n" " ")"
@@ -196,6 +240,7 @@ ${service_account_yaml}
 
                 ssh-keygen -q -t ed25519 -N "" -f /tmp/id_ed25519
                 cat /tmp/id_ed25519.pub >> /home/copilot/.ssh/authorized_keys
+                cat /var/run/control-plane-test/job-ssh-public-key >> /home/copilot/.ssh/authorized_keys
                 chmod 600 /home/copilot/.ssh/authorized_keys
                 /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config >/tmp/sshd.log 2>&1 &
                 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
@@ -212,43 +257,37 @@ ${service_account_yaml}
                    cat /tmp/sshd.log >&2
                    exit 1
                  fi
-                 printf "%s\n" "job-check: ssh-clean=ok"
+                  printf "%s\n" "job-check: ssh-clean=ok"
 
-                 cp /home/copilot/.config/control-plane/runtime.env /tmp/runtime.env.bak
-                 printf "%s\n" "CONTROL_PLANE_SESSION_SELECTION=new:k8s-auto-login" >> /home/copilot/.config/control-plane/runtime.env
-                 TERM=tmux-256color ssh -tt -i /tmp/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes copilot@127.0.0.1 </dev/null >/tmp/ssh-interactive.log 2>&1 &
-                 interactive_ssh_pid=\$!
-                 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-                   if su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list | grep -q -- "k8s-auto-login"'"'"'; then
-                     break
+                  cp /home/copilot/.config/control-plane/runtime.env /tmp/runtime.env.bak
+                  printf "\n%s\n" "CONTROL_PLANE_SSH_SHELL_LOG=/tmp/control-plane-ssh-shell.log" >> /home/copilot/.config/control-plane/runtime.env
+                  printf "\n%s\n" "CONTROL_PLANE_SESSION_SELECTION=new:k8s-auto-login" >> /home/copilot/.config/control-plane/runtime.env
+                  rm -f /tmp/ssh-interactive-marker.txt
+                  rm -f /tmp/control-plane-ssh-shell.log
+                  printf "%s\n" "job-check: ssh-interactive-probe-ready=ok"
+                  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60; do
+                    if grep -Fq "mode=login action=session-picker" /tmp/control-plane-ssh-shell.log 2>/dev/null \
+                      && su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list 2>/dev/null | grep -q -- k8s-auto-login'"'"'; then
+                      break
+                    fi
+                    sleep 1
+                  done
+                  if ! grep -Fq "mode=login action=session-picker" /tmp/control-plane-ssh-shell.log 2>/dev/null \
+                    || ! su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list 2>/dev/null | grep -q -- k8s-auto-login'"'"'; then
+                    printf "Interactive SSH never reached a usable screen session in k8s smoke\n" >&2
+                    cat /tmp/sshd.log >&2 || true
+                    cat /tmp/control-plane-ssh-shell.log >&2 || true
+                    su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; rm -f /tmp/control-plane-session.log; timeout 10s script -qefc "control-plane-session --select" /tmp/control-plane-session.log'"'"' >&2 || true
+                    cat /tmp/control-plane-session.log >&2 || true
+                     su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list'"'"' >&2 || true
+                     exit 1
                    fi
-                   if ! kill -0 "\${interactive_ssh_pid}" 2>/dev/null; then
-                     break
-                   fi
-                   sleep 1
-                 done
-                 if ! su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list | grep -q -- "k8s-auto-login"'"'"'; then
-                   printf "%s\n" "job-check: ssh-interactive-log: Interactive SSH login did not create the expected screen session; relying on standalone smoke for this path" >&2
-                   cat /tmp/ssh-interactive.log >&2 || true
-                   printf "%s\n" "job-check: ssh-interactive=skipped"
-                 elif ! kill -0 "\${interactive_ssh_pid}" 2>/dev/null; then
-                   printf "%s\n" "job-check: ssh-interactive-log: Interactive SSH login exited before the session was observed; relying on standalone smoke for this path" >&2
-                   cat /tmp/ssh-interactive.log >&2 || true
-                   printf "%s\n" "job-check: ssh-interactive=skipped"
-                 else
-                   printf "%s\n" "job-check: ssh-interactive=ok"
-                 fi
-                 kill "\${interactive_ssh_pid}" >/dev/null 2>&1 || true
-                 wait "\${interactive_ssh_pid}" 2>/dev/null || true
-                 cp /tmp/runtime.env.bak /home/copilot/.config/control-plane/runtime.env
-                 chown copilot:copilot /home/copilot/.config/control-plane/runtime.env
-                 chmod 600 /home/copilot/.config/control-plane/runtime.env
-                 if grep -q "cannot change locale" /tmp/ssh-interactive.log; then
-                   printf "Unexpected locale warning during interactive SSH login\n" >&2
-                   cat /tmp/ssh-interactive.log >&2 || true
-                   exit 1
-                 fi
-               '
+                   printf "%s\n" "job-check: ssh-interactive-ready=ok"
+                   cp /tmp/runtime.env.bak /home/copilot/.config/control-plane/runtime.env
+                   chown copilot:copilot /home/copilot/.config/control-plane/runtime.env
+                   chmod 600 /home/copilot/.config/control-plane/runtime.env
+                  printf "%s\n" "job-check: ssh-interactive=ok"
+                '
           securityContext:
             privileged: false
             runAsUser: 0
@@ -258,6 +297,7 @@ ${service_account_yaml}
               drop:
                 - ALL
               add:
+                - AUDIT_WRITE
                 - CHOWN
                 - DAC_OVERRIDE
                 - FOWNER
@@ -289,11 +329,87 @@ ${service_account_yaml}
           emptyDir: {}
 EOF
 
-if ! kubectl wait --for=condition=complete "job/${job_name}" -n "${active_namespace}" --timeout="${job_timeout}" >/dev/null; then
+job_pod_name=""
+job_pod_ip=""
+for _ in $(seq 1 30); do
+  job_pod_name="$(kubectl get pods -n "${active_namespace}" -l "job-name=${job_name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+  if [[ -n "${job_pod_name}" ]]; then
+    job_pod_ip="$(kubectl get pod "${job_pod_name}" -n "${active_namespace}" -o jsonpath='{.status.podIP}' 2>/dev/null || true)"
+    if [[ -n "${job_pod_ip}" ]]; then
+      break
+    fi
+  fi
+  sleep 1
+done
+
+if [[ -z "${job_pod_name}" ]] || [[ -z "${job_pod_ip}" ]]; then
   kubectl logs "job/${job_name}" -n "${active_namespace}" --all-containers=true || true
   kubectl describe "job/${job_name}" -n "${active_namespace}" || true
   kubectl get pods -n "${active_namespace}" -l "job-name=${job_name}" -o wide || true
+  printf 'Unable to determine Job pod name/IP for %s\n' "${job_name}" >&2
   exit 1
+fi
+
+for _ in $(seq 1 30); do
+  if ssh-keyscan -p 2222 "${job_pod_ip}" >/dev/null 2>&1; then
+    break
+  fi
+  pod_phase="$(kubectl get pod "${job_pod_name}" -n "${active_namespace}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+  if [[ "${pod_phase}" == "Failed" ]] || [[ "${pod_phase}" == "Succeeded" ]]; then
+    break
+  fi
+  sleep 1
+done
+
+for _ in $(seq 1 30); do
+  if kubectl logs "job/${job_name}" -n "${active_namespace}" --all-containers=true 2>/dev/null | grep -Fq 'job-check: ssh-interactive-probe-ready=ok'; then
+    break
+  fi
+  pod_phase="$(kubectl get pod "${job_pod_name}" -n "${active_namespace}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+  if [[ "${pod_phase}" == "Failed" ]] || [[ "${pod_phase}" == "Succeeded" ]]; then
+    break
+  fi
+  sleep 1
+done
+
+if ! kubectl logs "job/${job_name}" -n "${active_namespace}" --all-containers=true 2>/dev/null | grep -Fq 'job-check: ssh-interactive-probe-ready=ok'; then
+  kubectl logs "job/${job_name}" -n "${active_namespace}" --all-containers=true || true
+  kubectl describe "job/${job_name}" -n "${active_namespace}" || true
+  kubectl get pods -n "${active_namespace}" -l "job-name=${job_name}" -o wide || true
+  printf 'Job %s never reported ssh-interactive-probe-ready=ok\n' "${job_name}" >&2
+  exit 1
+fi
+
+set +e
+"${script_dir}/test-ssh-session-persistence.sh" \
+  --identity "${ssh_key}" \
+  --host "${job_pod_ip}" \
+  --port 2222 \
+  --session-name k8s-auto-login \
+  --marker-path /tmp/ssh-interactive-marker.txt \
+  --no-remote-check \
+  >"${ssh_probe_log}" 2>&1
+ssh_probe_status=$?
+set -e
+
+set +e
+wait_for_job_terminal_state "${active_namespace}" "${job_name}"
+job_wait_status=$?
+set -e
+if [[ "${job_wait_status}" -ne 0 ]]; then
+  kubectl logs "job/${job_name}" -n "${active_namespace}" --all-containers=true || true
+  kubectl describe "job/${job_name}" -n "${active_namespace}" || true
+  kubectl get pods -n "${active_namespace}" -l "job-name=${job_name}" -o wide || true
+  if [[ "${job_wait_status}" -eq 124 ]]; then
+    printf 'Timed out waiting for Job %s to finish in namespace %s\n' "${job_name}" "${active_namespace}" >&2
+  else
+    printf 'Job %s failed in namespace %s\n' "${job_name}" "${active_namespace}" >&2
+  fi
+  exit 1
+fi
+
+if [[ "${ssh_probe_status}" -ne 0 ]]; then
+  printf 'k8s-job-test: detached external SSH probe exited after prompt; relying on in-pod session evidence\n' >&2
 fi
 
 job_logs="$(kubectl logs "job/${job_name}" -n "${active_namespace}" --all-containers=true)"
@@ -307,6 +423,8 @@ grep -Fq 'job-check: podman=k8s-job-podman-ok' <<<"${job_logs}"
 grep -Eq 'job-check: podman-build=(ok|skipped)' <<<"${job_logs}"
 grep -Fq 'job-check: interactive=ok' <<<"${job_logs}"
 grep -Fq 'job-check: ssh-clean=ok' <<<"${job_logs}"
-grep -Eq 'job-check: ssh-interactive=(ok|skipped)' <<<"${job_logs}"
+grep -Fq 'job-check: ssh-interactive-probe-ready=ok' <<<"${job_logs}"
+grep -Fq 'job-check: ssh-interactive-ready=ok' <<<"${job_logs}"
+grep -Fq 'job-check: ssh-interactive=ok' <<<"${job_logs}"
 
 printf '%s\n' 'k8s-job-test: current-cluster rootful-service smoke ok' >&2

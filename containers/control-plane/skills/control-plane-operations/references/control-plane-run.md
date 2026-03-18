@@ -15,7 +15,7 @@
 ```bash
 control-plane-run --mode auto --execution-hint short \
   --workspace /workspace \
-  --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:latest \
+  --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:replace-me-with-commit-sha \
   -- /usr/local/bin/execution-plane-smoke write-marker /workspace/short.txt short
 ```
 
@@ -25,7 +25,7 @@ control-plane-run --mode auto --execution-hint short \
 control-plane-run --mode auto --execution-hint long \
   --namespace copilot-sandbox-jobs \
   --job-name smoke-job \
-  --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:latest \
+  --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:replace-me-with-commit-sha \
   -- /usr/local/bin/execution-plane-smoke write-marker /workspace/long.txt long
 ```
 
@@ -35,7 +35,7 @@ control-plane-run --mode auto --execution-hint long \
 control-plane-run --mode k8s-job \
   --namespace copilot-sandbox-jobs \
   --mount-file ./script.sh:scripts/script.sh \
-  --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:latest \
+  --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:replace-me-with-commit-sha \
   -- /usr/local/bin/execution-plane-smoke exec bash -lc \
      'bash /var/run/control-plane/job-inputs/scripts/script.sh'
 ```
@@ -44,7 +44,7 @@ control-plane-run --mode k8s-job \
 
 ```bash
 control-plane-session --command \
-  'control-plane-run --mode auto --execution-hint long --namespace copilot-sandbox-jobs --job-name smoke-job --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:latest -- /usr/local/bin/execution-plane-smoke write-marker /workspace/long.txt long'
+  'control-plane-run --mode auto --execution-hint long --namespace copilot-sandbox-jobs --job-name smoke-job --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:replace-me-with-commit-sha -- /usr/local/bin/execution-plane-smoke write-marker /workspace/long.txt long'
 ```
 
 ## Notes
