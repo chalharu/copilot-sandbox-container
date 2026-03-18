@@ -49,6 +49,8 @@ Control Plane では、少なくとも次を永続化対象とします。
 
 一方、Podman の runtime dir、runroot、Screen socket は PVC ではなく ephemeral path に置きます。これにより stale netns や古い socket が再起動後に残りにくくなります。
 
+current-cluster の rootful-service graphroot も既定では `~/.copilot/containers` ではなく `/run/control-plane/state-<driver>/storage` 配下へ置きます。local Podman の image / layer を Pod 再起動後へ持ち越さない代わりに、PVC に残った古い rootful image store が次回 startup の hot path を重くしないようにするためです。
+
 Podman storage は driver ごとに分離しています。`overlay` と `vfs` を混在させても DB 衝突を起こしにくくするためです。
 
 ## 6. bundled skill を `~/.copilot/skills` へ同期する理由

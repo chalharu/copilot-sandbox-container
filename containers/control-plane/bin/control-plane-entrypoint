@@ -35,7 +35,7 @@ local_podman_mode="${CONTROL_PLANE_LOCAL_PODMAN_MODE:-rootless}"
 rootful_podman_storage_driver="${CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER:-vfs}"
 rootful_podman_runtime_dir="${CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR:-/run/control-plane}"
 rootful_podman_socket="${CONTROL_PLANE_ROOTFUL_PODMAN_SOCKET:-${rootful_podman_runtime_dir}/podman-root.sock}"
-rootful_podman_state_root="${CONTROL_PLANE_ROOTFUL_PODMAN_STATE_ROOT:-${podman_state_root}/rootful-${rootful_podman_storage_driver}}"
+rootful_podman_state_root="${CONTROL_PLANE_ROOTFUL_PODMAN_STATE_ROOT:-${rootful_podman_runtime_dir}/state-${rootful_podman_storage_driver}}"
 rootful_podman_graphroot="${rootful_podman_state_root}/storage"
 rootful_podman_runroot="${rootful_podman_runtime_dir}/runroot"
 rootful_podman_storage_config_path="${rootful_podman_runtime_dir}/storage.conf"
@@ -134,6 +134,33 @@ safe_chown_tree() {
   for target in "$@"; do
     [[ -e "${target}" ]] || continue
     find "${target}" \( -type l -o -type s \) -prune -o -exec chown "${owner}" {} +
+  done
+}
+
+safe_chown_tree_excluding_path() {
+  local owner="$1"
+  local target="$2"
+  local excluded_path="$3"
+
+  [[ -e "${target}" ]] || return
+  if [[ -n "${excluded_path}" ]] && [[ -e "${excluded_path}" ]]; then
+    find "${target}" \
+      \( -path "${excluded_path}" -o -type l -o -type s \) \
+      -prune -o -exec chown "${owner}" {} +
+    return
+  fi
+
+  find "${target}" \( -type l -o -type s \) -prune -o -exec chown "${owner}" {} +
+}
+
+ensure_path_ownership() {
+  local owner="$1"
+  shift
+  local target
+
+  for target in "$@"; do
+    [[ -e "${target}" ]] || continue
+    chown "${owner}" "${target}"
   done
 }
 
@@ -485,18 +512,26 @@ mkdir -p \
   "${podman_graphroot}/volumes" \
   "${podman_runroot}"
 
-safe_chown_tree "${control_plane_user}:${control_plane_user}" \
+safe_chown_tree_excluding_path \
+  "${control_plane_user}:${control_plane_user}" \
   "${control_plane_home}/.copilot" \
+  "${podman_state_root}"
+safe_chown_tree "${control_plane_user}:${control_plane_user}" \
   "${control_plane_home}/.config" \
   "${runtime_config_dir}" \
   "${kube_dir}" \
   "${control_plane_home}/.ssh" \
-  "${copilot_skills_dir}" \
   "${control_plane_workspace}" \
-  "${podman_state_root}" \
   "${screen_dir}" \
   "${tmp_dir}" \
   "${runtime_dir}"
+ensure_path_ownership "${control_plane_user}:${control_plane_user}" \
+  "${podman_state_root}" \
+  "${podman_state_dir}" \
+  "${podman_graphroot}" \
+  "${podman_graphroot}/${podman_storage_driver}" \
+  "${podman_graphroot}/volumes" \
+  "${podman_runroot}"
 chown "${control_plane_user}:${control_plane_user}" \
   "/run/user/${control_plane_uid}" \
   "${control_plane_home}" \

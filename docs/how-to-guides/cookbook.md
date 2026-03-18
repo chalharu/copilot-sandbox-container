@@ -19,6 +19,7 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 ### current-cluster で詰まりやすい点
 
 - Podman build は rootful-service で remote Podman socket と `--isolation=chroot` を既定に使う
+- current-cluster の rootful-service image store は Pod 再起動後に持ち越さないよう ephemeral path へ置く
 - `yamllint` image の DHI base image は `scripts/prepare-dhi-images.sh` で事前 pull する
 - `hadolint` と `shellcheck` は fully-qualified image 名で pull する
 
@@ -40,6 +41,7 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 
 - bundled skill の `references/` が読める
 - `drop: ALL` 系 capability 構成で interactive SSH login が接続維持後も入力を受け付ける
+- rootful-service の Podman graphroot が `~/.copilot/containers` ではなく ephemeral path を使う
 - rootful-service 下の `podman build` と `podman run` が通る
 
 ## 3. sample manifest を current-cluster 向けに更新する

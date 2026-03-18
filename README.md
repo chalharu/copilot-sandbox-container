@@ -72,6 +72,7 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 
 - `scripts/test-standalone.sh`
 - `scripts/test-regressions.sh`
+- `scripts/test-podman-startup.sh`
 - `scripts/test-entrypoint-capabilities.sh`
 - `scripts/test-kind.sh`
 
@@ -87,6 +88,7 @@ Kubernetes 上の current-cluster smoke は次で実行します。
 
 - `drop: ALL` 系 profile での interactive SSH login が接続維持後も入力を受け付ける
 - bundled skill の `references/` 可読性
+- rootful-service の Podman graphroot が `/run/control-plane/state-vfs/storage` の ephemeral path を使う
 - rootful-service 下の `podman build`
 
 すでに Control Plane Pod の中から作業している場合は、追加の spot check として次も使えます。
