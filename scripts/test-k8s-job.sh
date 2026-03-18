@@ -192,9 +192,11 @@ ${service_account_yaml}
                  printf "job-check: term=%s\n" "\${term_report}"
                  [[ "\${term_report}" == "xterm-256color 256" ]]
 
-                podman_info="\$(su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; podman info --format "{{.Store.GraphDriverName}} {{.Host.Security.Rootless}}"'"'"')"
-                printf "job-check: podman-info=%s\n" "\${podman_info}"
-                [[ "\${podman_info}" == "vfs false" ]]
+                 podman_info="\$(su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; podman info --format "{{.Store.GraphRoot}} {{.Store.GraphDriverName}} {{.Host.Security.Rootless}}"'"'"')"
+                 printf "job-check: podman-info=%s\n" "\${podman_info}"
+                 [[ "\${podman_info}" == "/run/control-plane/state-vfs/storage vfs false" ]]
+                 test ! -e /home/copilot/.copilot/containers/rootful-vfs
+                 printf "%s\n" "job-check: rootful-store=ephemeral"
 
                  podman_output="\$(su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; podman run --rm docker.io/library/busybox:1.37.0 echo k8s-job-podman-ok'"'"')"
                  printf "job-check: podman=%s\n" "\${podman_output}"
@@ -418,7 +420,8 @@ printf '%s\n' "${job_logs}"
 grep -Fq 'job-check: runtime-env=' <<<"${job_logs}"
 grep -Fq 'job-check: skill-read=ok' <<<"${job_logs}"
 grep -Fq 'job-check: term=xterm-256color 256' <<<"${job_logs}"
-grep -Fq 'job-check: podman-info=vfs false' <<<"${job_logs}"
+grep -Fq 'job-check: podman-info=/run/control-plane/state-vfs/storage vfs false' <<<"${job_logs}"
+grep -Fq 'job-check: rootful-store=ephemeral' <<<"${job_logs}"
 grep -Fq 'job-check: podman=k8s-job-podman-ok' <<<"${job_logs}"
 grep -Eq 'job-check: podman-build=(ok|skipped)' <<<"${job_logs}"
 grep -Fq 'job-check: interactive=ok' <<<"${job_logs}"

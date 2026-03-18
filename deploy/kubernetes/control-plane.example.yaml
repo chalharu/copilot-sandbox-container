@@ -197,7 +197,9 @@ spec:
             # Current-cluster local Podman profile: run a rootful remote service
             # inside the control-plane container. The entrypoint exports
             # CONTAINER_HOST/DOCKER_HOST plus safe defaults
-            # (`--cgroups=disabled --network=host`) into runtime.env.
+            # (`--cgroups=disabled --network=host`) into runtime.env, and keeps
+            # the rootful image store on an ephemeral `/run/control-plane/...`
+            # path so leftover local images do not slow the next Pod start.
             - name: CONTROL_PLANE_LOCAL_PODMAN_MODE
               value: rootful-service
             - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
