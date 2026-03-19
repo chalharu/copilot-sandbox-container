@@ -111,8 +111,9 @@ if [[ -s "${workdir}/chown.log" ]]; then
   exit 1
 fi
 
-printf '%s\n' 'podman-startup-test: verifying rootful-service keeps image state off persistent ~/.copilot storage' >&2
+printf '%s\n' 'podman-startup-test: verifying rootful-service uses dedicated rootful Podman storage' >&2
 prepare_state_tree rootful
+mkdir -p "${workdir}/rootful/rootful-podman"
 
 cat > "${workdir}/fake-podman" <<'EOF'
 #!/usr/bin/env bash
@@ -165,6 +166,7 @@ rootful_output="$("${container_bin}" run --rm \
   -v "${workdir}/rootful/ssh:/home/copilot/.ssh" \
   -v "${workdir}/rootful/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
   -v "${workdir}/rootful/workspace:/workspace" \
+  -v "${workdir}/rootful/rootful-podman:/var/lib/control-plane/rootful-podman" \
   -v "${workdir}:/var/run/control-plane-test" \
   "${entrypoint_override_args[@]}" \
   "${control_plane_image}" \
@@ -173,16 +175,21 @@ rootful_status=$?
 set -e
 
 if [[ "${rootful_status}" -ne 0 ]]; then
-  printf 'Expected rootful-service startup to succeed with an ephemeral Podman state root\n' >&2
+  printf 'Expected rootful-service startup to succeed with a dedicated Podman state root\n' >&2
   printf '%s\n' "${rootful_output}" >&2
   exit 1
 fi
 grep -qx 'rootful-ok' <<<"${rootful_output}"
 grep -Fqx -- '--root' "${workdir}/fake-podman.args"
-grep -Fqx -- '/run/control-plane/state-vfs/storage' "${workdir}/fake-podman.args"
+grep -Fqx -- '/var/lib/control-plane/rootful-podman/rootful-vfs/storage' "${workdir}/fake-podman.args"
 if [[ -e "${workdir}/rootful/copilot/containers/rootful-vfs" ]]; then
   printf 'Expected rootful-service startup to avoid persistent ~/.copilot rootful-vfs storage\n' >&2
   find "${workdir}/rootful/copilot/containers/rootful-vfs" -maxdepth 3 -print >&2 || true
+  exit 1
+fi
+if [[ ! -d "${workdir}/rootful/rootful-podman/rootful-vfs" ]]; then
+  printf 'Expected rootful-service startup to create dedicated /var/lib/control-plane/rootful-podman state\n' >&2
+  find "${workdir}/rootful/rootful-podman" -maxdepth 3 -print >&2 || true
   exit 1
 fi
 

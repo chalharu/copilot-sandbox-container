@@ -6,6 +6,7 @@ control_plane_uid="$(id -u "${control_plane_user}")"
 control_plane_home="$(getent passwd "${control_plane_user}" | cut -d: -f6)"
 control_plane_workspace="${CONTROL_PLANE_WORKSPACE:-/workspace}"
 copilot_config_path="${control_plane_home}/.copilot/config.json"
+copilot_session_state_dir="${control_plane_home}/.copilot/session-state"
 gh_config_dir="${control_plane_home}/.config/gh"
 gh_hosts_path="${gh_config_dir}/hosts.yml"
 containers_config_dir="${control_plane_home}/.config/containers"
@@ -37,12 +38,14 @@ dockerhub_username="${DOCKERHUB_USERNAME:-}"
 dockerhub_token="${DOCKERHUB_TOKEN:-}"
 git_user_name="${CONTROL_PLANE_GIT_USER_NAME:-}"
 git_user_email="${CONTROL_PLANE_GIT_USER_EMAIL:-}"
+copilot_cpu_limit_percent="${CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT:-100}"
+copilot_nice_level="${CONTROL_PLANE_COPILOT_NICE_LEVEL:-10}"
 podman_storage_driver="${CONTROL_PLANE_PODMAN_STORAGE_DRIVER:-}"
 local_podman_mode="${CONTROL_PLANE_LOCAL_PODMAN_MODE:-rootless}"
 rootful_podman_storage_driver="${CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER:-vfs}"
 rootful_podman_runtime_dir="${CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR:-/run/control-plane}"
 rootful_podman_socket="${CONTROL_PLANE_ROOTFUL_PODMAN_SOCKET:-${rootful_podman_runtime_dir}/podman-root.sock}"
-rootful_podman_state_root="${CONTROL_PLANE_ROOTFUL_PODMAN_STATE_ROOT:-${rootful_podman_runtime_dir}/state-${rootful_podman_storage_driver}}"
+rootful_podman_state_root="${CONTROL_PLANE_ROOTFUL_PODMAN_STATE_ROOT:-/var/lib/control-plane/rootful-podman/rootful-${rootful_podman_storage_driver}}"
 rootful_podman_graphroot="${rootful_podman_state_root}/storage"
 rootful_podman_runroot="${rootful_podman_runtime_dir}/runroot"
 rootful_podman_storage_config_path="${rootful_podman_runtime_dir}/storage.conf"
@@ -56,6 +59,11 @@ job_workspace_pvc="${CONTROL_PLANE_JOB_WORKSPACE_PVC:-}"
 job_workspace_mount_path="${CONTROL_PLANE_JOB_WORKSPACE_MOUNT_PATH:-${CONTROL_PLANE_WORKSPACE_MOUNT_PATH:-/workspace}}"
 job_workspace_subpath="${CONTROL_PLANE_JOB_WORKSPACE_SUBPATH:-${CONTROL_PLANE_WORKSPACE_SUBPATH:-workspace}}"
 job_input_mount_path="${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH:-/var/run/control-plane/job-inputs}"
+job_transfer_root="${CONTROL_PLANE_JOB_TRANSFER_ROOT:-${tmp_dir}/job-transfers}"
+job_transfer_image="${CONTROL_PLANE_JOB_TRANSFER_IMAGE:-}"
+job_transfer_host="${CONTROL_PLANE_JOB_TRANSFER_HOST:-control-plane.${CONTROL_PLANE_K8S_NAMESPACE:-default}.svc.cluster.local}"
+job_transfer_port="${CONTROL_PLANE_JOB_TRANSFER_PORT:-2222}"
+job_transfer_user="${CONTROL_PLANE_JOB_TRANSFER_USER:-${control_plane_user}}"
 
 if [[ -z "${podman_storage_driver}" ]]; then
   if [[ -e /dev/fuse ]]; then
@@ -142,22 +150,6 @@ safe_chown_tree() {
     [[ -e "${target}" ]] || continue
     find "${target}" \( -type l -o -type s \) -prune -o -exec chown "${owner}" {} +
   done
-}
-
-safe_chown_tree_excluding_path() {
-  local owner="$1"
-  local target="$2"
-  local excluded_path="$3"
-
-  [[ -e "${target}" ]] || return
-  if [[ -n "${excluded_path}" ]] && [[ -e "${excluded_path}" ]]; then
-    find "${target}" \
-      \( -path "${excluded_path}" -o -type l -o -type s \) \
-      -prune -o -exec chown "${owner}" {} +
-    return
-  fi
-
-  find "${target}" \( -type l -o -type s \) -prune -o -exec chown "${owner}" {} +
 }
 
 ensure_path_ownership() {
@@ -356,8 +348,8 @@ require_json_object_file() {
   local target_path="$1"
   local description="$2"
 
-  if ! jq -e 'type == "object"' "${target_path}" >/dev/null; then
-    printf 'Expected %s at %s to contain a top-level JSON object\n' "${description}" "${target_path}" >&2
+  if ! jq -e -s 'length == 1 and (.[0] | type == "object")' "${target_path}" >/dev/null; then
+    printf 'Expected %s at %s to contain a single top-level JSON object\n' "${description}" "${target_path}" >&2
     exit 1
   fi
 }
@@ -378,12 +370,12 @@ merge_json_object_file() {
   merged_tmp="$(mktemp)"
 
   if [[ -f "${target_path}" ]]; then
+    require_json_object_file "${target_path}" "existing Copilot config"
     cp "${target_path}" "${base_tmp}"
   else
     printf '%s\n' '{}' > "${base_tmp}"
   fi
 
-  require_json_object_file "${base_tmp}" "existing Copilot config"
   require_json_object_file "${overlay_path}" "injected Copilot config"
 
   if ! jq -s '
@@ -408,10 +400,10 @@ merge_json_object_file() {
     exit 1
   fi
 
-  mv "${merged_tmp}" "${target_path}"
+  cat "${merged_tmp}" > "${target_path}"
   chown "${owner}" "${target_path}"
   chmod 600 "${target_path}"
-  rm -f "${base_tmp}"
+  rm -f "${base_tmp}" "${merged_tmp}"
 }
 
 write_gh_hosts_from_token() {
@@ -573,6 +565,23 @@ ensure_ssh_host_key() {
   ln -sfn "${persistent_key_path}.pub" "${etc_key_path}.pub"
 }
 
+remove_ssh_host_key() {
+  local key_basename="$1"
+  local persistent_key_path="${host_key_dir}/${key_basename}"
+  local etc_key_path="/etc/ssh/${key_basename}"
+
+  if [[ -e "${persistent_key_path}" ]] && [[ ! -f "${persistent_key_path}" ]]; then
+    printf 'Refusing to remove non-file SSH host key path at %s\n' "${persistent_key_path}" >&2
+    exit 1
+  fi
+
+  rm -f \
+    "${persistent_key_path}" \
+    "${persistent_key_path}.pub" \
+    "${etc_key_path}" \
+    "${etc_key_path}.pub"
+}
+
 install_bundled_control_plane_skill() {
   local skill_name="control-plane-operations"
   local source_dir="${bundled_skills_dir}/${skill_name}"
@@ -637,9 +646,11 @@ mkdir -p \
   "${copilot_skills_dir}" \
   "${control_plane_workspace}" \
   "${podman_state_root}" \
+  "${copilot_session_state_dir}" \
   "${podman_state_dir}" \
   "${screen_dir}" \
   "${tmp_dir}" \
+  "${job_transfer_root}" \
   "${host_key_dir}" \
   "/run/user/${control_plane_uid}" \
   "${rootful_podman_runtime_dir}" \
@@ -653,20 +664,20 @@ mkdir -p \
   "${podman_graphroot}/volumes" \
   "${podman_runroot}"
 
-safe_chown_tree_excluding_path \
-  "${control_plane_user}:${control_plane_user}" \
-  "${control_plane_home}/.copilot" \
-  "${podman_state_root}"
 safe_chown_tree "${control_plane_user}:${control_plane_user}" \
   "${control_plane_home}/.config" \
   "${runtime_config_dir}" \
   "${kube_dir}" \
   "${control_plane_home}/.ssh" \
   "${control_plane_workspace}" \
+  "${job_transfer_root}" \
+  "${podman_state_dir}" \
   "${screen_dir}" \
   "${tmp_dir}" \
   "${runtime_dir}"
 ensure_path_ownership "${control_plane_user}:${control_plane_user}" \
+  "${control_plane_home}/.copilot" \
+  "${copilot_session_state_dir}" \
   "${podman_state_root}" \
   "${podman_state_dir}" \
   "${podman_graphroot}" \
@@ -685,7 +696,9 @@ chown -h "${control_plane_user}:${control_plane_user}" "${control_plane_home}/.l
 chown root:root "${host_key_dir}"
 chown root:root /run/sshd
 chmod 755 "${control_plane_home}"
-chmod 700 "${control_plane_home}/.ssh" "${runtime_dir}" "${tmp_dir}" "${screen_dir}" "${host_key_dir}"
+chmod 700 "${control_plane_home}/.ssh" "${runtime_dir}" "${tmp_dir}" "${job_transfer_root}" "${screen_dir}"
+# Jobs need to read the public SSH host key from an unprivileged shell to seed known_hosts.
+chmod 711 "${host_key_dir}"
 chmod 755 /run/sshd
 export XDG_RUNTIME_DIR="${runtime_dir}"
 export TMPDIR="${tmp_dir}"
@@ -792,12 +805,21 @@ fi
   if [[ -n "${CONTROL_PLANE_COPILOT_BIN:-}" ]]; then
     write_runtime_var CONTROL_PLANE_COPILOT_BIN "${CONTROL_PLANE_COPILOT_BIN}"
   fi
+  write_runtime_var CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT "${copilot_cpu_limit_percent}"
+  write_runtime_var CONTROL_PLANE_COPILOT_NICE_LEVEL "${copilot_nice_level}"
   write_runtime_var CONTROL_PLANE_JOB_SERVICE_ACCOUNT "${CONTROL_PLANE_JOB_SERVICE_ACCOUNT:-}"
   write_runtime_var CONTROL_PLANE_JOB_IMAGE_PULL_POLICY "${CONTROL_PLANE_JOB_IMAGE_PULL_POLICY:-IfNotPresent}"
   write_runtime_var CONTROL_PLANE_JOB_CPU_REQUEST "${CONTROL_PLANE_JOB_CPU_REQUEST:-100m}"
   write_runtime_var CONTROL_PLANE_JOB_CPU_LIMIT "${CONTROL_PLANE_JOB_CPU_LIMIT:-1000m}"
   write_runtime_var CONTROL_PLANE_JOB_MEMORY_REQUEST "${CONTROL_PLANE_JOB_MEMORY_REQUEST:-128Mi}"
   write_runtime_var CONTROL_PLANE_JOB_MEMORY_LIMIT "${CONTROL_PLANE_JOB_MEMORY_LIMIT:-1Gi}"
+  write_runtime_var CONTROL_PLANE_JOB_TRANSFER_ROOT "${job_transfer_root}"
+  if [[ -n "${job_transfer_image}" ]]; then
+    write_runtime_var CONTROL_PLANE_JOB_TRANSFER_IMAGE "${job_transfer_image}"
+  fi
+  write_runtime_var CONTROL_PLANE_JOB_TRANSFER_HOST "${job_transfer_host}"
+  write_runtime_var CONTROL_PLANE_JOB_TRANSFER_PORT "${job_transfer_port}"
+  write_runtime_var CONTROL_PLANE_JOB_TRANSFER_USER "${job_transfer_user}"
   write_runtime_var XDG_RUNTIME_DIR "${runtime_dir}"
   write_runtime_var TMPDIR "${tmp_dir}"
   write_runtime_var SCREENDIR "${screen_dir}"
@@ -807,6 +829,7 @@ fi
     write_runtime_var CONTROL_PLANE_PODMAN_DEFAULT_CGROUPS "${rootful_podman_default_cgroups}"
     write_runtime_var CONTROL_PLANE_PODMAN_DEFAULT_NETWORK "${rootful_podman_default_network}"
     write_runtime_var CONTROL_PLANE_PODMAN_BUILD_ISOLATION "${rootful_podman_build_isolation}"
+    write_runtime_var CONTROL_PLANE_ROOTFUL_PODMAN_STATE_ROOT "${rootful_podman_state_root}"
   fi
   write_runtime_var KUBECONFIG "${KUBECONFIG:-}"
   if [[ -n "${copilot_github_token}" ]]; then
@@ -833,8 +856,8 @@ install_bundled_control_plane_skill
 configure_copilot
 configure_gh_hosts
 configure_git
-ensure_ssh_host_key rsa ssh_host_rsa_key
-ensure_ssh_host_key ecdsa ssh_host_ecdsa_key
+remove_ssh_host_key ssh_host_rsa_key
+remove_ssh_host_key ssh_host_ecdsa_key
 ensure_ssh_host_key ed25519 ssh_host_ed25519_key
 start_rootful_podman_service
 

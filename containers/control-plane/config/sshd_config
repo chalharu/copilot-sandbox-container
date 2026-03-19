@@ -2,8 +2,8 @@ Port 2222
 Protocol 2
 AddressFamily any
 ListenAddress 0.0.0.0
-HostKey /etc/ssh/ssh_host_rsa_key
-HostKey /etc/ssh/ssh_host_ecdsa_key
+# Job transfer pins the ED25519 host key into known_hosts; advertising multiple
+# host key algorithms can make Go SSH clients select a different key type.
 HostKey /etc/ssh/ssh_host_ed25519_key
 PidFile /run/sshd.pid
 PermitRootLogin no

@@ -505,7 +505,7 @@ invoke_podman_command() {
 }
 
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/podman-run-$(id -u)}"
-export TMPDIR="${TMPDIR:-${HOME:-/tmp}/.copilot/tmp}"
+export TMPDIR="${TMPDIR:-/tmp/control-plane-$(id -u)}"
 mkdir -p "${XDG_RUNTIME_DIR}"
 mkdir -p "${TMPDIR}"
 chmod 700 "${XDG_RUNTIME_DIR}"

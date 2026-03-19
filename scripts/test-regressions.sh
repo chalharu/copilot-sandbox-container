@@ -2,6 +2,7 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+control_plane_bin_dir="${script_dir}/../containers/control-plane/bin"
 control_plane_image="${1:?usage: scripts/test-regressions.sh <control-plane-image>}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-podman}"
 workdir="$(mktemp -d)"
@@ -31,9 +32,39 @@ require_command() {
 
 require_command "${container_bin}"
 require_command awk
+require_command ssh-keygen
 
 # shellcheck source=scripts/lib-container-toolchain.sh
 source "${script_dir}/lib-container-toolchain.sh"
+
+assert_multiline_command_block() {
+  local manifest_path="$1"
+  local expected_header="$2"
+
+  if ! awk -v expected_header="${expected_header}" '
+    /- '\''-lc'\''/ { saw_lc = 1; next }
+    saw_lc && $0 ~ /^[[:space:]]+- / {
+      block_header = $0
+      sub(/^[[:space:]]+- /, "", block_header)
+      if (block_header == expected_header) {
+        saw_block = 1
+        next
+      }
+      exit 1
+    }
+    saw_block && $0 ~ /^[[:space:]]+printf line-one$/ { saw_line_one = 1; content_lines++; next }
+    saw_block && $0 ~ /^[[:space:]]+printf line-two$/ { saw_line_two = 1; content_lines++; next }
+    saw_block && $0 ~ /^[[:space:]]+$/ { blank_lines++; content_lines++; next }
+    saw_block && $0 ~ /^[[:space:]]+resources:$/ { saw_resources = 1; next }
+    END {
+      exit !(saw_block && saw_line_one && saw_line_two && saw_resources && content_lines == 2 && blank_lines == 0)
+    }
+  ' "${manifest_path}"; then
+    printf 'Expected multiline execution command args to render with YAML block header %s\n' "${expected_header}" >&2
+    awk '/- '\''-lc'\''/,/resources:/' "${manifest_path}" >&2 || true
+    exit 1
+  fi
+}
 
 printf '%s\n' 'regression-test: verifying broken overlay symlink startup handling' >&2
 mkdir -p \
@@ -160,6 +191,145 @@ grep -qx 'test-token' "${workdir}/login.stdin"
 grep -qx 'image exists dhi.io/python:3-alpine3.23-dev' "${workdir}/image-exists.args"
 grep -qx 'pull dhi.io/python:3-alpine3.23-dev' "${workdir}/pull.args"
 
+printf '%s\n' 'regression-test: verifying k8s-job-start expands transfer env in rclone config' >&2
+mkdir -p "${workdir}/k8s-home/.ssh" "${workdir}/k8s-host-keys"
+printf '%s\n' 'k8s transfer input' > "${workdir}/k8s-transfer-input.txt"
+ssh-keygen -q -t ed25519 -N '' -f "${workdir}/k8s-host-keys/ssh_host_ed25519_key" >/dev/null
+cat > "${workdir}/fake-bin/kubectl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+manifest_path="${TEST_REGRESSION_K8S_MANIFEST_PATH:?}"
+secret_args_path="${TEST_REGRESSION_K8S_SECRET_ARGS_PATH:?}"
+case "${1:-}" in
+  create)
+    if [[ "${2:-}" == "secret" ]] && [[ "${3:-}" == "generic" ]]; then
+      printf '%s\n' "$@" > "${secret_args_path}"
+      exit 0
+    fi
+    if [[ "${2:-}" == "-f" ]] && [[ "${3:-}" == "-" ]]; then
+      cat > "${manifest_path}"
+      exit 0
+    fi
+    ;;
+esac
+printf 'unexpected fake kubectl command: %s\n' "$*" >&2
+exit 1
+EOF
+chmod +x "${workdir}/fake-bin/kubectl"
+PATH="${workdir}/fake-bin:${control_plane_bin_dir}:${PATH}" \
+  HOME="${workdir}/k8s-home" \
+  CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+  CONTROL_PLANE_HOST_KEY_DIR="${workdir}/k8s-host-keys" \
+  CONTROL_PLANE_JOB_TRANSFER_IMAGE=localhost/control-plane:test \
+  TEST_REGRESSION_K8S_MANIFEST_PATH="${workdir}/k8s-job-manifest.yaml" \
+  TEST_REGRESSION_K8S_SECRET_ARGS_PATH="${workdir}/k8s-job-secret.args" \
+  "${control_plane_bin_dir}/k8s-job-start" \
+  --namespace control-plane-ci-jobs \
+  --job-name regression-transfer-job \
+  --image localhost/execution-plane-smoke:test \
+  --mount-file "${workdir}/k8s-transfer-input.txt:inputs/k8s-transfer-input.txt" \
+  -- true >/dev/null
+
+grep -qx 'create' "${workdir}/k8s-job-secret.args"
+grep -qx 'secret' "${workdir}/k8s-job-secret.args"
+grep -qx 'generic' "${workdir}/k8s-job-secret.args"
+if grep -Fq '<<RCLONE' "${workdir}/k8s-job-manifest.yaml"; then
+  printf 'Expected k8s-job-start to render rclone.conf with printf, not heredocs\n' >&2
+  grep -n 'RCLONE' "${workdir}/k8s-job-manifest.yaml" >&2 || true
+  exit 1
+fi
+if [[ "$(grep -Fc "printf 'host = %s\\n' \"\${CONTROL_PLANE_TRANSFER_HOST}\"" "${workdir}/k8s-job-manifest.yaml")" -ne 2 ]]; then
+  printf 'Expected both transfer containers to format the rclone host with printf\n' >&2
+  grep -n 'rclone.conf\|host = %s\|user = %s\|port = %s' "${workdir}/k8s-job-manifest.yaml" >&2 || true
+  exit 1
+fi
+grep -Fq "printf 'user = %s\\n' \"\${CONTROL_PLANE_TRANSFER_USER}\"" "${workdir}/k8s-job-manifest.yaml"
+grep -Fq "printf 'port = %s\\n' \"\${CONTROL_PLANE_TRANSFER_PORT}\"" "${workdir}/k8s-job-manifest.yaml"
+if [[ "$(grep -Fc -- '--transfers 1' "${workdir}/k8s-job-manifest.yaml")" -ne 2 ]]; then
+  printf 'Expected both transfer containers to serialize rclone transfers\n' >&2
+  grep -n 'rclone_flags\|transfers 1\|checkers 1\|sftp-disable-concurrent' "${workdir}/k8s-job-manifest.yaml" >&2 || true
+  exit 1
+fi
+if [[ "$(grep -Fc -- '--checkers 1' "${workdir}/k8s-job-manifest.yaml")" -ne 2 ]]; then
+  printf 'Expected both transfer containers to serialize rclone checkers\n' >&2
+  grep -n 'rclone_flags\|transfers 1\|checkers 1\|sftp-disable-concurrent' "${workdir}/k8s-job-manifest.yaml" >&2 || true
+  exit 1
+fi
+if [[ "$(grep -Fc -- '--sftp-disable-concurrent-reads' "${workdir}/k8s-job-manifest.yaml")" -ne 2 ]]; then
+  printf 'Expected both transfer containers to disable concurrent SFTP reads\n' >&2
+  grep -n 'rclone_flags\|transfers 1\|checkers 1\|sftp-disable-concurrent' "${workdir}/k8s-job-manifest.yaml" >&2 || true
+  exit 1
+fi
+if [[ "$(grep -Fc -- '--sftp-disable-concurrent-writes' "${workdir}/k8s-job-manifest.yaml")" -ne 2 ]]; then
+  printf 'Expected both transfer containers to disable concurrent SFTP writes\n' >&2
+  grep -n 'rclone_flags\|transfers 1\|checkers 1\|sftp-disable-concurrent' "${workdir}/k8s-job-manifest.yaml" >&2 || true
+  exit 1
+fi
+grep -Fq 'name: CONTROL_PLANE_JOB_RUN_AS_UID' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq 'name: CONTROL_PLANE_JOB_RUN_AS_GID' "${workdir}/k8s-job-manifest.yaml"
+grep -A1 'name: CONTROL_PLANE_JOB_RUN_AS_UID' "${workdir}/k8s-job-manifest.yaml" | grep -Fq "value: '1000'"
+grep -A1 'name: CONTROL_PLANE_JOB_RUN_AS_GID' "${workdir}/k8s-job-manifest.yaml" | grep -Fq "value: '1000'"
+grep -Fq 'runAsUser: 0' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq 'runAsGroup: 1000' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq -- '- CHOWN' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq -- '- FOWNER' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq "chown -R \"\${CONTROL_PLANE_JOB_RUN_AS_UID}:\${CONTROL_PLANE_JOB_RUN_AS_GID}\" \"\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}\"" "${workdir}/k8s-job-manifest.yaml"
+grep -Fq "chmod -R u+rwX \"\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}\"" "${workdir}/k8s-job-manifest.yaml"
+
+PATH="${workdir}/fake-bin:${control_plane_bin_dir}:${PATH}" \
+  HOME="${workdir}/k8s-home" \
+  CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+  CONTROL_PLANE_HOST_KEY_DIR="${workdir}/k8s-host-keys" \
+  TEST_REGRESSION_K8S_MANIFEST_PATH="${workdir}/k8s-job-multiline-manifest.yaml" \
+  TEST_REGRESSION_K8S_SECRET_ARGS_PATH="${workdir}/k8s-job-multiline-secret.args" \
+  "${control_plane_bin_dir}/k8s-job-start" \
+  --namespace control-plane-ci-jobs \
+  --job-name regression-multiline-command-job \
+  --image localhost/execution-plane-smoke:test \
+  -- bash -lc $'printf line-one\nprintf line-two' >/dev/null
+
+assert_multiline_command_block "${workdir}/k8s-job-multiline-manifest.yaml" '|-'
+
+PATH="${workdir}/fake-bin:${control_plane_bin_dir}:${PATH}" \
+  HOME="${workdir}/k8s-home" \
+  CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+  CONTROL_PLANE_HOST_KEY_DIR="${workdir}/k8s-host-keys" \
+  TEST_REGRESSION_K8S_MANIFEST_PATH="${workdir}/k8s-job-multiline-trailing-manifest.yaml" \
+  TEST_REGRESSION_K8S_SECRET_ARGS_PATH="${workdir}/k8s-job-multiline-trailing-secret.args" \
+  "${control_plane_bin_dir}/k8s-job-start" \
+  --namespace control-plane-ci-jobs \
+  --job-name regression-multiline-command-trailing-job \
+  --image localhost/execution-plane-smoke:test \
+  -- bash -lc $'printf line-one\nprintf line-two\n' >/dev/null
+
+assert_multiline_command_block "${workdir}/k8s-job-multiline-trailing-manifest.yaml" '|+'
+
+set +e
+newline_transfer_output="$(
+  PATH="${workdir}/fake-bin:${control_plane_bin_dir}:${PATH}" \
+    HOME="${workdir}/k8s-home" \
+    CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+    CONTROL_PLANE_HOST_KEY_DIR="${workdir}/k8s-host-keys" \
+    CONTROL_PLANE_JOB_TRANSFER_IMAGE=localhost/control-plane:test \
+    CONTROL_PLANE_JOB_TRANSFER_HOST=$'control-plane.example\nmalicious' \
+    TEST_REGRESSION_K8S_MANIFEST_PATH="${workdir}/should-not-exist.yaml" \
+    TEST_REGRESSION_K8S_SECRET_ARGS_PATH="${workdir}/should-not-exist.args" \
+    "${control_plane_bin_dir}/k8s-job-start" \
+    --namespace control-plane-ci-jobs \
+    --job-name regression-transfer-job-invalid \
+    --image localhost/execution-plane-smoke:test \
+    --mount-file "${workdir}/k8s-transfer-input.txt:inputs/k8s-transfer-input.txt" \
+    -- true 2>&1
+)"
+newline_transfer_status=$?
+set -e
+
+if [[ "${newline_transfer_status}" -eq 0 ]]; then
+  printf 'Expected k8s-job-start to reject multiline transfer host values\n' >&2
+  exit 1
+fi
+grep -Fq 'CONTROL_PLANE_JOB_TRANSFER_HOST must not contain newlines' <<<"${newline_transfer_output}"
+
 printf '%s\n' 'regression-test: verifying published ports skip default host network injection' >&2
 cat > "${workdir}/fake-bin/podman-run-publish" <<'EOF'
 #!/usr/bin/env bash
@@ -246,17 +416,22 @@ exit 0
 EOF
 chmod +x "${workdir}/fake-bin/podman"
 
-(
-  export PATH="${workdir}/fake-bin:${PATH}"
-  export TEST_REGRESSION_LOG_DIR="${workdir}"
-  export CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null
-  export CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service
-  export CONTAINER_HOST='unix:///run/control-plane/podman-root.sock'
-  export DOCKER_HOST='unix:///run/control-plane/podman-root.sock'
+run_rootful_service_build_test() {
+  local PATH="${workdir}/fake-bin:${PATH}"
+  local TEST_REGRESSION_LOG_DIR="${workdir}"
+  local CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null
+  local CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service
+  local CONTAINER_HOST='unix:///run/control-plane/podman-root.sock'
+  local DOCKER_HOST='unix:///run/control-plane/podman-root.sock'
+  local selected_build_bin
+  export PATH TEST_REGRESSION_LOG_DIR CONTROL_PLANE_RUNTIME_ENV_FILE
+  export CONTROL_PLANE_LOCAL_PODMAN_MODE CONTAINER_HOST DOCKER_HOST
   selected_build_bin="$(build_command_for_toolchain podman)"
   [[ "${selected_build_bin}" == "podman" ]]
   build_image_for_toolchain podman quay.io/example/test:latest /tmp
-)
+}
+
+run_rootful_service_build_test
 
 test ! -f "${workdir}/buildah.args"
 grep -qx 'CONTAINER_HOST=unix:///run/control-plane/podman-root.sock' "${workdir}/remote-build.env"
@@ -332,5 +507,100 @@ if [[ "${detached_failure_status}" -eq 0 ]]; then
   exit 1
 fi
 grep -q 'rootless Podman is blocked by the outer runtime' <<<"${detached_failure_output}"
+
+printf '%s\n' 'regression-test: verifying Copilot launcher applies CPU cap, nice, and secret env injection' >&2
+cat > "${workdir}/fake-bin/cpulimit" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" > "${TEST_REGRESSION_LOG_DIR:?}/cpulimit.args"
+[[ "${1:-}" == "-f" ]]
+[[ "${2:-}" == "-q" ]]
+[[ "${3:-}" == "-l" ]]
+shift 4
+[[ "${1:-}" == "--" ]]
+shift
+exec "$@"
+EOF
+chmod +x "${workdir}/fake-bin/cpulimit"
+
+cat > "${workdir}/fake-bin/nice" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" > "${TEST_REGRESSION_LOG_DIR:?}/nice.args"
+[[ "${1:-}" == "-n" ]]
+shift 2
+exec "$@"
+EOF
+chmod +x "${workdir}/fake-bin/nice"
+
+cat > "${workdir}/fake-bin/copilot" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'COPILOT_GITHUB_TOKEN=%s\n' "${COPILOT_GITHUB_TOKEN:-}" > "${TEST_REGRESSION_LOG_DIR:?}/copilot.env"
+printf '%s\n' "$@" > "${TEST_REGRESSION_LOG_DIR:?}/copilot.args"
+exit 0
+EOF
+chmod +x "${workdir}/fake-bin/copilot"
+printf '%s' 'copilot-token-for-test' > "${workdir}/copilot-token"
+
+run_copilot_launcher_test() {
+  local PATH="${workdir}/fake-bin:${PATH}"
+  local TEST_REGRESSION_LOG_DIR="${workdir}"
+  local CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null
+  local CONTROL_PLANE_COPILOT_BIN=copilot
+  local CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE="${workdir}/copilot-token"
+  local CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT=55
+  local CONTROL_PLANE_COPILOT_NICE_LEVEL=7
+  export PATH TEST_REGRESSION_LOG_DIR CONTROL_PLANE_RUNTIME_ENV_FILE
+  export CONTROL_PLANE_COPILOT_BIN CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE
+  export CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT CONTROL_PLANE_COPILOT_NICE_LEVEL
+  "${script_dir}/../containers/control-plane/bin/control-plane-copilot"
+}
+
+run_copilot_launcher_test
+
+grep -qx -- '-f' "${workdir}/cpulimit.args"
+grep -qx -- '-q' "${workdir}/cpulimit.args"
+grep -qx -- '-l' "${workdir}/cpulimit.args"
+grep -qx '55' "${workdir}/cpulimit.args"
+grep -qx -- '--' "${workdir}/cpulimit.args"
+grep -qx 'nice' "${workdir}/cpulimit.args"
+grep -qx -- '-n' "${workdir}/nice.args"
+grep -qx '7' "${workdir}/nice.args"
+grep -qx -- '--yolo' "${workdir}/copilot.args"
+grep -qx -- '--secret-env-vars=COPILOT_GITHUB_TOKEN' "${workdir}/copilot.args"
+grep -qx 'COPILOT_GITHUB_TOKEN=copilot-token-for-test' "${workdir}/copilot.env"
+
+printf '%s\n' 'regression-test: verifying control-plane-run defaults runtime paths to /tmp' >&2
+cat > "${workdir}/fake-bin/podman-run-env" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'XDG_RUNTIME_DIR=%s\n' "${XDG_RUNTIME_DIR:-}" > "${TEST_REGRESSION_LOG_DIR:?}/run.env"
+printf 'TMPDIR=%s\n' "${TMPDIR:-}" >> "${TEST_REGRESSION_LOG_DIR:?}/run.env"
+printf '%s\n' "$@" > "${TEST_REGRESSION_LOG_DIR:?}/run.args"
+exit 0
+EOF
+chmod +x "${workdir}/fake-bin/podman-run-env"
+
+runtime_workspace="${workdir}/workspace"
+
+env -u XDG_RUNTIME_DIR -u TMPDIR \
+  CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+  TEST_REGRESSION_LOG_DIR="${workdir}" \
+  CONTROL_PLANE_PODMAN_BIN="${workdir}/fake-bin/podman-run-env" \
+  "${script_dir}/../containers/control-plane/bin/control-plane-run" \
+  --mode podman \
+  --workspace "${runtime_workspace}" \
+  --image quay.io/example/test:latest \
+  -- true
+
+grep -qx "XDG_RUNTIME_DIR=/tmp/control-plane-run-$(id -u)" "${workdir}/run.env"
+grep -qx "TMPDIR=/tmp/control-plane-$(id -u)" "${workdir}/run.env"
+grep -qx 'run' "${workdir}/run.args"
+grep -qx -- '--rm' "${workdir}/run.args"
+grep -qx -- '-v' "${workdir}/run.args"
+grep -qx "${runtime_workspace}:/workspace" "${workdir}/run.args"
+grep -qx 'quay.io/example/test:latest' "${workdir}/run.args"
+grep -qx 'true' "${workdir}/run.args"
 
 printf '%s\n' 'regression-test: targeted regressions ok' >&2

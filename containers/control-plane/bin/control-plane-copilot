@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+runtime_config_file="${CONTROL_PLANE_RUNTIME_ENV_FILE:-${HOME:-/home/${USER:-copilot}}/.config/control-plane/runtime.env}"
+if [[ -f "${runtime_config_file}" ]]; then
+  # shellcheck disable=SC1090
+  source "${runtime_config_file}"
+fi
+
+copilot_bin="${CONTROL_PLANE_COPILOT_BIN:-copilot}"
+copilot_github_token_file="${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE:-}"
+copilot_cpu_limit_percent="${CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT:-100}"
+copilot_nice_level="${CONTROL_PLANE_COPILOT_NICE_LEVEL:-10}"
+
+die() {
+  printf 'control-plane-copilot: %s\n' "$*" >&2
+  exit 64
+}
+
+require_integer() {
+  local value="$1"
+  local description="$2"
+
+  [[ "${value}" =~ ^-?[0-9]+$ ]] || die "${description} must be an integer: ${value}"
+}
+
+command -v "${copilot_bin}" >/dev/null 2>&1 || {
+  printf 'control-plane-copilot: missing Copilot binary: %s\n' "${copilot_bin}" >&2
+  exit 127
+}
+
+require_integer "${copilot_nice_level}" "CONTROL_PLANE_COPILOT_NICE_LEVEL"
+if [[ -n "${copilot_cpu_limit_percent}" ]]; then
+  require_integer "${copilot_cpu_limit_percent}" "CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT"
+fi
+
+copilot_args=("${copilot_bin}" --yolo)
+if [[ -n "${copilot_github_token_file}" ]] && [[ -f "${copilot_github_token_file}" ]]; then
+  IFS= read -r copilot_github_token < "${copilot_github_token_file}" || true
+  if [[ -n "${copilot_github_token:-}" ]]; then
+    export COPILOT_GITHUB_TOKEN="${copilot_github_token}"
+    copilot_args+=(--secret-env-vars=COPILOT_GITHUB_TOKEN)
+  fi
+fi
+
+launch_args=(nice -n "${copilot_nice_level}" "${copilot_args[@]}")
+if [[ -n "${copilot_cpu_limit_percent}" ]] && (( copilot_cpu_limit_percent > 0 )); then
+  if ! command -v cpulimit >/dev/null 2>&1; then
+    printf '%s\n' \
+      'control-plane-copilot: cpulimit is unavailable; continuing without an explicit CPU cap.' \
+      >&2
+    exec "${launch_args[@]}"
+  fi
+  exec cpulimit -f -q -l "${copilot_cpu_limit_percent}" -- "${launch_args[@]}"
+fi
+
+exec "${launch_args[@]}"

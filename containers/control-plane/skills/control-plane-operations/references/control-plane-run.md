@@ -6,7 +6,7 @@
 - Use `--mode auto --execution-hint long` for commands that should become Kubernetes Jobs.
 - Use `--mode podman` when the command must stay local even if it looks long-running.
 - Use `--mode k8s-job` when the command must become a Job even if it looks short.
-- Use `--mount-file SRC[:DEST]` for small helper files that should appear under `/var/run/control-plane/job-inputs/DEST` in either execution path.
+- Use `--mount-file SRC[:DEST]` for helper files that should appear under `/var/run/control-plane/job-inputs/DEST` in either execution path.
 
 ## Common patterns
 
@@ -29,7 +29,7 @@ control-plane-run --mode auto --execution-hint long \
   -- /usr/local/bin/execution-plane-smoke write-marker /workspace/long.txt long
 ```
 
-### Run a Kubernetes Job with a small helper file
+### Run a Kubernetes Job with a helper file
 
 ```bash
 control-plane-run --mode k8s-job \
@@ -52,6 +52,7 @@ control-plane-session --command \
 - The sample least-privilege Kubernetes deployment exports `CONTROL_PLANE_RUN_MODE=k8s-job`, so plain `control-plane-run ...` defaults to the Job path unless you override it.
 - The sample deployment also sets `CONTROL_PLANE_JOB_NAMESPACE=copilot-sandbox-jobs`, so `--namespace` defaults to the Job namespace rather than the Control Plane namespace.
 - Pass `--workspace /workspace` when the local execution path must mount the repository workspace.
-- `--mount-file` is for small files only. Large workspaces still need a shared PVC or another artifact handoff path.
+- In the Kubernetes Job path, `--mount-file` stages files over SSH/SFTP via `rclone` and writes back modified files when the Job completes.
+- Write-back is conflict-safe: if the source changed outside the Job while the Job was running, the control plane keeps the conflicting output in the transfer staging area instead of overwriting the source file.
 - Keep Kubernetes-specific flags (`--namespace`, `--job-name`) ready even in `auto` mode when the command may route to a Job.
 - Prefer explicit image references. Use commit SHA tags for reproducible automation.

@@ -90,6 +90,10 @@ github.com:
   user: secret-bot
 EOF
 printf '%s' 'unused-secret-fallback-token' > "${workdir}/file-backed/auth/gh-github-token"
+printf '%s\n' legacy-rsa-private > "${workdir}/file-backed/state/ssh-host-keys/ssh_host_rsa_key"
+printf '%s\n' legacy-rsa-public > "${workdir}/file-backed/state/ssh-host-keys/ssh_host_rsa_key.pub"
+printf '%s\n' legacy-ecdsa-private > "${workdir}/file-backed/state/ssh-host-keys/ssh_host_ecdsa_key"
+printf '%s\n' legacy-ecdsa-public > "${workdir}/file-backed/state/ssh-host-keys/ssh_host_ecdsa_key.pub"
 
 set +e
 file_backed_output="$("${container_bin}" run --rm \
@@ -112,6 +116,21 @@ file_backed_output="$("${container_bin}" run --rm \
 set -euo pipefail
 test "$(stat -c '%a %U %G' /home/copilot/.copilot/config.json)" = '600 copilot copilot'
 test "$(stat -c '%a %U %G' /home/copilot/.config/gh/hosts.yml)" = '600 copilot copilot'
+test "$(stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys)" = '711 root root'
+test "$(stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key)" = '600 root root'
+test "$(stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub)" = '644 root root'
+! test -e /var/lib/control-plane/ssh-host-keys/ssh_host_rsa_key
+! test -e /var/lib/control-plane/ssh-host-keys/ssh_host_ecdsa_key
+! test -e /var/lib/control-plane/ssh-host-keys/ssh_host_rsa_key.pub
+! test -e /var/lib/control-plane/ssh-host-keys/ssh_host_ecdsa_key.pub
+grep -Fxq 'HostKey /etc/ssh/ssh_host_ed25519_key' /etc/ssh/sshd_config
+! grep -Fq 'HostKey /etc/ssh/ssh_host_rsa_key' /etc/ssh/sshd_config
+! grep -Fq 'HostKey /etc/ssh/ssh_host_ecdsa_key' /etc/ssh/sshd_config
+su -s /bin/bash copilot -lc 'test -r /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub'
+if su -s /bin/bash copilot -lc 'test -r /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key'; then
+  printf '%s\n' 'Expected Copilot user to be unable to read the private SSH host key' >&2
+  exit 1
+fi
 jq -e '.chat.editor == "vim"' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.chat.theme == "light"' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.nested.keep == 1' /home/copilot/.copilot/config.json >/dev/null
@@ -135,6 +154,125 @@ if [[ "${file_backed_status}" -ne 0 ]]; then
   exit 1
 fi
 grep -qx 'file-backed-ok' <<<"${file_backed_output}"
+
+printf '%s\n' 'config-injection-test: verifying Copilot merge works with single-file config mounts' >&2
+prepare_state_tree file-mounted
+cat > "${workdir}/file-mounted/state/copilot-config.json" <<'EOF'
+{
+  "chat": {
+    "editor": "vim",
+    "theme": "dark"
+  },
+  "nested": {
+    "keep": 1,
+    "replace": {
+      "fromBase": true
+    },
+    "array": [
+      "base"
+    ]
+  }
+}
+EOF
+cat > "${workdir}/file-mounted/config/copilot-config.json" <<'EOF'
+{
+  "chat": {
+    "theme": "light"
+  },
+  "nested": {
+    "replace": {
+      "fromOverlay": true
+    },
+    "array": [
+      "overlay"
+    ]
+  },
+  "topLevelOverlay": "single-file-mount"
+}
+EOF
+cat > "${workdir}/file-mounted/auth/gh-hosts.yml" <<'EOF'
+github.com:
+  oauth_token: single-file-secret-token
+  git_protocol: ssh
+EOF
+
+set +e
+file_mounted_output="$("${container_bin}" run --rm \
+  --name "${container_name}" \
+  -i \
+  "${startup_caps[@]}" \
+  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForConfigInjection control-plane-config-injection' \
+  -e COPILOT_CONFIG_JSON_FILE=/var/run/control-plane-config/copilot-config.json \
+  -e GH_HOSTS_YML_FILE=/var/run/control-plane-auth/gh-hosts.yml \
+  -v "${workdir}/file-mounted/state/copilot-config.json:/home/copilot/.copilot/config.json" \
+  -v "${workdir}/file-mounted/state/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/file-mounted/state/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/file-mounted/state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/file-mounted/state/workspace:/workspace" \
+  -v "${workdir}/file-mounted/auth:/var/run/control-plane-auth:ro" \
+  -v "${workdir}/file-mounted/config:/var/run/control-plane-config:ro" \
+  "${control_plane_image}" \
+  bash -l -se 2>&1 <<'EOF'
+set -euo pipefail
+test "$(stat -c '%a %U %G' /home/copilot/.copilot/config.json)" = '600 copilot copilot'
+jq -e '.chat.editor == "vim"' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.chat.theme == "light"' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.nested.keep == 1' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.nested.replace.fromBase == true and .nested.replace.fromOverlay == true' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.nested.array == ["overlay"]' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.topLevelOverlay == "single-file-mount"' /home/copilot/.copilot/config.json >/dev/null
+printf '%s\n' file-mounted-ok
+EOF
+)"
+file_mounted_status=$?
+set -e
+
+if [[ "${file_mounted_status}" -ne 0 ]]; then
+  printf 'Expected Copilot config merge to succeed when config.json is a single-file mount\n' >&2
+  printf '%s\n' "${file_mounted_output}" >&2
+  exit 1
+fi
+grep -qx 'file-mounted-ok' <<<"${file_mounted_output}"
+
+printf '%s\n' 'config-injection-test: verifying empty single-file config mounts fail clearly' >&2
+prepare_state_tree empty-file-mounted
+: > "${workdir}/empty-file-mounted/state/copilot-config.json"
+cat > "${workdir}/empty-file-mounted/config/copilot-config.json" <<'EOF'
+{
+  "chat": {
+    "theme": "light"
+  }
+}
+EOF
+
+set +e
+empty_file_mounted_output="$("${container_bin}" run --rm \
+  --name "${container_name}" \
+  -i \
+  "${startup_caps[@]}" \
+  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForConfigInjection control-plane-config-injection' \
+  -e COPILOT_CONFIG_JSON_FILE=/var/run/control-plane-config/copilot-config.json \
+  -v "${workdir}/empty-file-mounted/state/copilot-config.json:/home/copilot/.copilot/config.json" \
+  -v "${workdir}/empty-file-mounted/state/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/empty-file-mounted/state/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/empty-file-mounted/state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/empty-file-mounted/state/workspace:/workspace" \
+  -v "${workdir}/empty-file-mounted/config:/var/run/control-plane-config:ro" \
+  "${control_plane_image}" \
+  bash -l -se 2>&1 <<'EOF'
+set -euo pipefail
+printf '%s\n' unexpected-success
+EOF
+)"
+empty_file_mounted_status=$?
+set -e
+
+if [[ "${empty_file_mounted_status}" -eq 0 ]]; then
+  printf 'Expected empty single-file config mount to fail validation\n' >&2
+  printf '%s\n' "${empty_file_mounted_output}" >&2
+  exit 1
+fi
+grep -Fq 'Expected existing Copilot config at /home/copilot/.copilot/config.json to contain a single top-level JSON object' <<<"${empty_file_mounted_output}"
 
 printf '%s\n' 'config-injection-test: verifying gh token Secret generates hosts.yml when no file override exists' >&2
 prepare_state_tree token-backed

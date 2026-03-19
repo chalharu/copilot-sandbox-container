@@ -21,6 +21,7 @@ RUN apt-get update -o Acquire::Retries=3 \
     && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
+        cpulimit \
         curl \
         fuse-overlayfs \
         gh \
@@ -33,6 +34,7 @@ RUN apt-get update -o Acquire::Retries=3 \
         openssh-server \
         podman \
         procps \
+        rclone \
         screen \
         slirp4netns \
         tini \
@@ -118,6 +120,8 @@ COPY skills/control-plane-operations/ /usr/local/share/control-plane/skills/cont
 COPY --chmod=755 bin/control-plane-podman /usr/local/bin/control-plane-podman
 COPY --chmod=755 bin/control-plane-screen /usr/local/bin/control-plane-screen
 COPY --chmod=755 bin/control-plane-entrypoint /usr/local/bin/control-plane-entrypoint
+COPY --chmod=755 bin/control-plane-copilot /usr/local/bin/control-plane-copilot
+COPY --chmod=755 bin/control-plane-job-transfer /usr/local/bin/control-plane-job-transfer
 COPY --chmod=755 bin/control-plane-run /usr/local/bin/control-plane-run
 COPY --chmod=755 bin/control-plane-session /usr/local/bin/control-plane-session
 COPY --chmod=755 bin/control-plane-ssh-shell /usr/local/bin/control-plane-ssh-shell
