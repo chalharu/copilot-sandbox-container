@@ -1369,7 +1369,7 @@ ssh_bash <<'EOF'
 set -euo pipefail
 mkdir -p ~/.copilot/session-state
 printf '%s\n' 'session-state-ok' > ~/.copilot/session-state/k8s-session-state.txt
-printf '%s\n' 'tmp-ok' > "\${TMPDIR}/k8s-tmp.txt"
+printf '%s\n' 'tmp-ok' > "${TMPDIR}/k8s-tmp.txt"
 printf '%s\n' 'rootful-reset' > /var/lib/control-plane/rootful-podman/rootful-vfs/should-disappear.txt
 EOF
 
