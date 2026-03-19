@@ -7,7 +7,7 @@ source "${script_dir}/lib-container-toolchain.sh"
 
 container_bin=""
 # renovate: datasource=docker depName=ghcr.io/renovatebot/renovate versioning=docker
-renovate_image="${CONTROL_PLANE_RENOVATE_IMAGE:-ghcr.io/renovatebot/renovate:43.77.8@sha256:7f4e93919c7d4d0069a462390c4b0ea906df0c45f0abc5e6843693bf30fc5172}"
+renovate_image="${CONTROL_PLANE_RENOVATE_IMAGE:-ghcr.io/renovatebot/renovate:43.78.0@sha256:2b5f86824eee0ac871efb527febe7222283ff05f1a1701092af9d178cad32580}"
 base_dir=""
 log_file=""
 renovate_env=()
