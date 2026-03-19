@@ -90,6 +90,10 @@ github.com:
   user: secret-bot
 EOF
 printf '%s' 'unused-secret-fallback-token' > "${workdir}/file-backed/auth/gh-github-token"
+printf '%s\n' legacy-rsa-private > "${workdir}/file-backed/state/ssh-host-keys/ssh_host_rsa_key"
+printf '%s\n' legacy-rsa-public > "${workdir}/file-backed/state/ssh-host-keys/ssh_host_rsa_key.pub"
+printf '%s\n' legacy-ecdsa-private > "${workdir}/file-backed/state/ssh-host-keys/ssh_host_ecdsa_key"
+printf '%s\n' legacy-ecdsa-public > "${workdir}/file-backed/state/ssh-host-keys/ssh_host_ecdsa_key.pub"
 
 set +e
 file_backed_output="$("${container_bin}" run --rm \
@@ -115,6 +119,13 @@ test "$(stat -c '%a %U %G' /home/copilot/.config/gh/hosts.yml)" = '600 copilot c
 test "$(stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys)" = '711 root root'
 test "$(stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key)" = '600 root root'
 test "$(stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub)" = '644 root root'
+! test -e /var/lib/control-plane/ssh-host-keys/ssh_host_rsa_key
+! test -e /var/lib/control-plane/ssh-host-keys/ssh_host_ecdsa_key
+! test -e /var/lib/control-plane/ssh-host-keys/ssh_host_rsa_key.pub
+! test -e /var/lib/control-plane/ssh-host-keys/ssh_host_ecdsa_key.pub
+grep -Fxq 'HostKey /etc/ssh/ssh_host_ed25519_key' /etc/ssh/sshd_config
+! grep -Fq 'HostKey /etc/ssh/ssh_host_rsa_key' /etc/ssh/sshd_config
+! grep -Fq 'HostKey /etc/ssh/ssh_host_ecdsa_key' /etc/ssh/sshd_config
 su -s /bin/bash copilot -lc 'test -r /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub'
 if su -s /bin/bash copilot -lc 'test -r /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key'; then
   printf '%s\n' 'Expected Copilot user to be unable to read the private SSH host key' >&2
