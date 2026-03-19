@@ -159,6 +159,8 @@ job_cpu_limit="${CONTROL_PLANE_JOB_CPU_LIMIT:-1000m}"
 job_memory_request="${CONTROL_PLANE_JOB_MEMORY_REQUEST:-128Mi}"
 job_memory_limit="${CONTROL_PLANE_JOB_MEMORY_LIMIT:-1Gi}"
 input_mount_path="${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH:-/var/run/control-plane/job-inputs}"
+job_run_as_uid="${CONTROL_PLANE_JOB_RUN_AS_UID:-1000}"
+job_run_as_gid="${CONTROL_PLANE_JOB_RUN_AS_GID:-1000}"
 job_transfer_image="${CONTROL_PLANE_JOB_TRANSFER_IMAGE:-}"
 job_transfer_host="${CONTROL_PLANE_JOB_TRANSFER_HOST:-control-plane.${CONTROL_PLANE_K8S_NAMESPACE:-default}.svc.cluster.local}"
 job_transfer_port="${CONTROL_PLANE_JOB_TRANSFER_PORT:-2222}"
@@ -171,6 +173,9 @@ created_transfer_secret=""
 created_transfer_id=""
 job_created=0
 job_transfer_key_dir=""
+
+[[ "${job_run_as_uid}" =~ ^[0-9]+$ ]] || die "job run UID must be numeric"
+[[ "${job_run_as_gid}" =~ ^[0-9]+$ ]] || die "job run GID must be numeric"
 
 cleanup() {
   if [[ "${job_created}" -eq 0 ]] && [[ -n "${created_transfer_secret}" ]]; then
@@ -384,6 +389,20 @@ EOF
         - name: job-transfer-init
           image: $(yaml_quote "${job_transfer_image}")
           imagePullPolicy: $(yaml_quote "${job_image_pull_policy}")
+          securityContext:
+            privileged: false
+            runAsUser: 0
+            runAsGroup: ${job_run_as_gid}
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - FOWNER
+            seccompProfile:
+              type: RuntimeDefault
           env:
             - name: CONTROL_PLANE_TRANSFER_HOST
               value: $(yaml_quote "${job_transfer_host}")
@@ -395,6 +414,10 @@ EOF
               value: $(yaml_quote "${created_transfer_dir}/input")
             - name: CONTROL_PLANE_JOB_INPUT_MOUNT_PATH
               value: $(yaml_quote "${input_mount_path}")
+            - name: CONTROL_PLANE_JOB_RUN_AS_UID
+              value: $(yaml_quote "${job_run_as_uid}")
+            - name: CONTROL_PLANE_JOB_RUN_AS_GID
+              value: $(yaml_quote "${job_run_as_gid}")
           command:
             - /bin/bash
             - -lc
@@ -418,6 +441,8 @@ EOF
               )
               mkdir -p "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}"
               rclone --config /tmp/rclone.conf "\${rclone_flags[@]}" copy "control-plane:\${CONTROL_PLANE_TRANSFER_REMOTE_PATH}" "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}"
+              chown -R "\${CONTROL_PLANE_JOB_RUN_AS_UID}:\${CONTROL_PLANE_JOB_RUN_AS_GID}" "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}"
+              chmod -R u+rwX "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}"
           volumeMounts:
             - name: job-inputs
               mountPath: $(yaml_quote "${input_mount_path}")

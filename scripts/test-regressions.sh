@@ -265,6 +265,16 @@ if [[ "$(grep -Fc -- '--sftp-disable-concurrent-writes' "${workdir}/k8s-job-mani
   grep -n 'rclone_flags\|transfers 1\|checkers 1\|sftp-disable-concurrent' "${workdir}/k8s-job-manifest.yaml" >&2 || true
   exit 1
 fi
+grep -Fq 'name: CONTROL_PLANE_JOB_RUN_AS_UID' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq 'name: CONTROL_PLANE_JOB_RUN_AS_GID' "${workdir}/k8s-job-manifest.yaml"
+grep -A1 'name: CONTROL_PLANE_JOB_RUN_AS_UID' "${workdir}/k8s-job-manifest.yaml" | grep -Fq "value: '1000'"
+grep -A1 'name: CONTROL_PLANE_JOB_RUN_AS_GID' "${workdir}/k8s-job-manifest.yaml" | grep -Fq "value: '1000'"
+grep -Fq 'runAsUser: 0' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq 'runAsGroup: 1000' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq -- '- CHOWN' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq -- '- FOWNER' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq "chown -R \"\${CONTROL_PLANE_JOB_RUN_AS_UID}:\${CONTROL_PLANE_JOB_RUN_AS_GID}\" \"\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}\"" "${workdir}/k8s-job-manifest.yaml"
+grep -Fq "chmod -R u+rwX \"\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}\"" "${workdir}/k8s-job-manifest.yaml"
 
 PATH="${workdir}/fake-bin:${control_plane_bin_dir}:${PATH}" \
   HOME="${workdir}/k8s-home" \
