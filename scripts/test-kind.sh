@@ -1388,7 +1388,7 @@ second_host_fingerprint="$(ssh_host_fingerprint)"
 
 ssh_bash <<'EOF'
 set -euo pipefail
-test -f ~/.copilot/state.txt
+test ! -e ~/.copilot/state.txt
 test -f ~/.copilot/session-state/k8s-session-state.txt
 test -f ~/.config/gh/state.txt
 test -f ~/.ssh/state.txt
