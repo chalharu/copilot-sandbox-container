@@ -589,6 +589,9 @@ spec:
             capabilities:
               drop:
                 - ALL
+              add:
+                - CHOWN
+                - FOWNER
             seccompProfile:
               type: RuntimeDefault
           volumeMounts:

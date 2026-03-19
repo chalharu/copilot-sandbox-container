@@ -243,11 +243,15 @@ spec:
           securityContext:
             privileged: false
             runAsUser: 0
+            runAsGroup: 1000
             runAsNonRoot: false
             allowPrivilegeEscalation: false
             capabilities:
               drop:
                 - ALL
+              add:
+                - CHOWN
+                - FOWNER
             seccompProfile:
               type: RuntimeDefault
           volumeMounts:
