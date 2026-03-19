@@ -591,6 +591,7 @@ spec:
                 - ALL
               add:
                 - CHOWN
+                - DAC_OVERRIDE
                 - FOWNER
             seccompProfile:
               type: RuntimeDefault
