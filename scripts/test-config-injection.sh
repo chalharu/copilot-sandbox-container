@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+control_plane_image="${1:?usage: scripts/test-config-injection.sh <control-plane-image>}"
+container_bin="${CONTROL_PLANE_CONTAINER_BIN:-podman}"
+workdir="$(mktemp -d)"
+container_name="control-plane-config-injection-test"
+startup_caps=(
+  --cap-add AUDIT_WRITE
+  --cap-add CHOWN
+  --cap-add DAC_OVERRIDE
+  --cap-add FOWNER
+  --cap-add SETGID
+  --cap-add SETUID
+  --cap-add SYS_CHROOT
+)
+
+cleanup() {
+  "${container_bin}" rm -f "${container_name}" >/dev/null 2>&1 || true
+  rm -rf "${workdir}" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || {
+    printf 'Missing required command: %s\n' "$1" >&2
+    exit 1
+  }
+}
+
+prepare_state_tree() {
+  local prefix="$1"
+
+  mkdir -p \
+    "${workdir}/${prefix}/state/copilot" \
+    "${workdir}/${prefix}/state/gh" \
+    "${workdir}/${prefix}/state/ssh" \
+    "${workdir}/${prefix}/state/ssh-host-keys" \
+    "${workdir}/${prefix}/state/workspace" \
+    "${workdir}/${prefix}/auth" \
+    "${workdir}/${prefix}/config"
+}
+
+require_command "${container_bin}"
+
+printf '%s\n' 'config-injection-test: verifying Copilot merge and Secret-backed gh hosts injection' >&2
+prepare_state_tree file-backed
+cat > "${workdir}/file-backed/state/copilot/config.json" <<'EOF'
+{
+  "chat": {
+    "editor": "vim",
+    "theme": "dark"
+  },
+  "nested": {
+    "keep": 1,
+    "replace": {
+      "fromBase": true
+    },
+    "array": [
+      "base"
+    ]
+  }
+}
+EOF
+cat > "${workdir}/file-backed/state/gh/hosts.yml" <<'EOF'
+github.com:
+  oauth_token: stale-state-token
+  git_protocol: https
+EOF
+cat > "${workdir}/file-backed/config/copilot-config.json" <<'EOF'
+{
+  "chat": {
+    "theme": "light"
+  },
+  "nested": {
+    "replace": {
+      "fromOverlay": true
+    },
+    "array": [
+      "overlay"
+    ]
+  },
+  "topLevelOverlay": "configmap"
+}
+EOF
+cat > "${workdir}/file-backed/auth/gh-hosts.yml" <<'EOF'
+github.com:
+  oauth_token: secret-hosts-token
+  git_protocol: ssh
+  user: secret-bot
+EOF
+printf '%s' 'unused-secret-fallback-token' > "${workdir}/file-backed/auth/gh-github-token"
+
+set +e
+file_backed_output="$("${container_bin}" run --rm \
+  --name "${container_name}" \
+  -i \
+  "${startup_caps[@]}" \
+  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForConfigInjection control-plane-config-injection' \
+  -e COPILOT_CONFIG_JSON_FILE=/var/run/control-plane-config/copilot-config.json \
+  -e GH_HOSTS_YML_FILE=/var/run/control-plane-auth/gh-hosts.yml \
+  -e GH_GITHUB_TOKEN_FILE=/var/run/control-plane-auth/gh-github-token \
+  -v "${workdir}/file-backed/state/copilot:/home/copilot/.copilot" \
+  -v "${workdir}/file-backed/state/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/file-backed/state/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/file-backed/state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/file-backed/state/workspace:/workspace" \
+  -v "${workdir}/file-backed/auth:/var/run/control-plane-auth:ro" \
+  -v "${workdir}/file-backed/config:/var/run/control-plane-config:ro" \
+  "${control_plane_image}" \
+  bash -l -se 2>&1 <<'EOF'
+set -euo pipefail
+test "$(stat -c '%a %U %G' /home/copilot/.copilot/config.json)" = '600 copilot copilot'
+test "$(stat -c '%a %U %G' /home/copilot/.config/gh/hosts.yml)" = '600 copilot copilot'
+jq -e '.chat.editor == "vim"' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.chat.theme == "light"' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.nested.keep == 1' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.nested.replace.fromBase == true and .nested.replace.fromOverlay == true' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.nested.array == ["overlay"]' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.topLevelOverlay == "configmap"' /home/copilot/.copilot/config.json >/dev/null
+grep -Fq 'oauth_token: secret-hosts-token' /home/copilot/.config/gh/hosts.yml
+grep -Fq 'git_protocol: ssh' /home/copilot/.config/gh/hosts.yml
+grep -Fq 'user: secret-bot' /home/copilot/.config/gh/hosts.yml
+! grep -Fq 'stale-state-token' /home/copilot/.config/gh/hosts.yml
+! grep -Fq 'unused-secret-fallback-token' /home/copilot/.config/gh/hosts.yml
+printf '%s\n' file-backed-ok
+EOF
+)"
+file_backed_status=$?
+set -e
+
+if [[ "${file_backed_status}" -ne 0 ]]; then
+  printf 'Expected file-backed gh hosts injection and Copilot config merge to succeed\n' >&2
+  printf '%s\n' "${file_backed_output}" >&2
+  exit 1
+fi
+grep -qx 'file-backed-ok' <<<"${file_backed_output}"
+
+printf '%s\n' 'config-injection-test: verifying gh token Secret generates hosts.yml when no file override exists' >&2
+prepare_state_tree token-backed
+cat > "${workdir}/token-backed/state/gh/hosts.yml" <<'EOF'
+github.com:
+  oauth_token: stale-generated-token
+  git_protocol: ssh
+EOF
+printf '%s' 'generated-secret-token' > "${workdir}/token-backed/auth/gh-github-token"
+
+set +e
+token_backed_output="$("${container_bin}" run --rm \
+  --name "${container_name}" \
+  -i \
+  "${startup_caps[@]}" \
+  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForConfigInjection control-plane-config-injection' \
+  -e GH_GITHUB_TOKEN_FILE=/var/run/control-plane-auth/gh-github-token \
+  -v "${workdir}/token-backed/state/copilot:/home/copilot/.copilot" \
+  -v "${workdir}/token-backed/state/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/token-backed/state/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/token-backed/state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/token-backed/state/workspace:/workspace" \
+  -v "${workdir}/token-backed/auth:/var/run/control-plane-auth:ro" \
+  "${control_plane_image}" \
+  bash -l -se 2>&1 <<'EOF'
+set -euo pipefail
+test "$(stat -c '%a %U %G' /home/copilot/.config/gh/hosts.yml)" = '600 copilot copilot'
+grep -Fq 'oauth_token: generated-secret-token' /home/copilot/.config/gh/hosts.yml
+grep -Fq 'git_protocol: https' /home/copilot/.config/gh/hosts.yml
+! grep -Fq 'stale-generated-token' /home/copilot/.config/gh/hosts.yml
+printf '%s\n' token-backed-ok
+EOF
+)"
+token_backed_status=$?
+set -e
+
+if [[ "${token_backed_status}" -ne 0 ]]; then
+  printf 'Expected gh token Secret to render ~/.config/gh/hosts.yml\n' >&2
+  printf '%s\n' "${token_backed_output}" >&2
+  exit 1
+fi
+grep -qx 'token-backed-ok' <<<"${token_backed_output}"
+
+printf '%s\n' 'config-injection-test: config injection regressions ok' >&2

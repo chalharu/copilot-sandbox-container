@@ -53,13 +53,19 @@ current-cluster の rootful-service graphroot も既定では `~/.copilot/contai
 
 Podman storage は driver ごとに分離しています。`overlay` と `vfs` を混在させても DB 衝突を起こしにくくするためです。
 
-## 6. bundled skill を `~/.copilot/skills` へ同期する理由
+## 6. なぜ Copilot config は ConfigMap merge で gh auth は Secret なのか
+
+`~/.copilot/config.json` には editor preference や feature toggle のような非機密設定が入りやすく、しかも PVC 上に既存 state が残っている前提です。そのため sample manifest では `control-plane-config` ConfigMap に JSON object overlay を置き、entrypoint が既存 `~/.copilot/config.json` へ deep-merge する形にしています。これなら Pod を再作成しても PVC 上の既存設定を丸ごと消さずに、operator が足したい差分だけを宣言できます。
+
+一方で `~/.config/gh/hosts.yml` は token を含み得るため ConfigMap へは置きません。entrypoint は `GH_HOSTS_YML_FILE` による Secret-backed file を最優先し、これが無い場合だけ `GH_GITHUB_TOKEN_FILE` から最小 `hosts.yml` を生成します。つまり gh 側は「Secret で完全指定」か「Secret token から安全に生成」の 2 択に寄せ、token を平文 ConfigMap へ流さない設計です。
+
+## 7. bundled skill を `~/.copilot/skills` へ同期する理由
 
 `control-plane-operations` skill は image へ同梱し、起動時に `~/.copilot/skills/control-plane-operations` へ同期します。これは `/workspace` が別リポジトリを指していても、Control Plane 固有の運用知識を常に参照可能にするためです。
 
 今回の修正では symlink ではなく copy 同期に寄せ、`references/` を含む directory / file mode を明示的に整えています。これにより、directory traverse 権が壊れて `Permission denied` になる経路を消しています。
 
-## 7. image 方針
+## 8. image 方針
 
 image は次の優先順位で決めます。
 
