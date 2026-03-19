@@ -154,6 +154,10 @@ ${service_account_yaml}
           env:
             - name: CONTROL_PLANE_LOCAL_PODMAN_MODE
               value: rootful-service
+            - name: CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER
+              value: overlay
+            - name: CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR
+              value: /var/tmp/control-plane/rootful-overlay
           command:
             - /bin/bash
             - -lc
@@ -187,7 +191,7 @@ ${service_account_yaml}
                  [[ "\${runtime_line}" == *"CONTROL_PLANE_PODMAN_DEFAULT_CGROUPS=disabled"* ]]
                  [[ "\${runtime_line}" == *"CONTROL_PLANE_PODMAN_DEFAULT_NETWORK=host"* ]]
                  [[ "\${runtime_line}" == *"CONTROL_PLANE_PODMAN_BUILD_ISOLATION=chroot"* ]]
-                 [[ "\${runtime_line}" == *"CONTAINER_HOST="*"/run/control-plane/podman-root.sock"* ]]
+                  [[ "\${runtime_line}" == *"CONTAINER_HOST="*"/var/tmp/control-plane/rootful-overlay/podman-root.sock"* ]]
 
                  su -s /bin/bash copilot -c '"'"'set -euo pipefail; skill_root="\$HOME/.copilot/skills/control-plane-operations"; test ! -L "\$skill_root"; test -r "\$skill_root/SKILL.md"; test -x "\$skill_root/references"; test -r "\$skill_root/references/control-plane-run.md"; test -r "\$skill_root/references/skills.md"'"'"'
                  printf "%s\n" "job-check: skill-read=ok"
@@ -198,9 +202,17 @@ ${service_account_yaml}
 
                   podman_info="\$(su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; podman info --format "{{.Store.GraphRoot}} {{.Store.GraphDriverName}} {{.Host.Security.Rootless}}"'"'"')"
                   printf "job-check: podman-info=%s\n" "\${podman_info}"
-                  [[ "\${podman_info}" == "/var/lib/control-plane/rootful-podman/rootful-vfs/storage vfs false" ]]
-                  test ! -e /home/copilot/.copilot/containers/rootful-vfs
-                  test -d /var/lib/control-plane/rootful-podman/rootful-vfs
+                  [[ "\${podman_info}" == "/var/lib/control-plane/rootful-podman/rootful-overlay/storage overlay false" ]]
+                  test ! -e /home/copilot/.copilot/containers/rootful-overlay
+                  test -d /var/tmp/control-plane/rootful-overlay/runroot
+                  grep -qx "driver = \"overlay\"" /var/tmp/control-plane/rootful-overlay/storage.conf
+                  grep -qx "graphroot = \"/var/lib/control-plane/rootful-podman/rootful-overlay/storage\"" /var/tmp/control-plane/rootful-overlay/storage.conf
+                  grep -qx "runroot = \"/var/tmp/control-plane/rootful-overlay/runroot\"" /var/tmp/control-plane/rootful-overlay/storage.conf
+                  if [[ -e /dev/fuse ]]; then
+                    grep -qx "mount_program = \"/usr/bin/fuse-overlayfs\"" /var/tmp/control-plane/rootful-overlay/storage.conf
+                  else
+                    ! grep -q "mount_program" /var/tmp/control-plane/rootful-overlay/storage.conf
+                  fi
                   printf "%s\n" "job-check: rootful-store=dedicated-volume"
 
                  podman_output="\$(su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; podman run --rm docker.io/library/busybox:1.37.0 echo k8s-job-podman-ok'"'"')"
@@ -329,6 +341,8 @@ ${service_account_yaml}
               mountPath: /home/copilot/.copilot
             - name: rootful-podman
               mountPath: /var/lib/control-plane/rootful-podman
+            - name: runtime-tmp
+              mountPath: /var/tmp/control-plane
       volumes:
         - name: test-files
           configMap:
@@ -337,6 +351,8 @@ ${service_account_yaml}
         - name: state
           emptyDir: {}
         - name: rootful-podman
+          emptyDir: {}
+        - name: runtime-tmp
           emptyDir: {}
 EOF
 
@@ -429,7 +445,7 @@ printf '%s\n' "${job_logs}"
 grep -Fq 'job-check: runtime-env=' <<<"${job_logs}"
 grep -Fq 'job-check: skill-read=ok' <<<"${job_logs}"
 grep -Fq 'job-check: term=xterm-256color 256' <<<"${job_logs}"
-grep -Fq 'job-check: podman-info=/var/lib/control-plane/rootful-podman/rootful-vfs/storage vfs false' <<<"${job_logs}"
+grep -Fq 'job-check: podman-info=/var/lib/control-plane/rootful-podman/rootful-overlay/storage overlay false' <<<"${job_logs}"
 grep -Fq 'job-check: rootful-store=dedicated-volume' <<<"${job_logs}"
 grep -Fq 'job-check: podman=k8s-job-podman-ok' <<<"${job_logs}"
 grep -Eq 'job-check: podman-build=(ok|skipped)' <<<"${job_logs}"

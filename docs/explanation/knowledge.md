@@ -49,9 +49,11 @@ Control Plane では、少なくとも次を永続化対象とします。
 - `/workspace`
 - `/var/lib/control-plane/rootful-podman`
 
-一方、`~/.copilot/tmp`、Podman の runtime dir、runroot、Screen socket は PVC ではなく ephemeral path に置きます。これにより stale netns や古い socket が再起動後に残りにくくなります。
+一方、`~/.copilot/tmp`、rootless Podman の runtime dir / runroot、Screen socket は PVC ではなく ephemeral path に置きます。これにより stale netns や古い socket が再起動後に残りにくくなります。
 
-current-cluster の rootful-service graphroot は既定で `/var/lib/control-plane/rootful-podman/rootful-<driver>/storage` を使います。ただしこの volume は Podman 専用の RWO 領域として分離し、init container が起動時に掃除します。これにより `/workspace` や `~/.copilot` を重くせずに、rootful-service 側のパスも安定させられます。
+current-cluster の rootful-service graphroot は既定で `/var/lib/control-plane/rootful-podman/rootful-<driver>/storage` を使います。この volume は Podman 専用の RWO 領域として分離し、init container が起動時に掃除します。runtime dir / runroot は別に `/var/tmp/control-plane/rootful-<driver>` へ寄せます。sample manifest ではここを disk-backed `emptyDir` にしているため、rootful-service 側の大きめな temp data を tmpfs-backed `/run` ではなく node 側の ephemeral storage へ逃がせます。
+
+current-cluster の rootful-service は既定 driver を `overlay` にします。`vfs` より copy-up が軽く、PVC や node ephemeral storage の消費を抑えやすいためです。rootless overlay は選ばれた時点で `fuse-overlayfs` を前提にします。一方 rootful overlay は `/dev/fuse` がある環境でだけ `fuse-overlayfs` を使い、無い場合は kernel overlay の既定挙動へ任せます。
 
 Podman storage は driver ごとに分離しています。`overlay` と `vfs` を混在させても DB 衝突を起こしにくくするためです。
 

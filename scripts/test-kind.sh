@@ -576,8 +576,8 @@ spec:
               chown 1000:1000 /state/copilot-config.json
               chmod 700 /workspace-state/workspace
               chmod 600 /state/copilot-config.json
-              rm -rf /rootful-podman/*
-              mkdir -p /rootful-podman/rootful-vfs
+              rm -rf /var/lib/control-plane/rootful-podman/*
+              mkdir -p /var/lib/control-plane/rootful-podman/rootful-overlay
           securityContext:
             privileged: false
             # Fresh PVC roots start out owned by root, so create the shared
@@ -603,7 +603,7 @@ spec:
             - name: workspace
               mountPath: /workspace-state
             - name: rootful-podman
-              mountPath: /rootful-podman
+              mountPath: /var/lib/control-plane/rootful-podman
         - name: init-state
           # renovate: datasource=docker depName=busybox versioning=docker
           image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
@@ -683,6 +683,10 @@ spec:
               value: k8s-job
             - name: CONTROL_PLANE_LOCAL_PODMAN_MODE
               value: rootful-service
+            - name: CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER
+              value: overlay
+            - name: CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR
+              value: /var/tmp/control-plane/rootful-overlay
             - name: CONTROL_PLANE_JOB_TRANSFER_IMAGE
               value: ${control_plane_image}
             - name: CONTROL_PLANE_JOB_TRANSFER_HOST
@@ -764,6 +768,8 @@ spec:
               subPath: workspace
             - name: rootful-podman
               mountPath: /var/lib/control-plane/rootful-podman
+            - name: runtime-tmp
+              mountPath: /var/tmp/control-plane
             - name: control-plane-auth
               mountPath: /var/run/control-plane-auth
               readOnly: true
@@ -783,6 +789,8 @@ spec:
         - name: rootful-podman
           persistentVolumeClaim:
             claimName: control-plane-rootful-podman-pvc
+        - name: runtime-tmp
+          emptyDir: {}
         - name: control-plane-auth
           secret:
             secretName: control-plane-auth
@@ -924,7 +932,7 @@ else
 fi
 test -d "\${expected_state_dir}/storage/\${expected_driver}"
 test -d "\${expected_state_dir}/storage/volumes"
-test -d /var/lib/control-plane/rootful-podman/rootful-vfs
+test -d /var/tmp/control-plane/rootful-overlay/runroot
 printf '%s\n' 'kind-test remote: storage paths ok' >&2
 test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
 cat /proc/self/uid_map > /workspace/k8s-pod-uid-map.txt
@@ -972,7 +980,7 @@ printf '%s\n' 'kind-test: initial remote assertions ok' >&2
 if ! ssh_bash <<'EOF'
 set -euo pipefail
 podman info --format '{{.Store.GraphRoot}} {{.Store.GraphDriverName}} {{.Host.Security.Rootless}}' > /workspace/k8s-podman-info-summary.txt 2> /workspace/k8s-podman-info.log
-grep -qx '/var/lib/control-plane/rootful-podman/rootful-vfs/storage vfs false' /workspace/k8s-podman-info-summary.txt
+grep -qx '/var/lib/control-plane/rootful-podman/rootful-overlay/storage overlay false' /workspace/k8s-podman-info-summary.txt
 timeout 30s podman pull docker.io/library/hello-world:latest > /workspace/k8s-actual-podman-pull.log 2>&1
 timeout 20s podman run --rm docker.io/library/hello-world:latest > /workspace/k8s-actual-podman-run.log 2>&1
 grep -q 'Hello from Docker!' /workspace/k8s-actual-podman-run.log
@@ -1373,7 +1381,7 @@ printf '%s\n' 'tmp-ok' > "${TMPDIR}/k8s-tmp.txt"
 EOF
 
 kubectl exec --namespace "${namespace}" "$(control_plane_pod_name)" -c control-plane -- bash -lc \
-  "set -euo pipefail; printf '%s\n' 'rootful-reset' > /var/lib/control-plane/rootful-podman/rootful-vfs/should-disappear.txt"
+  "set -euo pipefail; printf '%s\n' 'rootful-reset' > /var/lib/control-plane/rootful-podman/rootful-overlay/should-disappear.txt"
 
 first_host_fingerprint="$(ssh_host_fingerprint)"
 
@@ -1397,6 +1405,6 @@ test -f /workspace/auto-job.txt
 test -f /workspace/default-job.txt
 test -f /workspace/k8s-screen.txt
 test ! -e "${TMPDIR}/k8s-tmp.txt"
-test ! -e /var/lib/control-plane/rootful-podman/rootful-vfs/should-disappear.txt
+test ! -e /var/lib/control-plane/rootful-podman/rootful-overlay/should-disappear.txt
 test ! -e ~/.copilot/tmp
 EOF

@@ -238,8 +238,8 @@ spec:
               chown 1000:1000 /state/copilot-config.json
               chmod 700 /workspace-state/workspace
               chmod 600 /state/copilot-config.json
-              rm -rf /rootful-podman/*
-              mkdir -p /rootful-podman/rootful-vfs
+              rm -rf /var/lib/control-plane/rootful-podman/*
+              mkdir -p /var/lib/control-plane/rootful-podman/rootful-overlay
           securityContext:
             privileged: false
             runAsUser: 0
@@ -263,7 +263,7 @@ spec:
             - name: workspace
               mountPath: /workspace-state
             - name: rootful-podman
-              mountPath: /rootful-podman
+              mountPath: /var/lib/control-plane/rootful-podman
         - name: init-state
           # renovate: datasource=docker depName=busybox versioning=docker
           image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
@@ -353,12 +353,17 @@ spec:
             - name: CONTROL_PLANE_RUN_MODE
               value: k8s-job
             # Current-cluster local Podman profile: run a rootful remote service
-            # inside the control-plane container. The rootful image store lives
-            # on its own PVC under /var/lib/control-plane/rootful-podman, and
-            # the init container clears it at startup so old local images do not
-            # slow the next Pod start.
+            # inside the control-plane container. The rootful image store stays
+            # on its own PVC under /var/lib/control-plane/rootful-podman, while
+            # the runtime dir moves to a disk-backed emptyDir under
+            # /var/tmp/control-plane/rootful-overlay so Podman temp data avoids
+            # tmpfs-backed /run without bloating the shared workspace PVC.
             - name: CONTROL_PLANE_LOCAL_PODMAN_MODE
               value: rootful-service
+            - name: CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER
+              value: overlay
+            - name: CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR
+              value: /var/tmp/control-plane/rootful-overlay
             # `cpulimit` treats 100 as roughly one CPU core, which keeps an
             # interactive Copilot session from monopolizing the node.
             - name: CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT
@@ -449,6 +454,8 @@ spec:
               subPath: workspace
             - name: rootful-podman
               mountPath: /var/lib/control-plane/rootful-podman
+            - name: runtime-tmp
+              mountPath: /var/tmp/control-plane
             # Optional advanced rootless profile: if your cluster really
             # supports `hostUsers: false`, `/dev/fuse`, and nested user
             # namespaces, you can switch CONTROL_PLANE_LOCAL_PODMAN_MODE back to
@@ -479,6 +486,8 @@ spec:
         - name: rootful-podman
           persistentVolumeClaim:
             claimName: control-plane-rootful-podman-pvc
+        - name: runtime-tmp
+          emptyDir: {}
         # Optional advanced rootless profile: if your cluster policy allows
         # hostPath devices, mount /dev/fuse for fuse-overlayfs. On stricter
         # clusters use a device plugin-backed resource instead.
