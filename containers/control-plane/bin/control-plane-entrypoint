@@ -400,10 +400,10 @@ merge_json_object_file() {
     exit 1
   fi
 
-  mv "${merged_tmp}" "${target_path}"
+  cat "${merged_tmp}" > "${target_path}"
   chown "${owner}" "${target_path}"
   chmod 600 "${target_path}"
-  rm -f "${base_tmp}"
+  rm -f "${base_tmp}" "${merged_tmp}"
 }
 
 write_gh_hosts_from_token() {

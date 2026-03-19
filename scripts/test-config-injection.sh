@@ -136,6 +136,85 @@ if [[ "${file_backed_status}" -ne 0 ]]; then
 fi
 grep -qx 'file-backed-ok' <<<"${file_backed_output}"
 
+printf '%s\n' 'config-injection-test: verifying Copilot merge works with single-file config mounts' >&2
+prepare_state_tree file-mounted
+cat > "${workdir}/file-mounted/state/copilot-config.json" <<'EOF'
+{
+  "chat": {
+    "editor": "vim",
+    "theme": "dark"
+  },
+  "nested": {
+    "keep": 1,
+    "replace": {
+      "fromBase": true
+    },
+    "array": [
+      "base"
+    ]
+  }
+}
+EOF
+cat > "${workdir}/file-mounted/config/copilot-config.json" <<'EOF'
+{
+  "chat": {
+    "theme": "light"
+  },
+  "nested": {
+    "replace": {
+      "fromOverlay": true
+    },
+    "array": [
+      "overlay"
+    ]
+  },
+  "topLevelOverlay": "single-file-mount"
+}
+EOF
+cat > "${workdir}/file-mounted/auth/gh-hosts.yml" <<'EOF'
+github.com:
+  oauth_token: single-file-secret-token
+  git_protocol: ssh
+EOF
+
+set +e
+file_mounted_output="$("${container_bin}" run --rm \
+  --name "${container_name}" \
+  -i \
+  "${startup_caps[@]}" \
+  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForConfigInjection control-plane-config-injection' \
+  -e COPILOT_CONFIG_JSON_FILE=/var/run/control-plane-config/copilot-config.json \
+  -e GH_HOSTS_YML_FILE=/var/run/control-plane-auth/gh-hosts.yml \
+  -v "${workdir}/file-mounted/state/copilot-config.json:/home/copilot/.copilot/config.json" \
+  -v "${workdir}/file-mounted/state/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/file-mounted/state/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/file-mounted/state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/file-mounted/state/workspace:/workspace" \
+  -v "${workdir}/file-mounted/auth:/var/run/control-plane-auth:ro" \
+  -v "${workdir}/file-mounted/config:/var/run/control-plane-config:ro" \
+  "${control_plane_image}" \
+  bash -l -se 2>&1 <<'EOF'
+set -euo pipefail
+test "$(stat -c '%a %U %G' /home/copilot/.copilot/config.json)" = '600 copilot copilot'
+jq -e '.chat.editor == "vim"' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.chat.theme == "light"' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.nested.keep == 1' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.nested.replace.fromBase == true and .nested.replace.fromOverlay == true' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.nested.array == ["overlay"]' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.topLevelOverlay == "single-file-mount"' /home/copilot/.copilot/config.json >/dev/null
+printf '%s\n' file-mounted-ok
+EOF
+)"
+file_mounted_status=$?
+set -e
+
+if [[ "${file_mounted_status}" -ne 0 ]]; then
+  printf 'Expected Copilot config merge to succeed when config.json is a single-file mount\n' >&2
+  printf '%s\n' "${file_mounted_output}" >&2
+  exit 1
+fi
+grep -qx 'file-mounted-ok' <<<"${file_mounted_output}"
+
 printf '%s\n' 'config-injection-test: verifying gh token Secret generates hosts.yml when no file override exists' >&2
 prepare_state_tree token-backed
 cat > "${workdir}/token-backed/state/gh/hosts.yml" <<'EOF'
