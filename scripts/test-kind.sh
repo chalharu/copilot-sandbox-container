@@ -844,7 +844,7 @@ wait_for_control_plane_pod
 start_port_forward
 wait_for_ssh
 
-ssh_bash <<EOF
+if ! ssh_bash <<EOF
 set -euo pipefail
 command -v node
 command -v npm
@@ -865,9 +865,11 @@ docker --version >/dev/null
 command -v sshd
 command -v screen
 command -v vim
+printf '%s\n' 'kind-test remote: command availability ok' >&2
 test "\$(TERM=xterm-256color tput colors)" -ge 256
 test "\$(TERM=screen-256color tput colors)" -ge 256
 test "\$(TERM=tmux-256color tput colors)" -ge 256
+printf '%s\n' 'kind-test remote: terminfo ok' >&2
 printf '%s\n' "\${LANG}" | grep -qi 'utf-8'
 test "\${LC_ALL}" = "en_US.UTF8"
 locale charmap | grep -qx 'UTF-8'
@@ -876,12 +878,14 @@ locale -a | grep -Eqi '^ja_JP\.utf-?8$'
 test "\${EDITOR}" = "vim"
 test "\${VISUAL}" = "vim"
 test "\${GH_PAGER}" = "cat"
+printf '%s\n' 'kind-test remote: locale and editor env ok' >&2
 test -f ~/.copilot/skills/control-plane-operations/SKILL.md
 test -f ~/.copilot/config.json
 test -d ~/.copilot/session-state
 test -f ~/.config/gh/hosts.yml
 test "\$(stat -c '%a %U %G' ~/.copilot/config.json)" = '600 copilot copilot'
 test "\$(stat -c '%a %U %G' ~/.config/gh/hosts.yml)" = '600 copilot copilot'
+printf '%s\n' 'kind-test remote: persisted files ok' >&2
 jq -e '.auth.provider == "github"' ~/.copilot/config.json >/dev/null
 jq -e '.features.sessionPicker == true' ~/.copilot/config.json >/dev/null
 jq -e '.features.persisted == false' ~/.copilot/config.json >/dev/null
@@ -890,13 +894,16 @@ jq -e '.nested.keep == 1' ~/.copilot/config.json >/dev/null
 jq -e '.nested.replace.fromBase == true and .nested.replace.fromOverlay == true' ~/.copilot/config.json >/dev/null
 jq -e '.nested.array == ["overlay"]' ~/.copilot/config.json >/dev/null
 jq -e '.topLevelOverlay == "kind"' ~/.copilot/config.json >/dev/null
+printf '%s\n' 'kind-test remote: config merge ok' >&2
 grep -Fq 'oauth_token: kind-secret-hosts-token' ~/.config/gh/hosts.yml
 grep -Fq 'git_protocol: ssh' ~/.config/gh/hosts.yml
 grep -Fq 'user: kind-bot' ~/.config/gh/hosts.yml
 ! grep -Fq 'stale-kind-token' ~/.config/gh/hosts.yml
 ! grep -Fq 'kind-secret-token-fallback' ~/.config/gh/hosts.yml
+printf '%s\n' 'kind-test remote: gh hosts ok' >&2
 grep -qx 'cgroup_manager = "cgroupfs"' ~/.config/containers/containers.conf
 grep -qx 'events_logger = "file"' ~/.config/containers/containers.conf
+printf '%s\n' 'kind-test remote: containers.conf ok' >&2
 expected_driver=""
 expected_state_dir=""
 if [[ -e /dev/fuse ]]; then
@@ -918,9 +925,48 @@ fi
 test -d "\${expected_state_dir}/storage/\${expected_driver}"
 test -d "\${expected_state_dir}/storage/volumes"
 test -d /var/lib/control-plane/rootful-podman/rootful-vfs
+printf '%s\n' 'kind-test remote: storage paths ok' >&2
 test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
 cat /proc/self/uid_map > /workspace/k8s-pod-uid-map.txt
+printf '%s\n' 'kind-test remote: runtime env and workspace write ok' >&2
 EOF
+then
+  ssh_bash <<'EOF' >&2 || true
+set +e
+printf '%s\n' '--- kind-test initial remote debug ---'
+printf 'LANG=%s\n' "${LANG:-}" || true
+printf 'LC_ALL=%s\n' "${LC_ALL:-}" || true
+printf 'EDITOR=%s\n' "${EDITOR:-}" || true
+printf 'VISUAL=%s\n' "${VISUAL:-}" || true
+printf 'GH_PAGER=%s\n' "${GH_PAGER:-}" || true
+printf '%s\n' '--- terminfo ---'
+TERM=xterm-256color tput colors || true
+TERM=screen-256color tput colors || true
+TERM=tmux-256color tput colors || true
+printf '%s\n' '--- locale ---'
+locale charmap || true
+locale -a || true
+printf '%s\n' '--- persisted files ---'
+ls -ld ~/.copilot ~/.copilot/session-state ~/.config ~/.config/gh ~/.ssh /workspace || true
+ls -l ~/.copilot/config.json ~/.config/gh/hosts.yml || true
+stat -c '%n %a %U %G' ~/.copilot/config.json ~/.config/gh/hosts.yml || true
+printf '%s\n' '--- config and gh hosts ---'
+cat ~/.copilot/config.json || true
+cat ~/.config/gh/hosts.yml || true
+printf '%s\n' '--- containers config ---'
+cat ~/.config/containers/containers.conf || true
+cat ~/.config/containers/storage.conf || true
+printf '%s\n' '--- storage paths ---'
+readlink /home/copilot/.local/share/containers || true
+ls -la /home/copilot/.copilot /home/copilot/.copilot/containers || true
+ls -la /var/lib/control-plane/rootful-podman || true
+printf '%s\n' '--- runtime env ---'
+printf 'CONTROL_PLANE_JOB_NAMESPACE=%s\n' "${CONTROL_PLANE_JOB_NAMESPACE:-}" || true
+cat /proc/self/uid_map || true
+EOF
+  dump_control_plane_diagnostics
+  exit 1
+fi
 printf '%s\n' 'kind-test: initial remote assertions ok' >&2
 
 if ! ssh_bash <<'EOF'
