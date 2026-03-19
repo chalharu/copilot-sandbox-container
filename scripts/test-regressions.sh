@@ -412,13 +412,15 @@ exit 0
 EOF
 chmod +x "${workdir}/fake-bin/podman-run-env"
 
+runtime_workspace="${workdir}/workspace"
+
 env -u XDG_RUNTIME_DIR -u TMPDIR \
   CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
   TEST_REGRESSION_LOG_DIR="${workdir}" \
   CONTROL_PLANE_PODMAN_BIN="${workdir}/fake-bin/podman-run-env" \
   "${script_dir}/../containers/control-plane/bin/control-plane-run" \
   --mode podman \
-  --workspace /workspace \
+  --workspace "${runtime_workspace}" \
   --image quay.io/example/test:latest \
   -- true
 
@@ -427,7 +429,7 @@ grep -qx "TMPDIR=/tmp/control-plane-$(id -u)" "${workdir}/run.env"
 grep -qx 'run' "${workdir}/run.args"
 grep -qx -- '--rm' "${workdir}/run.args"
 grep -qx -- '-v' "${workdir}/run.args"
-grep -qx '/workspace:/workspace' "${workdir}/run.args"
+grep -qx "${runtime_workspace}:/workspace" "${workdir}/run.args"
 grep -qx 'quay.io/example/test:latest' "${workdir}/run.args"
 grep -qx 'true' "${workdir}/run.args"
 
