@@ -31,6 +31,7 @@ require_command() {
 
 require_command "${container_bin}"
 require_command awk
+require_command ssh-keygen
 
 # shellcheck source=scripts/lib-container-toolchain.sh
 source "${script_dir}/lib-container-toolchain.sh"
@@ -159,6 +160,87 @@ grep -qx 'login dhi.io -u test-user --password-stdin' "${workdir}/login.args"
 grep -qx 'test-token' "${workdir}/login.stdin"
 grep -qx 'image exists dhi.io/python:3-alpine3.23-dev' "${workdir}/image-exists.args"
 grep -qx 'pull dhi.io/python:3-alpine3.23-dev' "${workdir}/pull.args"
+
+printf '%s\n' 'regression-test: verifying k8s-job-start expands transfer env in rclone config' >&2
+mkdir -p "${workdir}/k8s-home/.ssh" "${workdir}/k8s-host-keys"
+printf '%s\n' 'k8s transfer input' > "${workdir}/k8s-transfer-input.txt"
+ssh-keygen -q -t ed25519 -N '' -f "${workdir}/k8s-host-keys/ssh_host_ed25519_key" >/dev/null
+cat > "${workdir}/fake-bin/kubectl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+manifest_path="${TEST_REGRESSION_K8S_MANIFEST_PATH:?}"
+secret_args_path="${TEST_REGRESSION_K8S_SECRET_ARGS_PATH:?}"
+case "${1:-}" in
+  create)
+    if [[ "${2:-}" == "secret" ]] && [[ "${3:-}" == "generic" ]]; then
+      printf '%s\n' "$@" > "${secret_args_path}"
+      exit 0
+    fi
+    if [[ "${2:-}" == "-f" ]] && [[ "${3:-}" == "-" ]]; then
+      cat > "${manifest_path}"
+      exit 0
+    fi
+    ;;
+esac
+printf 'unexpected fake kubectl command: %s\n' "$*" >&2
+exit 1
+EOF
+chmod +x "${workdir}/fake-bin/kubectl"
+PATH="${workdir}/fake-bin:/workspace/containers/control-plane/bin:${PATH}" \
+  HOME="${workdir}/k8s-home" \
+  CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+  CONTROL_PLANE_HOST_KEY_DIR="${workdir}/k8s-host-keys" \
+  CONTROL_PLANE_JOB_TRANSFER_IMAGE=localhost/control-plane:test \
+  TEST_REGRESSION_K8S_MANIFEST_PATH="${workdir}/k8s-job-manifest.yaml" \
+  TEST_REGRESSION_K8S_SECRET_ARGS_PATH="${workdir}/k8s-job-secret.args" \
+  "${script_dir}/../containers/control-plane/bin/k8s-job-start" \
+  --namespace control-plane-ci-jobs \
+  --job-name regression-transfer-job \
+  --image localhost/execution-plane-smoke:test \
+  --mount-file "${workdir}/k8s-transfer-input.txt:inputs/k8s-transfer-input.txt" \
+  -- true >/dev/null
+
+grep -qx 'create' "${workdir}/k8s-job-secret.args"
+grep -qx 'secret' "${workdir}/k8s-job-secret.args"
+grep -qx 'generic' "${workdir}/k8s-job-secret.args"
+if grep -Fq '<<RCLONE' "${workdir}/k8s-job-manifest.yaml"; then
+  printf 'Expected k8s-job-start to render rclone.conf with printf, not heredocs\n' >&2
+  grep -n 'RCLONE' "${workdir}/k8s-job-manifest.yaml" >&2 || true
+  exit 1
+fi
+if [[ "$(grep -Fc "printf 'host = %s\\n' \"\${CONTROL_PLANE_TRANSFER_HOST}\"" "${workdir}/k8s-job-manifest.yaml")" -ne 2 ]]; then
+  printf 'Expected both transfer containers to format the rclone host with printf\n' >&2
+  grep -n 'rclone.conf\|host = %s\|user = %s\|port = %s' "${workdir}/k8s-job-manifest.yaml" >&2 || true
+  exit 1
+fi
+grep -Fq "printf 'user = %s\\n' \"\${CONTROL_PLANE_TRANSFER_USER}\"" "${workdir}/k8s-job-manifest.yaml"
+grep -Fq "printf 'port = %s\\n' \"\${CONTROL_PLANE_TRANSFER_PORT}\"" "${workdir}/k8s-job-manifest.yaml"
+
+set +e
+newline_transfer_output="$(
+  PATH="${workdir}/fake-bin:/workspace/containers/control-plane/bin:${PATH}" \
+    HOME="${workdir}/k8s-home" \
+    CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+    CONTROL_PLANE_HOST_KEY_DIR="${workdir}/k8s-host-keys" \
+    CONTROL_PLANE_JOB_TRANSFER_IMAGE=localhost/control-plane:test \
+    CONTROL_PLANE_JOB_TRANSFER_HOST=$'control-plane.example\nmalicious' \
+    TEST_REGRESSION_K8S_MANIFEST_PATH="${workdir}/should-not-exist.yaml" \
+    TEST_REGRESSION_K8S_SECRET_ARGS_PATH="${workdir}/should-not-exist.args" \
+    "${script_dir}/../containers/control-plane/bin/k8s-job-start" \
+    --namespace control-plane-ci-jobs \
+    --job-name regression-transfer-job-invalid \
+    --image localhost/execution-plane-smoke:test \
+    --mount-file "${workdir}/k8s-transfer-input.txt:inputs/k8s-transfer-input.txt" \
+    -- true 2>&1
+)"
+newline_transfer_status=$?
+set -e
+
+if [[ "${newline_transfer_status}" -eq 0 ]]; then
+  printf 'Expected k8s-job-start to reject multiline transfer host values\n' >&2
+  exit 1
+fi
+grep -Fq 'CONTROL_PLANE_JOB_TRANSFER_HOST must not contain newlines' <<<"${newline_transfer_output}"
 
 printf '%s\n' 'regression-test: verifying published ports skip default host network injection' >&2
 cat > "${workdir}/fake-bin/podman-run-publish" <<'EOF'

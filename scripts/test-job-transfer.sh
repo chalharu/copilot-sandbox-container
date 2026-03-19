@@ -42,6 +42,15 @@ require_command control-plane-job-transfer
 
 job_transfer_root="${CONTROL_PLANE_JOB_TRANSFER_ROOT:-${TMPDIR:-/tmp}/job-transfers}"
 
+dump_job_debug() {
+  local job_name="$1"
+
+  kubectl get job,pod --namespace "${job_namespace}" -l "job-name=${job_name}" -o wide >&2 || true
+  kubectl describe job --namespace "${job_namespace}" "${job_name}" >&2 || true
+  kubectl describe pod --namespace "${job_namespace}" -l "job-name=${job_name}" >&2 || true
+  kubectl logs "job/${job_name}" --namespace "${job_namespace}" --all-containers=true >&2 || true
+}
+
 printf '%s\n' 'job-transfer-test: verifying large mount-file transfer and write-back' >&2
 success_source="${workdir}/large-transfer.txt"
 dd if=/dev/zero of="${success_source}" bs=1048576 count=1 status=none
@@ -67,7 +76,11 @@ k8s-job-start \
 
 success_transfer_id="$(kubectl get job --namespace "${job_namespace}" "${success_job_name}" -o jsonpath='{.metadata.annotations.control-plane\.github\.io/job-transfer-id}')"
 success_transfer_secret="$(kubectl get job --namespace "${job_namespace}" "${success_job_name}" -o jsonpath='{.metadata.annotations.control-plane\.github\.io/job-transfer-secret}')"
-k8s-job-wait --namespace "${job_namespace}" --job-name "${success_job_name}" --timeout 180s
+if ! k8s-job-wait --namespace "${job_namespace}" --job-name "${success_job_name}" --timeout 180s; then
+  printf 'Expected successful write-back Job %s to complete\n' "${success_job_name}" >&2
+  dump_job_debug "${success_job_name}"
+  exit 1
+fi
 
 if ! grep -Fqx 'large-transfer-updated' <(tail -n 1 "${success_source}"); then
   printf 'Expected large mount-file write-back to update %s\n' "${success_source}" >&2

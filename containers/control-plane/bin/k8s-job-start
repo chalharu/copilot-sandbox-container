@@ -67,6 +67,14 @@ validate_relative_path() {
   fi
 }
 
+validate_single_line_value() {
+  local name="$1"
+  local value="$2"
+
+  [[ "${value}" != *$'\n'* ]] || die "${name} must not contain newlines"
+  [[ "${value}" != *$'\r'* ]] || die "${name} must not contain carriage returns"
+}
+
 normalize_mount_file_spec() {
   local spec="$1"
   local source_path
@@ -267,6 +275,9 @@ if [[ ${#mount_files[@]} -gt 0 ]]; then
   [[ -n "${job_transfer_host}" ]] || die "CONTROL_PLANE_JOB_TRANSFER_HOST is required when --mount-file is used"
   [[ -n "${job_transfer_port}" ]] || die "CONTROL_PLANE_JOB_TRANSFER_PORT is required when --mount-file is used"
   [[ -n "${job_transfer_user}" ]] || die "CONTROL_PLANE_JOB_TRANSFER_USER is required when --mount-file is used"
+  validate_single_line_value "CONTROL_PLANE_JOB_TRANSFER_HOST" "${job_transfer_host}"
+  validate_single_line_value "CONTROL_PLANE_JOB_TRANSFER_PORT" "${job_transfer_port}"
+  validate_single_line_value "CONTROL_PLANE_JOB_TRANSFER_USER" "${job_transfer_user}"
   [[ -f "${host_key_dir}/ssh_host_ed25519_key.pub" ]] || die "missing SSH host key at ${host_key_dir}/ssh_host_ed25519_key.pub"
 
   created_transfer_id="$(printf '%s-%s-%s\n' "${job_name}" "$(date +%s)" "$RANDOM" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
@@ -376,16 +387,16 @@ EOF
             - -lc
             - |
               set -euo pipefail
-              cat > /tmp/rclone.conf <<'RCLONE'
-              [control-plane]
-              type = sftp
-              host = \${CONTROL_PLANE_TRANSFER_HOST}
-              user = \${CONTROL_PLANE_TRANSFER_USER}
-              port = \${CONTROL_PLANE_TRANSFER_PORT}
-              key_file = /var/run/control-plane-job-transfer/id_ed25519
-              known_hosts_file = /var/run/control-plane-job-transfer/known_hosts
-              shell_type = none
-              RCLONE
+              {
+                printf '%s\n' '[control-plane]'
+                printf '%s\n' 'type = sftp'
+                printf 'host = %s\n' "\${CONTROL_PLANE_TRANSFER_HOST}"
+                printf 'user = %s\n' "\${CONTROL_PLANE_TRANSFER_USER}"
+                printf 'port = %s\n' "\${CONTROL_PLANE_TRANSFER_PORT}"
+                printf '%s\n' 'key_file = /var/run/control-plane-job-transfer/id_ed25519'
+                printf '%s\n' 'known_hosts_file = /var/run/control-plane-job-transfer/known_hosts'
+                printf '%s\n' 'shell_type = none'
+              } > /tmp/rclone.conf
               mkdir -p "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}"
               rclone --config /tmp/rclone.conf copy "control-plane:\${CONTROL_PLANE_TRANSFER_REMOTE_PATH}" "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}"
           volumeMounts:
@@ -440,16 +451,16 @@ EOF
                 -o StrictHostKeyChecking=yes
                 -o UserKnownHostsFile=/var/run/control-plane-job-transfer/known_hosts
               )
-              cat > /tmp/rclone.conf <<'RCLONE'
-              [control-plane]
-              type = sftp
-              host = \${CONTROL_PLANE_TRANSFER_HOST}
-              user = \${CONTROL_PLANE_TRANSFER_USER}
-              port = \${CONTROL_PLANE_TRANSFER_PORT}
-              key_file = /var/run/control-plane-job-transfer/id_ed25519
-              known_hosts_file = /var/run/control-plane-job-transfer/known_hosts
-              shell_type = none
-              RCLONE
+              {
+                printf '%s\n' '[control-plane]'
+                printf '%s\n' 'type = sftp'
+                printf 'host = %s\n' "\${CONTROL_PLANE_TRANSFER_HOST}"
+                printf 'user = %s\n' "\${CONTROL_PLANE_TRANSFER_USER}"
+                printf 'port = %s\n' "\${CONTROL_PLANE_TRANSFER_PORT}"
+                printf '%s\n' 'key_file = /var/run/control-plane-job-transfer/id_ed25519'
+                printf '%s\n' 'known_hosts_file = /var/run/control-plane-job-transfer/known_hosts'
+                printf '%s\n' 'shell_type = none'
+              } > /tmp/rclone.conf
               if [[ "\${execution_exit_code}" == "0" ]]; then
                 rclone --config /tmp/rclone.conf copy "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}" "control-plane:\${CONTROL_PLANE_TRANSFER_OUTPUT_PATH}"
                 ssh "\${ssh_opts[@]}" "\${CONTROL_PLANE_TRANSFER_USER}@\${CONTROL_PLANE_TRANSFER_HOST}" \
