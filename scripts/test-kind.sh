@@ -510,8 +510,11 @@ spec:
               YAML
           securityContext:
             privileged: false
-            runAsUser: 0
-            runAsNonRoot: false
+            # Restarted pods re-enter PVC content already owned by the copilot
+            # user, so seed the state volume with the same identity.
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
             allowPrivilegeEscalation: false
             capabilities:
               drop:
