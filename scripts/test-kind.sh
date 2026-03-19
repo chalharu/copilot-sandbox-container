@@ -334,31 +334,16 @@ roleRef:
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: control-plane-state-pv
-spec:
-  capacity:
-    storage: 2Gi
-  accessModes:
-    - ReadWriteOnce
-  persistentVolumeReclaimPolicy: Delete
-  storageClassName: control-plane-manual
-  hostPath:
-    path: /tmp/control-plane-state
-    type: DirectoryOrCreate
----
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: control-plane-session-state-pv
+  name: control-plane-copilot-session-pv
 spec:
   capacity:
     storage: 2Gi
   accessModes:
     - ReadWriteMany
   persistentVolumeReclaimPolicy: Delete
-  storageClassName: control-plane-session-state-manual
+  storageClassName: control-plane-copilot-session-manual
   hostPath:
-    path: /tmp/control-plane-session-state
+    path: /tmp/control-plane-copilot-session
     type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -379,21 +364,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: control-plane-state-pvc
-  namespace: ${namespace}
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 2Gi
-  storageClassName: control-plane-manual
-  volumeName: control-plane-state-pv
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: control-plane-session-state-pvc
+  name: control-plane-copilot-session-pvc
   namespace: ${namespace}
 spec:
   accessModes:
@@ -401,8 +372,8 @@ spec:
   resources:
     requests:
       storage: 2Gi
-  storageClassName: control-plane-session-state-manual
-  volumeName: control-plane-session-state-pv
+  storageClassName: control-plane-copilot-session-manual
+  volumeName: control-plane-copilot-session-pv
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -417,35 +388,6 @@ spec:
       storage: 2Gi
   storageClassName: control-plane-control-workspace-manual
   volumeName: control-plane-workspace-control-pv
----
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: control-plane-rootful-podman-pv
-spec:
-  capacity:
-    storage: 2Gi
-  accessModes:
-    - ReadWriteOnce
-  persistentVolumeReclaimPolicy: Delete
-  storageClassName: control-plane-rootful-podman-manual
-  hostPath:
-    path: /tmp/control-plane-rootful-podman
-    type: DirectoryOrCreate
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: control-plane-rootful-podman-pvc
-  namespace: ${namespace}
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 2Gi
-  storageClassName: control-plane-rootful-podman-manual
-  volumeName: control-plane-rootful-podman-pv
 ---
 apiVersion: v1
 kind: PersistentVolume
@@ -565,19 +507,34 @@ spec:
             - |
               set -eu
               umask 077
-              mkdir -p /state/gh /state/ssh /state/ssh-host-keys /workspace-state/workspace /session-state
-              touch /state/copilot-config.json
-              chown -R 1000:1000 /state/gh /state/ssh /state/ssh-host-keys /session-state
-              find /state/gh /state/ssh /state/ssh-host-keys /session-state -type d -exec chmod 700 {} +
-              find /state/gh /state/ssh /state/ssh-host-keys /session-state -type f -exec chmod 600 {} +
+              mkdir -p \
+                /copilot-session/state/gh \
+                /copilot-session/state/ssh \
+                /copilot-session/state/ssh-host-keys \
+                /copilot-session/session-state \
+                /workspace-state/workspace \
+                /cache/rootful-podman \
+                /cache/runtime-tmp
+              touch /copilot-session/state/copilot-config.json
+              chown -R 1000:1000 /copilot-session/state /copilot-session/session-state
+              find /copilot-session/state /copilot-session/session-state -type d -exec chmod 700 {} +
+              find /copilot-session/state /copilot-session/session-state -type f -exec chmod 600 {} +
               # Preserve user workspace file modes; only hand the shared mount root
               # back to UID/GID 1000 so the control-plane session can use it.
               chown 1000:1000 /workspace-state/workspace
-              chown 1000:1000 /state/copilot-config.json
               chmod 700 /workspace-state/workspace
-              chmod 600 /state/copilot-config.json
-              rm -rf /var/lib/control-plane/rootful-podman/*
-              mkdir -p /var/lib/control-plane/rootful-podman/rootful-overlay
+              # Keep graphroot root-only, but leave the runtime tmp path traversable
+              # so the copilot user can reach the rootful Podman socket later.
+              chown 0:0 /cache/rootful-podman
+              chmod 700 /cache/rootful-podman
+              chown 0:1000 /cache/runtime-tmp
+              chmod 755 /cache/runtime-tmp
+              rm -rf /cache/rootful-podman/*
+              mkdir -p /cache/rootful-podman/rootful-overlay /cache/runtime-tmp/rootful-overlay
+              chown 0:0 /cache/rootful-podman/rootful-overlay
+              chmod 700 /cache/rootful-podman/rootful-overlay
+              chown 0:1000 /cache/runtime-tmp/rootful-overlay
+              chmod 755 /cache/runtime-tmp/rootful-overlay
           securityContext:
             privileged: false
             # Fresh PVC roots start out owned by root, so create the shared
@@ -596,14 +553,12 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           volumeMounts:
-            - name: state
-              mountPath: /state
-            - name: session-state
-              mountPath: /session-state
+            - name: copilot-session
+              mountPath: /copilot-session
             - name: workspace
               mountPath: /workspace-state
-            - name: rootful-podman
-              mountPath: /var/lib/control-plane/rootful-podman
+            - name: cache
+              mountPath: /cache
         - name: init-state
           # renovate: datasource=docker depName=busybox versioning=docker
           image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
@@ -650,8 +605,9 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           volumeMounts:
-            - name: state
+            - name: copilot-session
               mountPath: /state
+              subPath: state
       containers:
         - name: control-plane
           image: ${control_plane_image}
@@ -749,27 +705,30 @@ spec:
               cpu: "1"
               memory: 1Gi
           volumeMounts:
-            - name: state
+            - name: copilot-session
               mountPath: /home/copilot/.copilot/config.json
-              subPath: copilot-config.json
-            - name: session-state
+              subPath: state/copilot-config.json
+            - name: copilot-session
               mountPath: /home/copilot/.copilot/session-state
-            - name: state
+              subPath: session-state
+            - name: copilot-session
               mountPath: /home/copilot/.config/gh
-              subPath: gh
-            - name: state
+              subPath: state/gh
+            - name: copilot-session
               mountPath: /home/copilot/.ssh
-              subPath: ssh
-            - name: state
+              subPath: state/ssh
+            - name: copilot-session
               mountPath: /var/lib/control-plane/ssh-host-keys
-              subPath: ssh-host-keys
+              subPath: state/ssh-host-keys
             - name: workspace
               mountPath: /workspace
               subPath: workspace
-            - name: rootful-podman
+            - name: cache
               mountPath: /var/lib/control-plane/rootful-podman
-            - name: runtime-tmp
+              subPath: rootful-podman
+            - name: cache
               mountPath: /var/tmp/control-plane
+              subPath: runtime-tmp
             - name: control-plane-auth
               mountPath: /var/run/control-plane-auth
               readOnly: true
@@ -777,19 +736,13 @@ spec:
               mountPath: /var/run/control-plane-config
               readOnly: true
       volumes:
-        - name: state
+        - name: copilot-session
           persistentVolumeClaim:
-            claimName: control-plane-state-pvc
-        - name: session-state
-          persistentVolumeClaim:
-            claimName: control-plane-session-state-pvc
+            claimName: control-plane-copilot-session-pvc
         - name: workspace
           persistentVolumeClaim:
             claimName: control-plane-workspace-pvc
-        - name: rootful-podman
-          persistentVolumeClaim:
-            claimName: control-plane-rootful-podman-pvc
-        - name: runtime-tmp
+        - name: cache
           emptyDir: {}
         - name: control-plane-auth
           secret:
@@ -804,10 +757,8 @@ cleanup() {
   stop_port_forward
   kubectl delete namespace "${namespace}" --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete namespace "${job_namespace}" --ignore-not-found >/dev/null 2>&1 || true
-  kubectl delete pv control-plane-state-pv --ignore-not-found >/dev/null 2>&1 || true
-  kubectl delete pv control-plane-session-state-pv --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete pv control-plane-copilot-session-pv --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete pv control-plane-workspace-control-pv --ignore-not-found >/dev/null 2>&1 || true
-  kubectl delete pv control-plane-rootful-podman-pv --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete pv control-plane-workspace-job-pv --ignore-not-found >/dev/null 2>&1 || true
   if [[ "${created_cluster}" -eq 1 ]]; then
     kind_cmd delete cluster --name "${cluster_name}" >/dev/null 2>&1 || true

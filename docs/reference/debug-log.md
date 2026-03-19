@@ -2,7 +2,7 @@
 
 このページは、current-cluster と Control Plane 周辺で実際に重要になるログ断片を引くための Reference です。手順は `docs/how-to-guides/cookbook.md`、背景説明は `docs/explanation/knowledge.md` を参照してください。
 
-current-cluster の rootful-service では、local Podman の graphroot を既定で `/var/lib/control-plane/rootful-podman/rootful-overlay/storage` に置き、runtime dir は `/var/tmp/control-plane/rootful-overlay` へ寄せます。image store は Pod 用に分離した RWO PVC、runtime dir は disk-backed `emptyDir` を想定し、前者は init container が起動時に掃除するため、古い local image store を引きずらずに済みます。
+このリポジトリの rootful-service sample では、local Podman の graphroot を既定で `/var/lib/control-plane/rootful-podman/rootful-overlay/storage` に置き、runtime dir は `/var/tmp/control-plane/rootful-overlay` へ寄せます。graphroot の背後は disposable な `emptyDir` cache、runtime dir も disk-backed `emptyDir` を想定し、Pod 再作成時に再生成できる local image store を persistent volume から切り離しています。
 
 ## 1. bundled skill が読めない
 

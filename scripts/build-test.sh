@@ -42,7 +42,7 @@ CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
   "${script_dir}/test-podman-startup.sh" "${control_plane_image}"
 
 CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
-  "${script_dir}/test-k8s-sample-podman-storage.sh"
+  "${script_dir}/test-k8s-sample-storage-layout.sh"
 
 CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
   "${script_dir}/test-entrypoint-capabilities.sh" "${control_plane_image}"
