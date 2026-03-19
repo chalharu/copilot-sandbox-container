@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+runtime_config_file="${CONTROL_PLANE_RUNTIME_ENV_FILE:-${HOME:-/home/${USER:-copilot}}/.config/control-plane/runtime.env}"
+if [[ -f "${runtime_config_file}" ]]; then
+  # shellcheck disable=SC1090
+  source "${runtime_config_file}"
+fi
+
+transfer_root="${CONTROL_PLANE_JOB_TRANSFER_ROOT:-${TMPDIR:-/tmp}/job-transfers}"
+authorized_keys_path="${HOME:-/home/${USER:-copilot}}/.ssh/authorized_keys"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  control-plane-job-transfer finalize --transfer-id ID
+  control-plane-job-transfer release-access --transfer-id ID [--remove-transfer-dir]
+USAGE
+}
+
+die() {
+  printf 'control-plane-job-transfer: %s\n' "$*" >&2
+  exit 64
+}
+
+manifest_path_for() {
+  local transfer_id="$1"
+  printf '%s/%s/manifest.json\n' "${transfer_root%/}" "${transfer_id}"
+}
+
+remove_authorized_key_block() {
+  local marker="$1"
+  local lock_file="${authorized_keys_path}.lock"
+  local tmp
+
+  [[ -n "${marker}" ]] || return 0
+  [[ -f "${authorized_keys_path}" ]] || return 0
+
+  tmp="$(mktemp "${authorized_keys_path}.XXXXXX")"
+  (
+    flock -x 9
+    awk -v marker="${marker}" '
+      BEGIN { skipping = 0 }
+      $0 == "# BEGIN " marker { skipping = 1; next }
+      $0 == "# END " marker { skipping = 0; next }
+      skipping == 0 { print }
+    ' "${authorized_keys_path}" > "${tmp}"
+    mv "${tmp}" "${authorized_keys_path}"
+    chmod 600 "${authorized_keys_path}"
+  ) 9>"${lock_file}"
+}
+
+delete_secret_object() {
+  local namespace="$1"
+  local secret_name="$2"
+
+  [[ -n "${namespace}" ]] || return 0
+  [[ -n "${secret_name}" ]] || return 0
+  command -v kubectl >/dev/null 2>&1 || return 0
+
+  kubectl delete secret --namespace "${namespace}" "${secret_name}" --ignore-not-found >/dev/null 2>&1 || true
+}
+
+release_access_from_manifest() {
+  local manifest_path="$1"
+  local remove_transfer_dir="${2:-0}"
+  local auth_marker=""
+  local job_namespace=""
+  local secret_name=""
+  local transfer_dir
+
+  [[ -f "${manifest_path}" ]] || return 0
+
+  auth_marker="$(jq -r '.authorized_key_marker // empty' "${manifest_path}")"
+  job_namespace="$(jq -r '.job_namespace // empty' "${manifest_path}")"
+  secret_name="$(jq -r '.secret_name // empty' "${manifest_path}")"
+  transfer_dir="$(dirname "${manifest_path}")"
+
+  delete_secret_object "${job_namespace}" "${secret_name}"
+  remove_authorized_key_block "${auth_marker}"
+
+  if [[ "${remove_transfer_dir}" -eq 1 ]]; then
+    rm -rf "${transfer_dir}"
+  fi
+}
+
+apply_output_file() {
+  local source_path="$1"
+  local destination_path="$2"
+  local input_path="$3"
+  local output_path="$4"
+  local original_sha256="$5"
+  local transfer_dir="$6"
+  local current_sha256=""
+  local conflict_path
+  local source_dir
+  local source_name
+  local temp_path
+
+  [[ -f "${input_path}" ]] || die "missing staged input for ${destination_path}"
+  [[ -f "${output_path}" ]] || return 0
+
+  if cmp -s "${input_path}" "${output_path}"; then
+    return 0
+  fi
+
+  if [[ -f "${source_path}" ]]; then
+    current_sha256="$(sha256sum "${source_path}" | awk '{ print $1 }')"
+  fi
+
+  if [[ "${current_sha256}" != "${original_sha256}" ]]; then
+    conflict_path="${transfer_dir}/conflicts/${destination_path}"
+    mkdir -p "$(dirname "${conflict_path}")"
+    cp "${output_path}" "${conflict_path}"
+    printf 'conflict %s -> %s\n' "${destination_path}" "${source_path}" >> "${transfer_dir}/conflicts.txt"
+    return 1
+  fi
+
+  source_dir="$(dirname "${source_path}")"
+  source_name="$(basename "${source_path}")"
+  [[ -d "${source_dir}" ]] || die "cannot update ${source_path}: source directory does not exist"
+  [[ -w "${source_dir}" ]] || die "cannot update ${source_path}: source directory is not writable"
+
+  temp_path="$(mktemp "${source_dir}/.${source_name}.control-plane-job-transfer.XXXXXX")"
+  cp "${output_path}" "${temp_path}"
+  mv "${temp_path}" "${source_path}"
+  return 0
+}
+
+finalize_transfer() {
+  local transfer_id="$1"
+  local manifest_path
+  local transfer_dir
+  local conflict_count=0
+  local updated_count=0
+  local file_json
+  local source_path
+  local destination_path
+  local original_sha256
+  local input_path
+  local output_path
+
+  manifest_path="$(manifest_path_for "${transfer_id}")"
+  [[ -f "${manifest_path}" ]] || die "missing manifest for transfer ${transfer_id}"
+  transfer_dir="$(dirname "${manifest_path}")"
+  : > "${transfer_dir}/conflicts.txt"
+
+  while IFS= read -r file_json; do
+    source_path="$(jq -r '.source_path' <<<"${file_json}")"
+    destination_path="$(jq -r '.destination_path' <<<"${file_json}")"
+    original_sha256="$(jq -r '.source_sha256' <<<"${file_json}")"
+    input_path="${transfer_dir}/input/${destination_path}"
+    output_path="${transfer_dir}/output/${destination_path}"
+
+    if apply_output_file "${source_path}" "${destination_path}" "${input_path}" "${output_path}" "${original_sha256}" "${transfer_dir}"; then
+      if [[ -f "${output_path}" ]] && ! cmp -s "${input_path}" "${output_path}"; then
+        updated_count=$((updated_count + 1))
+      fi
+    else
+      conflict_count=$((conflict_count + 1))
+    fi
+  done < <(jq -c '.files[]' "${manifest_path}")
+
+  release_access_from_manifest "${manifest_path}" 0
+
+  if [[ "${conflict_count}" -gt 0 ]]; then
+    printf '%s\n' \
+      "control-plane-job-transfer: detected ${conflict_count} conflict(s); kept staged output under ${transfer_dir}/conflicts for manual inspection." \
+      >&2
+    exit 1
+  fi
+
+  rm -f "${transfer_dir}/conflicts.txt"
+  rm -rf "${transfer_dir}"
+  printf 'control-plane-job-transfer: finalized %s updated file(s)\n' "${updated_count}" >&2
+}
+
+subcommand="${1:-}"
+case "${subcommand}" in
+  finalize|release-access)
+    shift
+    ;;
+  --help|-h|'')
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    die "unknown subcommand: ${subcommand}"
+    ;;
+esac
+
+transfer_id=""
+remove_transfer_dir=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --transfer-id)
+      transfer_id="$2"
+      shift 2
+      ;;
+    --remove-transfer-dir)
+      remove_transfer_dir=1
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      die "unknown option: $1"
+      ;;
+  esac
+done
+
+[[ -n "${transfer_id}" ]] || die "--transfer-id is required"
+
+manifest_path="$(manifest_path_for "${transfer_id}")"
+case "${subcommand}" in
+  finalize)
+    finalize_transfer "${transfer_id}"
+    ;;
+  release-access)
+    release_access_from_manifest "${manifest_path}" "${remove_transfer_dir}"
+    ;;
+esac

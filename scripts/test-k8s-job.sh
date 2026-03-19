@@ -112,6 +112,8 @@ kubectl create configmap "${configmap_name}" \
   -n "${active_namespace}" \
   --from-file=control-plane-entrypoint=/workspace/containers/control-plane/bin/control-plane-entrypoint \
   --from-file=control-plane-podman=/workspace/containers/control-plane/bin/control-plane-podman \
+  --from-file=control-plane-copilot=/workspace/containers/control-plane/bin/control-plane-copilot \
+  --from-file=control-plane-job-transfer=/workspace/containers/control-plane/bin/control-plane-job-transfer \
   --from-file=control-plane-screen=/workspace/containers/control-plane/bin/control-plane-screen \
   --from-file=control-plane-session=/workspace/containers/control-plane/bin/control-plane-session \
   --from-file=control-plane-ssh-shell=/workspace/containers/control-plane/bin/control-plane-ssh-shell \
@@ -158,10 +160,12 @@ ${service_account_yaml}
             - |
               set -euo pipefail
               install -m 0755 /var/run/control-plane-test/control-plane-entrypoint /usr/local/bin/control-plane-entrypoint
-               install -m 0755 /var/run/control-plane-test/control-plane-podman /usr/local/bin/control-plane-podman
-               install -m 0755 /var/run/control-plane-test/control-plane-screen /usr/local/bin/control-plane-screen
-               install -m 0755 /var/run/control-plane-test/control-plane-session /usr/local/bin/control-plane-session
-               install -m 0755 /var/run/control-plane-test/control-plane-ssh-shell /usr/local/bin/control-plane-ssh-shell
+                install -m 0755 /var/run/control-plane-test/control-plane-podman /usr/local/bin/control-plane-podman
+                install -m 0755 /var/run/control-plane-test/control-plane-copilot /usr/local/bin/control-plane-copilot
+                install -m 0755 /var/run/control-plane-test/control-plane-job-transfer /usr/local/bin/control-plane-job-transfer
+                install -m 0755 /var/run/control-plane-test/control-plane-screen /usr/local/bin/control-plane-screen
+                install -m 0755 /var/run/control-plane-test/control-plane-session /usr/local/bin/control-plane-session
+                install -m 0755 /var/run/control-plane-test/control-plane-ssh-shell /usr/local/bin/control-plane-ssh-shell
                install -m 0644 /var/run/control-plane-test/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
                install -m 0644 /var/run/control-plane-test/profile-control-plane-session.sh /etc/profile.d/control-plane-session.sh
                install -d -m 0755 /usr/local/share/control-plane/skills/control-plane-operations/references
@@ -190,13 +194,14 @@ ${service_account_yaml}
 
                  term_report="\$(TERM=xterm-color bash -lc '"'"'printf "%s %s" "\$TERM" "\$(tput colors)"'"'"')"
                  printf "job-check: term=%s\n" "\${term_report}"
-                 [[ "\${term_report}" == "xterm-256color 256" ]]
+                  [[ "\${term_report}" == "xterm-256color 256" ]]
 
-                 podman_info="\$(su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; podman info --format "{{.Store.GraphRoot}} {{.Store.GraphDriverName}} {{.Host.Security.Rootless}}"'"'"')"
-                 printf "job-check: podman-info=%s\n" "\${podman_info}"
-                 [[ "\${podman_info}" == "/run/control-plane/state-vfs/storage vfs false" ]]
-                 test ! -e /home/copilot/.copilot/containers/rootful-vfs
-                 printf "%s\n" "job-check: rootful-store=ephemeral"
+                  podman_info="\$(su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; podman info --format "{{.Store.GraphRoot}} {{.Store.GraphDriverName}} {{.Host.Security.Rootless}}"'"'"')"
+                  printf "job-check: podman-info=%s\n" "\${podman_info}"
+                  [[ "\${podman_info}" == "/var/lib/control-plane/rootful-podman/rootful-vfs/storage vfs false" ]]
+                  test ! -e /home/copilot/.copilot/containers/rootful-vfs
+                  test -d /var/lib/control-plane/rootful-podman/rootful-vfs
+                  printf "%s\n" "job-check: rootful-store=dedicated-volume"
 
                  podman_output="\$(su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; podman run --rm docker.io/library/busybox:1.37.0 echo k8s-job-podman-ok'"'"')"
                  printf "job-check: podman=%s\n" "\${podman_output}"
@@ -322,12 +327,16 @@ ${service_account_yaml}
               readOnly: true
             - name: state
               mountPath: /home/copilot/.copilot
+            - name: rootful-podman
+              mountPath: /var/lib/control-plane/rootful-podman
       volumes:
         - name: test-files
           configMap:
             name: ${configmap_name}
             defaultMode: 0555
         - name: state
+          emptyDir: {}
+        - name: rootful-podman
           emptyDir: {}
 EOF
 
@@ -420,8 +429,8 @@ printf '%s\n' "${job_logs}"
 grep -Fq 'job-check: runtime-env=' <<<"${job_logs}"
 grep -Fq 'job-check: skill-read=ok' <<<"${job_logs}"
 grep -Fq 'job-check: term=xterm-256color 256' <<<"${job_logs}"
-grep -Fq 'job-check: podman-info=/run/control-plane/state-vfs/storage vfs false' <<<"${job_logs}"
-grep -Fq 'job-check: rootful-store=ephemeral' <<<"${job_logs}"
+grep -Fq 'job-check: podman-info=/var/lib/control-plane/rootful-podman/rootful-vfs/storage vfs false' <<<"${job_logs}"
+grep -Fq 'job-check: rootful-store=dedicated-volume' <<<"${job_logs}"
 grep -Fq 'job-check: podman=k8s-job-podman-ok' <<<"${job_logs}"
 grep -Eq 'job-check: podman-build=(ok|skipped)' <<<"${job_logs}"
 grep -Fq 'job-check: interactive=ok' <<<"${job_logs}"

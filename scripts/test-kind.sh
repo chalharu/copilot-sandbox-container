@@ -290,7 +290,7 @@ rules:
     resources: ["pods/log"]
     verbs: ["get"]
   - apiGroups: [""]
-    resources: ["configmaps"]
+    resources: ["secrets"]
     verbs: ["create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -307,6 +307,30 @@ roleRef:
   kind: Role
   name: control-plane-jobs
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: control-plane-job-self-read
+  namespace: ${job_namespace}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: control-plane-job-self-read
+  namespace: ${job_namespace}
+subjects:
+  - kind: ServiceAccount
+    name: control-plane-job
+    namespace: ${job_namespace}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: control-plane-job-self-read
+---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -320,6 +344,21 @@ spec:
   storageClassName: control-plane-manual
   hostPath:
     path: /tmp/control-plane-state
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: control-plane-session-state-pv
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: control-plane-session-state-manual
+  hostPath:
+    path: /tmp/control-plane-session-state
     type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -354,6 +393,20 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
+  name: control-plane-session-state-pvc
+  namespace: ${namespace}
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: control-plane-session-state-manual
+  volumeName: control-plane-session-state-pv
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
   name: control-plane-workspace-pvc
   namespace: ${namespace}
 spec:
@@ -364,6 +417,35 @@ spec:
       storage: 2Gi
   storageClassName: control-plane-control-workspace-manual
   volumeName: control-plane-workspace-control-pv
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: control-plane-rootful-podman-pv
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: control-plane-rootful-podman-manual
+  hostPath:
+    path: /tmp/control-plane-rootful-podman
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: control-plane-rootful-podman-pvc
+  namespace: ${namespace}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: control-plane-rootful-podman-manual
+  volumeName: control-plane-rootful-podman-pv
 ---
 apiVersion: v1
 kind: PersistentVolume
@@ -482,8 +564,12 @@ spec:
             - -c
             - |
               set -eu
-              umask 007
-              mkdir -p /state/copilot /state/gh /state/ssh /state/ssh-host-keys /workspace-state/workspace
+              umask 077
+              mkdir -p /state/gh /state/ssh /state/ssh-host-keys /workspace-state/workspace /session-state
+              touch /state/copilot-config.json
+              chmod 600 /state/copilot-config.json
+              rm -rf /rootful-podman/*
+              mkdir -p /rootful-podman/rootful-vfs
           securityContext:
             privileged: false
             # Fresh PVC roots start out owned by root, so create the shared
@@ -500,8 +586,12 @@ spec:
           volumeMounts:
             - name: state
               mountPath: /state
+            - name: session-state
+              mountPath: /session-state
             - name: workspace
               mountPath: /workspace-state
+            - name: rootful-podman
+              mountPath: /rootful-podman
         - name: init-state
           # renovate: datasource=docker depName=busybox versioning=docker
           image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
@@ -511,7 +601,7 @@ spec:
             - |
               set -eu
               umask 077
-              [ -f /state/copilot/config.json ] || cat > /state/copilot/config.json <<'JSON'
+              [ -f /state/copilot-config.json ] || cat > /state/copilot-config.json <<'JSON'
               {
                 "auth": {
                   "provider": "github"
@@ -581,6 +671,14 @@ spec:
               value: k8s-job
             - name: CONTROL_PLANE_LOCAL_PODMAN_MODE
               value: rootful-service
+            - name: CONTROL_PLANE_JOB_TRANSFER_IMAGE
+              value: ${control_plane_image}
+            - name: CONTROL_PLANE_JOB_TRANSFER_HOST
+              value: control-plane.${namespace}.svc.cluster.local
+            - name: CONTROL_PLANE_JOB_TRANSFER_PORT
+              value: "2222"
+            - name: CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT
+              value: "100"
             - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
               value: Never
           # Keep the Kind test on the same current-cluster-compatible profile as
@@ -636,8 +734,10 @@ spec:
               memory: 1Gi
           volumeMounts:
             - name: state
-              mountPath: /home/copilot/.copilot
-              subPath: copilot
+              mountPath: /home/copilot/.copilot/config.json
+              subPath: copilot-config.json
+            - name: session-state
+              mountPath: /home/copilot/.copilot/session-state
             - name: state
               mountPath: /home/copilot/.config/gh
               subPath: gh
@@ -650,6 +750,8 @@ spec:
             - name: workspace
               mountPath: /workspace
               subPath: workspace
+            - name: rootful-podman
+              mountPath: /var/lib/control-plane/rootful-podman
             - name: control-plane-auth
               mountPath: /var/run/control-plane-auth
               readOnly: true
@@ -660,9 +762,15 @@ spec:
         - name: state
           persistentVolumeClaim:
             claimName: control-plane-state-pvc
+        - name: session-state
+          persistentVolumeClaim:
+            claimName: control-plane-session-state-pvc
         - name: workspace
           persistentVolumeClaim:
             claimName: control-plane-workspace-pvc
+        - name: rootful-podman
+          persistentVolumeClaim:
+            claimName: control-plane-rootful-podman-pvc
         - name: control-plane-auth
           secret:
             secretName: control-plane-auth
@@ -677,7 +785,9 @@ cleanup() {
   kubectl delete namespace "${namespace}" --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete namespace "${job_namespace}" --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete pv control-plane-state-pv --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete pv control-plane-session-state-pv --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete pv control-plane-workspace-control-pv --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete pv control-plane-rootful-podman-pv --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete pv control-plane-workspace-job-pv --ignore-not-found >/dev/null 2>&1 || true
   if [[ "${created_cluster}" -eq 1 ]]; then
     kind_cmd delete cluster --name "${cluster_name}" >/dev/null 2>&1 || true
@@ -734,6 +844,8 @@ command -v k8s-job-start
 command -v k8s-job-wait
 command -v k8s-job-pod
 command -v k8s-job-logs
+command -v control-plane-copilot
+command -v control-plane-job-transfer
 command -v podman
 command -v docker
 command -v kind
@@ -754,6 +866,7 @@ test "\${VISUAL}" = "vim"
 test "\${GH_PAGER}" = "cat"
 test -f ~/.copilot/skills/control-plane-operations/SKILL.md
 test -f ~/.copilot/config.json
+test -d ~/.copilot/session-state
 test -f ~/.config/gh/hosts.yml
 test "\$(stat -c '%a %U %G' ~/.copilot/config.json)" = '600 copilot copilot'
 test "\$(stat -c '%a %U %G' ~/.config/gh/hosts.yml)" = '600 copilot copilot'
@@ -792,6 +905,7 @@ else
 fi
 test -d "\${expected_state_dir}/storage/\${expected_driver}"
 test -d "\${expected_state_dir}/storage/volumes"
+test -d /var/lib/control-plane/rootful-podman/rootful-vfs
 test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
 cat /proc/self/uid_map > /workspace/k8s-pod-uid-map.txt
 EOF
@@ -799,8 +913,8 @@ printf '%s\n' 'kind-test: initial remote assertions ok' >&2
 
 if ! ssh_bash <<'EOF'
 set -euo pipefail
-podman info --format '{{.Store.GraphDriverName}} {{.Host.Security.Rootless}}' > /workspace/k8s-podman-info-summary.txt 2> /workspace/k8s-podman-info.log
-grep -qx 'vfs false' /workspace/k8s-podman-info-summary.txt
+podman info --format '{{.Store.GraphRoot}} {{.Store.GraphDriverName}} {{.Host.Security.Rootless}}' > /workspace/k8s-podman-info-summary.txt 2> /workspace/k8s-podman-info.log
+grep -qx '/var/lib/control-plane/rootful-podman/rootful-vfs/storage vfs false' /workspace/k8s-podman-info-summary.txt
 timeout 30s podman pull docker.io/library/hello-world:latest > /workspace/k8s-actual-podman-pull.log 2>&1
 timeout 20s podman run --rm docker.io/library/hello-world:latest > /workspace/k8s-actual-podman-run.log 2>&1
 grep -q 'Hello from Docker!' /workspace/k8s-actual-podman-run.log
@@ -834,13 +948,13 @@ if [[ "\${jobs_status}" -ne 0 ]] || [[ "\${jobs_access}" != "yes" ]]; then
   exit 1
 fi
 set +e
-configmaps_access="\$(kubectl auth can-i create configmaps --namespace ${job_namespace} 2>&1)"
-configmaps_status=\$?
+secrets_access="\$(kubectl auth can-i create secrets --namespace ${job_namespace} 2>&1)"
+secrets_status=\$?
 set -e
-if [[ "\${configmaps_status}" -ne 0 ]] || [[ "\${configmaps_access}" != "yes" ]]; then
-  printf 'Expected control-plane service account to create configmaps in namespace %s\n' "${job_namespace}" >&2
-  printf 'kubectl auth can-i exit status: %s\n' "\${configmaps_status}" >&2
-  printf '%s\n' "\${configmaps_access}" >&2
+if [[ "\${secrets_status}" -ne 0 ]] || [[ "\${secrets_access}" != "yes" ]]; then
+  printf 'Expected control-plane service account to create secrets in namespace %s\n' "${job_namespace}" >&2
+  printf 'kubectl auth can-i exit status: %s\n' "\${secrets_status}" >&2
+  printf '%s\n' "\${secrets_access}" >&2
   kubectl config current-context >&2 || true
   exit 1
 fi
@@ -1107,7 +1221,7 @@ EOF
 
 ssh_bash <<EOF
 set -euo pipefail
-printf 'job input from configmap\n' > /workspace/job-input.txt
+printf 'job input from transfer\n' > /workspace/job-input.txt
 printf 'colon input\n' > '/workspace/job:input.txt'
 cat > /tmp/fake-podman-success <<'INNER'
 #!/usr/bin/env bash
@@ -1183,13 +1297,12 @@ grep -q '^pull$' /tmp/fake-podman-migrate.log
 grep -q '^quay.io/example/test:latest$' /tmp/fake-podman-migrate.log
 grep -q 'detected stale rootless Podman state' /tmp/fake-podman-migrate-output.log
 grep -q 'repaired the local Podman state' /tmp/fake-podman-migrate-output.log
-control-plane-run --mode auto --execution-hint long --namespace ${job_namespace} --job-name ci-configmap-job --mount-file /workspace/job-input.txt:inputs/job-input.txt --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke exec bash -lc 'grep -qx "job input from configmap" /var/run/control-plane/job-inputs/inputs/job-input.txt'
+/workspace/scripts/test-job-transfer.sh ${execution_plane_image} ${job_namespace}
+mkdir -p ~/.copilot/session-state
+printf '%s\n' 'session-state-ok' > ~/.copilot/session-state/k8s-session-state.txt
+printf '%s\n' 'tmp-ok' > "\${TMPDIR}/k8s-tmp.txt"
+printf '%s\n' 'rootful-reset' > /var/lib/control-plane/rootful-podman/rootful-vfs/should-disappear.txt
 EOF
-
-if kubectl get configmaps --namespace "${job_namespace}" -l job-name=ci-configmap-job -o jsonpath='{.items[*].metadata.name}' | grep -q .; then
-  printf 'Expected ci-configmap-job input ConfigMap to be cleaned up\n' >&2
-  exit 1
-fi
 
 first_host_fingerprint="$(ssh_host_fingerprint)"
 
@@ -1205,10 +1318,14 @@ second_host_fingerprint="$(ssh_host_fingerprint)"
 ssh_bash <<'EOF'
 set -euo pipefail
 test -f ~/.copilot/state.txt
+test -f ~/.copilot/session-state/k8s-session-state.txt
 test -f ~/.config/gh/state.txt
 test -f ~/.ssh/state.txt
 test -f /workspace/manual-job.txt
 test -f /workspace/auto-job.txt
 test -f /workspace/default-job.txt
 test -f /workspace/k8s-screen.txt
+test ! -e "${TMPDIR}/k8s-tmp.txt"
+test ! -e /var/lib/control-plane/rootful-podman/rootful-vfs/should-disappear.txt
+test ! -e ~/.copilot/tmp
 EOF

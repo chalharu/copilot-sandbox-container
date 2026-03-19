@@ -2,7 +2,7 @@
 
 このページは、current-cluster と Control Plane 周辺で実際に重要になるログ断片を引くための Reference です。手順は `docs/how-to-guides/cookbook.md`、背景説明は `docs/explanation/knowledge.md` を参照してください。
 
-current-cluster の rootful-service では、起動遅延を避けるため local Podman の graphroot を既定で `/run/control-plane/state-vfs/storage` のような ephemeral path に置きます。古い PVC 配下の `~/.copilot/containers/rootful-*` は起動 hot path から外れるため、残っていても次回 startup の主要因にならない想定です。
+current-cluster の rootful-service では、local Podman の graphroot を既定で `/var/lib/control-plane/rootful-podman/rootful-vfs/storage` に置きます。この volume は Pod 用に分離した RWO PVC を想定し、init container が起動時に中身を掃除するため、古い local image store を引きずらずに済みます。
 
 ## 1. bundled skill が読めない
 

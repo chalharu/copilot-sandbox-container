@@ -87,60 +87,42 @@ normalize_mount_file_spec() {
 
   [[ -n "${source_path}" ]] || die "mount-file source must not be empty"
   [[ -f "${source_path}" ]] || die "mount-file source is not a regular file: ${source_path}"
+  [[ ! -L "${source_path}" ]] || die "mount-file source must not be a symlink: ${source_path}"
   validate_relative_path "${destination_path}" "${allow_colon}"
 
   printf '%s\t%s\n' "${source_path}" "${destination_path}"
 }
 
-render_configmap_binary_data() {
-  local indent="$1"
-  shift
-  local spec
-  local normalized
-  local source_path
-  local index=0
-  local total_size=0
-  local file_size
-
-  for spec in "$@"; do
-    normalized="$(normalize_mount_file_spec "${spec}")"
-    source_path="${normalized%%$'\t'*}"
-    file_size="$(wc -c < "${source_path}")"
-    total_size=$((total_size + file_size))
-    if (( total_size > input_configmap_max_bytes )); then
-      die "mount-file payload exceeds ${input_configmap_max_bytes} bytes; use a shared workspace PVC or another artifact handoff path"
-    fi
-    printf '%s%s: %s\n' "${indent}" "file-${index}" "$(base64 -w0 < "${source_path}")"
-    index=$((index + 1))
-  done
-}
-
-render_configmap_items() {
-  local indent="$1"
-  shift
-  local spec
-  local normalized
-  local destination_path
-  local index=0
-
-  for spec in "$@"; do
-    normalized="$(normalize_mount_file_spec "${spec}")"
-    destination_path="${normalized#*$'\t'}"
-    printf '%s- key: %s\n' "${indent}" "$(yaml_quote "file-${index}")"
-    printf '%s  path: %s\n' "${indent}" "$(yaml_quote "${destination_path}")"
-    index=$((index + 1))
-  done
-}
-
-job_input_configmap_name() {
+job_transfer_secret_name() {
   local current_job_name="$1"
   local checksum
   local prefix
 
   checksum="$(printf '%s' "${current_job_name}" | cksum | awk '{ print $1 }')"
-  prefix="${current_job_name:0:45}"
+  prefix="${current_job_name:0:43}"
   prefix="${prefix%-}"
-  printf '%s-inputs-%s\n' "${prefix}" "${checksum}"
+  printf '%s-transfer-%s\n' "${prefix}" "${checksum}"
+}
+
+append_authorized_key_block() {
+  local marker="$1"
+  local public_key_path="$2"
+  local lock_file="${authorized_keys_path}.lock"
+
+  touch "${authorized_keys_path}"
+  chmod 600 "${authorized_keys_path}"
+
+  (
+    flock -x 9
+    if grep -Fxq "# BEGIN ${marker}" "${authorized_keys_path}"; then
+      die "authorized_keys already contains marker ${marker}"
+    fi
+    {
+      printf '# BEGIN %s\n' "${marker}"
+      cat "${public_key_path}"
+      printf '# END %s\n' "${marker}"
+    } >> "${authorized_keys_path}"
+  ) 9>"${lock_file}"
 }
 
 namespace="${CONTROL_PLANE_JOB_NAMESPACE:-${CONTROL_PLANE_K8S_NAMESPACE:-default}}"
@@ -156,14 +138,28 @@ job_cpu_limit="${CONTROL_PLANE_JOB_CPU_LIMIT:-1000m}"
 job_memory_request="${CONTROL_PLANE_JOB_MEMORY_REQUEST:-128Mi}"
 job_memory_limit="${CONTROL_PLANE_JOB_MEMORY_LIMIT:-1Gi}"
 input_mount_path="${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH:-/var/run/control-plane/job-inputs}"
-input_configmap_max_bytes="${CONTROL_PLANE_JOB_INPUT_CONFIGMAP_MAX_BYTES:-750000}"
+job_transfer_image="${CONTROL_PLANE_JOB_TRANSFER_IMAGE:-}"
+job_transfer_host="${CONTROL_PLANE_JOB_TRANSFER_HOST:-control-plane.${CONTROL_PLANE_K8S_NAMESPACE:-default}.svc.cluster.local}"
+job_transfer_port="${CONTROL_PLANE_JOB_TRANSFER_PORT:-2222}"
+job_transfer_user="${CONTROL_PLANE_JOB_TRANSFER_USER:-${USER:-copilot}}"
+job_transfer_root="${CONTROL_PLANE_JOB_TRANSFER_ROOT:-${TMPDIR:-/tmp}/job-transfers}"
+host_key_dir="${CONTROL_PLANE_HOST_KEY_DIR:-/var/lib/control-plane/ssh-host-keys}"
+authorized_keys_path="${HOME:-/home/${USER:-copilot}}/.ssh/authorized_keys"
 mount_files=()
-created_input_configmap=""
+created_transfer_secret=""
+created_transfer_id=""
 job_created=0
+job_transfer_key_dir=""
 
 cleanup() {
-  if [[ -n "${created_input_configmap}" ]] && [[ "${job_created}" -eq 0 ]]; then
-    kubectl delete configmap --namespace "${namespace}" "${created_input_configmap}" --ignore-not-found >/dev/null 2>&1 || true
+  if [[ "${job_created}" -eq 0 ]] && [[ -n "${created_transfer_secret}" ]]; then
+    kubectl delete secret --namespace "${namespace}" "${created_transfer_secret}" --ignore-not-found >/dev/null 2>&1 || true
+  fi
+  if [[ "${job_created}" -eq 0 ]] && [[ -n "${created_transfer_id}" ]]; then
+    control-plane-job-transfer release-access --transfer-id "${created_transfer_id}" --remove-transfer-dir >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${job_transfer_key_dir}" ]]; then
+    rm -rf "${job_transfer_key_dir}" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -222,8 +218,12 @@ fi
 command_block="$(render_yaml_list '            ' "$@")"
 volume_mount_entries=""
 volume_entries=""
+init_container_entries=""
+sidecar_entries=""
+job_metadata_block=""
 volume_mount_block=""
 volume_block=""
+init_containers_block=""
 service_account_block=""
 resources_block=$(cat <<EOF
           resources:
@@ -259,33 +259,212 @@ EOF
 fi
 
 if [[ ${#mount_files[@]} -gt 0 ]]; then
-  created_input_configmap="$(job_input_configmap_name "${job_name}")"
-  cat <<EOF | kubectl create -f - >/dev/null
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: $(yaml_quote "${created_input_configmap}")
-  namespace: $(yaml_quote "${namespace}")
-  labels:
-    app.kubernetes.io/name: control-plane-job-inputs
-    app.kubernetes.io/part-of: control-plane-execution
-    job-name: $(yaml_quote "${job_name}")
-binaryData:
-$(render_configmap_binary_data '  ' "${mount_files[@]}")
-EOF
+  command -v control-plane-job-transfer >/dev/null 2>&1 || die "missing control-plane-job-transfer helper"
+  command -v jq >/dev/null 2>&1 || die "missing jq"
+  command -v kubectl >/dev/null 2>&1 || die "missing kubectl"
+  command -v ssh-keygen >/dev/null 2>&1 || die "missing ssh-keygen"
+  [[ -n "${job_transfer_image}" ]] || die "CONTROL_PLANE_JOB_TRANSFER_IMAGE is required when --mount-file is used"
+  [[ -n "${job_transfer_host}" ]] || die "CONTROL_PLANE_JOB_TRANSFER_HOST is required when --mount-file is used"
+  [[ -n "${job_transfer_port}" ]] || die "CONTROL_PLANE_JOB_TRANSFER_PORT is required when --mount-file is used"
+  [[ -n "${job_transfer_user}" ]] || die "CONTROL_PLANE_JOB_TRANSFER_USER is required when --mount-file is used"
+  [[ -f "${host_key_dir}/ssh_host_ed25519_key.pub" ]] || die "missing SSH host key at ${host_key_dir}/ssh_host_ed25519_key.pub"
+
+  created_transfer_id="$(printf '%s-%s-%s\n' "${job_name}" "$(date +%s)" "$RANDOM" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
+  created_transfer_id="${created_transfer_id%-}"
+  created_transfer_secret="$(job_transfer_secret_name "${job_name}")"
+  created_transfer_dir="${job_transfer_root%/}/${created_transfer_id}"
+  authorized_key_marker="control-plane-job-transfer:${created_transfer_id}"
+  job_transfer_key_dir="$(mktemp -d "${TMPDIR:-/tmp}/k8s-job-transfer.XXXXXX")"
+  ssh_private_key_path="${job_transfer_key_dir}/id_ed25519"
+  ssh_known_hosts_path="${job_transfer_key_dir}/known_hosts"
+  manifest_path="${created_transfer_dir}/manifest.json"
+  transfer_files_json='[]'
+  mkdir -p "${created_transfer_dir}/input" "${created_transfer_dir}/output"
+  ssh-keygen -q -t ed25519 -N '' -f "${ssh_private_key_path}" >/dev/null
+  printf '[%s]:%s ' "${job_transfer_host}" "${job_transfer_port}" > "${ssh_known_hosts_path}"
+  cat "${host_key_dir}/ssh_host_ed25519_key.pub" >> "${ssh_known_hosts_path}"
+  append_authorized_key_block "${authorized_key_marker}" "${ssh_private_key_path}.pub"
+
+  for mount_file in "${mount_files[@]}"; do
+    normalized_mount_file="$(normalize_mount_file_spec "${mount_file}")"
+    source_path="${normalized_mount_file%%$'\t'*}"
+    destination_path="${normalized_mount_file#*$'\t'}"
+    staged_input_path="${created_transfer_dir}/input/${destination_path}"
+    mkdir -p "$(dirname "${staged_input_path}")"
+    cp "${source_path}" "${staged_input_path}"
+    source_sha256="$(sha256sum "${source_path}" | awk '{ print $1 }')"
+    transfer_files_json="$(jq -c \
+      --arg source_path "${source_path}" \
+      --arg destination_path "${destination_path}" \
+      --arg source_sha256 "${source_sha256}" \
+      '. + [{
+        source_path: $source_path,
+        destination_path: $destination_path,
+        source_sha256: $source_sha256
+      }]' <<<"${transfer_files_json}")"
+  done
+
+  jq -n \
+    --arg transfer_id "${created_transfer_id}" \
+    --arg job_name "${job_name}" \
+    --arg job_namespace "${namespace}" \
+    --arg secret_name "${created_transfer_secret}" \
+    --arg authorized_key_marker "${authorized_key_marker}" \
+    --arg input_root "${created_transfer_dir}/input" \
+    --arg output_root "${created_transfer_dir}/output" \
+    --argjson files "${transfer_files_json}" \
+    '{
+      transfer_id: $transfer_id,
+      job_name: $job_name,
+      job_namespace: $job_namespace,
+      secret_name: $secret_name,
+      authorized_key_marker: $authorized_key_marker,
+      input_root: $input_root,
+      output_root: $output_root,
+      files: $files
+    }' > "${manifest_path}"
+
+  kubectl create secret generic "${created_transfer_secret}" \
+    --namespace "${namespace}" \
+    --from-file=id_ed25519="${ssh_private_key_path}" \
+    --from-file=known_hosts="${ssh_known_hosts_path}" \
+    >/dev/null
 
   volume_mount_entries="$(append_yaml_block "${volume_mount_entries}" "$(cat <<EOF
             - name: job-inputs
               mountPath: $(yaml_quote "${input_mount_path}")
+            - name: job-transfer-auth
+              mountPath: '/var/run/control-plane-job-transfer'
               readOnly: true
 EOF
   )")"
+
   volume_entries="$(append_yaml_block "${volume_entries}" "$(cat <<EOF
         - name: job-inputs
-          configMap:
-            name: $(yaml_quote "${created_input_configmap}")
-            items:
-$(render_configmap_items '              ' "${mount_files[@]}")
+          emptyDir: {}
+        - name: job-transfer-auth
+          secret:
+            secretName: $(yaml_quote "${created_transfer_secret}")
+            defaultMode: 0400
+EOF
+  )")"
+
+  job_metadata_block=$(cat <<EOF
+  annotations:
+    control-plane.github.io/job-transfer-id: $(yaml_quote "${created_transfer_id}")
+    control-plane.github.io/job-transfer-secret: $(yaml_quote "${created_transfer_secret}")
+EOF
+  )
+
+  init_container_entries="$(append_yaml_block "${init_container_entries}" "$(cat <<EOF
+        - name: job-transfer-init
+          image: $(yaml_quote "${job_transfer_image}")
+          imagePullPolicy: $(yaml_quote "${job_image_pull_policy}")
+          env:
+            - name: CONTROL_PLANE_TRANSFER_HOST
+              value: $(yaml_quote "${job_transfer_host}")
+            - name: CONTROL_PLANE_TRANSFER_PORT
+              value: $(yaml_quote "${job_transfer_port}")
+            - name: CONTROL_PLANE_TRANSFER_USER
+              value: $(yaml_quote "${job_transfer_user}")
+            - name: CONTROL_PLANE_TRANSFER_REMOTE_PATH
+              value: $(yaml_quote "${created_transfer_dir}/input")
+            - name: CONTROL_PLANE_JOB_INPUT_MOUNT_PATH
+              value: $(yaml_quote "${input_mount_path}")
+          command:
+            - /bin/bash
+            - -lc
+            - |
+              set -euo pipefail
+              cat > /tmp/rclone.conf <<'RCLONE'
+              [control-plane]
+              type = sftp
+              host = \${CONTROL_PLANE_TRANSFER_HOST}
+              user = \${CONTROL_PLANE_TRANSFER_USER}
+              port = \${CONTROL_PLANE_TRANSFER_PORT}
+              key_file = /var/run/control-plane-job-transfer/id_ed25519
+              known_hosts_file = /var/run/control-plane-job-transfer/known_hosts
+              shell_type = none
+              RCLONE
+              mkdir -p "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}"
+              rclone --config /tmp/rclone.conf copy "control-plane:\${CONTROL_PLANE_TRANSFER_REMOTE_PATH}" "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}"
+          volumeMounts:
+            - name: job-inputs
+              mountPath: $(yaml_quote "${input_mount_path}")
+            - name: job-transfer-auth
+              mountPath: '/var/run/control-plane-job-transfer'
+              readOnly: true
+EOF
+  )")"
+
+  sidecar_entries="$(append_yaml_block "${sidecar_entries}" "$(cat <<EOF
+        - name: job-transfer-sync
+          image: $(yaml_quote "${job_transfer_image}")
+          imagePullPolicy: $(yaml_quote "${job_image_pull_policy}")
+          env:
+            - name: CONTROL_PLANE_TRANSFER_ID
+              value: $(yaml_quote "${created_transfer_id}")
+            - name: CONTROL_PLANE_TRANSFER_HOST
+              value: $(yaml_quote "${job_transfer_host}")
+            - name: CONTROL_PLANE_TRANSFER_PORT
+              value: $(yaml_quote "${job_transfer_port}")
+            - name: CONTROL_PLANE_TRANSFER_USER
+              value: $(yaml_quote "${job_transfer_user}")
+            - name: CONTROL_PLANE_TRANSFER_OUTPUT_PATH
+              value: $(yaml_quote "${created_transfer_dir}/output")
+            - name: CONTROL_PLANE_JOB_INPUT_MOUNT_PATH
+              value: $(yaml_quote "${input_mount_path}")
+          command:
+            - /bin/bash
+            - -lc
+            - |
+              set -euo pipefail
+              api_server="https://\${KUBERNETES_SERVICE_HOST}:\${KUBERNETES_SERVICE_PORT_HTTPS:-443}"
+              service_account_dir=/var/run/secrets/kubernetes.io/serviceaccount
+              token="\$(cat "\${service_account_dir}/token")"
+              namespace="\$(cat "\${service_account_dir}/namespace")"
+              ca_crt="\${service_account_dir}/ca.crt"
+              pod_name="\${HOSTNAME:?}"
+              execution_exit_code=""
+              while [[ -z "\${execution_exit_code}" ]]; do
+                pod_json="\$(curl -fsS --cacert "\${ca_crt}" -H "Authorization: Bearer \${token}" "\${api_server}/api/v1/namespaces/\${namespace}/pods/\${pod_name}")"
+                execution_exit_code="\$(jq -r '.status.containerStatuses[] | select(.name == "execution") | .state.terminated.exitCode // empty' <<<"\${pod_json}")"
+                if [[ -z "\${execution_exit_code}" ]]; then
+                  sleep 1
+                fi
+              done
+              ssh_opts=(
+                -i /var/run/control-plane-job-transfer/id_ed25519
+                -p "\${CONTROL_PLANE_TRANSFER_PORT}"
+                -o BatchMode=yes
+                -o StrictHostKeyChecking=yes
+                -o UserKnownHostsFile=/var/run/control-plane-job-transfer/known_hosts
+              )
+              cat > /tmp/rclone.conf <<'RCLONE'
+              [control-plane]
+              type = sftp
+              host = \${CONTROL_PLANE_TRANSFER_HOST}
+              user = \${CONTROL_PLANE_TRANSFER_USER}
+              port = \${CONTROL_PLANE_TRANSFER_PORT}
+              key_file = /var/run/control-plane-job-transfer/id_ed25519
+              known_hosts_file = /var/run/control-plane-job-transfer/known_hosts
+              shell_type = none
+              RCLONE
+              if [[ "\${execution_exit_code}" == "0" ]]; then
+                rclone --config /tmp/rclone.conf copy "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}" "control-plane:\${CONTROL_PLANE_TRANSFER_OUTPUT_PATH}"
+                ssh "\${ssh_opts[@]}" "\${CONTROL_PLANE_TRANSFER_USER}@\${CONTROL_PLANE_TRANSFER_HOST}" \
+                  "control-plane-job-transfer finalize --transfer-id \${CONTROL_PLANE_TRANSFER_ID}"
+                exit 0
+              fi
+              ssh "\${ssh_opts[@]}" "\${CONTROL_PLANE_TRANSFER_USER}@\${CONTROL_PLANE_TRANSFER_HOST}" \
+                "control-plane-job-transfer release-access --transfer-id \${CONTROL_PLANE_TRANSFER_ID}"
+              exit "\${execution_exit_code}"
+          volumeMounts:
+            - name: job-inputs
+              mountPath: $(yaml_quote "${input_mount_path}")
+            - name: job-transfer-auth
+              mountPath: '/var/run/control-plane-job-transfer'
+              readOnly: true
 EOF
   )")"
 fi
@@ -306,12 +485,46 @@ EOF
   )
 fi
 
+if [[ -n "${init_container_entries}" ]]; then
+  init_containers_block=$(cat <<EOF
+      initContainers:
+${init_container_entries}
+EOF
+  )
+fi
+
+if [[ -n "${sidecar_entries}" ]]; then
+  container_entries=$(cat <<EOF
+        - name: execution
+          image: $(yaml_quote "${image}")
+          imagePullPolicy: $(yaml_quote "${job_image_pull_policy}")
+          command:
+${command_block}
+${resources_block}
+${volume_mount_block}
+${sidecar_entries}
+EOF
+  )
+else
+  container_entries=$(cat <<EOF
+        - name: execution
+          image: $(yaml_quote "${image}")
+          imagePullPolicy: $(yaml_quote "${job_image_pull_policy}")
+          command:
+${command_block}
+${resources_block}
+${volume_mount_block}
+EOF
+  )
+fi
+
 cat <<EOF | kubectl create -f - >/dev/null
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: $(yaml_quote "${job_name}")
   namespace: $(yaml_quote "${namespace}")
+${job_metadata_block}
 spec:
   backoffLimit: 0
   template:
@@ -322,14 +535,9 @@ spec:
     spec:
       restartPolicy: Never
 ${service_account_block}
+${init_containers_block}
       containers:
-        - name: execution
-          image: $(yaml_quote "${image}")
-          imagePullPolicy: $(yaml_quote "${job_image_pull_policy}")
-          command:
-${command_block}
-${resources_block}
-${volume_mount_block}
+${container_entries}
 ${volume_block}
 EOF
 

@@ -14,7 +14,7 @@ Options:
   --job-name NAME                 Kubernetes Job name
   --timeout DURATION              Kubernetes Job wait timeout (default: 300s)
   --workspace PATH                Host or mounted workspace path (default: /workspace)
-  --mount-file SRC[:DEST]         Mount a small local file under the shared job input dir
+  --mount-file SRC[:DEST]         Mount a local file under the shared job input dir
   --input-mount-path PATH         Mount path used for --mount-file (default: /var/run/control-plane/job-inputs)
   --image IMAGE                   Execution Plane image to run
   --help                          Show this help
@@ -68,6 +68,7 @@ normalize_mount_file_spec() {
 
   [[ -n "${source_path}" ]] || die "mount-file source must not be empty"
   [[ -f "${source_path}" ]] || die "mount-file source is not a regular file: ${source_path}"
+  [[ ! -L "${source_path}" ]] || die "mount-file source must not be a symlink: ${source_path}"
   validate_relative_path "${destination_path}" "${allow_colon}"
 
   printf '%s\t%s\n' "${source_path}" "${destination_path}"
@@ -196,8 +197,8 @@ if [[ "${mode}" == "podman" ]]; then
   podman_args=(run --rm -v "${workspace}:/workspace")
 
   mkdir -p "${workspace}"
-  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-${HOME}/.copilot/run}"
-  export TMPDIR="${TMPDIR:-${HOME}/.copilot/tmp}"
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/control-plane-run-$(id -u)}"
+  export TMPDIR="${TMPDIR:-/tmp/control-plane-$(id -u)}"
   mkdir -p "${XDG_RUNTIME_DIR}"
   mkdir -p "${TMPDIR}"
   chmod 700 "${XDG_RUNTIME_DIR}"

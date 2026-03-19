@@ -19,9 +19,11 @@ yamllint_config="${CONTROL_PLANE_YAMLLINT_CONFIG:-/workspace/.yamllint}"
 dockerfiles=()
 yaml_files=()
 shellcheck_targets=(
+  /workspace/containers/control-plane/bin/control-plane-copilot
   /workspace/containers/control-plane/bin/control-plane-podman
   /workspace/containers/control-plane/bin/control-plane-screen
   /workspace/containers/control-plane/bin/control-plane-entrypoint
+  /workspace/containers/control-plane/bin/control-plane-job-transfer
   /workspace/containers/control-plane/bin/control-plane-run
   /workspace/containers/control-plane/bin/control-plane-session
   /workspace/containers/control-plane/bin/k8s-job-start

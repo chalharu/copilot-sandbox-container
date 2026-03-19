@@ -42,30 +42,38 @@ current-cluster では `CONTROL_PLANE_RUN_MODE=k8s-job` を既定にし、local 
 
 Control Plane では、少なくとも次を永続化対象とします。
 
-- `~/.copilot`
+- `~/.copilot/config.json`
+- `~/.copilot/session-state`
 - `~/.config/gh`
 - `~/.ssh`
 - `/workspace`
+- `/var/lib/control-plane/rootful-podman`
 
-一方、Podman の runtime dir、runroot、Screen socket は PVC ではなく ephemeral path に置きます。これにより stale netns や古い socket が再起動後に残りにくくなります。
+一方、`~/.copilot/tmp`、Podman の runtime dir、runroot、Screen socket は PVC ではなく ephemeral path に置きます。これにより stale netns や古い socket が再起動後に残りにくくなります。
 
-current-cluster の rootful-service graphroot も既定では `~/.copilot/containers` ではなく `/run/control-plane/state-<driver>/storage` 配下へ置きます。local Podman の image / layer を Pod 再起動後へ持ち越さない代わりに、PVC に残った古い rootful image store が次回 startup の hot path を重くしないようにするためです。
+current-cluster の rootful-service graphroot は既定で `/var/lib/control-plane/rootful-podman/rootful-<driver>/storage` を使います。ただしこの volume は Podman 専用の RWO 領域として分離し、init container が起動時に掃除します。これにより `/workspace` や `~/.copilot` を重くせずに、rootful-service 側のパスも安定させられます。
 
 Podman storage は driver ごとに分離しています。`overlay` と `vfs` を混在させても DB 衝突を起こしにくくするためです。
 
-## 6. なぜ Copilot config は ConfigMap merge で gh auth は Secret なのか
+## 6. なぜ Job の `--mount-file` は SSH/SFTP + `rclone` なのか
+
+ConfigMap 経由の file handoff は簡単ですが、サイズ制限が厳しく、大きめの入力ファイルや Job からの write-back を扱いにくいです。そのため Kubernetes Job path の `--mount-file` は、Control Plane 自身の SSH endpoint を使って一時鍵を配り、init container が `rclone` で入力を pull し、sidecar が Job 完了後に変更ファイルを push する構成へ切り替えています。
+
+write-back では、Job 開始時に記録した元ファイルの SHA-256 と完了時の現在値を比較します。Job 実行中に外部更新が入り、かつ Job 側も同じファイルを変えていた場合は上書きせず、競合出力を transfer staging area に退避して operator に明示します。つまり「大きいファイルを運べること」と「黙って競合を潰さないこと」を同時に優先しています。
+
+## 7. なぜ Copilot config は ConfigMap merge で gh auth は Secret なのか
 
 `~/.copilot/config.json` には editor preference や feature toggle のような非機密設定が入りやすく、しかも PVC 上に既存 state が残っている前提です。そのため sample manifest では `control-plane-config` ConfigMap に JSON object overlay を置き、entrypoint が既存 `~/.copilot/config.json` へ deep-merge する形にしています。これなら Pod を再作成しても PVC 上の既存設定を丸ごと消さずに、operator が足したい差分だけを宣言できます。
 
 一方で `~/.config/gh/hosts.yml` は token を含み得るため ConfigMap へは置きません。entrypoint は `GH_HOSTS_YML_FILE` による Secret-backed file を最優先し、これが無い場合だけ `GH_GITHUB_TOKEN_FILE` から最小 `hosts.yml` を生成します。つまり gh 側は「Secret で完全指定」か「Secret token から安全に生成」の 2 択に寄せ、token を平文 ConfigMap へ流さない設計です。
 
-## 7. bundled skill を `~/.copilot/skills` へ同期する理由
+## 8. bundled skill を `~/.copilot/skills` へ同期する理由
 
 `control-plane-operations` skill は image へ同梱し、起動時に `~/.copilot/skills/control-plane-operations` へ同期します。これは `/workspace` が別リポジトリを指していても、Control Plane 固有の運用知識を常に参照可能にするためです。
 
 今回の修正では symlink ではなく copy 同期に寄せ、`references/` を含む directory / file mode を明示的に整えています。これにより、directory traverse 権が壊れて `Permission denied` になる経路を消しています。
 
-## 8. image 方針
+## 9. image 方針
 
 image は次の優先順位で決めます。
 
