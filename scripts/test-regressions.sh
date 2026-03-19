@@ -2,6 +2,7 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+control_plane_bin_dir="${script_dir}/../containers/control-plane/bin"
 control_plane_image="${1:?usage: scripts/test-regressions.sh <control-plane-image>}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-podman}"
 workdir="$(mktemp -d)"
@@ -186,14 +187,14 @@ printf 'unexpected fake kubectl command: %s\n' "$*" >&2
 exit 1
 EOF
 chmod +x "${workdir}/fake-bin/kubectl"
-PATH="${workdir}/fake-bin:/workspace/containers/control-plane/bin:${PATH}" \
+PATH="${workdir}/fake-bin:${control_plane_bin_dir}:${PATH}" \
   HOME="${workdir}/k8s-home" \
   CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
   CONTROL_PLANE_HOST_KEY_DIR="${workdir}/k8s-host-keys" \
   CONTROL_PLANE_JOB_TRANSFER_IMAGE=localhost/control-plane:test \
   TEST_REGRESSION_K8S_MANIFEST_PATH="${workdir}/k8s-job-manifest.yaml" \
   TEST_REGRESSION_K8S_SECRET_ARGS_PATH="${workdir}/k8s-job-secret.args" \
-  "${script_dir}/../containers/control-plane/bin/k8s-job-start" \
+  "${control_plane_bin_dir}/k8s-job-start" \
   --namespace control-plane-ci-jobs \
   --job-name regression-transfer-job \
   --image localhost/execution-plane-smoke:test \
@@ -218,7 +219,7 @@ grep -Fq "printf 'port = %s\\n' \"\${CONTROL_PLANE_TRANSFER_PORT}\"" "${workdir}
 
 set +e
 newline_transfer_output="$(
-  PATH="${workdir}/fake-bin:/workspace/containers/control-plane/bin:${PATH}" \
+  PATH="${workdir}/fake-bin:${control_plane_bin_dir}:${PATH}" \
     HOME="${workdir}/k8s-home" \
     CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
     CONTROL_PLANE_HOST_KEY_DIR="${workdir}/k8s-host-keys" \
@@ -226,7 +227,7 @@ newline_transfer_output="$(
     CONTROL_PLANE_JOB_TRANSFER_HOST=$'control-plane.example\nmalicious' \
     TEST_REGRESSION_K8S_MANIFEST_PATH="${workdir}/should-not-exist.yaml" \
     TEST_REGRESSION_K8S_SECRET_ARGS_PATH="${workdir}/should-not-exist.args" \
-    "${script_dir}/../containers/control-plane/bin/k8s-job-start" \
+    "${control_plane_bin_dir}/k8s-job-start" \
     --namespace control-plane-ci-jobs \
     --job-name regression-transfer-job-invalid \
     --image localhost/execution-plane-smoke:test \
