@@ -679,7 +679,9 @@ chown -h "${control_plane_user}:${control_plane_user}" "${control_plane_home}/.l
 chown root:root "${host_key_dir}"
 chown root:root /run/sshd
 chmod 755 "${control_plane_home}"
-chmod 700 "${control_plane_home}/.ssh" "${runtime_dir}" "${tmp_dir}" "${job_transfer_root}" "${screen_dir}" "${host_key_dir}"
+chmod 700 "${control_plane_home}/.ssh" "${runtime_dir}" "${tmp_dir}" "${job_transfer_root}" "${screen_dir}"
+# Jobs need to read the public SSH host key from an unprivileged shell to seed known_hosts.
+chmod 711 "${host_key_dir}"
 chmod 755 /run/sshd
 export XDG_RUNTIME_DIR="${runtime_dir}"
 export TMPDIR="${tmp_dir}"

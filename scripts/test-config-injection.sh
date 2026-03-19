@@ -112,6 +112,14 @@ file_backed_output="$("${container_bin}" run --rm \
 set -euo pipefail
 test "$(stat -c '%a %U %G' /home/copilot/.copilot/config.json)" = '600 copilot copilot'
 test "$(stat -c '%a %U %G' /home/copilot/.config/gh/hosts.yml)" = '600 copilot copilot'
+test "$(stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys)" = '711 root root'
+test "$(stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key)" = '600 root root'
+test "$(stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub)" = '644 root root'
+su -s /bin/bash copilot -lc 'test -r /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub'
+if su -s /bin/bash copilot -lc 'test -r /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key'; then
+  printf '%s\n' 'Expected Copilot user to be unable to read the private SSH host key' >&2
+  exit 1
+fi
 jq -e '.chat.editor == "vim"' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.chat.theme == "light"' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.nested.keep == 1' /home/copilot/.copilot/config.json >/dev/null
