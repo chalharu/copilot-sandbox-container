@@ -1355,7 +1355,18 @@ grep -q '^pull$' /tmp/fake-podman-migrate.log
 grep -q '^quay.io/example/test:latest$' /tmp/fake-podman-migrate.log
 grep -q 'detected stale rootless Podman state' /tmp/fake-podman-migrate-output.log
 grep -q 'repaired the local Podman state' /tmp/fake-podman-migrate-output.log
-/workspace/scripts/test-job-transfer.sh ${execution_plane_image} ${job_namespace}
+EOF
+
+printf -v remote_job_transfer_command 'bash -l -se -- %q %q' "${execution_plane_image}" "${job_namespace}"
+# shellcheck disable=SC2029
+if ! ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_job_transfer_command}" < "${script_dir}/test-job-transfer.sh"; then
+  printf 'Expected kind job transfer regression script to succeed\n' >&2
+  dump_control_plane_diagnostics
+  exit 1
+fi
+
+ssh_bash <<'EOF'
+set -euo pipefail
 mkdir -p ~/.copilot/session-state
 printf '%s\n' 'session-state-ok' > ~/.copilot/session-state/k8s-session-state.txt
 printf '%s\n' 'tmp-ok' > "\${TMPDIR}/k8s-tmp.txt"
