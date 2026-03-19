@@ -1370,8 +1370,10 @@ set -euo pipefail
 mkdir -p ~/.copilot/session-state
 printf '%s\n' 'session-state-ok' > ~/.copilot/session-state/k8s-session-state.txt
 printf '%s\n' 'tmp-ok' > "${TMPDIR}/k8s-tmp.txt"
-printf '%s\n' 'rootful-reset' > /var/lib/control-plane/rootful-podman/rootful-vfs/should-disappear.txt
 EOF
+
+kubectl exec --namespace "${namespace}" "$(control_plane_pod_name)" -c control-plane -- bash -lc \
+  "set -euo pipefail; printf '%s\n' 'rootful-reset' > /var/lib/control-plane/rootful-podman/rootful-vfs/should-disappear.txt"
 
 first_host_fingerprint="$(ssh_host_fingerprint)"
 
