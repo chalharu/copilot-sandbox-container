@@ -215,6 +215,46 @@ if [[ "${file_mounted_status}" -ne 0 ]]; then
 fi
 grep -qx 'file-mounted-ok' <<<"${file_mounted_output}"
 
+printf '%s\n' 'config-injection-test: verifying empty single-file config mounts fail clearly' >&2
+prepare_state_tree empty-file-mounted
+: > "${workdir}/empty-file-mounted/state/copilot-config.json"
+cat > "${workdir}/empty-file-mounted/config/copilot-config.json" <<'EOF'
+{
+  "chat": {
+    "theme": "light"
+  }
+}
+EOF
+
+set +e
+empty_file_mounted_output="$("${container_bin}" run --rm \
+  --name "${container_name}" \
+  -i \
+  "${startup_caps[@]}" \
+  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForConfigInjection control-plane-config-injection' \
+  -e COPILOT_CONFIG_JSON_FILE=/var/run/control-plane-config/copilot-config.json \
+  -v "${workdir}/empty-file-mounted/state/copilot-config.json:/home/copilot/.copilot/config.json" \
+  -v "${workdir}/empty-file-mounted/state/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/empty-file-mounted/state/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/empty-file-mounted/state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/empty-file-mounted/state/workspace:/workspace" \
+  -v "${workdir}/empty-file-mounted/config:/var/run/control-plane-config:ro" \
+  "${control_plane_image}" \
+  bash -l -se 2>&1 <<'EOF'
+set -euo pipefail
+printf '%s\n' unexpected-success
+EOF
+)"
+empty_file_mounted_status=$?
+set -e
+
+if [[ "${empty_file_mounted_status}" -eq 0 ]]; then
+  printf 'Expected empty single-file config mount to fail validation\n' >&2
+  printf '%s\n' "${empty_file_mounted_output}" >&2
+  exit 1
+fi
+grep -Fq 'Expected existing Copilot config at /home/copilot/.copilot/config.json to contain a single top-level JSON object' <<<"${empty_file_mounted_output}"
+
 printf '%s\n' 'config-injection-test: verifying gh token Secret generates hosts.yml when no file override exists' >&2
 prepare_state_tree token-backed
 cat > "${workdir}/token-backed/state/gh/hosts.yml" <<'EOF'

@@ -613,7 +613,7 @@ spec:
             - |
               set -eu
               umask 077
-              [ -f /state/copilot-config.json ] || cat > /state/copilot-config.json <<'JSON'
+              [ -s /state/copilot-config.json ] || cat > /state/copilot-config.json <<'JSON'
               {
                 "auth": {
                   "provider": "github"

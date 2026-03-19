@@ -348,8 +348,8 @@ require_json_object_file() {
   local target_path="$1"
   local description="$2"
 
-  if ! jq -e 'type == "object"' "${target_path}" >/dev/null; then
-    printf 'Expected %s at %s to contain a top-level JSON object\n' "${description}" "${target_path}" >&2
+  if ! jq -e -s 'length == 1 and (.[0] | type == "object")' "${target_path}" >/dev/null; then
+    printf 'Expected %s at %s to contain a single top-level JSON object\n' "${description}" "${target_path}" >&2
     exit 1
   fi
 }
@@ -370,12 +370,12 @@ merge_json_object_file() {
   merged_tmp="$(mktemp)"
 
   if [[ -f "${target_path}" ]]; then
+    require_json_object_file "${target_path}" "existing Copilot config"
     cp "${target_path}" "${base_tmp}"
   else
     printf '%s\n' '{}' > "${base_tmp}"
   fi
 
-  require_json_object_file "${base_tmp}" "existing Copilot config"
   require_json_object_file "${overlay_path}" "injected Copilot config"
 
   if ! jq -s '
