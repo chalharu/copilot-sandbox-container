@@ -38,20 +38,16 @@ current-cluster では `CONTROL_PLANE_RUN_MODE=k8s-job` を既定にし、local 
 
 この構成は least-privilege ではありますが、rootless の完全互換ではありません。したがって current-cluster の local nested Podman / Kind は今も best-effort 扱いです。
 
-## 5. state を分けて持つ理由
+## 5. sample manifest の state をどう分けるか
 
-Control Plane では、少なくとも次を永続化対象とします。
+sample manifest の既定値では、永続化を 2 つの PVC に絞ります。
 
-- `~/.copilot/config.json`
-- `~/.copilot/session-state`
-- `~/.config/gh`
-- `~/.ssh`
-- `/workspace`
-- `/var/lib/control-plane/rootful-podman`
+- RWX の copilot session PVC
+- RWO の `/workspace` PVC
 
-一方、`~/.copilot/tmp`、rootless Podman の runtime dir / runroot、Screen socket は PVC ではなく ephemeral path に置きます。これにより stale netns や古い socket が再起動後に残りにくくなります。
+copilot session PVC には `~/.copilot/config.json`、`~/.copilot/session-state`、`~/.config/gh`、`~/.ssh`、`/var/lib/control-plane/ssh-host-keys` をまとめます。これで session picker、GitHub 認証、SSH 鍵、Copilot の設定は Pod 再作成後も残せます。
 
-current-cluster の rootful-service graphroot は既定で `/var/lib/control-plane/rootful-podman/rootful-<driver>/storage` を使います。この volume は Podman 専用の RWO 領域として分離し、init container が起動時に掃除します。runtime dir / runroot は別に `/var/tmp/control-plane/rootful-<driver>` へ寄せます。sample manifest ではここを disk-backed `emptyDir` にしているため、rootful-service 側の大きめな temp data を tmpfs-backed `/run` ではなく node 側の ephemeral storage へ逃がせます。
+一方、`~/.copilot/tmp`、Screen socket、rootless Podman の runtime dir / runroot、rootful-service の graphroot cache は PVC ではなく ephemeral path に置きます。特に rootful-service の graphroot は `/var/lib/control-plane/rootful-podman/rootful-<driver>/storage` を使いつつ、sample manifest ではその背後を disposable な `emptyDir` にしているため、再作成可能な Podman cache が persistent volume を食い潰しません。runtime dir / runroot は引き続き `/var/tmp/control-plane/rootful-<driver>` へ寄せ、tmpfs-backed `/run` を膨らませないようにしています。
 
 current-cluster の rootful-service は既定 driver を `overlay` にします。`vfs` より copy-up が軽く、PVC や node ephemeral storage の消費を抑えやすいためです。rootless overlay は選ばれた時点で `fuse-overlayfs` を前提にします。一方 rootful overlay は `/dev/fuse` がある環境でだけ `fuse-overlayfs` を使い、無い場合は kernel overlay の既定挙動へ任せます。
 

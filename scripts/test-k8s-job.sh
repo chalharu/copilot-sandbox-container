@@ -213,7 +213,7 @@ ${service_account_yaml}
                   else
                     ! grep -q "mount_program" /var/tmp/control-plane/rootful-overlay/storage.conf
                   fi
-                  printf "%s\n" "job-check: rootful-store=dedicated-volume"
+                  printf "%s\n" "job-check: rootful-store=ephemeral-cache"
 
                  podman_output="\$(su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; podman run --rm docker.io/library/busybox:1.37.0 echo k8s-job-podman-ok'"'"')"
                  printf "job-check: podman=%s\n" "\${podman_output}"
@@ -446,7 +446,7 @@ grep -Fq 'job-check: runtime-env=' <<<"${job_logs}"
 grep -Fq 'job-check: skill-read=ok' <<<"${job_logs}"
 grep -Fq 'job-check: term=xterm-256color 256' <<<"${job_logs}"
 grep -Fq 'job-check: podman-info=/var/lib/control-plane/rootful-podman/rootful-overlay/storage overlay false' <<<"${job_logs}"
-grep -Fq 'job-check: rootful-store=dedicated-volume' <<<"${job_logs}"
+grep -Fq 'job-check: rootful-store=ephemeral-cache' <<<"${job_logs}"
 grep -Fq 'job-check: podman=k8s-job-podman-ok' <<<"${job_logs}"
 grep -Eq 'job-check: podman-build=(ok|skipped)' <<<"${job_logs}"
 grep -Fq 'job-check: interactive=ok' <<<"${job_logs}"
