@@ -421,8 +421,8 @@ run_rootful_service_build_test() {
   local TEST_REGRESSION_LOG_DIR="${workdir}"
   local CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null
   local CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service
-  local CONTAINER_HOST='unix:///run/control-plane/podman-root.sock'
-  local DOCKER_HOST='unix:///run/control-plane/podman-root.sock'
+  local CONTAINER_HOST='unix:///var/tmp/control-plane/rootful-overlay/podman-root.sock'
+  local DOCKER_HOST='unix:///var/tmp/control-plane/rootful-overlay/podman-root.sock'
   local selected_build_bin
   export PATH TEST_REGRESSION_LOG_DIR CONTROL_PLANE_RUNTIME_ENV_FILE
   export CONTROL_PLANE_LOCAL_PODMAN_MODE CONTAINER_HOST DOCKER_HOST
@@ -434,7 +434,7 @@ run_rootful_service_build_test() {
 run_rootful_service_build_test
 
 test ! -f "${workdir}/buildah.args"
-grep -qx 'CONTAINER_HOST=unix:///run/control-plane/podman-root.sock' "${workdir}/remote-build.env"
+grep -qx 'CONTAINER_HOST=unix:///var/tmp/control-plane/rootful-overlay/podman-root.sock' "${workdir}/remote-build.env"
 grep -qx 'build' "${workdir}/remote-build.args"
 grep -qx -- '--tag' "${workdir}/remote-build.args"
 grep -qx -- '--isolation=chroot' "${workdir}/remote-build.args"

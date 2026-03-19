@@ -42,10 +42,10 @@ copilot_cpu_limit_percent="${CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT:-100}"
 copilot_nice_level="${CONTROL_PLANE_COPILOT_NICE_LEVEL:-10}"
 podman_storage_driver="${CONTROL_PLANE_PODMAN_STORAGE_DRIVER:-}"
 local_podman_mode="${CONTROL_PLANE_LOCAL_PODMAN_MODE:-rootless}"
-rootful_podman_storage_driver="${CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER:-vfs}"
-rootful_podman_runtime_dir="${CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR:-/run/control-plane}"
-rootful_podman_socket="${CONTROL_PLANE_ROOTFUL_PODMAN_SOCKET:-${rootful_podman_runtime_dir}/podman-root.sock}"
+rootful_podman_storage_driver="${CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER:-overlay}"
 rootful_podman_state_root="${CONTROL_PLANE_ROOTFUL_PODMAN_STATE_ROOT:-/var/lib/control-plane/rootful-podman/rootful-${rootful_podman_storage_driver}}"
+rootful_podman_runtime_dir="${CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR:-/var/tmp/control-plane/rootful-${rootful_podman_storage_driver}}"
+rootful_podman_socket="${CONTROL_PLANE_ROOTFUL_PODMAN_SOCKET:-${rootful_podman_runtime_dir}/podman-root.sock}"
 rootful_podman_graphroot="${rootful_podman_state_root}/storage"
 rootful_podman_runroot="${rootful_podman_runtime_dir}/runroot"
 rootful_podman_storage_config_path="${rootful_podman_runtime_dir}/storage.conf"
@@ -135,7 +135,7 @@ write_rootful_storage_conf() {
     printf 'driver = "%s"\n' "${rootful_podman_storage_driver}"
     printf 'graphroot = "%s"\n' "${rootful_podman_graphroot}"
     printf 'runroot = "%s"\n' "${rootful_podman_runroot}"
-    if [[ "${rootful_podman_storage_driver}" == "overlay" ]]; then
+    if [[ "${rootful_podman_storage_driver}" == "overlay" ]] && [[ -e /dev/fuse ]]; then
       printf '\n%s\n' '[storage.options]'
       printf '%s\n' 'mount_program = "/usr/bin/fuse-overlayfs"'
     fi
@@ -829,7 +829,9 @@ fi
     write_runtime_var CONTROL_PLANE_PODMAN_DEFAULT_CGROUPS "${rootful_podman_default_cgroups}"
     write_runtime_var CONTROL_PLANE_PODMAN_DEFAULT_NETWORK "${rootful_podman_default_network}"
     write_runtime_var CONTROL_PLANE_PODMAN_BUILD_ISOLATION "${rootful_podman_build_isolation}"
+    write_runtime_var CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER "${rootful_podman_storage_driver}"
     write_runtime_var CONTROL_PLANE_ROOTFUL_PODMAN_STATE_ROOT "${rootful_podman_state_root}"
+    write_runtime_var CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR "${rootful_podman_runtime_dir}"
   fi
   write_runtime_var KUBECONFIG "${KUBECONFIG:-}"
   if [[ -n "${copilot_github_token}" ]]; then

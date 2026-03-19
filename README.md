@@ -91,7 +91,7 @@ Kubernetes 上の current-cluster smoke は次で実行します。
 
 - `drop: ALL` 系 profile での interactive SSH login が接続維持後も入力を受け付ける
 - bundled skill の `references/` 可読性
-- rootful-service の Podman graphroot が `/var/lib/control-plane/rootful-podman/rootful-vfs/storage` の専用 volume を使う
+- rootful-service の Podman graphroot が `/var/lib/control-plane/rootful-podman/rootful-overlay/storage` の専用 volume を使い、runtime dir は `/var/tmp/control-plane/rootful-overlay` の disk-backed temp path へ逃がされる
 - rootful-service 下の `podman build`
 
 sample manifest では、`control-plane-auth` Secret に `ssh-public-key` と必要な Secret 値 (`gh-github-token` または `gh-hosts.yml`, `copilot-github-token`, DockerHub 認証情報) を入れ、`control-plane-config` ConfigMap に `copilot-config.json` overlay を置きます。永続化は `~/.copilot/config.json`、`~/.copilot/session-state`、`~/.config/gh`、`~/.ssh`、`/workspace`、専用 rootful Podman volume に分離し、`~/.copilot/tmp` は永続化しません。Job の `--mount-file` は ConfigMap ではなく SSH/SFTP + `rclone` で渡し、変更されたファイルは競合を検知しながら write-back します。

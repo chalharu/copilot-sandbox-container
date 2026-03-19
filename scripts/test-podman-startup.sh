@@ -153,6 +153,25 @@ perl -MIO::Socket::UNIX -e '
 EOF
 chmod +x "${workdir}/fake-podman"
 
+cat > "${workdir}/rootful-startup-check.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+rootful_storage_conf=/var/tmp/control-plane/rootful-overlay/storage.conf
+
+grep -q '^CONTAINER_HOST=unix:///var/tmp/control-plane/rootful-overlay/podman-root.sock$' /home/copilot/.config/control-plane/runtime.env
+grep -qx 'driver = "overlay"' "${rootful_storage_conf}"
+grep -qx 'graphroot = "/var/lib/control-plane/rootful-podman/rootful-overlay/storage"' "${rootful_storage_conf}"
+grep -qx 'runroot = "/var/tmp/control-plane/rootful-overlay/runroot"' "${rootful_storage_conf}"
+if [[ -e /dev/fuse ]]; then
+  grep -qx 'mount_program = "/usr/bin/fuse-overlayfs"' "${rootful_storage_conf}"
+else
+  ! grep -q 'mount_program' "${rootful_storage_conf}"
+fi
+printf '%s\n' rootful-ok
+EOF
+chmod +x "${workdir}/rootful-startup-check.sh"
+
 set +e
 rootful_output="$("${container_bin}" run --rm \
   --name control-plane-podman-startup-rootful \
@@ -170,7 +189,7 @@ rootful_output="$("${container_bin}" run --rm \
   -v "${workdir}:/var/run/control-plane-test" \
   "${entrypoint_override_args[@]}" \
   "${control_plane_image}" \
-  bash -lc 'grep -q "^CONTAINER_HOST=unix:///run/control-plane/podman-root.sock$" /home/copilot/.config/control-plane/runtime.env && printf "%s\n" rootful-ok' 2>&1)"
+  /var/run/control-plane-test/rootful-startup-check.sh 2>&1)"
 rootful_status=$?
 set -e
 
@@ -181,13 +200,13 @@ if [[ "${rootful_status}" -ne 0 ]]; then
 fi
 grep -qx 'rootful-ok' <<<"${rootful_output}"
 grep -Fqx -- '--root' "${workdir}/fake-podman.args"
-grep -Fqx -- '/var/lib/control-plane/rootful-podman/rootful-vfs/storage' "${workdir}/fake-podman.args"
-if [[ -e "${workdir}/rootful/copilot/containers/rootful-vfs" ]]; then
-  printf 'Expected rootful-service startup to avoid persistent ~/.copilot rootful-vfs storage\n' >&2
-  find "${workdir}/rootful/copilot/containers/rootful-vfs" -maxdepth 3 -print >&2 || true
+grep -Fqx -- '/var/lib/control-plane/rootful-podman/rootful-overlay/storage' "${workdir}/fake-podman.args"
+if [[ -e "${workdir}/rootful/copilot/containers/rootful-overlay" ]]; then
+  printf 'Expected rootful-service startup to avoid persistent ~/.copilot rootful-overlay storage\n' >&2
+  find "${workdir}/rootful/copilot/containers/rootful-overlay" -maxdepth 3 -print >&2 || true
   exit 1
 fi
-if [[ ! -d "${workdir}/rootful/rootful-podman/rootful-vfs" ]]; then
+if [[ ! -d "${workdir}/rootful/rootful-podman/rootful-overlay" ]]; then
   printf 'Expected rootful-service startup to create dedicated /var/lib/control-plane/rootful-podman state\n' >&2
   find "${workdir}/rootful/rootful-podman" -maxdepth 3 -print >&2 || true
   exit 1
