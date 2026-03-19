@@ -220,6 +220,7 @@ dump_control_plane_diagnostics() {
   pod_name="$(control_plane_pod_name 2>/dev/null || true)"
   if [[ -n "${pod_name}" ]]; then
     kubectl describe pod/"${pod_name}" --namespace "${namespace}" >&2 || true
+    kubectl logs --namespace "${namespace}" pod/"${pod_name}" -c init-state-dirs >&2 || true
     kubectl logs --namespace "${namespace}" pod/"${pod_name}" -c init-state >&2 || true
     kubectl logs --namespace "${namespace}" pod/"${pod_name}" -c control-plane >&2 || true
   fi
@@ -473,6 +474,34 @@ spec:
         fsGroup: 1000
       serviceAccountName: control-plane
       initContainers:
+        - name: init-state-dirs
+          # renovate: datasource=docker depName=busybox versioning=docker
+          image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              umask 007
+              mkdir -p /state/copilot /state/gh /state/ssh /state/ssh-host-keys /workspace-state/workspace
+          securityContext:
+            privileged: false
+            # Fresh PVC roots start out owned by root, so create the shared
+            # top-level directories before handing file seeding to UID 1000.
+            runAsUser: 0
+            runAsGroup: 1000
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: state
+              mountPath: /state
+            - name: workspace
+              mountPath: /workspace-state
         - name: init-state
           # renovate: datasource=docker depName=busybox versioning=docker
           image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
@@ -482,7 +511,6 @@ spec:
             - |
               set -eu
               umask 077
-              mkdir -p /state/copilot /state/gh /state/ssh /state/ssh-host-keys /workspace-state/workspace
               [ -f /state/copilot/config.json ] || cat > /state/copilot/config.json <<'JSON'
               {
                 "auth": {
@@ -510,8 +538,6 @@ spec:
               YAML
           securityContext:
             privileged: false
-            # Restarted pods re-enter PVC content already owned by the copilot
-            # user, so seed the state volume with the same identity.
             runAsUser: 1000
             runAsGroup: 1000
             runAsNonRoot: true
@@ -524,8 +550,6 @@ spec:
           volumeMounts:
             - name: state
               mountPath: /state
-            - name: workspace
-              mountPath: /workspace-state
       containers:
         - name: control-plane
           image: ${control_plane_image}
