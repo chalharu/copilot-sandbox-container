@@ -229,6 +229,14 @@ spec:
               umask 077
               mkdir -p /state/gh /state/ssh /state/ssh-host-keys /workspace-state/workspace /session-state
               touch /state/copilot-config.json
+              chown -R 1000:1000 /state/gh /state/ssh /state/ssh-host-keys /session-state
+              find /state/gh /state/ssh /state/ssh-host-keys /session-state -type d -exec chmod 700 {} +
+              find /state/gh /state/ssh /state/ssh-host-keys /session-state -type f -exec chmod 600 {} +
+              # Preserve user workspace file modes; only hand the shared mount root
+              # back to UID/GID 1000 so the control-plane session can use it.
+              chown 1000:1000 /workspace-state/workspace
+              chown 1000:1000 /state/copilot-config.json
+              chmod 700 /workspace-state/workspace
               chmod 600 /state/copilot-config.json
               rm -rf /rootful-podman/*
               mkdir -p /rootful-podman/rootful-vfs
