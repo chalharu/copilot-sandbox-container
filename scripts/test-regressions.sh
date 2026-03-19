@@ -37,6 +37,35 @@ require_command ssh-keygen
 # shellcheck source=scripts/lib-container-toolchain.sh
 source "${script_dir}/lib-container-toolchain.sh"
 
+assert_multiline_command_block() {
+  local manifest_path="$1"
+  local expected_header="$2"
+
+  if ! awk -v expected_header="${expected_header}" '
+    /- '\''-lc'\''/ { saw_lc = 1; next }
+    saw_lc && $0 ~ /^[[:space:]]+- / {
+      block_header = $0
+      sub(/^[[:space:]]+- /, "", block_header)
+      if (block_header == expected_header) {
+        saw_block = 1
+        next
+      }
+      exit 1
+    }
+    saw_block && $0 ~ /^[[:space:]]+printf line-one$/ { saw_line_one = 1; content_lines++; next }
+    saw_block && $0 ~ /^[[:space:]]+printf line-two$/ { saw_line_two = 1; content_lines++; next }
+    saw_block && $0 ~ /^[[:space:]]+$/ { blank_lines++; content_lines++; next }
+    saw_block && $0 ~ /^[[:space:]]+resources:$/ { saw_resources = 1; next }
+    END {
+      exit !(saw_block && saw_line_one && saw_line_two && saw_resources && content_lines == 2 && blank_lines == 0)
+    }
+  ' "${manifest_path}"; then
+    printf 'Expected multiline execution command args to render with YAML block header %s\n' "${expected_header}" >&2
+    awk '/- '\''-lc'\''/,/resources:/' "${manifest_path}" >&2 || true
+    exit 1
+  fi
+}
+
 printf '%s\n' 'regression-test: verifying broken overlay symlink startup handling' >&2
 mkdir -p \
   "${workdir}/state/copilot/containers/overlay/storage/overlay/l" \
@@ -236,6 +265,34 @@ if [[ "$(grep -Fc -- '--sftp-disable-concurrent-writes' "${workdir}/k8s-job-mani
   grep -n 'rclone_flags\|transfers 1\|checkers 1\|sftp-disable-concurrent' "${workdir}/k8s-job-manifest.yaml" >&2 || true
   exit 1
 fi
+
+PATH="${workdir}/fake-bin:${control_plane_bin_dir}:${PATH}" \
+  HOME="${workdir}/k8s-home" \
+  CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+  CONTROL_PLANE_HOST_KEY_DIR="${workdir}/k8s-host-keys" \
+  TEST_REGRESSION_K8S_MANIFEST_PATH="${workdir}/k8s-job-multiline-manifest.yaml" \
+  TEST_REGRESSION_K8S_SECRET_ARGS_PATH="${workdir}/k8s-job-multiline-secret.args" \
+  "${control_plane_bin_dir}/k8s-job-start" \
+  --namespace control-plane-ci-jobs \
+  --job-name regression-multiline-command-job \
+  --image localhost/execution-plane-smoke:test \
+  -- bash -lc $'printf line-one\nprintf line-two' >/dev/null
+
+assert_multiline_command_block "${workdir}/k8s-job-multiline-manifest.yaml" '|-'
+
+PATH="${workdir}/fake-bin:${control_plane_bin_dir}:${PATH}" \
+  HOME="${workdir}/k8s-home" \
+  CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+  CONTROL_PLANE_HOST_KEY_DIR="${workdir}/k8s-host-keys" \
+  TEST_REGRESSION_K8S_MANIFEST_PATH="${workdir}/k8s-job-multiline-trailing-manifest.yaml" \
+  TEST_REGRESSION_K8S_SECRET_ARGS_PATH="${workdir}/k8s-job-multiline-trailing-secret.args" \
+  "${control_plane_bin_dir}/k8s-job-start" \
+  --namespace control-plane-ci-jobs \
+  --job-name regression-multiline-command-trailing-job \
+  --image localhost/execution-plane-smoke:test \
+  -- bash -lc $'printf line-one\nprintf line-two\n' >/dev/null
+
+assert_multiline_command_block "${workdir}/k8s-job-multiline-trailing-manifest.yaml" '|+'
 
 set +e
 newline_transfer_output="$(
