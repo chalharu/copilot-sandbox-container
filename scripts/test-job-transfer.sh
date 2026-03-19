@@ -44,11 +44,18 @@ job_transfer_root="${CONTROL_PLANE_JOB_TRANSFER_ROOT:-${TMPDIR:-/tmp}/job-transf
 
 dump_job_debug() {
   local job_name="$1"
+  local pod_name=""
 
   kubectl get job,pod --namespace "${job_namespace}" -l "job-name=${job_name}" -o wide >&2 || true
   kubectl describe job --namespace "${job_namespace}" "${job_name}" >&2 || true
   kubectl describe pod --namespace "${job_namespace}" -l "job-name=${job_name}" >&2 || true
   kubectl logs "job/${job_name}" --namespace "${job_namespace}" --all-containers=true >&2 || true
+  pod_name="$(kubectl get pod --namespace "${job_namespace}" -l "job-name=${job_name}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+  if [[ -n "${pod_name}" ]]; then
+    kubectl logs --namespace "${job_namespace}" "${pod_name}" -c job-transfer-init >&2 || true
+    kubectl logs --namespace "${job_namespace}" "${pod_name}" -c execution >&2 || true
+    kubectl logs --namespace "${job_namespace}" "${pod_name}" -c job-transfer-sync >&2 || true
+  fi
 }
 
 printf '%s\n' 'job-transfer-test: verifying large mount-file transfer and write-back' >&2

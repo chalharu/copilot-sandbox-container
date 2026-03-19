@@ -397,8 +397,14 @@ EOF
                 printf '%s\n' 'known_hosts_file = /var/run/control-plane-job-transfer/known_hosts'
                 printf '%s\n' 'shell_type = none'
               } > /tmp/rclone.conf
+              rclone_flags=(
+                --transfers 1
+                --checkers 1
+                --sftp-disable-concurrent-reads
+                --sftp-disable-concurrent-writes
+              )
               mkdir -p "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}"
-              rclone --config /tmp/rclone.conf copy "control-plane:\${CONTROL_PLANE_TRANSFER_REMOTE_PATH}" "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}"
+              rclone --config /tmp/rclone.conf "\${rclone_flags[@]}" copy "control-plane:\${CONTROL_PLANE_TRANSFER_REMOTE_PATH}" "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}"
           volumeMounts:
             - name: job-inputs
               mountPath: $(yaml_quote "${input_mount_path}")
@@ -461,8 +467,14 @@ EOF
                 printf '%s\n' 'known_hosts_file = /var/run/control-plane-job-transfer/known_hosts'
                 printf '%s\n' 'shell_type = none'
               } > /tmp/rclone.conf
+              rclone_flags=(
+                --transfers 1
+                --checkers 1
+                --sftp-disable-concurrent-reads
+                --sftp-disable-concurrent-writes
+              )
               if [[ "\${execution_exit_code}" == "0" ]]; then
-                rclone --config /tmp/rclone.conf copy "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}" "control-plane:\${CONTROL_PLANE_TRANSFER_OUTPUT_PATH}"
+                rclone --config /tmp/rclone.conf "\${rclone_flags[@]}" copy "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}" "control-plane:\${CONTROL_PLANE_TRANSFER_OUTPUT_PATH}"
                 ssh "\${ssh_opts[@]}" "\${CONTROL_PLANE_TRANSFER_USER}@\${CONTROL_PLANE_TRANSFER_HOST}" \
                   "control-plane-job-transfer finalize --transfer-id \${CONTROL_PLANE_TRANSFER_ID}"
                 exit 0
