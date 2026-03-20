@@ -5,6 +5,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 workflow_path="${repo_root}/.github/workflows/control-plane-ci.yml"
 build_test_path="${script_dir}/build-test.sh"
+kind_test_path="${script_dir}/test-kind.sh"
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -73,6 +74,8 @@ assert_file_contains "${build_test_path}" 'run_kind_group session'
 assert_file_contains "${build_test_path}" 'run_kind_group jobs'
 assert_file_contains "${build_test_path}" 'run_kind_group jobs-core'
 assert_file_contains "${build_test_path}" 'run_kind_group jobs-transfer'
+assert_file_contains "${kind_test_path}" 'kind-test: skipping duplicate rootful local podman smoke for group %s'
+assert_file_contains "${kind_test_path}" "[[ \"\${kind_test_group}\" == \"session\" ]] || [[ \"\${kind_test_group}\" == \"jobs-core\" ]]"
 
 printf '%s\n' 'ci-workflow-test: verifying workflow fan-out wiring' >&2
 integration_block="$(job_block integration)"

@@ -885,7 +885,9 @@ EOF
   fi
   printf '%s\n' 'kind-test: initial remote assertions ok' >&2
 
-  if ! ssh_bash <<'EOF'
+  if [[ "${kind_test_group}" == "session" ]] || [[ "${kind_test_group}" == "jobs-core" ]]; then
+    printf 'kind-test: skipping duplicate rootful local podman smoke for group %s\n' "${kind_test_group}" >&2
+  elif ! ssh_bash <<'EOF'
 set -euo pipefail
 podman info --format '{{.Store.GraphRoot}} {{.Store.GraphDriverName}} {{.Host.Security.Rootless}}' > /workspace/k8s-podman-info-summary.txt 2> /workspace/k8s-podman-info.log
 grep -qx '/var/lib/control-plane/rootful-podman/rootful-overlay/storage overlay false' /workspace/k8s-podman-info-summary.txt
@@ -905,8 +907,9 @@ podman ps -a || true
 EOF
     dump_control_plane_diagnostics
     exit 1
+  else
+    printf '%s\n' 'kind-test: rootful local podman smoke ok' >&2
   fi
-  printf '%s\n' 'kind-test: rootful local podman smoke ok' >&2
 
   ssh_bash <<EOF
 set -euo pipefail
