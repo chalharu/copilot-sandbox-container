@@ -159,6 +159,12 @@ jobs:
       - name: Load integration images
         run: podman load -i downloaded-images/control-plane-images.tar
 
+      - name: Prepare DHI images
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: ./scripts/prepare-dhi-images.sh
+
       - name: Run regression integration group
         env:
           CONTROL_PLANE_TOOLCHAIN: podman
@@ -253,6 +259,12 @@ jobs:
 
       - name: Log in to GHCR
         run: printf '%s' "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Prepare DHI images
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: ./scripts/prepare-dhi-images.sh
 
       - name: Build yamllint image for publishing
         run: podman build --tag localhost/yamllint:test containers/yamllint
