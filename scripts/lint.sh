@@ -16,8 +16,9 @@ shellcheck_image="${CONTROL_PLANE_SHELLCHECK_IMAGE:-docker.io/koalaman/shellchec
 biome_image="${CONTROL_PLANE_BIOME_IMAGE:-ghcr.io/biomejs/biome:2.4.8@sha256:b387446dd5528d2c2b5554678b49c29016a925dd4e94f383b07be4ace81e3c46}"
 yamllint_image="${CONTROL_PLANE_YAMLLINT_IMAGE_TAG:-localhost/yamllint:test}"
 yamllint_config="${CONTROL_PLANE_YAMLLINT_CONFIG:-/workspace/.yamllint}"
-# Match the caller so restrictive workspace mounts remain readable in-container.
-container_user="$(id -u):$(id -g)"
+# Use container root so restrictive workspace mounts remain readable across
+# Docker, rootful Podman, and rootless Podman.
+workspace_access_user="0:0"
 dockerfiles=()
 yaml_files=()
 shellcheck_targets=(
@@ -71,6 +72,6 @@ if [[ "${toolchain}" == "podman" ]]; then
   "${script_dir}/prepare-dhi-images.sh"
 fi
 build_image_for_toolchain "${toolchain}" "${yamllint_image}" containers/yamllint
-"${container_bin}" run --rm --user "${container_user}" -v "${PWD}:/workspace:ro" "${hadolint_image}" hadolint "${dockerfiles[@]}"
-"${container_bin}" run --rm --user "${container_user}" -v "${PWD}:/workspace:ro" "${shellcheck_image}" -x -P /workspace "${shellcheck_targets[@]}"
-"${container_bin}" run --rm --user "${container_user}" -v "${PWD}:/workspace:ro" "${yamllint_image}" -c "${yamllint_config}" "${yaml_files[@]}"
+"${container_bin}" run --rm --user "${workspace_access_user}" -v "${PWD}:/workspace:ro" "${hadolint_image}" hadolint "${dockerfiles[@]}"
+"${container_bin}" run --rm --user "${workspace_access_user}" -v "${PWD}:/workspace:ro" "${shellcheck_image}" -x -P /workspace "${shellcheck_targets[@]}"
+"${container_bin}" run --rm --user "${workspace_access_user}" -v "${PWD}:/workspace:ro" "${yamllint_image}" -c "${yamllint_config}" "${yaml_files[@]}"
