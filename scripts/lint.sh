@@ -14,10 +14,19 @@ hadolint_image="${CONTROL_PLANE_HADOLINT_IMAGE:-docker.io/hadolint/hadolint:v2.1
 shellcheck_image="${CONTROL_PLANE_SHELLCHECK_IMAGE:-docker.io/koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d}"
 # renovate: datasource=docker depName=ghcr.io/biomejs/biome versioning=docker
 biome_image="${CONTROL_PLANE_BIOME_IMAGE:-ghcr.io/biomejs/biome:2.4.8@sha256:b387446dd5528d2c2b5554678b49c29016a925dd4e94f383b07be4ace81e3c46}"
+# renovate: datasource=docker depName=docker.io/library/node versioning=docker
+markdownlint_node_image="${CONTROL_PLANE_MARKDOWNLINT_NODE_IMAGE:-docker.io/library/node:24.14.0-bookworm-slim@sha256:d8e448a56fc63242f70026718378bd4b00f8c82e78d20eefb199224a4d8e33d8}"
+# renovate: datasource=npm depName=markdownlint-cli2
+markdownlint_version="${CONTROL_PLANE_MARKDOWNLINT_VERSION:-0.21.0}"
+markdownlint_cache_volume="${CONTROL_PLANE_MARKDOWNLINT_CACHE_VOLUME:-control-plane-markdownlint-cache}"
 yamllint_image="${CONTROL_PLANE_YAMLLINT_IMAGE_TAG:-localhost/yamllint:test}"
 yamllint_config="${CONTROL_PLANE_YAMLLINT_CONFIG:-/workspace/.yamllint}"
+# Use container root so restrictive workspace mounts remain readable across
+# Docker, rootful Podman, and rootless Podman.
+workspace_access_user="0:0"
 dockerfiles=()
 yaml_files=()
+markdown_files=()
 shellcheck_targets=(
   /workspace/containers/control-plane/bin/control-plane-copilot
   /workspace/containers/control-plane/bin/control-plane-podman
@@ -34,6 +43,39 @@ shellcheck_targets=(
   /workspace/containers/control-plane/config/profile-control-plane-env.sh
   /workspace/containers/execution-plane-smoke/execution-plane-smoke
 )
+lint_log_dir="$(mktemp -d)"
+lint_job_names=()
+lint_job_pids=()
+
+cleanup() {
+  rm -rf "${lint_log_dir}"
+}
+trap cleanup EXIT
+
+run_lint_job() {
+  local name="$1"
+  local log_path="${lint_log_dir}/${name}.log"
+
+  shift
+  "$@" >"${log_path}" 2>&1 &
+  lint_job_names+=("${name}")
+  lint_job_pids+=("$!")
+}
+
+wait_for_lint_jobs() {
+  local failed=0
+  local index
+
+  for index in "${!lint_job_pids[@]}"; do
+    if ! wait "${lint_job_pids[$index]}"; then
+      failed=1
+      printf 'Lint step failed: %s\n' "${lint_job_names[$index]}" >&2
+      cat "${lint_log_dir}/${lint_job_names[$index]}.log" >&2
+    fi
+  done
+
+  [[ "${failed}" -eq 0 ]]
+}
 
 require_command "${container_bin}"
 require_command "${build_bin}"
@@ -45,6 +87,15 @@ done < <(find containers -name Dockerfile -print | LC_ALL=C sort)
 while IFS= read -r yaml_file; do
   yaml_files+=("/workspace/${yaml_file}")
 done < <(find . -type f \( -name '*.yml' -o -name '*.yaml' \) -print | LC_ALL=C sort)
+
+while IFS= read -r markdown_file; do
+  markdown_files+=("/workspace/${markdown_file#./}")
+done < <(
+  find . \
+    -path './agent-skills/skills/doc-coauthoring' -prune -o \
+    -path './agent-skills/skills/skill-creator' -prune -o \
+    -type f -name '*.md' -print | LC_ALL=C sort
+)
 
 while IFS= read -r script_file; do
   shellcheck_targets+=("/workspace/${script_file}")
@@ -60,6 +111,11 @@ if [[ "${#yaml_files[@]}" -eq 0 ]]; then
   exit 1
 fi
 
+if [[ "${#markdown_files[@]}" -eq 0 ]]; then
+  printf 'No Markdown files found in repository\n' >&2
+  exit 1
+fi
+
 printf 'Using %s toolchain for lint\n' "${toolchain}"
 # Biome ignores .json5 when traversing repository paths, so validate renovate.json5
 # through stdin and discard the normalized output once parsing succeeds.
@@ -69,6 +125,25 @@ if [[ "${toolchain}" == "podman" ]]; then
   "${script_dir}/prepare-dhi-images.sh"
 fi
 build_image_for_toolchain "${toolchain}" "${yamllint_image}" containers/yamllint
-"${container_bin}" run --rm -v "${PWD}:/workspace:ro" "${hadolint_image}" hadolint "${dockerfiles[@]}"
-"${container_bin}" run --rm -v "${PWD}:/workspace:ro" "${shellcheck_image}" -x -P /workspace "${shellcheck_targets[@]}"
-"${container_bin}" run --rm -v "${PWD}:/workspace:ro" "${yamllint_image}" -c "${yamllint_config}" "${yaml_files[@]}"
+printf '%s\n' 'Running hadolint, shellcheck, yamllint, and markdownlint in parallel' >&2
+
+run_lint_job hadolint \
+  "${container_bin}" run --rm --user "${workspace_access_user}" -v "${PWD}:/workspace:ro" "${hadolint_image}" hadolint "${dockerfiles[@]}"
+
+run_lint_job shellcheck \
+  "${container_bin}" run --rm --user "${workspace_access_user}" -v "${PWD}:/workspace:ro" "${shellcheck_image}" -x -P /workspace "${shellcheck_targets[@]}"
+
+run_lint_job yamllint \
+  "${container_bin}" run --rm --user "${workspace_access_user}" -v "${PWD}:/workspace:ro" "${yamllint_image}" -c "${yamllint_config}" "${yaml_files[@]}"
+
+run_lint_job markdownlint \
+  "${container_bin}" run --rm --user "${workspace_access_user}" \
+    -e NPM_CONFIG_CACHE=/tmp/npm-cache \
+    -e NPM_CONFIG_UPDATE_NOTIFIER=false \
+    -v "${markdownlint_cache_volume}:/tmp/npm-cache" \
+    -v "${PWD}:/workspace:ro" \
+    -w /workspace \
+    "${markdownlint_node_image}" \
+    npx --yes "markdownlint-cli2@${markdownlint_version}" "${markdown_files[@]}"
+
+wait_for_lint_jobs

@@ -36,7 +36,7 @@ Execute repository changes through a full delivery loop instead of stopping at a
    - After fixes, rerun the affected validation and fall back to the full baseline when the blast radius is unclear.
 
 6. Deliver through Git and PR workflow.
-   - Prefer a dedicated `git-commit` skill when one is available. Otherwise inspect status and diff carefully, stage only intended files, and commit using the repository's conventions.
+   - Prefer dedicated `git-commit` and `pull-request-workflow` skills when they are available. Otherwise inspect status and diff carefully, stage only intended files, and use explicit Git and GitHub operations to commit, push, and update the PR.
    - Keep work on a non-main branch.
    - After each commit, fetch and rebase onto `origin/main` when the requested workflow expects the branch to stay current.
    - Push before creating or updating the PR, and use the available GitHub tooling in the environment.

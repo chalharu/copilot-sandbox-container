@@ -6,6 +6,13 @@
 - Because the target directory lives under the writable Copilot home, the skill stays visible even when `/workspace` points at a different repository.
 - Repository-specific skills can still live under `.github/skills/` in the mounted repository.
 
+## Bundled skill catalog
+
+- `control-plane-operations`: control-plane runtime, Podman, SSH, and Kubernetes Job execution guidance
+- `repo-change-delivery`: generic end-to-end repository delivery loop
+- `git-commit`: generic commit workflow with repository-convention message generation
+- `pull-request-workflow`: generic pull request creation, update, and hosted-check handling workflow
+
 ## Update a bundled skill
 
 1. Edit `containers/control-plane/skills/<skill-name>/`.

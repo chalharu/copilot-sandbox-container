@@ -11,6 +11,7 @@ ssh_port="${CONTROL_PLANE_TEST_SSH_PORT:-32222}"
 kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-podman}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-${kind_provider}}"
 control_plane_selector="app.kubernetes.io/name=control-plane"
+kind_image_archive="${CONTROL_PLANE_KIND_IMAGE_ARCHIVE:-}"
 workdir="$(mktemp -d)"
 ssh_key="${workdir}/id_ed25519"
 kubeconfig_path="${workdir}/kubeconfig"
@@ -19,6 +20,7 @@ port_forward_pid=""
 created_cluster=0
 kind_uses_sudo=0
 kind_sudo_mode="${CONTROL_PLANE_KIND_SUDO_MODE:-auto}"
+kind_test_group="${CONTROL_PLANE_KIND_TEST_GROUP:-all}"
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -237,15 +239,18 @@ wait_for_control_plane_pod() {
   return 1
 }
 
-load_kind_image() {
-  local image="$1"
-  local archive_basename archive_path
+load_kind_images() {
+  local helper_args=(--cluster-name "${cluster_name}")
 
-  archive_basename="$(printf '%s' "${image}" | tr '/:' '__')"
-  archive_path="${workdir}/${archive_basename}.tar"
+  if [[ -n "${kind_image_archive}" ]]; then
+    helper_args+=(--image-archive "${kind_image_archive}")
+  else
+    helper_args+=(--container-bin "${container_bin}" --image "${control_plane_image}" --image "${execution_plane_image}")
+  fi
 
-  "${container_bin}" save --output "${archive_path}" "${image}" >/dev/null
-  kind_cmd load image-archive "${archive_path}" --name "${cluster_name}"
+  CONTROL_PLANE_KIND_USE_SUDO="${kind_uses_sudo}" \
+    KIND_EXPERIMENTAL_PROVIDER="${kind_provider}" \
+    "${script_dir}/load-kind-images.sh" "${helper_args[@]}"
 }
 
 apply_resources() {
@@ -753,57 +758,8 @@ spec:
 EOF
 }
 
-cleanup() {
-  stop_port_forward
-  kubectl delete namespace "${namespace}" --ignore-not-found >/dev/null 2>&1 || true
-  kubectl delete namespace "${job_namespace}" --ignore-not-found >/dev/null 2>&1 || true
-  kubectl delete pv control-plane-copilot-session-pv --ignore-not-found >/dev/null 2>&1 || true
-  kubectl delete pv control-plane-workspace-control-pv --ignore-not-found >/dev/null 2>&1 || true
-  kubectl delete pv control-plane-workspace-job-pv --ignore-not-found >/dev/null 2>&1 || true
-  if [[ "${created_cluster}" -eq 1 ]]; then
-    kind_cmd delete cluster --name "${cluster_name}" >/dev/null 2>&1 || true
-  fi
-  rm -rf "${workdir}"
-}
-trap cleanup EXIT
-
-require_command kind
-require_command kubectl
-require_command "${container_bin}"
-require_command ssh
-require_command ssh-keygen
-require_command ssh-keyscan
-
-export KIND_EXPERIMENTAL_PROVIDER="${kind_provider}"
-
-if [[ "${kind_sudo_mode}" == "always" ]]; then
-  enable_kind_sudo
-fi
-
-if ! kind_cmd get clusters | grep -qx "${cluster_name}"; then
-  if ! create_cluster; then
-    status=$?
-    if [[ "${status}" -eq 2 ]]; then
-      exit 0
-    fi
-    exit "${status}"
-  fi
-  created_cluster=1
-fi
-
-refresh_kubeconfig
-kubectl config use-context "kind-${cluster_name}" >/dev/null
-kubectl wait --for=condition=Ready node --all --timeout=180s >/dev/null
-load_kind_image "${control_plane_image}"
-load_kind_image "${execution_plane_image}"
-ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"
-apply_resources
-test "$(kubectl get service/control-plane --namespace "${namespace}" -o jsonpath='{.spec.type}')" = "LoadBalancer"
-wait_for_control_plane_pod
-start_port_forward
-wait_for_ssh
-
-if ! ssh_bash <<EOF
+run_shared_remote_assertions() {
+  if ! ssh_bash <<EOF
 set -euo pipefail
 command -v node
 command -v npm
@@ -890,8 +846,8 @@ test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
 cat /proc/self/uid_map > /workspace/k8s-pod-uid-map.txt
 printf '%s\n' 'kind-test remote: runtime env and workspace write ok' >&2
 EOF
-then
-  ssh_bash <<'EOF' >&2 || true
+  then
+    ssh_bash <<'EOF' >&2 || true
 set +e
 printf '%s\n' '--- kind-test initial remote debug ---'
 printf 'LANG=%s\n' "${LANG:-}" || true
@@ -924,12 +880,14 @@ printf '%s\n' '--- runtime env ---'
 printf 'CONTROL_PLANE_JOB_NAMESPACE=%s\n' "${CONTROL_PLANE_JOB_NAMESPACE:-}" || true
 cat /proc/self/uid_map || true
 EOF
-  dump_control_plane_diagnostics
-  exit 1
-fi
-printf '%s\n' 'kind-test: initial remote assertions ok' >&2
+    dump_control_plane_diagnostics
+    exit 1
+  fi
+  printf '%s\n' 'kind-test: initial remote assertions ok' >&2
 
-if ! ssh_bash <<'EOF'
+  if [[ "${kind_test_group}" == "session" ]] || [[ "${kind_test_group}" == "jobs-core" ]]; then
+    printf 'kind-test: skipping duplicate rootful local podman smoke for group %s\n' "${kind_test_group}" >&2
+  elif ! ssh_bash <<'EOF'
 set -euo pipefail
 podman info --format '{{.Store.GraphRoot}} {{.Store.GraphDriverName}} {{.Host.Security.Rootless}}' > /workspace/k8s-podman-info-summary.txt 2> /workspace/k8s-podman-info.log
 grep -qx '/var/lib/control-plane/rootful-podman/rootful-overlay/storage overlay false' /workspace/k8s-podman-info-summary.txt
@@ -937,8 +895,8 @@ timeout 30s podman pull docker.io/library/hello-world:latest > /workspace/k8s-ac
 timeout 20s podman run --rm docker.io/library/hello-world:latest > /workspace/k8s-actual-podman-run.log 2>&1
 grep -q 'Hello from Docker!' /workspace/k8s-actual-podman-run.log
 EOF
-then
-  ssh_bash <<'EOF' >&2 || true
+  then
+    ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
 cat /workspace/k8s-podman-info.log || true
 cat /workspace/k8s-podman-info-summary.txt || true
@@ -947,12 +905,13 @@ cat /workspace/k8s-actual-podman-run.log || true
 podman info || true
 podman ps -a || true
 EOF
-  dump_control_plane_diagnostics
-  exit 1
-fi
-printf '%s\n' 'kind-test: rootful local podman smoke ok' >&2
+    dump_control_plane_diagnostics
+    exit 1
+  else
+    printf '%s\n' 'kind-test: rootful local podman smoke ok' >&2
+  fi
 
-ssh_bash <<EOF
+  ssh_bash <<EOF
 set -euo pipefail
 set +e
 jobs_access="\$(kubectl auth can-i create jobs --namespace ${job_namespace} 2>&1)"
@@ -977,17 +936,19 @@ if [[ "\${secrets_status}" -ne 0 ]] || [[ "\${secrets_access}" != "yes" ]]; then
   exit 1
 fi
 EOF
-printf '%s\n' 'kind-test: rbac assertions ok' >&2
+  printf '%s\n' 'kind-test: rbac assertions ok' >&2
 
-utf8_roundtrip="$(ssh_bash <<'EOF'
+  utf8_roundtrip="$(ssh_bash <<'EOF'
 set -euo pipefail
 printf '日本語★\n'
 EOF
 )"
-[[ "${utf8_roundtrip}" == "日本語★" ]]
-printf '%s\n' 'kind-test: utf8 roundtrip ok' >&2
+  [[ "${utf8_roundtrip}" == "日本語★" ]]
+  printf '%s\n' 'kind-test: utf8 roundtrip ok' >&2
+}
 
-ssh_bash <<'EOF'
+start_persistence_session_fixtures() {
+  ssh_bash <<'EOF'
 set -euo pipefail
 mkdir -p ~/.copilot ~/.config/gh ~/.ssh /workspace
 echo k8s > ~/.copilot/state.txt
@@ -995,183 +956,200 @@ echo gh > ~/.config/gh/state.txt
 echo ssh > ~/.ssh/state.txt
 screen -T screen-256color -dmS kind-session sh -lc 'printf "%s\n" "$TERM" > /workspace/k8s-screen-term.txt; printf "日本語★\n" > /workspace/k8s-screen-utf8.txt; echo k8s-screen > /workspace/k8s-screen.txt; sleep 30'
 EOF
-printf '%s\n' 'kind-test: screen session started' >&2
+  printf '%s\n' 'kind-test: screen session started' >&2
+}
 
-printf '%s\n' 'kind-test: verifying login TERM fallback' >&2
-if ! TERM=bogusterm ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
-  "CONTROL_PLANE_DISABLE_SESSION_PICKER=1 bash -lic 'printf \"%s\n\" \"\$TERM\" > /workspace/k8s-login-term.txt; tput colors > /workspace/k8s-login-colors.txt'" \
-  </dev/null >"${workdir}/ssh-login-term.log" 2>&1; then
-  cat "${workdir}/ssh-login-term.log" >&2 || true
-  printf 'Expected kind login shell TERM fallback to succeed over SSH\n' >&2
-  exit 1
-fi
-if ! ssh_bash <<'EOF'
+wait_for_screen_output_fixture() {
+  if ! wait_for_remote_grep '^k8s-screen$' /workspace/k8s-screen.txt; then
+    ssh_bash <<'EOF' >&2 || true
+set -euo pipefail
+cat /workspace/k8s-screen-term.txt || true
+cat /workspace/k8s-screen-utf8.txt || true
+cat /workspace/k8s-screen.txt || true
+EOF
+    printf 'Expected kind-session fixture to persist screen status output\n' >&2
+    exit 1
+  fi
+}
+
+run_terminal_session_assertions() {
+  printf '%s\n' 'kind-test: verifying login TERM fallback' >&2
+  if ! TERM=bogusterm ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
+    "CONTROL_PLANE_DISABLE_SESSION_PICKER=1 bash -lic 'printf \"%s\n\" \"\$TERM\" > /workspace/k8s-login-term.txt; tput colors > /workspace/k8s-login-colors.txt'" \
+    </dev/null >"${workdir}/ssh-login-term.log" 2>&1; then
+    cat "${workdir}/ssh-login-term.log" >&2 || true
+    printf 'Expected kind login shell TERM fallback to succeed over SSH\n' >&2
+    exit 1
+  fi
+  if ! ssh_bash <<'EOF'
 set -euo pipefail
 grep -Eq '^(xterm-256color|xterm)$' /workspace/k8s-login-term.txt
 awk 'NR == 1 { exit !($1 >= 8) }' /workspace/k8s-login-colors.txt
 EOF
-then
-  ssh_bash <<'EOF' >&2 || true
+  then
+    ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
 cat /workspace/k8s-login-term.txt || true
 cat /workspace/k8s-login-colors.txt || true
 EOF
-  printf 'Expected kind login TERM fallback files to report a usable terminal\n' >&2
-  exit 1
-fi
-printf '%s\n' 'kind-test: login TERM fallback ok' >&2
+    printf 'Expected kind login TERM fallback files to report a usable terminal\n' >&2
+    exit 1
+  fi
+  printf '%s\n' 'kind-test: login TERM fallback ok' >&2
 
-printf '%s\n' 'kind-test: verifying login TERM upgrade to 256 colors' >&2
-if ! TERM=xterm-color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
-  "CONTROL_PLANE_DISABLE_SESSION_PICKER=1 bash -lic 'printf \"%s\n\" \"\$TERM\" > /workspace/k8s-login-term-upgrade.txt; tput colors > /workspace/k8s-login-term-upgrade-colors.txt'" \
-  </dev/null >"${workdir}/ssh-login-term-upgrade.log" 2>&1; then
-  cat "${workdir}/ssh-login-term-upgrade.log" >&2 || true
-  printf 'Expected kind login TERM upgrade to succeed over SSH\n' >&2
-  exit 1
-fi
-if ! ssh_bash <<'EOF'
+  printf '%s\n' 'kind-test: verifying login TERM upgrade to 256 colors' >&2
+  if ! TERM=xterm-color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
+    "CONTROL_PLANE_DISABLE_SESSION_PICKER=1 bash -lic 'printf \"%s\n\" \"\$TERM\" > /workspace/k8s-login-term-upgrade.txt; tput colors > /workspace/k8s-login-term-upgrade-colors.txt'" \
+    </dev/null >"${workdir}/ssh-login-term-upgrade.log" 2>&1; then
+    cat "${workdir}/ssh-login-term-upgrade.log" >&2 || true
+    printf 'Expected kind login TERM upgrade to succeed over SSH\n' >&2
+    exit 1
+  fi
+  if ! ssh_bash <<'EOF'
 set -euo pipefail
 grep -qx 'xterm-256color' /workspace/k8s-login-term-upgrade.txt
 awk 'NR == 1 { exit !($1 >= 256) }' /workspace/k8s-login-term-upgrade-colors.txt
 EOF
-then
-  ssh_bash <<'EOF' >&2 || true
+  then
+    ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
 cat /workspace/k8s-login-term-upgrade.txt || true
 cat /workspace/k8s-login-term-upgrade-colors.txt || true
 EOF
-  printf 'Expected kind login TERM upgrade files to report xterm-256color with 256 colors\n' >&2
-  exit 1
-fi
-printf '%s\n' 'kind-test: login TERM upgrade ok' >&2
+    printf 'Expected kind login TERM upgrade files to report xterm-256color with 256 colors\n' >&2
+    exit 1
+  fi
+  printf '%s\n' 'kind-test: login TERM upgrade ok' >&2
 
-if ! wait_for_screen_term kind-session /workspace/k8s-screen-term.txt; then
-  ssh_bash <<'EOF' >&2 || true
+  if ! wait_for_screen_term kind-session /workspace/k8s-screen-term.txt; then
+    ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
 screen -list || true
 cat /workspace/k8s-screen-term.txt || true
 cat /workspace/k8s-screen-utf8.txt || true
 EOF
-  printf 'Expected kind-session to report a screen-256color TERM variant\n' >&2
-  exit 1
-fi
-printf '%s\n' 'kind-test: screen term ready' >&2
+    printf 'Expected kind-session to report a screen-256color TERM variant\n' >&2
+    exit 1
+  fi
+  printf '%s\n' 'kind-test: screen term ready' >&2
 
-if ! wait_for_remote_grep '^日本語★$' /workspace/k8s-screen-utf8.txt; then
-  ssh_bash <<'EOF' >&2 || true
+  if ! wait_for_remote_grep '^日本語★$' /workspace/k8s-screen-utf8.txt; then
+    ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
 cat /workspace/k8s-screen-term.txt || true
 cat /workspace/k8s-screen-utf8.txt || true
 cat /workspace/k8s-screen.txt || true
 EOF
-  printf 'Expected kind-session to persist UTF-8 screen output\n' >&2
-  exit 1
-fi
-printf '%s\n' 'kind-test: screen utf8 ready' >&2
+    printf 'Expected kind-session to persist UTF-8 screen output\n' >&2
+    exit 1
+  fi
+  printf '%s\n' 'kind-test: screen utf8 ready' >&2
 
-if ! wait_for_remote_grep '^k8s-screen$' /workspace/k8s-screen.txt; then
-  ssh_bash <<'EOF' >&2 || true
+  if ! wait_for_remote_grep '^k8s-screen$' /workspace/k8s-screen.txt; then
+    ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
 cat /workspace/k8s-screen-term.txt || true
 cat /workspace/k8s-screen-utf8.txt || true
 cat /workspace/k8s-screen.txt || true
 EOF
-  printf 'Expected kind-session to persist screen status output\n' >&2
-  exit 1
-fi
-printf '%s\n' 'kind-test: screen output ready' >&2
+    printf 'Expected kind-session to persist screen status output\n' >&2
+    exit 1
+  fi
+  printf '%s\n' 'kind-test: screen output ready' >&2
 
-printf '%s\n' 'kind-test: verifying session picker fallback' >&2
-if ! TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
-  "CONTROL_PLANE_SESSION_SELECTION=9999 bash -lic 'printf \"%s\n\" fallback-shell-ok'" \
-  </dev/null >"${workdir}/ssh-picker-fallback.log" 2>&1; then
-  cat "${workdir}/ssh-picker-fallback.log" >&2 || true
-  printf 'Expected SSH login to fall back to a shell when the session picker fails\n' >&2
-  exit 1
-fi
-if ! grep -q 'fallback-shell-ok' "${workdir}/ssh-picker-fallback.log"; then
-  printf 'Expected fallback-shell-ok marker in kind SSH fallback log\n' >&2
-  cat "${workdir}/ssh-picker-fallback.log" >&2 || true
-  exit 1
-fi
-if ! grep -q 'session picker failed; continuing with the login shell' "${workdir}/ssh-picker-fallback.log"; then
-  printf 'Expected session picker fallback warning in kind SSH fallback log\n' >&2
-  cat "${workdir}/ssh-picker-fallback.log" >&2 || true
-  exit 1
-fi
-printf '%s\n' 'kind-test: session picker fallback ok' >&2
+  printf '%s\n' 'kind-test: verifying session picker fallback' >&2
+  if ! TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
+    "CONTROL_PLANE_SESSION_SELECTION=9999 bash -lic 'printf \"%s\n\" fallback-shell-ok'" \
+    </dev/null >"${workdir}/ssh-picker-fallback.log" 2>&1; then
+    cat "${workdir}/ssh-picker-fallback.log" >&2 || true
+    printf 'Expected SSH login to fall back to a shell when the session picker fails\n' >&2
+    exit 1
+  fi
+  if ! grep -q 'fallback-shell-ok' "${workdir}/ssh-picker-fallback.log"; then
+    printf 'Expected fallback-shell-ok marker in kind SSH fallback log\n' >&2
+    cat "${workdir}/ssh-picker-fallback.log" >&2 || true
+    exit 1
+  fi
+  if ! grep -q 'session picker failed; continuing with the login shell' "${workdir}/ssh-picker-fallback.log"; then
+    printf 'Expected session picker fallback warning in kind SSH fallback log\n' >&2
+    cat "${workdir}/ssh-picker-fallback.log" >&2 || true
+    exit 1
+  fi
+  printf '%s\n' 'kind-test: session picker fallback ok' >&2
 
-printf '%s\n' 'kind-test: verifying interactive SSH auto-login' >&2
-if ! ssh_bash <<EOF
+  printf '%s\n' 'kind-test: verifying interactive SSH auto-login' >&2
+  if ! ssh_bash <<EOF
 set -euo pipefail
 cp ~/.config/control-plane/runtime.env /workspace/k8s-runtime.env.bak
 printf '\nCONTROL_PLANE_SESSION_SELECTION=new:%s\n' "${kind_auto_login_session}" >> ~/.config/control-plane/runtime.env
 EOF
-then
-  printf 'Expected kind runtime.env backup/setup to succeed before SSH auto-login probe\n' >&2
-  exit 1
-fi
+  then
+    printf 'Expected kind runtime.env backup/setup to succeed before SSH auto-login probe\n' >&2
+    exit 1
+  fi
 
-set +e
-"${script_dir}/test-ssh-session-persistence.sh" \
-  --identity "${ssh_key}" \
-  --port "${ssh_port}" \
-  --session-name "${kind_auto_login_session}" \
-  --marker-path /workspace/k8s-auto-login-marker.txt
-kind_auto_login_status=$?
-set -e
+  set +e
+  "${script_dir}/test-ssh-session-persistence.sh" \
+    --identity "${ssh_key}" \
+    --port "${ssh_port}" \
+    --session-name "${kind_auto_login_session}" \
+    --marker-path /workspace/k8s-auto-login-marker.txt
+  kind_auto_login_status=$?
+  set -e
 
-if ! ssh_bash <<'EOF'
+  if ! ssh_bash <<'EOF'
 set -euo pipefail
 cp /workspace/k8s-runtime.env.bak ~/.config/control-plane/runtime.env
 chmod 600 ~/.config/control-plane/runtime.env
 rm -f /workspace/k8s-runtime.env.bak
 EOF
-then
-  printf 'Expected kind runtime.env restore to succeed after SSH auto-login probe\n' >&2
-  exit 1
-fi
+  then
+    printf 'Expected kind runtime.env restore to succeed after SSH auto-login probe\n' >&2
+    exit 1
+  fi
 
-if [[ "${kind_auto_login_status}" -ne 0 ]]; then
-  printf 'Expected kind interactive SSH auto-login to stay attached and accept input\n' >&2
-  exit 1
-fi
-printf '%s\n' 'kind-test: interactive SSH auto-login ok' >&2
+  if [[ "${kind_auto_login_status}" -ne 0 ]]; then
+    printf 'Expected kind interactive SSH auto-login to stay attached and accept input\n' >&2
+    exit 1
+  fi
+  printf '%s\n' 'kind-test: interactive SSH auto-login ok' >&2
 
-printf '%s\n' 'kind-test: verifying picker menu options' >&2
-if ! ssh_bash <<'EOF'
+  printf '%s\n' 'kind-test: verifying picker menu options' >&2
+  if ! ssh_bash <<'EOF'
 set -euo pipefail
 screen -T screen-256color -dmS shell bash -lc 'sleep 30'
 EOF
-then
-  printf 'Expected shell session fixture for kind picker menu test\n' >&2
-  exit 1
-fi
-set +e
-printf '9999\n' | TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
-  "control-plane-session --select" >"${workdir}/ssh-picker-menu.log" 2>&1
-picker_menu_status=$?
-set -e
-if [[ "${picker_menu_status}" -eq 0 ]]; then
-  printf 'Expected kind picker menu probe to fail on invalid selection\n' >&2
-  cat "${workdir}/ssh-picker-menu.log" >&2 || true
-  exit 1
-fi
-if ! grep -Fq 'Copilot (/workspace, --yolo)' "${workdir}/ssh-picker-menu.log"; then
-  printf 'Expected kind picker menu to show the Copilot option when only shell sessions exist\n' >&2
-  cat "${workdir}/ssh-picker-menu.log" >&2 || true
-  exit 1
-fi
-printf '%s\n' 'kind-test: picker menu shows Copilot option' >&2
+  then
+    printf 'Expected shell session fixture for kind picker menu test\n' >&2
+    exit 1
+  fi
+  set +e
+  printf '9999\n' | TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
+    "control-plane-session --select" >"${workdir}/ssh-picker-menu.log" 2>&1
+  picker_menu_status=$?
+  set -e
+  if [[ "${picker_menu_status}" -eq 0 ]]; then
+    printf 'Expected kind picker menu probe to fail on invalid selection\n' >&2
+    cat "${workdir}/ssh-picker-menu.log" >&2 || true
+    exit 1
+  fi
+  if ! grep -Fq 'Copilot (/workspace, --yolo)' "${workdir}/ssh-picker-menu.log"; then
+    printf 'Expected kind picker menu to show the Copilot option when only shell sessions exist\n' >&2
+    cat "${workdir}/ssh-picker-menu.log" >&2 || true
+    exit 1
+  fi
+  printf '%s\n' 'kind-test: picker menu shows Copilot option' >&2
+}
 
-printf '%s\n' 'kind-test: starting manual job' >&2
-if ! job_name="$(ssh_bash <<EOF
+run_job_core_assertions() {
+  printf '%s\n' 'kind-test: starting manual job' >&2
+  if ! job_name="$(ssh_bash <<EOF
 set -euo pipefail
 k8s-job-start --namespace ${job_namespace} --job-name ci-manual-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/manual-job.txt manual
 EOF
 )";
-then
-  ssh_bash <<EOF >&2 || true
+  then
+    ssh_bash <<EOF >&2 || true
 set -euxo pipefail
 command -v k8s-job-start
 kubectl config current-context
@@ -1182,62 +1160,62 @@ kubectl auth can-i create jobs --namespace ${job_namespace}
 kubectl delete job --namespace ${job_namespace} ci-manual-job --ignore-not-found >/dev/null 2>&1 || true
 bash -x "\$(command -v k8s-job-start)" --namespace ${job_namespace} --job-name ci-manual-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/manual-job.txt manual
 EOF
-  dump_control_plane_diagnostics
-  exit 1
-fi
-job_name="$(printf '%s' "${job_name}" | tr -d '\r\n')"
-printf '%s\n' 'kind-test: manual job created' >&2
+    dump_control_plane_diagnostics
+    exit 1
+  fi
+  job_name="$(printf '%s' "${job_name}" | tr -d '\r\n')"
+  printf '%s\n' 'kind-test: manual job created' >&2
 
-ssh_bash <<EOF
+  ssh_bash <<EOF
 set -euo pipefail
 k8s-job-wait --namespace ${job_namespace} --job-name ${job_name} --timeout 180s
 EOF
 
-pod_name="$(ssh_bash <<EOF
+  pod_name="$(ssh_bash <<EOF
 set -euo pipefail
 k8s-job-pod --namespace ${job_namespace} --job-name ${job_name}
 EOF
 )"
-pod_name="$(printf '%s' "${pod_name}" | tr -d '\r\n')"
-[[ -n "${pod_name}" ]]
+  pod_name="$(printf '%s' "${pod_name}" | tr -d '\r\n')"
+  [[ -n "${pod_name}" ]]
 
-logs="$(ssh_bash <<EOF
+  logs="$(ssh_bash <<EOF
 set -euo pipefail
 k8s-job-logs --namespace ${job_namespace} --job-name ${job_name}
 EOF
 )"
-grep -q 'manual' <<<"${logs}"
+  grep -q 'manual' <<<"${logs}"
 
-ssh_bash <<'EOF'
+  ssh_bash <<'EOF'
 set -euo pipefail
 test -f /workspace/manual-job.txt
 EOF
 
-auto_output="$(ssh_bash <<EOF
+  auto_output="$(ssh_bash <<EOF
 set -euo pipefail
 control-plane-run --mode auto --execution-hint long --namespace ${job_namespace} --job-name ci-auto-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/auto-job.txt auto
 EOF
 )"
-grep -q 'auto' <<<"${auto_output}"
+  grep -q 'auto' <<<"${auto_output}"
 
-ssh_bash <<'EOF'
+  ssh_bash <<'EOF'
 set -euo pipefail
 test -f /workspace/auto-job.txt
 EOF
 
-default_mode_output="$(ssh_bash <<EOF
+  default_mode_output="$(ssh_bash <<EOF
 set -euo pipefail
 control-plane-run --job-name ci-default-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/default-job.txt default
 EOF
 )"
-grep -q 'default' <<<"${default_mode_output}"
+  grep -q 'default' <<<"${default_mode_output}"
 
-ssh_bash <<'EOF'
+  ssh_bash <<'EOF'
 set -euo pipefail
 test -f /workspace/default-job.txt
 EOF
 
-ssh_bash <<EOF
+  ssh_bash <<EOF
 set -euo pipefail
 printf 'job input from transfer\n' > /workspace/job-input.txt
 printf 'colon input\n' > '/workspace/job:input.txt'
@@ -1311,42 +1289,46 @@ if [[ "\${fake_migrate_status}" -ne 0 ]]; then
   printf 'Expected control-plane-podman to recover after podman system migrate\n' >&2
   exit 1
 fi
-grep -q '^pull$' /tmp/fake-podman-migrate.log
-grep -q '^quay.io/example/test:latest$' /tmp/fake-podman-migrate.log
-grep -q 'detected stale rootless Podman state' /tmp/fake-podman-migrate-output.log
-grep -q 'repaired the local Podman state' /tmp/fake-podman-migrate-output.log
+  grep -q '^pull$' /tmp/fake-podman-migrate.log
+  grep -q '^quay.io/example/test:latest$' /tmp/fake-podman-migrate.log
+  grep -q 'detected stale rootless Podman state' /tmp/fake-podman-migrate-output.log
+  grep -q 'repaired the local Podman state' /tmp/fake-podman-migrate-output.log
 EOF
+}
 
-printf -v remote_job_transfer_command 'bash -l -se -- %q %q' "${execution_plane_image}" "${job_namespace}"
-# shellcheck disable=SC2029
-if ! ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_job_transfer_command}" < "${script_dir}/test-job-transfer.sh"; then
-  printf 'Expected kind job transfer regression script to succeed\n' >&2
-  dump_control_plane_diagnostics
-  exit 1
-fi
+run_job_transfer_assertions() {
+  printf -v remote_job_transfer_command 'bash -l -se -- %q %q' "${execution_plane_image}" "${job_namespace}"
+  # shellcheck disable=SC2029
+  if ! ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_job_transfer_command}" < "${script_dir}/test-job-transfer.sh"; then
+    printf 'Expected kind job transfer regression script to succeed\n' >&2
+    dump_control_plane_diagnostics
+    exit 1
+  fi
+}
 
-ssh_bash <<'EOF'
+run_restart_assertions() {
+  ssh_bash <<'EOF'
 set -euo pipefail
 mkdir -p ~/.copilot/session-state
 printf '%s\n' 'session-state-ok' > ~/.copilot/session-state/k8s-session-state.txt
 printf '%s\n' 'tmp-ok' > "${TMPDIR}/k8s-tmp.txt"
 EOF
 
-kubectl exec --namespace "${namespace}" "$(control_plane_pod_name)" -c control-plane -- bash -lc \
-  "set -euo pipefail; printf '%s\n' 'rootful-reset' > /var/lib/control-plane/rootful-podman/rootful-overlay/should-disappear.txt"
+  kubectl exec --namespace "${namespace}" "$(control_plane_pod_name)" -c control-plane -- bash -lc \
+    "set -euo pipefail; printf '%s\n' 'rootful-reset' > /var/lib/control-plane/rootful-podman/rootful-overlay/should-disappear.txt"
 
-first_host_fingerprint="$(ssh_host_fingerprint)"
+  first_host_fingerprint="$(ssh_host_fingerprint)"
 
-stop_port_forward
-kubectl rollout restart deployment/control-plane --namespace "${namespace}" >/dev/null
-wait_for_control_plane_pod
-start_port_forward
-wait_for_ssh
+  stop_port_forward
+  kubectl rollout restart deployment/control-plane --namespace "${namespace}" >/dev/null
+  wait_for_control_plane_pod
+  start_port_forward
+  wait_for_ssh
 
-second_host_fingerprint="$(ssh_host_fingerprint)"
-[[ "${first_host_fingerprint}" == "${second_host_fingerprint}" ]]
+  second_host_fingerprint="$(ssh_host_fingerprint)"
+  [[ "${first_host_fingerprint}" == "${second_host_fingerprint}" ]]
 
-ssh_bash <<'EOF'
+  ssh_bash <<'EOF'
 set -euo pipefail
 test ! -e ~/.copilot/state.txt
 test -f ~/.copilot/session-state/k8s-session-state.txt
@@ -1360,3 +1342,105 @@ test ! -e "${TMPDIR}/k8s-tmp.txt"
 test ! -e /var/lib/control-plane/rootful-podman/rootful-overlay/should-disappear.txt
 test ! -e ~/.copilot/tmp
 EOF
+}
+
+run_job_and_restart_assertions() {
+  run_job_core_assertions
+  run_job_transfer_assertions
+  run_restart_assertions
+}
+
+run_job_core_and_restart_assertions() {
+  run_job_core_assertions
+  run_restart_assertions
+}
+
+cleanup() {
+  stop_port_forward
+  kubectl delete namespace "${namespace}" --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete namespace "${job_namespace}" --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete pv control-plane-copilot-session-pv --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete pv control-plane-workspace-control-pv --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete pv control-plane-workspace-job-pv --ignore-not-found >/dev/null 2>&1 || true
+  if [[ "${created_cluster}" -eq 1 ]]; then
+    kind_cmd delete cluster --name "${cluster_name}" >/dev/null 2>&1 || true
+  fi
+  rm -rf "${workdir}"
+}
+trap cleanup EXIT
+
+require_command kind
+require_command kubectl
+require_command "${container_bin}"
+require_command ssh
+require_command ssh-keygen
+require_command ssh-keyscan
+
+export KIND_EXPERIMENTAL_PROVIDER="${kind_provider}"
+
+if [[ -n "${kind_image_archive}" ]] && [[ ! -f "${kind_image_archive}" ]]; then
+  printf 'Missing Kind image archive: %s\n' "${kind_image_archive}" >&2
+  exit 1
+fi
+
+if [[ "${kind_sudo_mode}" == "always" ]]; then
+  enable_kind_sudo
+fi
+
+case "${kind_test_group}" in
+  all|session|jobs|jobs-core|jobs-transfer)
+    ;;
+  *)
+    printf 'Unsupported Kind test group: %s\n' "${kind_test_group}" >&2
+    exit 1
+    ;;
+esac
+
+if ! kind_cmd get clusters | grep -qx "${cluster_name}"; then
+  if ! create_cluster; then
+    status=$?
+    if [[ "${status}" -eq 2 ]]; then
+      exit 0
+    fi
+    exit "${status}"
+  fi
+  created_cluster=1
+fi
+
+refresh_kubeconfig
+kubectl config use-context "kind-${cluster_name}" >/dev/null
+kubectl wait --for=condition=Ready node --all --timeout=180s >/dev/null
+load_kind_images
+ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"
+apply_resources
+test "$(kubectl get service/control-plane --namespace "${namespace}" -o jsonpath='{.spec.type}')" = "LoadBalancer"
+wait_for_control_plane_pod
+start_port_forward
+wait_for_ssh
+
+run_shared_remote_assertions
+
+case "${kind_test_group}" in
+  all)
+    start_persistence_session_fixtures
+    run_terminal_session_assertions
+    run_job_and_restart_assertions
+    ;;
+  session)
+    start_persistence_session_fixtures
+    run_terminal_session_assertions
+    ;;
+  jobs)
+    start_persistence_session_fixtures
+    wait_for_screen_output_fixture
+    run_job_and_restart_assertions
+    ;;
+  jobs-core)
+    start_persistence_session_fixtures
+    wait_for_screen_output_fixture
+    run_job_core_and_restart_assertions
+    ;;
+  jobs-transfer)
+    run_job_transfer_assertions
+    ;;
+esac

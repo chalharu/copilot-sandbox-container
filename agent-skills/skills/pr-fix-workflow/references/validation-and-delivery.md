@@ -41,7 +41,7 @@ Start with the repository regression script:
 That script:
 
 - validates the repo-local `pr-fix-workflow` skill
-- validates the bundled `repo-change-delivery` skill
+- validates the bundled `repo-change-delivery`, `git-commit`, and `pull-request-workflow` skills
 - packages each skill through the repository `containers/yamllint` image without depending on host Python
 - checks that the control-plane image and runtime tests still expose bundled skills correctly
 
@@ -51,5 +51,5 @@ That script:
 
 The authoritative hosted validation definition lives in `.github/workflows/control-plane-ci.yml`.
 
-- `pull_request` runs `lint` and `integration`
-- `push` to `main` additionally runs `publish-manifests` and `cleanup-packages`
+- `pull_request` starts `lint` and `Integration Images` in parallel, then fans out `Integration Smoke`, `Integration Regressions`, `Integration Kind Session`, `Integration Kind Jobs Core`, and `Integration Kind Jobs Transfer`
+- `push` to `main` additionally gates `Publish Architecture Images`, `publish-manifests`, and `cleanup-packages` on the lint and integration fan-out results

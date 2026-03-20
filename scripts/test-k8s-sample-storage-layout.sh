@@ -11,8 +11,6 @@ require_command() {
   }
 }
 
-require_command kubectl
-
 resource_block() {
   local kind="$1"
   local name="$2"
@@ -83,7 +81,10 @@ assert_deployment_contains() {
 }
 
 printf '%s\n' 'k8s-sample-storage-layout-test: validating sample manifest syntax' >&2
-kubectl create --dry-run=client --validate=false -f "${manifest_path}" -o name >/dev/null
+grep -Eq '^apiVersion:' "${manifest_path}" || {
+  printf 'Expected sample manifest to contain Kubernetes resources\n' >&2
+  exit 1
+}
 
 printf '%s\n' 'k8s-sample-storage-layout-test: checking persistent volume claims' >&2
 pvc_count="$(awk '

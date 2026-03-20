@@ -125,6 +125,8 @@ skill_output="$("${container_bin}" run --rm \
 su -s /bin/bash copilot -c 'set -euo pipefail
 control_skill_root=\"\$HOME/.copilot/skills/control-plane-operations\"
 delivery_skill_root=\"\$HOME/.copilot/skills/repo-change-delivery\"
+commit_skill_root=\"\$HOME/.copilot/skills/git-commit\"
+pull_request_skill_root=\"\$HOME/.copilot/skills/pull-request-workflow\"
 test ! -L \"\$control_skill_root\"
 test -r \"\$control_skill_root/SKILL.md\"
 test -x \"\$control_skill_root/references\"
@@ -133,6 +135,12 @@ test -r \"\$control_skill_root/references/skills.md\"
 test ! -L \"\$delivery_skill_root\"
 test -r \"\$delivery_skill_root/SKILL.md\"
 grep -Fqx \"name: repo-change-delivery\" \"\$delivery_skill_root/SKILL.md\"
+test ! -L \"\$commit_skill_root\"
+test -r \"\$commit_skill_root/SKILL.md\"
+grep -Fqx \"name: git-commit\" \"\$commit_skill_root/SKILL.md\"
+test ! -L \"\$pull_request_skill_root\"
+test -r \"\$pull_request_skill_root/SKILL.md\"
+grep -Fqx \"name: pull-request-workflow\" \"\$pull_request_skill_root/SKILL.md\"
 printf \"%s\n\" bundled-skills-ok'" 2>&1)"
 skill_status=$?
 set -e
