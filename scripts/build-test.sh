@@ -36,6 +36,9 @@ CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
   "${script_dir}/test-regressions.sh" "${control_plane_image}"
 
 CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
+  "${script_dir}/test-renovate-config-permissions.sh"
+
+CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
   "${script_dir}/test-config-injection.sh" "${control_plane_image}"
 
 CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \

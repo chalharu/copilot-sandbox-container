@@ -72,6 +72,7 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 
 - `scripts/test-standalone.sh`
 - `scripts/test-regressions.sh`
+- `scripts/test-renovate-config-permissions.sh`
 - `scripts/test-config-injection.sh`
 - `scripts/test-podman-startup.sh`
 - `scripts/test-k8s-sample-storage-layout.sh`

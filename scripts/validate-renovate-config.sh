@@ -10,6 +10,8 @@ container_bin=""
 renovate_image="${CONTROL_PLANE_RENOVATE_IMAGE:-ghcr.io/renovatebot/renovate:43.84.0@sha256:0334065a0093ea5f80bcd397640c0188fbd79827cb8981dcfeaad49a5b21f9ed}"
 base_dir=""
 log_file=""
+# Match the caller so restrictive workspace mounts remain readable in-container.
+container_user="$(id -u):$(id -g)"
 renovate_env=()
 dockerhub_username="${DOCKERHUB_USERNAME:-}"
 dockerhub_token="${DOCKERHUB_TOKEN:-}"
@@ -32,6 +34,7 @@ cleanup() {
 
   if [[ -n "${cleanup_container_bin}" ]] && command -v "${cleanup_container_bin}" >/dev/null 2>&1 && [[ -d "${cleanup_base_dir}" ]]; then
     "${cleanup_container_bin}" run --rm \
+      --user "${container_user}" \
       -v "${cleanup_base_dir}:/tmp/renovate-base" \
       --entrypoint sh \
       "${cleanup_renovate_image}" \
@@ -83,6 +86,7 @@ if [[ -n "${dockerhub_username}" ]] && [[ -n "${dockerhub_token}" ]]; then
 fi
 
 "${container_bin}" run --rm \
+  --user "${container_user}" \
   -v "${PWD}:/workspace:ro" \
   -w /workspace \
   --entrypoint renovate-config-validator \
@@ -93,6 +97,7 @@ renovate_status=0
 
 set +e
 "${container_bin}" run --rm \
+  --user "${container_user}" \
   "${renovate_env[@]}" \
   -e LOG_LEVEL=debug \
   -e RENOVATE_CONFIG_FILE=/workspace/renovate.json5 \
