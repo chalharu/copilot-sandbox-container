@@ -69,6 +69,8 @@ CONTROL_PLANE_TOOLCHAIN=docker ./scripts/build-test.sh
 CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh --build-only
 CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh --skip-image-build --group smoke
+CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh --skip-image-build --group kind-session
+CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh --skip-image-build --group kind-jobs
 ```
 
 このスクリプトは、Control Plane イメージと smoke 用 Execution Plane イメージを build し、既定では次の下位テストを順に実行します。
@@ -85,7 +87,7 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh --skip-image-build --grou
 
 Kind integration では、`scripts/test-job-transfer.sh` も通して `--mount-file` の大きいファイル転送、Job 完了時の write-back、外部更新との競合保護を確認します。
 
-CI や focused rerun 向けには、`--build-only` と `--skip-image-build --group <smoke|regressions|kind>` を使って、image build を 1 回にしてから各 test group を分けて実行できます。
+CI や focused rerun 向けには、`--build-only` と `--skip-image-build --group <smoke|regressions|kind|kind-session|kind-jobs>` を使って、image build を 1 回にしてから各 test group を分けて実行できます。`kind` は従来どおり Kind の全シナリオを一括実行し、`kind-session` と `kind-jobs` は CI の wall-clock 短縮向けに分割したサブセットです。
 
 ## ステップ 4: current-cluster を確認する
 

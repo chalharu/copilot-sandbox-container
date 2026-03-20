@@ -18,7 +18,7 @@ test_group="all"
 
 usage() {
   cat >&2 <<'EOF'
-Usage: scripts/build-test.sh [--build-only] [--skip-image-build] [--group all|smoke|regressions|kind]
+Usage: scripts/build-test.sh [--build-only] [--skip-image-build] [--group all|smoke|regressions|kind|kind-session|kind-jobs]
 EOF
 }
 
@@ -47,12 +47,18 @@ run_regressions_group() {
     "${script_dir}/test-k8s-sample-storage-layout.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
+    "${script_dir}/test-ci-workflow-parallelization.sh"
+
+  CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-repo-change-delivery-skills.sh"
 }
 
 run_kind_group() {
+  local kind_test_group="${1:-all}"
+
   KIND_EXPERIMENTAL_PROVIDER="${kind_provider}" \
     CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
+    CONTROL_PLANE_KIND_TEST_GROUP="${kind_test_group}" \
     "${script_dir}/test-kind.sh" "${control_plane_image}" "${execution_plane_image}" "${cluster_name}"
 }
 
@@ -91,7 +97,7 @@ if [[ -n "${CONTROL_PLANE_CONTAINER_BIN:-}" ]] && [[ "${CONTROL_PLANE_CONTAINER_
 fi
 
 case "${test_group}" in
-  all|smoke|regressions|kind)
+  all|smoke|regressions|kind|kind-session|kind-jobs)
     ;;
   *)
     printf 'Unsupported build/test group: %s\n' "${test_group}" >&2
@@ -121,7 +127,7 @@ fi
 require_command ssh
 require_command ssh-keygen
 
-if [[ "${test_group}" == "kind" ]] || [[ "${test_group}" == "all" ]]; then
+if [[ "${test_group}" == "kind" ]] || [[ "${test_group}" == "kind-session" ]] || [[ "${test_group}" == "kind-jobs" ]] || [[ "${test_group}" == "all" ]]; then
   require_command kind
   require_command kubectl
 fi
@@ -140,5 +146,11 @@ case "${test_group}" in
     ;;
   kind)
     run_kind_group
+    ;;
+  kind-session)
+    run_kind_group session
+    ;;
+  kind-jobs)
+    run_kind_group jobs
     ;;
 esac
