@@ -7,8 +7,8 @@ skill_dir="${repo_root}/agent-skills/skills/pr-fix-workflow"
 container_skill_dir="/workspace/agent-skills/skills/pr-fix-workflow"
 skill_file="${skill_dir}/SKILL.md"
 reference_file="${skill_dir}/references/validation-and-delivery.md"
-package_dir="$(mktemp -d)"
-container_package_dir="/tmp/pr-fix-workflow-skill-package"
+package_dir="$(mktemp -d "${repo_root}/.pr-fix-workflow-skill-package.XXXXXX")"
+container_package_dir="/workspace/$(basename "${package_dir}")"
 
 # shellcheck source=scripts/lib-container-toolchain.sh
 source "${script_dir}/lib-container-toolchain.sh"
@@ -86,7 +86,6 @@ build_image_for_toolchain "${toolchain}" "${yamllint_image}" containers/yamllint
 
 "${container_bin}" run --rm --user "$(id -u):$(id -g)" \
   -v "${repo_root}:/workspace" \
-  -v "${package_dir}:${container_package_dir}" \
   -w /workspace/.github/skills/skill-creator/scripts \
   --entrypoint python3 \
   "${yamllint_image}" \
