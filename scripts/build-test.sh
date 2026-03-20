@@ -45,7 +45,7 @@ CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
   "${script_dir}/test-k8s-sample-storage-layout.sh"
 
 CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
-  "${script_dir}/test-pr-fix-workflow-skill.sh"
+  "${script_dir}/test-repo-change-delivery-skills.sh"
 
 CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
   "${script_dir}/test-entrypoint-capabilities.sh" "${control_plane_image}"

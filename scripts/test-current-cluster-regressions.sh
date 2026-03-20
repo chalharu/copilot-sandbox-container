@@ -76,6 +76,10 @@ test -r "${skill_root}/SKILL.md"
 test -x "${skill_root}/references"
 test -r "${skill_root}/references/control-plane-run.md"
 test -r "${skill_root}/references/skills.md"
+delivery_skill_root="${HOME}/.copilot/skills/repo-change-delivery"
+test ! -L "${delivery_skill_root}"
+test -r "${delivery_skill_root}/SKILL.md"
+grep -Fqx 'name: repo-change-delivery' "${delivery_skill_root}/SKILL.md"
 printf '%s\n' 'current-cluster-test: skill-read=ok'
 
 printf '%s\n' 'current-cluster-test: verifying local podman build defaults' >&2

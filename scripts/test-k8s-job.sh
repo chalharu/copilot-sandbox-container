@@ -122,7 +122,8 @@ kubectl create configmap "${configmap_name}" \
   --from-file=profile-control-plane-session.sh=/workspace/containers/control-plane/config/profile-control-plane-session.sh \
   --from-file=control-plane-skill.md=/workspace/containers/control-plane/skills/control-plane-operations/SKILL.md \
   --from-file=control-plane-run.md=/workspace/containers/control-plane/skills/control-plane-operations/references/control-plane-run.md \
-  --from-file=skills-reference.md=/workspace/containers/control-plane/skills/control-plane-operations/references/skills.md
+  --from-file=skills-reference.md=/workspace/containers/control-plane/skills/control-plane-operations/references/skills.md \
+  --from-file=repo-change-delivery-skill.md=/workspace/containers/control-plane/skills/repo-change-delivery/SKILL.md
 
 service_account_yaml=''
 if [[ -n "${service_account}" ]]; then
@@ -173,10 +174,12 @@ ${service_account_yaml}
                install -m 0644 /var/run/control-plane-test/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
                install -m 0644 /var/run/control-plane-test/profile-control-plane-session.sh /etc/profile.d/control-plane-session.sh
                install -d -m 0755 /usr/local/share/control-plane/skills/control-plane-operations/references
-               install -m 0644 /var/run/control-plane-test/control-plane-skill.md /usr/local/share/control-plane/skills/control-plane-operations/SKILL.md
-               install -m 0644 /var/run/control-plane-test/control-plane-run.md /usr/local/share/control-plane/skills/control-plane-operations/references/control-plane-run.md
-               install -m 0644 /var/run/control-plane-test/skills-reference.md /usr/local/share/control-plane/skills/control-plane-operations/references/skills.md
-               ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/podman
+               install -d -m 0755 /usr/local/share/control-plane/skills/repo-change-delivery
+                install -m 0644 /var/run/control-plane-test/control-plane-skill.md /usr/local/share/control-plane/skills/control-plane-operations/SKILL.md
+                install -m 0644 /var/run/control-plane-test/control-plane-run.md /usr/local/share/control-plane/skills/control-plane-operations/references/control-plane-run.md
+                install -m 0644 /var/run/control-plane-test/skills-reference.md /usr/local/share/control-plane/skills/control-plane-operations/references/skills.md
+                install -m 0644 /var/run/control-plane-test/repo-change-delivery-skill.md /usr/local/share/control-plane/skills/repo-change-delivery/SKILL.md
+                ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/podman
                ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/docker
                ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen
                usermod --shell /usr/local/bin/control-plane-ssh-shell copilot
@@ -193,8 +196,8 @@ ${service_account_yaml}
                  [[ "\${runtime_line}" == *"CONTROL_PLANE_PODMAN_BUILD_ISOLATION=chroot"* ]]
                   [[ "\${runtime_line}" == *"CONTAINER_HOST="*"/var/tmp/control-plane/rootful-overlay/podman-root.sock"* ]]
 
-                 su -s /bin/bash copilot -c '"'"'set -euo pipefail; skill_root="\$HOME/.copilot/skills/control-plane-operations"; test ! -L "\$skill_root"; test -r "\$skill_root/SKILL.md"; test -x "\$skill_root/references"; test -r "\$skill_root/references/control-plane-run.md"; test -r "\$skill_root/references/skills.md"'"'"'
-                 printf "%s\n" "job-check: skill-read=ok"
+                 su -s /bin/bash copilot -c '"'"'set -euo pipefail; skill_root="\$HOME/.copilot/skills/control-plane-operations"; delivery_skill_root="\$HOME/.copilot/skills/repo-change-delivery"; test ! -L "\$skill_root"; test -r "\$skill_root/SKILL.md"; test -x "\$skill_root/references"; test -r "\$skill_root/references/control-plane-run.md"; test -r "\$skill_root/references/skills.md"; test ! -L "\$delivery_skill_root"; test -r "\$delivery_skill_root/SKILL.md"; grep -Fqx "name: repo-change-delivery" "\$delivery_skill_root/SKILL.md"'"'"'
+                  printf "%s\n" "job-check: skill-read=ok"
 
                  term_report="\$(TERM=xterm-color bash -lc '"'"'printf "%s %s" "\$TERM" "\$(tput colors)"'"'"')"
                  printf "job-check: term=%s\n" "\${term_report}"

@@ -102,7 +102,7 @@ if grep -q 'cannot dereference' <<<"${broken_symlink_output}"; then
 fi
 grep -qx 'startup-ok' <<<"${broken_symlink_output}"
 
-printf '%s\n' 'regression-test: verifying bundled skill sync keeps reference docs readable' >&2
+printf '%s\n' 'regression-test: verifying bundled skill sync keeps bundled skills readable' >&2
 mkdir -p \
   "${workdir}/skill-state/copilot" \
   "${workdir}/skill-state/gh" \
@@ -123,22 +123,26 @@ skill_output="$("${container_bin}" run --rm \
   "${control_plane_image}" \
   bash -lc "set -euo pipefail
 su -s /bin/bash copilot -c 'set -euo pipefail
-skill_root=\"\$HOME/.copilot/skills/control-plane-operations\"
-test ! -L \"\$skill_root\"
-test -r \"\$skill_root/SKILL.md\"
-test -x \"\$skill_root/references\"
-test -r \"\$skill_root/references/control-plane-run.md\"
-test -r \"\$skill_root/references/skills.md\"
-head -n 1 \"\$skill_root/references/skills.md\"'" 2>&1)"
+control_skill_root=\"\$HOME/.copilot/skills/control-plane-operations\"
+delivery_skill_root=\"\$HOME/.copilot/skills/repo-change-delivery\"
+test ! -L \"\$control_skill_root\"
+test -r \"\$control_skill_root/SKILL.md\"
+test -x \"\$control_skill_root/references\"
+test -r \"\$control_skill_root/references/control-plane-run.md\"
+test -r \"\$control_skill_root/references/skills.md\"
+test ! -L \"\$delivery_skill_root\"
+test -r \"\$delivery_skill_root/SKILL.md\"
+grep -Fqx \"name: repo-change-delivery\" \"\$delivery_skill_root/SKILL.md\"
+printf \"%s\n\" bundled-skills-ok'" 2>&1)"
 skill_status=$?
 set -e
 
 if [[ "${skill_status}" -ne 0 ]]; then
-  printf 'Expected bundled skill references to remain readable after startup sync\n' >&2
+  printf 'Expected bundled skills to remain readable after startup sync\n' >&2
   printf '%s\n' "${skill_output}" >&2
   exit 1
 fi
-grep -qx '# Built-in skill reference' <<<"${skill_output}"
+grep -qx 'bundled-skills-ok' <<<"${skill_output}"
 
 printf '%s\n' 'regression-test: verifying file-based DHI auth handling' >&2
 mkdir -p "${workdir}/fake-bin"

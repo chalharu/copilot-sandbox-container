@@ -3,9 +3,9 @@
 ## Contents
 
 - [Local validation baseline](#local-validation-baseline)
-- [Current-cluster verification](#current-cluster-verification)
+- [Kubernetes and current-cluster verification](#kubernetes-and-current-cluster-verification)
 - [Skill-specific validation](#skill-specific-validation)
-- [PR and CI loop](#pr-and-ci-loop)
+- [CI surfaces](#ci-surfaces)
 
 ## Local validation baseline
 
@@ -16,61 +16,40 @@ Run the repository baseline with Podman:
 
 Add a focused `scripts/test-*.sh` regression check for the behavior you changed and run it directly during iteration. Wire it into `scripts/build-test.sh` when it is deterministic and worth covering in the standard regression path.
 
-## Current-cluster verification
+## Kubernetes and current-cluster verification
 
 When the change affects Kubernetes manifests, control-plane runtime behavior, or cluster interactions, verify it against a real cluster path instead of relying only on static inspection.
 
-Preferred check:
+Preferred pre-deploy check:
 
 - `./scripts/test-k8s-job.sh`
+
+When the current cluster already runs the workspace image you are editing, also use:
+
+- `./scripts/test-current-cluster-regressions.sh`
 
 Use `kubectl get`, `kubectl describe`, and `kubectl logs` for extra inspection when needed. `scripts/build-test.sh` already assumes `kind`, `kubectl`, `ssh`, and `ssh-keygen` are available.
 
 ## Skill-specific validation
 
-When the change touches `.github/skills/`, validate and package the changed skill as part of the delivery loop.
+When the change touches repo-local skills under `.github/skills/` or bundled skills under `containers/control-plane/skills/`, validate every changed skill as part of the delivery loop.
 
-The host may not provide Python directly. Reuse the repository `containers/yamllint` image through the active container toolchain:
+Start with the repository regression script:
 
-```bash
-CONTROL_PLANE_TOOLCHAIN=podman ./scripts/lint.sh
+- `./scripts/test-repo-change-delivery-skills.sh`
 
-SKILL_DIR=/workspace/.github/skills/<skill-name>
-TMPDIR="$(mktemp -d)"
+That script:
 
-podman run --rm --user "$(id -u):$(id -g)" \
-  -v /workspace:/workspace \
-  -w /workspace/.github/skills/skill-creator/scripts \
-  --entrypoint python3 \
-  localhost/yamllint:test \
-  quick_validate.py "${SKILL_DIR}"
+- validates the repo-local `pr-fix-workflow` skill
+- validates the bundled `repo-change-delivery` skill
+- packages each skill through the repository `containers/yamllint` image without depending on host Python
+- checks that the control-plane image and runtime tests still expose bundled skills correctly
 
-podman run --rm --user "$(id -u):$(id -g)" \
-  -v /workspace:/workspace \
-  -v "${TMPDIR}:${TMPDIR}" \
-  -w /workspace/.github/skills/skill-creator/scripts \
-  --entrypoint python3 \
-  localhost/yamllint:test \
-  package_skill.py "${SKILL_DIR}" "${TMPDIR}"
+`CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh` also includes the same regression script in the standard baseline.
 
-rm -rf "${TMPDIR}"
-```
+## CI surfaces
 
-Use the matching container runtime when the active toolchain is Docker instead of Podman.
-
-## PR and CI loop
-
-Use the `git-commit` skill for each commit cycle. After each commit:
-
-1. `git fetch origin main`
-2. `git rebase origin/main`
-3. rerun local validation if the rebase introduced changes or conflict resolution
-4. push the branch
-5. create or update the PR
-
-The authoritative CI definition lives in `.github/workflows/control-plane-ci.yml`.
+The authoritative hosted validation definition lives in `.github/workflows/control-plane-ci.yml`.
 
 - `pull_request` runs `lint` and `integration`
 - `push` to `main` additionally runs `publish-manifests` and `cleanup-packages`
-
-Wait for the PR checks or workflow run to finish. If any job fails, inspect the failing logs, fix the issue, recommit, rebase, rerun the local validation loop, push again, and wait again.

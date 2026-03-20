@@ -2,24 +2,24 @@
 
 ## Discovery model
 
-- The control-plane image seeds this skill into `~/.copilot/skills/control-plane-operations` at container start.
+- The control-plane image seeds every bundled skill from `containers/control-plane/skills/` into `~/.copilot/skills/` at container start.
 - Because the target directory lives under the writable Copilot home, the skill stays visible even when `/workspace` points at a different repository.
 - Repository-specific skills can still live under `.github/skills/` in the mounted repository.
 
-## Update the bundled skill
+## Update a bundled skill
 
-1. Edit `containers/control-plane/skills/control-plane-operations/`.
+1. Edit `containers/control-plane/skills/<skill-name>/`.
 2. Keep `SKILL.md` concise and move detailed material into `references/` when needed.
-3. Ensure `containers/control-plane/Dockerfile` still copies the skill into `/usr/local/share/control-plane/skills/`.
-4. Ensure `containers/control-plane/bin/control-plane-entrypoint` still syncs the bundled copy into `~/.copilot/skills/`.
+3. Ensure `containers/control-plane/Dockerfile` still copies `containers/control-plane/skills/` into `/usr/local/share/control-plane/skills/`.
+4. Ensure `containers/control-plane/bin/control-plane-entrypoint` still syncs each bundled skill directory into `~/.copilot/skills/`.
 5. Validate structure with:
 
    ```bash
-   python3 .github/skills/skill-creator/scripts/package_skill.py containers/control-plane/skills/control-plane-operations
+   python3 .github/skills/skill-creator/scripts/package_skill.py containers/control-plane/skills/<skill-name>
    ```
 
 ## Combine with repo-local skills
 
 - Put repo-specific skills in the repository's `.github/skills/` directory.
-- Keep image-wide operational guidance in this bundled skill and keep repository conventions in repo-local skills.
+- Keep image-wide reusable workflows in bundled skills and keep repository-specific conventions in repo-local skills.
 - Prefer repo-local overrides only when behavior truly depends on the mounted repository.
