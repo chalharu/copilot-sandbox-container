@@ -28,10 +28,10 @@ Examples:
 - `chore(ci): update workflow cache key`
 
 Types:
+
 - `feat`: new feature
 - `fix`: bug fix
 - `docs`: documentation only
 - `refactor`: code change without behavior change
 - `test`: tests
 - `chore`: maintenance/configuration
-

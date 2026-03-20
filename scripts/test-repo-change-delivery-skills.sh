@@ -8,11 +8,20 @@ repo_skill_file="${repo_skill_dir}/SKILL.md"
 repo_reference_file="${repo_skill_dir}/references/validation-and-delivery.md"
 generic_skill_dir="${repo_root}/containers/control-plane/skills/repo-change-delivery"
 generic_skill_file="${generic_skill_dir}/SKILL.md"
+commit_skill_dir="${repo_root}/containers/control-plane/skills/git-commit"
+commit_skill_file="${commit_skill_dir}/SKILL.md"
+pull_request_skill_dir="${repo_root}/containers/control-plane/skills/pull-request-workflow"
+pull_request_skill_file="${pull_request_skill_dir}/SKILL.md"
+bundled_reference_file="${repo_root}/containers/control-plane/skills/control-plane-operations/references/skills.md"
+repo_commit_skill_file="${repo_root}/agent-skills/skills/git-commit/SKILL.md"
 dockerfile_path="${repo_root}/containers/control-plane/Dockerfile"
 entrypoint_path="${repo_root}/containers/control-plane/bin/control-plane-entrypoint"
 package_dir="$(mktemp -d)"
 repo_package_file="${package_dir}/pr-fix-workflow.skill"
 generic_package_file="${package_dir}/repo-change-delivery.skill"
+commit_package_file="${package_dir}/git-commit.skill"
+repo_commit_package_file="${package_dir}/repo-git-commit.skill"
+pull_request_package_file="${package_dir}/pull-request-workflow.skill"
 
 # shellcheck source=scripts/lib-container-toolchain.sh
 source "${script_dir}/lib-container-toolchain.sh"
@@ -94,6 +103,10 @@ printf '%s\n' 'repo-change-delivery-skills-test: checking skill files' >&2
 assert_file_present "${repo_skill_file}"
 assert_file_present "${repo_reference_file}"
 assert_file_present "${generic_skill_file}"
+assert_file_present "${commit_skill_file}"
+assert_file_present "${pull_request_skill_file}"
+assert_file_present "${bundled_reference_file}"
+assert_file_present "${repo_commit_skill_file}"
 assert_file_present "${dockerfile_path}"
 assert_file_present "${entrypoint_path}"
 assert_file_absent "${generic_skill_dir}/scripts/example.py"
@@ -104,9 +117,20 @@ assert_file_contains "${generic_skill_file}" 'name: repo-change-delivery'
 assert_file_contains "${generic_skill_file}" 'full implementation loop'
 assert_file_contains "${generic_skill_file}" 'non-main branch'
 assert_file_contains "${generic_skill_file}" 'repo-local delivery or validation skill'
+assert_file_contains "${generic_skill_file}" "\`git-commit\` and \`pull-request-workflow\`"
 assert_file_not_contains "${generic_skill_file}" 'CONTROL_PLANE_TOOLCHAIN=podman'
 assert_file_not_contains "${generic_skill_file}" '.github/workflows/control-plane-ci.yml'
 assert_file_not_contains "${generic_skill_file}" './scripts/test-k8s-job.sh'
+
+assert_file_contains "${commit_skill_file}" 'name: git-commit'
+assert_file_contains "${commit_skill_file}" 'Conventional Commits'
+assert_file_not_contains "${commit_skill_file}" 'mcp_io_github_'
+assert_file_contains "${repo_commit_skill_file}" 'name: git-commit'
+
+assert_file_contains "${pull_request_skill_file}" 'name: pull-request-workflow'
+assert_file_contains "${pull_request_skill_file}" 'Never open a duplicate pull request'
+assert_file_contains "${pull_request_skill_file}" 'Push local commits before creating or refreshing the PR'
+assert_file_contains "${pull_request_skill_file}" 'Prefer non-interactive GitHub operations'
 
 assert_file_contains "${repo_skill_file}" 'name: pr-fix-workflow'
 assert_file_contains "${repo_skill_file}" 'repo-change-delivery'
@@ -122,6 +146,9 @@ assert_file_contains "${repo_reference_file}" './scripts/test-k8s-job.sh'
 assert_file_contains "${repo_reference_file}" './scripts/test-current-cluster-regressions.sh'
 assert_file_contains "${repo_reference_file}" '.github/workflows/control-plane-ci.yml'
 assert_file_not_contains "${repo_reference_file}" 'git fetch origin main'
+
+assert_file_contains "${bundled_reference_file}" "\`git-commit\`"
+assert_file_contains "${bundled_reference_file}" "\`pull-request-workflow\`"
 
 assert_file_contains "${dockerfile_path}" 'COPY skills/ /usr/local/share/control-plane/skills/'
 assert_file_contains "${entrypoint_path}" 'install_bundled_control_plane_skills'
@@ -142,11 +169,38 @@ build_image_for_toolchain "${toolchain}" "${yamllint_image}" containers/yamllint
   -w /workspace/.github/skills/skill-creator/scripts \
   --entrypoint python3 \
   "${yamllint_image}" \
+  quick_validate.py /workspace/containers/control-plane/skills/git-commit
+
+"${container_bin}" run --rm --user "$(id -u):$(id -g)" \
+  -v "${repo_root}:/workspace" \
+  -w /workspace/.github/skills/skill-creator/scripts \
+  --entrypoint python3 \
+  "${yamllint_image}" \
+  quick_validate.py /workspace/containers/control-plane/skills/pull-request-workflow
+
+"${container_bin}" run --rm --user "$(id -u):$(id -g)" \
+  -v "${repo_root}:/workspace" \
+  -w /workspace/.github/skills/skill-creator/scripts \
+  --entrypoint python3 \
+  "${yamllint_image}" \
+  quick_validate.py /workspace/agent-skills/skills/git-commit
+
+"${container_bin}" run --rm --user "$(id -u):$(id -g)" \
+  -v "${repo_root}:/workspace" \
+  -w /workspace/.github/skills/skill-creator/scripts \
+  --entrypoint python3 \
+  "${yamllint_image}" \
   quick_validate.py /workspace/agent-skills/skills/pr-fix-workflow
 
 package_skill_to_host /workspace/containers/control-plane/skills/repo-change-delivery "${generic_package_file}"
+package_skill_to_host /workspace/containers/control-plane/skills/git-commit "${commit_package_file}"
+package_skill_to_host /workspace/containers/control-plane/skills/pull-request-workflow "${pull_request_package_file}"
+package_skill_to_host /workspace/agent-skills/skills/git-commit "${repo_commit_package_file}"
 package_skill_to_host /workspace/agent-skills/skills/pr-fix-workflow "${repo_package_file}"
 
 assert_file_present "${generic_package_file}"
+assert_file_present "${commit_package_file}"
+assert_file_present "${pull_request_package_file}"
+assert_file_present "${repo_commit_package_file}"
 assert_file_present "${repo_package_file}"
 printf '%s\n' 'repo-change-delivery-skills-test: skills ok' >&2

@@ -46,9 +46,180 @@ jobs:
         run: ./scripts/lint.sh
 
   integration:
-    name: Integration (${{ matrix.architecture_label }})
+    name: Integration Images (${{ matrix.architecture_label }})
     runs-on: ${{ matrix.runner }}
     needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture_label: x64
+            image_arch: amd64
+            runner: ubuntu-24.04
+          - architecture_label: aarch64
+            image_arch: arm64
+            runner: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6.0.2
+
+      - name: Install Podman toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+
+      - name: Build integration images
+        env:
+          CONTROL_PLANE_TOOLCHAIN: podman
+        run: ./scripts/build-test.sh --build-only
+
+      - name: Save integration images
+        run: podman save --multi-image-archive -o control-plane-images.tar localhost/control-plane:test localhost/execution-plane-smoke:test
+
+      - name: Upload integration images
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-plane-images-${{ matrix.image_arch }}
+          path: control-plane-images.tar
+          retention-days: 1
+          compression-level: 0
+
+  integration-smoke:
+    name: Integration Smoke (${{ matrix.architecture_label }})
+    runs-on: ${{ matrix.runner }}
+    needs: integration
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture_label: x64
+            image_arch: amd64
+            runner: ubuntu-24.04
+          - architecture_label: aarch64
+            image_arch: arm64
+            runner: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6.0.2
+
+      - name: Install Podman toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+
+      - name: Download integration images
+        uses: actions/download-artifact@v4
+        with:
+          name: control-plane-images-${{ matrix.image_arch }}
+          path: downloaded-images
+
+      - name: Load integration images
+        run: podman load -i downloaded-images/control-plane-images.tar
+
+      - name: Run smoke integration group
+        env:
+          CONTROL_PLANE_TOOLCHAIN: podman
+        run: ./scripts/build-test.sh --skip-image-build --group smoke
+
+  integration-regressions:
+    name: Integration Regressions (${{ matrix.architecture_label }})
+    runs-on: ${{ matrix.runner }}
+    needs: integration
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture_label: x64
+            image_arch: amd64
+            runner: ubuntu-24.04
+          - architecture_label: aarch64
+            image_arch: arm64
+            runner: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6.0.2
+
+      - name: Install Podman toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+
+      - name: Download integration images
+        uses: actions/download-artifact@v4
+        with:
+          name: control-plane-images-${{ matrix.image_arch }}
+          path: downloaded-images
+
+      - name: Load integration images
+        run: podman load -i downloaded-images/control-plane-images.tar
+
+      - name: Run regression integration group
+        env:
+          CONTROL_PLANE_TOOLCHAIN: podman
+        run: ./scripts/build-test.sh --skip-image-build --group regressions
+
+  integration-kind:
+    name: Integration Kind (${{ matrix.architecture_label }})
+    runs-on: ${{ matrix.runner }}
+    needs: integration
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture_label: x64
+            image_arch: amd64
+            runner: ubuntu-24.04
+          - architecture_label: aarch64
+            image_arch: arm64
+            runner: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6.0.2
+
+      - name: Install Podman toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede  # v4.0.1
+
+      - name: Set up Kind
+        uses: engineerd/setup-kind@ecfad61750951586a9ef973db567df1d28671bdc  # v0.6.2
+        with:
+          skipClusterLogsExport: true
+          version: v0.24.0
+
+      - name: Download integration images
+        uses: actions/download-artifact@v4
+        with:
+          name: control-plane-images-${{ matrix.image_arch }}
+          path: downloaded-images
+
+      - name: Load integration images
+        run: podman load -i downloaded-images/control-plane-images.tar
+
+      - name: Run Kind integration group
+        env:
+          CONTROL_PLANE_TOOLCHAIN: podman
+        run: ./scripts/build-test.sh --skip-image-build --group kind
+
+  publish-architecture-images:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: Publish Architecture Images (${{ matrix.architecture_label }})
+    runs-on: ${{ matrix.runner }}
+    needs:
+      - integration-smoke
+      - integration-regressions
+      - integration-kind
     strategy:
       fail-fast: false
       matrix:
@@ -71,36 +242,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y podman
 
-      - name: Prepare DHI images
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: ./scripts/prepare-dhi-images.sh
-
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede  # v4.0.1
-
-      - name: Set up Kind
-        uses: engineerd/setup-kind@ecfad61750951586a9ef973db567df1d28671bdc  # v0.6.2
+      - name: Download integration images
+        uses: actions/download-artifact@v4
         with:
-          skipClusterLogsExport: true
-          version: v0.24.0
+          name: control-plane-images-${{ matrix.image_arch }}
+          path: downloaded-images
 
-      - name: Run build and integration tests
-        env:
-          CONTROL_PLANE_TOOLCHAIN: podman
-        run: ./scripts/build-test.sh
+      - name: Load integration images
+        run: podman load -i downloaded-images/control-plane-images.tar
 
       - name: Log in to GHCR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: printf '%s' "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Build yamllint image for publishing
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: podman build --tag localhost/yamllint:test containers/yamllint
 
       - name: Read published image versions
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: image_versions
         run: |
           control_plane_version="$(sed -n 's/^ARG COPILOT_CLI_VERSION=//p' containers/control-plane/Dockerfile)"
@@ -111,7 +268,6 @@ jobs:
           printf 'yamllint_component_tag=%s\n' "${yamllint_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Publish architecture image tags
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GHCR_CONTROL_PLANE_IMAGE: ghcr.io/${{ github.repository }}/control-plane
           GHCR_YAMLLINT_IMAGE: ghcr.io/${{ github.repository }}/yamllint
@@ -130,7 +286,7 @@ jobs:
   publish-manifests:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    needs: integration
+    needs: publish-architecture-images
     permissions:
       contents: read
       packages: write

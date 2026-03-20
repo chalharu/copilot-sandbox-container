@@ -80,6 +80,14 @@ delivery_skill_root="${HOME}/.copilot/skills/repo-change-delivery"
 test ! -L "${delivery_skill_root}"
 test -r "${delivery_skill_root}/SKILL.md"
 grep -Fqx 'name: repo-change-delivery' "${delivery_skill_root}/SKILL.md"
+commit_skill_root="${HOME}/.copilot/skills/git-commit"
+test ! -L "${commit_skill_root}"
+test -r "${commit_skill_root}/SKILL.md"
+grep -Fqx 'name: git-commit' "${commit_skill_root}/SKILL.md"
+pull_request_skill_root="${HOME}/.copilot/skills/pull-request-workflow"
+test ! -L "${pull_request_skill_root}"
+test -r "${pull_request_skill_root}/SKILL.md"
+grep -Fqx 'name: pull-request-workflow' "${pull_request_skill_root}/SKILL.md"
 printf '%s\n' 'current-cluster-test: skill-read=ok'
 
 printf '%s\n' 'current-cluster-test: verifying local podman build defaults' >&2

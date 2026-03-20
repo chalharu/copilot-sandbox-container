@@ -41,7 +41,7 @@ Start with the repository regression script:
 That script:
 
 - validates the repo-local `pr-fix-workflow` skill
-- validates the bundled `repo-change-delivery` skill
+- validates the bundled `repo-change-delivery`, `git-commit`, and `pull-request-workflow` skills
 - packages each skill through the repository `containers/yamllint` image without depending on host Python
 - checks that the control-plane image and runtime tests still expose bundled skills correctly
 

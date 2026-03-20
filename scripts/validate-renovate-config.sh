@@ -130,15 +130,19 @@ fi
 
 expected_dependencies=(
   "@github/copilot"
+  "actions/download-artifact"
   "actions/checkout"
+  "actions/upload-artifact"
   "azure/setup-kubectl"
   "busybox"
   "dhi.io/python"
+  "docker.io/library/node"
   "engineerd/setup-kind"
   "ghcr.io/biomejs/biome"
   "ghcr.io/renovatebot/renovate"
   "hadolint/hadolint"
   "koalaman/shellcheck"
+  "markdownlint-cli2"
   "yamllint"
 )
 

@@ -50,7 +50,7 @@
 
 <!-- Major architecture changes MUST trigger a rewrite of this section -->
 
-```
+```text
 [Add directory structure overview when it stabilizes]
 ```
 
