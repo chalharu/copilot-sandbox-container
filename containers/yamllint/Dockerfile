@@ -8,7 +8,7 @@ ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 RUN python -m venv "${VIRTUAL_ENV}" \
     && python -m pip install --no-cache-dir "yamllint==${YAMLLINT_VERSION}"
 
-FROM dhi.io/python:3-alpine3.23@sha256:8dbcce9cf42e0fc567abfefdbfde88328d25f43986651802984b4235cd6831dd
+FROM dhi.io/python:3-alpine3.23@sha256:85af4b4082125ed0c965c55338e0b8dd85921e86fb0d1163d868808f85d6cfee
 
 ENV VIRTUAL_ENV=/opt/yamllint
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
