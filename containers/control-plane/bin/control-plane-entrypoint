@@ -582,20 +582,33 @@ remove_ssh_host_key() {
     "${etc_key_path}.pub"
 }
 
-install_bundled_control_plane_skill() {
-  local skill_name="control-plane-operations"
-  local source_dir="${bundled_skills_dir}/${skill_name}"
-  local target_dir="${copilot_skills_dir}/${skill_name}"
+install_bundled_control_plane_skills() {
+  local source_dir
+  local skill_name
+  local target_dir
+  local nullglob_was_set=0
 
-  [[ -d "${source_dir}" ]] || return 0
+  [[ -d "${bundled_skills_dir}" ]] || return 0
 
   mkdir -p "${copilot_skills_dir}"
-  rm -rf "${target_dir}"
-  mkdir -p "${target_dir}"
-  cp -R "${source_dir}/." "${target_dir}/"
-  find "${target_dir}" -type d -exec chmod 755 {} +
-  find "${target_dir}" -type f -exec chmod 644 {} +
-  safe_chown_tree "${control_plane_user}:${control_plane_user}" "${target_dir}"
+  if shopt -q nullglob; then
+    nullglob_was_set=1
+  fi
+  shopt -s nullglob
+  for source_dir in "${bundled_skills_dir}"/*; do
+    [[ -d "${source_dir}" ]] || continue
+    skill_name="$(basename "${source_dir}")"
+    target_dir="${copilot_skills_dir}/${skill_name}"
+    rm -rf "${target_dir}"
+    mkdir -p "${target_dir}"
+    cp -R "${source_dir}/." "${target_dir}/"
+    find "${target_dir}" -type d -exec chmod 755 {} +
+    find "${target_dir}" -type f -exec chmod 644 {} +
+    safe_chown_tree "${control_plane_user}:${control_plane_user}" "${target_dir}"
+  done
+  if [[ "${nullglob_was_set}" -eq 0 ]]; then
+    shopt -u nullglob
+  fi
 }
 
 configure_git_credential_helper() {
@@ -854,7 +867,7 @@ chmod 644 "${containers_storage_config_path}"
 chown "${control_plane_user}:${control_plane_user}" "${containers_engine_config_path}"
 chmod 644 "${containers_engine_config_path}"
 
-install_bundled_control_plane_skill
+install_bundled_control_plane_skills
 configure_copilot
 configure_gh_hosts
 configure_git

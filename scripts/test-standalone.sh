@@ -258,6 +258,7 @@ test "${VISUAL}" = "vim"
 test "${GH_PAGER}" = "cat"
 test -f /home/copilot/.copilot/skills/control-plane-operations/SKILL.md
 test -f /home/copilot/.copilot/skills/control-plane-operations/references/control-plane-run.md
+test -f /home/copilot/.copilot/skills/repo-change-delivery/SKILL.md
 grep -q "^copilot:" /etc/subuid
 grep -q "^copilot:" /etc/subgid
 grep -qx 'cgroup_manager = "cgroupfs"' /home/copilot/.config/containers/containers.conf
