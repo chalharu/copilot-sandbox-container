@@ -1134,7 +1134,7 @@ EOF
   printf '%s\n' 'kind-test: picker menu shows Copilot option' >&2
 }
 
-run_job_and_restart_assertions() {
+run_job_core_assertions() {
   printf '%s\n' 'kind-test: starting manual job' >&2
   if ! job_name="$(ssh_bash <<EOF
 set -euo pipefail
@@ -1282,12 +1282,14 @@ if [[ "\${fake_migrate_status}" -ne 0 ]]; then
   printf 'Expected control-plane-podman to recover after podman system migrate\n' >&2
   exit 1
 fi
-grep -q '^pull$' /tmp/fake-podman-migrate.log
-grep -q '^quay.io/example/test:latest$' /tmp/fake-podman-migrate.log
-grep -q 'detected stale rootless Podman state' /tmp/fake-podman-migrate-output.log
-grep -q 'repaired the local Podman state' /tmp/fake-podman-migrate-output.log
+  grep -q '^pull$' /tmp/fake-podman-migrate.log
+  grep -q '^quay.io/example/test:latest$' /tmp/fake-podman-migrate.log
+  grep -q 'detected stale rootless Podman state' /tmp/fake-podman-migrate-output.log
+  grep -q 'repaired the local Podman state' /tmp/fake-podman-migrate-output.log
 EOF
+}
 
+run_job_transfer_assertions() {
   printf -v remote_job_transfer_command 'bash -l -se -- %q %q' "${execution_plane_image}" "${job_namespace}"
   # shellcheck disable=SC2029
   if ! ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_job_transfer_command}" < "${script_dir}/test-job-transfer.sh"; then
@@ -1295,7 +1297,9 @@ EOF
     dump_control_plane_diagnostics
     exit 1
   fi
+}
 
+run_restart_assertions() {
   ssh_bash <<'EOF'
 set -euo pipefail
 mkdir -p ~/.copilot/session-state
@@ -1333,6 +1337,17 @@ test ! -e ~/.copilot/tmp
 EOF
 }
 
+run_job_and_restart_assertions() {
+  run_job_core_assertions
+  run_job_transfer_assertions
+  run_restart_assertions
+}
+
+run_job_core_and_restart_assertions() {
+  run_job_core_assertions
+  run_restart_assertions
+}
+
 cleanup() {
   stop_port_forward
   kubectl delete namespace "${namespace}" --ignore-not-found >/dev/null 2>&1 || true
@@ -1361,7 +1376,7 @@ if [[ "${kind_sudo_mode}" == "always" ]]; then
 fi
 
 case "${kind_test_group}" in
-  all|session|jobs)
+  all|session|jobs|jobs-core|jobs-transfer)
     ;;
   *)
     printf 'Unsupported Kind test group: %s\n' "${kind_test_group}" >&2
@@ -1408,5 +1423,13 @@ case "${kind_test_group}" in
     start_persistence_session_fixtures
     wait_for_screen_output_fixture
     run_job_and_restart_assertions
+    ;;
+  jobs-core)
+    start_persistence_session_fixtures
+    wait_for_screen_output_fixture
+    run_job_core_and_restart_assertions
+    ;;
+  jobs-transfer)
+    run_job_transfer_assertions
     ;;
 esac

@@ -67,15 +67,18 @@ require_command awk
 require_command grep
 
 printf '%s\n' 'ci-workflow-test: verifying build-test group support' >&2
-assert_file_contains "${build_test_path}" 'Usage: scripts/build-test.sh [--build-only] [--skip-image-build] [--group all|smoke|regressions|kind|kind-session|kind-jobs]'
-assert_file_contains "${build_test_path}" 'all|smoke|regressions|kind|kind-session|kind-jobs)'
+assert_file_contains "${build_test_path}" 'Usage: scripts/build-test.sh [--build-only] [--skip-image-build] [--group all|smoke|regressions|kind|kind-session|kind-jobs|kind-jobs-core|kind-jobs-transfer]'
+assert_file_contains "${build_test_path}" 'all|smoke|regressions|kind|kind-session|kind-jobs|kind-jobs-core|kind-jobs-transfer)'
 assert_file_contains "${build_test_path}" 'run_kind_group session'
 assert_file_contains "${build_test_path}" 'run_kind_group jobs'
+assert_file_contains "${build_test_path}" 'run_kind_group jobs-core'
+assert_file_contains "${build_test_path}" 'run_kind_group jobs-transfer'
 
 printf '%s\n' 'ci-workflow-test: verifying workflow fan-out wiring' >&2
 integration_block="$(job_block integration)"
 integration_kind_session_block="$(job_block integration-kind-session)"
 integration_kind_jobs_block="$(job_block integration-kind-jobs)"
+integration_kind_jobs_transfer_block="$(job_block integration-kind-jobs-transfer)"
 publish_block="$(job_block publish-architecture-images)"
 
 [[ -n "${integration_block}" ]] || {
@@ -90,17 +93,26 @@ publish_block="$(job_block publish-architecture-images)"
   printf 'Expected integration-kind-jobs job in %s\n' "${workflow_path}" >&2
   exit 1
 }
+[[ -n "${integration_kind_jobs_transfer_block}" ]] || {
+  printf 'Expected integration-kind-jobs-transfer job in %s\n' "${workflow_path}" >&2
+  exit 1
+}
 [[ -n "${publish_block}" ]] || {
   printf 'Expected publish-architecture-images job in %s\n' "${workflow_path}" >&2
   exit 1
 }
 
 assert_block_not_contains "${integration_block}" 'needs: lint' 'integration job block'
+assert_block_contains "${integration_kind_session_block}" 'skipClusterCreation: true' 'integration-kind-session job block'
 assert_block_contains "${integration_kind_session_block}" './scripts/build-test.sh --skip-image-build --group kind-session' 'integration-kind-session job block'
-assert_block_contains "${integration_kind_jobs_block}" './scripts/build-test.sh --skip-image-build --group kind-jobs' 'integration-kind-jobs job block'
+assert_block_contains "${integration_kind_jobs_block}" 'skipClusterCreation: true' 'integration-kind-jobs job block'
+assert_block_contains "${integration_kind_jobs_block}" './scripts/build-test.sh --skip-image-build --group kind-jobs-core' 'integration-kind-jobs job block'
+assert_block_contains "${integration_kind_jobs_transfer_block}" 'skipClusterCreation: true' 'integration-kind-jobs-transfer job block'
+assert_block_contains "${integration_kind_jobs_transfer_block}" './scripts/build-test.sh --skip-image-build --group kind-jobs-transfer' 'integration-kind-jobs-transfer job block'
 assert_block_contains "${publish_block}" '- lint' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" '- integration-kind-session' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" '- integration-kind-jobs' 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" '- integration-kind-jobs-transfer' 'publish-architecture-images job block'
 
 if grep -Fqx '  integration-kind:' "${workflow_path}"; then
   printf 'Did not expect legacy integration-kind job to remain in %s\n' "${workflow_path}" >&2

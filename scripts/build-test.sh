@@ -18,7 +18,7 @@ test_group="all"
 
 usage() {
   cat >&2 <<'EOF'
-Usage: scripts/build-test.sh [--build-only] [--skip-image-build] [--group all|smoke|regressions|kind|kind-session|kind-jobs]
+Usage: scripts/build-test.sh [--build-only] [--skip-image-build] [--group all|smoke|regressions|kind|kind-session|kind-jobs|kind-jobs-core|kind-jobs-transfer]
 EOF
 }
 
@@ -97,7 +97,7 @@ if [[ -n "${CONTROL_PLANE_CONTAINER_BIN:-}" ]] && [[ "${CONTROL_PLANE_CONTAINER_
 fi
 
 case "${test_group}" in
-  all|smoke|regressions|kind|kind-session|kind-jobs)
+  all|smoke|regressions|kind|kind-session|kind-jobs|kind-jobs-core|kind-jobs-transfer)
     ;;
   *)
     printf 'Unsupported build/test group: %s\n' "${test_group}" >&2
@@ -127,7 +127,7 @@ fi
 require_command ssh
 require_command ssh-keygen
 
-if [[ "${test_group}" == "kind" ]] || [[ "${test_group}" == "kind-session" ]] || [[ "${test_group}" == "kind-jobs" ]] || [[ "${test_group}" == "all" ]]; then
+if [[ "${test_group}" == "kind" ]] || [[ "${test_group}" == "kind-session" ]] || [[ "${test_group}" == "kind-jobs" ]] || [[ "${test_group}" == "kind-jobs-core" ]] || [[ "${test_group}" == "kind-jobs-transfer" ]] || [[ "${test_group}" == "all" ]]; then
   require_command kind
   require_command kubectl
 fi
@@ -152,5 +152,11 @@ case "${test_group}" in
     ;;
   kind-jobs)
     run_kind_group jobs
+    ;;
+  kind-jobs-core)
+    run_kind_group jobs-core
+    ;;
+  kind-jobs-transfer)
+    run_kind_group jobs-transfer
     ;;
 esac
