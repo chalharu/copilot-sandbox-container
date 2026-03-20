@@ -3,11 +3,12 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
-# Resolve the repo's .github/skills symlink to the canonical on-disk path.
-skill_dir="$(cd "${repo_root}/.github/skills/pr-fix-workflow" && pwd -P)"
+skill_dir="${repo_root}/agent-skills/skills/pr-fix-workflow"
+container_skill_dir="/workspace/agent-skills/skills/pr-fix-workflow"
 skill_file="${skill_dir}/SKILL.md"
 reference_file="${skill_dir}/references/validation-and-delivery.md"
 package_dir="$(mktemp -d)"
+container_package_dir="/tmp/pr-fix-workflow-skill-package"
 
 # shellcheck source=scripts/lib-container-toolchain.sh
 source "${script_dir}/lib-container-toolchain.sh"
@@ -81,15 +82,15 @@ build_image_for_toolchain "${toolchain}" "${yamllint_image}" containers/yamllint
   -w /workspace/.github/skills/skill-creator/scripts \
   --entrypoint python3 \
   "${yamllint_image}" \
-  quick_validate.py "${skill_dir}"
+  quick_validate.py "${container_skill_dir}"
 
 "${container_bin}" run --rm --user "$(id -u):$(id -g)" \
   -v "${repo_root}:/workspace" \
-  -v "${package_dir}:${package_dir}" \
+  -v "${package_dir}:${container_package_dir}" \
   -w /workspace/.github/skills/skill-creator/scripts \
   --entrypoint python3 \
   "${yamllint_image}" \
-  package_skill.py "${skill_dir}" "${package_dir}"
+  package_skill.py "${container_skill_dir}" "${container_package_dir}"
 
 assert_file_present "${package_dir}/pr-fix-workflow.skill"
 printf '%s\n' 'pr-fix-workflow-skill-test: skill ok' >&2
