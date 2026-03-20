@@ -7,8 +7,9 @@ skill_dir="${repo_root}/agent-skills/skills/pr-fix-workflow"
 container_skill_dir="/workspace/agent-skills/skills/pr-fix-workflow"
 skill_file="${skill_dir}/SKILL.md"
 reference_file="${skill_dir}/references/validation-and-delivery.md"
+gitignore_file="${repo_root}/.gitignore"
 package_dir="$(mktemp -d "${repo_root}/.pr-fix-workflow-skill-package.XXXXXX")"
-container_package_dir="/workspace/$(basename "${package_dir}")"
+package_file="${package_dir}/pr-fix-workflow.skill"
 
 # shellcheck source=scripts/lib-container-toolchain.sh
 source "${script_dir}/lib-container-toolchain.sh"
@@ -55,6 +56,7 @@ require_command "${container_bin}"
 printf '%s\n' 'pr-fix-workflow-skill-test: checking skill files' >&2
 assert_file_present "${skill_file}"
 assert_file_present "${reference_file}"
+assert_file_present "${gitignore_file}"
 assert_file_absent "${skill_dir}/scripts/example.py"
 assert_file_absent "${skill_dir}/references/api_reference.md"
 assert_file_absent "${skill_dir}/assets/example_asset.txt"
@@ -74,6 +76,7 @@ assert_file_contains "${reference_file}" './scripts/test-k8s-job.sh'
 assert_file_contains "${reference_file}" '.github/workflows/control-plane-ci.yml'
 assert_file_contains "${reference_file}" 'quick_validate.py'
 assert_file_contains "${reference_file}" 'package_skill.py'
+assert_file_contains "${gitignore_file}" '.pr-fix-workflow-skill-package.*'
 
 printf '%s\n' 'pr-fix-workflow-skill-test: validating and packaging skill' >&2
 build_image_for_toolchain "${toolchain}" "${yamllint_image}" containers/yamllint
@@ -89,7 +92,17 @@ build_image_for_toolchain "${toolchain}" "${yamllint_image}" containers/yamllint
   -w /workspace/.github/skills/skill-creator/scripts \
   --entrypoint python3 \
   "${yamllint_image}" \
-  package_skill.py "${container_skill_dir}" "${container_package_dir}"
+  -c 'import pathlib, subprocess, sys
+out_dir = pathlib.Path("/tmp/pr-fix-workflow-skill-package")
+out_dir.mkdir(parents=True, exist_ok=True)
+subprocess.run(
+    ["python3", "package_skill.py", "/workspace/agent-skills/skills/pr-fix-workflow", str(out_dir)],
+    check=True,
+    stdout=sys.stderr,
+    stderr=sys.stderr,
+)
+sys.stdout.buffer.write((out_dir / "pr-fix-workflow.skill").read_bytes())' \
+  > "${package_file}"
 
-assert_file_present "${package_dir}/pr-fix-workflow.skill"
+assert_file_present "${package_file}"
 printf '%s\n' 'pr-fix-workflow-skill-test: skill ok' >&2
