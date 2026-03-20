@@ -50,6 +50,9 @@ run_regressions_group() {
     "${script_dir}/test-k8s-job-wait.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
+    "${script_dir}/test-kind-image-loading.sh"
+
+  CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-ci-workflow-parallelization.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \

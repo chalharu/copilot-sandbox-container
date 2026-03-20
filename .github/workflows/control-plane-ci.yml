@@ -210,12 +210,10 @@ jobs:
           name: control-plane-images-${{ matrix.image_arch }}
           path: downloaded-images
 
-      - name: Load integration images
-        run: podman load -i downloaded-images/control-plane-images.tar
-
       - name: Run Kind session integration group
         env:
           CONTROL_PLANE_TOOLCHAIN: podman
+          CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar
         run: ./scripts/build-test.sh --skip-image-build --group kind-session
 
   integration-kind-jobs:
@@ -259,12 +257,10 @@ jobs:
           name: control-plane-images-${{ matrix.image_arch }}
           path: downloaded-images
 
-      - name: Load integration images
-        run: podman load -i downloaded-images/control-plane-images.tar
-
       - name: Run Kind job core integration group
         env:
           CONTROL_PLANE_TOOLCHAIN: podman
+          CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar
         run: ./scripts/build-test.sh --skip-image-build --group kind-jobs-core
 
   integration-kind-jobs-transfer:
@@ -308,12 +304,10 @@ jobs:
           name: control-plane-images-${{ matrix.image_arch }}
           path: downloaded-images
 
-      - name: Load integration images
-        run: podman load -i downloaded-images/control-plane-images.tar
-
       - name: Run Kind job transfer integration group
         env:
           CONTROL_PLANE_TOOLCHAIN: podman
+          CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar
         run: ./scripts/build-test.sh --skip-image-build --group kind-jobs-transfer
 
   publish-architecture-images:

@@ -11,6 +11,7 @@ ssh_port="${CONTROL_PLANE_TEST_SSH_PORT:-32222}"
 kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-podman}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-${kind_provider}}"
 control_plane_selector="app.kubernetes.io/name=control-plane"
+kind_image_archive="${CONTROL_PLANE_KIND_IMAGE_ARCHIVE:-}"
 workdir="$(mktemp -d)"
 ssh_key="${workdir}/id_ed25519"
 kubeconfig_path="${workdir}/kubeconfig"
@@ -238,15 +239,18 @@ wait_for_control_plane_pod() {
   return 1
 }
 
-load_kind_image() {
-  local image="$1"
-  local archive_basename archive_path
+load_kind_images() {
+  local helper_args=(--cluster-name "${cluster_name}")
 
-  archive_basename="$(printf '%s' "${image}" | tr '/:' '__')"
-  archive_path="${workdir}/${archive_basename}.tar"
+  if [[ -n "${kind_image_archive}" ]]; then
+    helper_args+=(--image-archive "${kind_image_archive}")
+  else
+    helper_args+=(--container-bin "${container_bin}" --image "${control_plane_image}" --image "${execution_plane_image}")
+  fi
 
-  "${container_bin}" save --output "${archive_path}" "${image}" >/dev/null
-  kind_cmd load image-archive "${archive_path}" --name "${cluster_name}"
+  CONTROL_PLANE_KIND_USE_SUDO="${kind_uses_sudo}" \
+    KIND_EXPERIMENTAL_PROVIDER="${kind_provider}" \
+    "${script_dir}/load-kind-images.sh" "${helper_args[@]}"
 }
 
 apply_resources() {
@@ -1371,6 +1375,11 @@ require_command ssh-keyscan
 
 export KIND_EXPERIMENTAL_PROVIDER="${kind_provider}"
 
+if [[ -n "${kind_image_archive}" ]] && [[ ! -f "${kind_image_archive}" ]]; then
+  printf 'Missing Kind image archive: %s\n' "${kind_image_archive}" >&2
+  exit 1
+fi
+
 if [[ "${kind_sudo_mode}" == "always" ]]; then
   enable_kind_sudo
 fi
@@ -1398,8 +1407,7 @@ fi
 refresh_kubeconfig
 kubectl config use-context "kind-${cluster_name}" >/dev/null
 kubectl wait --for=condition=Ready node --all --timeout=180s >/dev/null
-load_kind_image "${control_plane_image}"
-load_kind_image "${execution_plane_image}"
+load_kind_images
 ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"
 apply_resources
 test "$(kubectl get service/control-plane --namespace "${namespace}" -o jsonpath='{.spec.type}')" = "LoadBalancer"

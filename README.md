@@ -83,13 +83,14 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh --skip-image-build --grou
 - `scripts/test-config-injection.sh`
 - `scripts/test-podman-startup.sh`
 - `scripts/test-k8s-sample-storage-layout.sh`
+- `scripts/test-kind-image-loading.sh`
 - `scripts/test-repo-change-delivery-skills.sh`
 - `scripts/test-entrypoint-capabilities.sh`
 - `scripts/test-kind.sh`
 
 Kind integration では、`scripts/test-job-transfer.sh` も通して `--mount-file` の大きいファイル転送、Job 完了時の write-back、外部更新との競合保護を確認します。
 
-CI や focused rerun 向けには、`--build-only` と `--skip-image-build --group <smoke|regressions|kind|kind-session|kind-jobs|kind-jobs-core|kind-jobs-transfer>` を使って、image build を 1 回にしてから各 test group を分けて実行できます。`kind` と `kind-jobs` は従来どおり Kind の全シナリオと Job 系シナリオ全体を一括実行し、CI では `kind-session`、`kind-jobs-core`、`kind-jobs-transfer` に分けて wall-clock を短縮します。
+CI や focused rerun 向けには、`--build-only` と `--skip-image-build --group <smoke|regressions|kind|kind-session|kind-jobs|kind-jobs-core|kind-jobs-transfer>` を使って、image build を 1 回にしてから各 test group を分けて実行できます。`kind` と `kind-jobs` は従来どおり Kind の全シナリオと Job 系シナリオ全体を一括実行し、CI では `kind-session`、`kind-jobs-core`、`kind-jobs-transfer` に分けて wall-clock を短縮します。Hosted CI の Kind jobs は、download 済みの multi-image archive をそのまま Kind に import し、`podman load -> podman save` の往復を避けます。
 
 ## ステップ 4: current-cluster を確認する
 
