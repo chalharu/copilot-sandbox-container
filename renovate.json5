@@ -10,20 +10,59 @@
 
   enabledManagers: ["dockerfile", "github-actions", "custom.regex"],
 
-  labels: ["dependencies"],
+  labels: ["dependencies", "renovate"],
   dependencyDashboard: true,
   prCreation: "immediate",
   rebaseWhen: "behind-base-branch",
   timezone: "Asia/Tokyo",
   automergeStrategy: "auto",
+  vulnerabilityAlerts: {
+    enabled: true,
+    labels: ["dependencies", "renovate"],
+    automerge: true,
+    automergeType: "pr",
+    platformAutomerge: true,
+    minimumReleaseAge: null,
+  },
+  minor: {
+    automerge: true,
+    automergeType: "pr",
+    platformAutomerge: true,
+    minimumReleaseAge: "3 days",
+  },
+  patch: {
+    automerge: true,
+    automergeType: "pr",
+    platformAutomerge: true,
+    minimumReleaseAge: "3 days",
+  },
+  digest: {
+    automerge: true,
+    automergeType: "pr",
+    platformAutomerge: true,
+    minimumReleaseAge: "3 days",
+  },
+  pin: {
+    automerge: true,
+    automergeType: "pr",
+    platformAutomerge: true,
+    minimumReleaseAge: "3 days",
+  },
+  pinDigest: {
+    automerge: true,
+    automergeType: "pr",
+    platformAutomerge: true,
+    minimumReleaseAge: "3 days",
+  },
 
   packageRules: [
     {
-      description: "Automerge non-major updates after GitHub Actions succeeds",
-      matchUpdateTypes: ["minor", "patch", "digest", "pin", "pinDigest"],
+      description: "Automerge @github/copilot after GitHub Actions succeeds and 1 day of release age",
+      matchPackageNames: ["@github/copilot"],
       automerge: true,
       automergeType: "pr",
       platformAutomerge: true,
+      minimumReleaseAge: "1 day",
     },
     {
       description: "Override the helper preset for actions/* GitHub Actions",

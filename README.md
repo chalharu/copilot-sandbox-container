@@ -31,7 +31,7 @@
 - `docker buildx` または `podman`
 - current-cluster を触る場合は、対象 namespace に対する `kubectl` 権限
 
-このリポジトリを current-cluster 上の Control Plane コンテナ内で扱う場合は、entrypoint が `~/.config/control-plane/runtime.env` を生成し、rootful Podman remote service、Copilot CPU cap、秘密情報の file path、Job 実行先 namespace などを login shell へ引き渡します。あわせて、`COPILOT_CONFIG_JSON_FILE` で渡した ConfigMap JSON を RWX の copilot session PVC 上にある既存 `~/.copilot/config.json` へ deep-merge し、同じ PVC で `~/.copilot/session-state`、`~/.config/gh`、`~/.ssh`、SSH host key を持ち越します。`~/.copilot/tmp` と rootful Podman cache は永続化せず、`GH_HOSTS_YML_FILE` または `GH_GITHUB_TOKEN_FILE` から `~/.config/gh/hosts.yml` を反映できます。
+このリポジトリを current-cluster 上の Control Plane コンテナ内で扱う場合は、entrypoint が `~/.config/control-plane/runtime.env` を生成し、rootful Podman remote service、Copilot CPU cap、秘密情報の file path、Job 実行先 namespace などを login shell へ引き渡します。あわせて、`COPILOT_CONFIG_JSON_FILE` で渡した ConfigMap JSON を RWX の copilot session PVC 上にある既存 `~/.copilot/config.json` へ deep-merge し、同じ PVC で `~/.copilot/command-history-state.json`、`~/.copilot/session-state`、`~/.config/gh`、`~/.ssh`、SSH host key を持ち越します。`~/.copilot/tmp` と rootful Podman cache は永続化せず、`GH_HOSTS_YML_FILE` または `GH_GITHUB_TOKEN_FILE` から `~/.config/gh/hosts.yml` を反映できます。
 
 ## ステップ 2: lint を実行する
 
@@ -107,7 +107,7 @@ Kubernetes 上の current-cluster smoke は次で実行します。
 - rootful-service の Podman graphroot が `/var/lib/control-plane/rootful-podman/rootful-overlay/storage` の disposable cache volume を使い、runtime dir は `/var/tmp/control-plane/rootful-overlay` の disk-backed temp path へ逃がされる
 - rootful-service 下の `podman build`
 
-sample manifest では、`control-plane-auth` Secret に `ssh-public-key` と必要な Secret 値 (`gh-github-token` または `gh-hosts.yml`, `copilot-github-token`, DockerHub 認証情報) を入れ、`control-plane-config` ConfigMap に `copilot-config.json` overlay を置きます。永続化は RWX の copilot session PVC と RWO の `/workspace` PVC を基本にし、前者へ `~/.copilot/config.json`、`~/.copilot/session-state`、`~/.config/gh`、`~/.ssh`、SSH host key をまとめます。rootful Podman cache と `~/.copilot/tmp` は emptyDir の ephemeral storage へ逃がし、Job の `--mount-file` は ConfigMap ではなく SSH/SFTP + `rclone` で渡して、変更されたファイルは競合を検知しながら write-back します。
+sample manifest では、`control-plane-auth` Secret に `ssh-public-key` と必要な Secret 値 (`gh-github-token` または `gh-hosts.yml`, `copilot-github-token`, DockerHub 認証情報) を入れ、`control-plane-config` ConfigMap に `copilot-config.json` overlay を置きます。永続化は RWX の copilot session PVC と RWO の `/workspace` PVC を基本にし、前者へ `~/.copilot/config.json`、`~/.copilot/command-history-state.json`、`~/.copilot/session-state`、`~/.config/gh`、`~/.ssh`、SSH host key をまとめます。rootful Podman cache と `~/.copilot/tmp` は emptyDir の ephemeral storage へ逃がし、Job の `--mount-file` は ConfigMap ではなく SSH/SFTP + `rclone` で渡して、変更されたファイルは競合を検知しながら write-back します。
 
 すでに Control Plane Pod の中から作業している場合は、追加の spot check として次も使えます。
 

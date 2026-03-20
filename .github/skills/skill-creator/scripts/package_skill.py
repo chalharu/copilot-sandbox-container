@@ -16,6 +16,10 @@ from pathlib import Path
 from quick_validate import validate_skill
 
 
+EXCLUDED_DIR_NAMES = {'__pycache__'}
+EXCLUDED_SUFFIXES = {'.pyc', '.pyo'}
+
+
 def package_skill(skill_path, output_dir=None):
     """
     Package a skill folder into a .skill file.
@@ -68,11 +72,19 @@ def package_skill(skill_path, output_dir=None):
         with zipfile.ZipFile(skill_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
             # Walk through the skill directory
             for file_path in skill_path.rglob('*'):
-                if file_path.is_file():
-                    # Calculate the relative path within the zip
-                    arcname = file_path.relative_to(skill_path.parent)
-                    zipf.write(file_path, arcname)
-                    print(f"  Added: {arcname}")
+                if not file_path.is_file():
+                    continue
+
+                relative_to_skill = file_path.relative_to(skill_path)
+                if any(part in EXCLUDED_DIR_NAMES for part in relative_to_skill.parts):
+                    continue
+                if file_path.suffix in EXCLUDED_SUFFIXES:
+                    continue
+
+                # Calculate the relative path within the zip
+                arcname = file_path.relative_to(skill_path.parent)
+                zipf.write(file_path, arcname)
+                print(f"  Added: {arcname}")
 
         print(f"\n✅ Successfully packaged skill to: {skill_filename}")
         return skill_filename

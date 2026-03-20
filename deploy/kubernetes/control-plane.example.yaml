@@ -209,7 +209,7 @@ spec:
                 /workspace-state/workspace \
                 /cache/rootful-podman \
                 /cache/runtime-tmp
-              touch /copilot-session/state/copilot-config.json
+              touch /copilot-session/state/copilot-config.json /copilot-session/state/command-history-state.json
               chown -R 1000:1000 /copilot-session/state /copilot-session/session-state
               find /copilot-session/state /copilot-session/session-state -type d -exec chmod 700 {} +
               find /copilot-session/state /copilot-session/session-state -type f -exec chmod 600 {} +
@@ -427,6 +427,9 @@ spec:
             - name: copilot-session
               mountPath: /home/copilot/.copilot/config.json
               subPath: state/copilot-config.json
+            - name: copilot-session
+              mountPath: /home/copilot/.copilot/command-history-state.json
+              subPath: state/command-history-state.json
             - name: copilot-session
               mountPath: /home/copilot/.copilot/session-state
               subPath: session-state
