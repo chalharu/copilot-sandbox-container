@@ -31,7 +31,7 @@
 - `docker buildx` または `podman`
 - current-cluster を触る場合は、対象 namespace に対する `kubectl` 権限
 
-このリポジトリを current-cluster 上の Control Plane コンテナ内で扱う場合は、entrypoint が `~/.config/control-plane/runtime.env` を生成し、rootful Podman remote service、Copilot CPU cap、秘密情報の file path、Job 実行先 namespace などを login shell へ引き渡します。あわせて、`COPILOT_CONFIG_JSON_FILE` で渡した ConfigMap JSON を RWX の copilot session PVC 上にある既存 `~/.copilot/config.json` へ deep-merge し、同じ PVC で `~/.copilot/command-history-state.json`、`~/.copilot/session-state`、`~/.config/gh`、`~/.ssh`、SSH host key を持ち越します。`~/.copilot/tmp` と rootful Podman cache は永続化せず、`GH_HOSTS_YML_FILE` または `GH_GITHUB_TOKEN_FILE` から `~/.config/gh/hosts.yml` を反映できます。
+このリポジトリを current-cluster 上の Control Plane コンテナ内で扱う場合は、entrypoint が `~/.config/control-plane/runtime.env` を生成し、rootful Podman remote service、`TZ` で指定した IANA timezone、Copilot CPU cap、秘密情報の file path、Job 実行先 namespace などを login shell へ引き渡します。あわせて、`COPILOT_CONFIG_JSON_FILE` で渡した ConfigMap JSON を RWX の copilot session PVC 上にある既存 `~/.copilot/config.json` へ deep-merge し、同じ PVC で `~/.copilot/command-history-state.json`、`~/.copilot/session-state`、`~/.config/gh`、`~/.ssh`、SSH host key を持ち越します。`~/.copilot/tmp` と rootful Podman cache は永続化せず、`GH_HOSTS_YML_FILE` または `GH_GITHUB_TOKEN_FILE` から `~/.config/gh/hosts.yml` を反映できます。
 
 ## ステップ 2: lint を実行する
 

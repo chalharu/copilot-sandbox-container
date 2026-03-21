@@ -308,6 +308,9 @@ spec:
             #   value: Your Name
             # - name: CONTROL_PLANE_GIT_USER_EMAIL
             #   value: you@example.com
+            # Optional: set an IANA timezone for login shells and job tooling.
+            # - name: TZ
+            #   value: Asia/Tokyo
             - name: CONTROL_PLANE_K8S_NAMESPACE
               value: copilot-sandbox
             - name: CONTROL_PLANE_JOB_NAMESPACE
