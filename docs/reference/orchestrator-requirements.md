@@ -64,8 +64,9 @@
 - 初期導入では公開 self-sign-up を行わず、管理者によるユーザー作成を前提にする
 - ユーザーは初回ログイン後に自分のパスワードを変更できる
 - パスワードは平文保存せず、強いハッシュで保存する
-- ユーザーは自分の GitHub 認証情報、GitHub Copilot 認証情報、Docker 認証情報、SSH 公開鍵を画面から登録・更新・削除できる
+- ユーザーは自分の GitHub 認証情報、GitHub Copilot 認証情報、Docker 認証情報、複数の SSH 公開鍵を画面から登録・更新・削除できる
 - 保存された資格情報はユーザーごとに分離され、別ユーザーの workspace や execution へ暗黙に共有しない
+- ユーザーが無効化された場合、そのユーザーのログイン session は失効し、新規操作は即時拒否される
 
 ### 5.2 workspace 作成
 
@@ -92,9 +93,10 @@
 - runner 終了前に session state、実行ログ、要約、メタデータを永続化する
 - `resume` 時は永続化済み state を再マウントし、同一 session として処理を継続する
 - resume に失敗した場合は明示的に `Error` とし、暗黙に新規 session へ切り替えない
-- 新しい session を開始する場合だけ、既存 session を明示的に `Archived` へ遷移させて置き換える
+- 新しい session を開始する場合、controller は replacement session を先に作成し、`Idle` へ到達した後に旧 session を `Archived` へ遷移させる
 - `Error` または `Archived` の session は自動復旧せず、ユーザーまたはオペレーターの明示操作でのみ新規 session へ切り替える
 - session state が欠損または破損している場合、resume は `Error` で停止し、既存 artifact を残したまま調査可能にする
+- `Running` の session を破棄して作り直す場合は、先に execution を `Cancelled` へ遷移させる
 
 ### 5.5 Copilot 連携
 
@@ -110,8 +112,8 @@
 - SSH endpoint には TTL を持たせ、期限切れまたは利用終了時に Pod / Service を削除する
 - SSH endpoint の Service type は既定で `ClusterIP` とし、`LoadBalancer` は管理者ポリシーで許可された場合だけ選択できる
 - `ClusterIP` を選んだ場合は、画面上から端末ログインできる機能を同時に提供する
-- `ClusterIP` のブラウザ端末ログインでは、システムが内部生成した一時 SSH 鍵を使い、ユーザー入力の公開鍵を必須にしない
-- `LoadBalancer` を選んだ場合は、ユーザーが保存した SSH 公開鍵を使って直接 SSH 接続できる
+- `ClusterIP` のブラウザ端末ログインでは、システムが内部生成した一時 SSH 鍵を使い、workspace-ssh 側で鍵の反映完了を確認した後に terminal を開く
+- `LoadBalancer` を選んだ場合は、ユーザーが保存した SSH 公開鍵のうち選択した 1 本を使って直接 SSH 接続できる
 - `LoadBalancer` を作成した場合は、要求者、時刻、workspace、公開先を監査ログへ残す
 
 ## 6. 機能要件
@@ -129,6 +131,7 @@
 - 状態遷移は API と controller のどちらから見ても一貫していなければならない
 - UI は watch または polling で状態変化を追従できる
 - API は workspace ごとの active execution 制約を検証し、controller は同じ制約を最終防衛線として再検証する
+- active session の切替は `create-then-switch` で行い、replacement session の作成失敗で既存 session を失わないこと
 
 ### 6.3 実行履歴
 
@@ -149,11 +152,13 @@
 - ユーザーは自分の GitHub / Copilot / Docker / SSH 公開鍵を保存、更新、削除できること
 - 資格情報が未設定または不正な場合、workspace 作成や execution は明示的なエラーで停止すること
 - execution と SSH endpoint は要求ユーザーの資格情報だけを参照すること
+- ユーザー無効化時は既存のログイン cookie を失効し、進行中 execution を `Cancelled`、SSH endpoint と browser terminal を `Expired` または `Closed` へ遷移させること
 
 ### 6.6 ブラウザ端末
 
 - `ClusterIP` の SSH endpoint が `Ready` のとき、ユーザーは UI からブラウザ端末を開始できること
 - ブラウザ端末は内部生成した一時 SSH 鍵と WebSocket bridge を用いて cluster 内の SSH Service へ接続すること
+- ブラウザ端末は generated key が workspace-ssh Pod へ反映されて `Ready` になるまで接続開始してはならない
 - ブラウザ端末終了時、一時鍵と terminal session は回収されること
 
 ### 6.7 Kubernetes 接続保証
@@ -183,7 +188,7 @@
 
 - prompt 完了後に runner を残さない
 - SSH endpoint は要求されたときだけ起動する
-- workspace PVC は永続化し、session / log / artifact は workspace ごとの RWX 領域へ分離する
+- workspace PVC は browser terminal と runner の同時 mount を許容するため RWX で永続化し、session / log / artifact も workspace ごとの RWX 領域へ分離する
 
 ### 7.4 可観測性
 
@@ -211,6 +216,7 @@
 - 認証済みユーザーが git リポジトリから workspace を作成できる
 - `Ready` workspace に対して prompt を実行し、完了後に runner が終了する
 - 同じ workspace で `resume` による follow-up prompt が成功する
+- 実行中 prompt を中止した場合に execution が `Cancelled` へ遷移する
 - `ClusterIP` endpoint に対してブラウザ端末ログインできる
 - SSH endpoint 要求時に新規 Pod と Service が作成され、解除時に削除される
 - 失敗時に UI と Kubernetes status の両方で失敗理由を追跡できる
