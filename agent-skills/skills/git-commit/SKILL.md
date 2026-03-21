@@ -1,1 +1,0 @@
-../../../containers/control-plane/skills/git-commit/SKILL.md

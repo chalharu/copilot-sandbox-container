@@ -520,7 +520,7 @@ spec:
                 /workspace-state/workspace \
                 /cache/rootful-podman \
                 /cache/runtime-tmp
-              touch /copilot-session/state/copilot-config.json
+              touch /copilot-session/state/copilot-config.json /copilot-session/state/command-history-state.json
               chown -R 1000:1000 /copilot-session/state /copilot-session/session-state
               find /copilot-session/state /copilot-session/session-state -type d -exec chmod 700 {} +
               find /copilot-session/state /copilot-session/session-state -type f -exec chmod 600 {} +
@@ -714,6 +714,9 @@ spec:
               mountPath: /home/copilot/.copilot/config.json
               subPath: state/copilot-config.json
             - name: copilot-session
+              mountPath: /home/copilot/.copilot/command-history-state.json
+              subPath: state/command-history-state.json
+            - name: copilot-session
               mountPath: /home/copilot/.copilot/session-state
               subPath: session-state
             - name: copilot-session
@@ -797,9 +800,11 @@ printf '%s\n' 'kind-test remote: locale and editor env ok' >&2
 test -f ~/.copilot/skills/control-plane-operations/SKILL.md
 test -f ~/.copilot/skills/repo-change-delivery/SKILL.md
 test -f ~/.copilot/config.json
+test -f ~/.copilot/command-history-state.json
 test -d ~/.copilot/session-state
 test -f ~/.config/gh/hosts.yml
 test "\$(stat -c '%a %U %G' ~/.copilot/config.json)" = '600 copilot copilot'
+test "\$(stat -c '%a %U %G' ~/.copilot/command-history-state.json)" = '600 copilot copilot'
 test "\$(stat -c '%a %U %G' ~/.config/gh/hosts.yml)" = '600 copilot copilot'
 printf '%s\n' 'kind-test remote: persisted files ok' >&2
 jq -e '.auth.provider == "github"' ~/.copilot/config.json >/dev/null
@@ -864,8 +869,8 @@ locale charmap || true
 locale -a || true
 printf '%s\n' '--- persisted files ---'
 ls -ld ~/.copilot ~/.copilot/session-state ~/.config ~/.config/gh ~/.ssh /workspace || true
-ls -l ~/.copilot/config.json ~/.config/gh/hosts.yml || true
-stat -c '%n %a %U %G' ~/.copilot/config.json ~/.config/gh/hosts.yml || true
+ls -l ~/.copilot/config.json ~/.copilot/command-history-state.json ~/.config/gh/hosts.yml || true
+stat -c '%n %a %U %G' ~/.copilot/config.json ~/.copilot/command-history-state.json ~/.config/gh/hosts.yml || true
 printf '%s\n' '--- config and gh hosts ---'
 cat ~/.copilot/config.json || true
 cat ~/.config/gh/hosts.yml || true
@@ -1309,6 +1314,7 @@ run_job_transfer_assertions() {
 run_restart_assertions() {
   ssh_bash <<'EOF'
 set -euo pipefail
+printf '%s\n' 'command-history-ok' > ~/.copilot/command-history-state.json
 mkdir -p ~/.copilot/session-state
 printf '%s\n' 'session-state-ok' > ~/.copilot/session-state/k8s-session-state.txt
 printf '%s\n' 'tmp-ok' > "${TMPDIR}/k8s-tmp.txt"
@@ -1331,6 +1337,7 @@ EOF
   ssh_bash <<'EOF'
 set -euo pipefail
 test ! -e ~/.copilot/state.txt
+grep -qx 'command-history-ok' ~/.copilot/command-history-state.json
 test -f ~/.copilot/session-state/k8s-session-state.txt
 test -f ~/.config/gh/state.txt
 test -f ~/.ssh/state.txt
