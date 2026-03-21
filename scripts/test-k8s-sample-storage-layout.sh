@@ -122,6 +122,8 @@ assert_resource_absent PersistentVolumeClaim control-plane-rootful-podman-pvc
 printf '%s\n' 'k8s-sample-storage-layout-test: checking shared session and ephemeral Podman cache' >&2
 assert_deployment_contains 'claimName: control-plane-copilot-session-pvc'
 assert_deployment_contains 'claimName: control-plane-workspace-pvc'
+assert_deployment_contains 'name: TZ'
+assert_deployment_contains 'value: Asia/Tokyo'
 assert_deployment_contains 'subPath: state/copilot-config.json'
 assert_deployment_contains 'subPath: state/command-history-state.json'
 assert_deployment_contains 'subPath: session-state'

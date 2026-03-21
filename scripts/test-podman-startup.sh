@@ -25,6 +25,7 @@ all_startup_caps=(
 cleanup() {
   "${container_bin}" rm -f control-plane-podman-startup-legacy >/dev/null 2>&1 || true
   "${container_bin}" rm -f control-plane-podman-startup-rootful >/dev/null 2>&1 || true
+  "${container_bin}" rm -f control-plane-podman-startup-timezone >/dev/null 2>&1 || true
   rm -rf "${workdir}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -211,5 +212,47 @@ if [[ ! -d "${workdir}/rootful/rootful-podman/rootful-overlay" ]]; then
   find "${workdir}/rootful/rootful-podman" -maxdepth 3 -print >&2 || true
   exit 1
 fi
+
+printf '%s\n' 'podman-startup-test: verifying configured timezone propagates to runtime env and login shell' >&2
+prepare_state_tree timezone
+
+cat > "${workdir}/timezone-check.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+grep -qx 'TZ=Asia/Tokyo' /home/copilot/.config/control-plane/runtime.env
+su -s /bin/bash copilot -c 'bash -lc '"'"'
+  test "${TZ}" = "Asia/Tokyo"
+  test "$(date +%Z)" = "JST"
+  test "$(date +%z)" = "+0900"
+'"'"''
+printf '%s\n' timezone-ok
+EOF
+chmod +x "${workdir}/timezone-check.sh"
+
+set +e
+timezone_output="$("${container_bin}" run --rm \
+  --name control-plane-podman-startup-timezone \
+  "${all_startup_caps[@]}" \
+  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForStartupRegression control-plane-startup' \
+  -e TZ=Asia/Tokyo \
+  -v "${workdir}/timezone/copilot:/home/copilot/.copilot" \
+  -v "${workdir}/timezone/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/timezone/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/timezone/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/timezone/workspace:/workspace" \
+  -v "${workdir}:/var/run/control-plane-test" \
+  "${entrypoint_override_args[@]}" \
+  "${control_plane_image}" \
+  /var/run/control-plane-test/timezone-check.sh 2>&1)"
+timezone_status=$?
+set -e
+
+if [[ "${timezone_status}" -ne 0 ]]; then
+  printf 'Expected configured timezone to propagate through runtime.env and login shells\n' >&2
+  printf '%s\n' "${timezone_output}" >&2
+  exit 1
+fi
+grep -qx 'timezone-ok' <<<"${timezone_output}"
 
 printf '%s\n' 'podman-startup-test: startup regressions ok' >&2

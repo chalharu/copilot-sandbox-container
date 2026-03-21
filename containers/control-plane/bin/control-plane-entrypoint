@@ -836,6 +836,9 @@ fi
   write_runtime_var XDG_RUNTIME_DIR "${runtime_dir}"
   write_runtime_var TMPDIR "${tmp_dir}"
   write_runtime_var SCREENDIR "${screen_dir}"
+  if [[ -n "${TZ:-}" ]]; then
+    write_runtime_var TZ "${TZ}"
+  fi
   if [[ "${local_podman_mode}" == "rootful-service" ]]; then
     write_runtime_var CONTAINER_HOST "unix://${rootful_podman_socket}"
     write_runtime_var DOCKER_HOST "unix://${rootful_podman_socket}"
