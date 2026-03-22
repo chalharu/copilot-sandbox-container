@@ -1,4 +1,4 @@
-FROM docker.io/library/alpine:3.21.3@sha256:41c81533144786e0beb2b148667355a6c7659aa99a14ed837ff15a98ca9d71f3
+FROM docker.io/library/alpine:3.21.3@sha256:a8560b36e8b8210634f77d9f7f9efd7ffa463e380b75e2e74aff4511df3ef88c
 
 # renovate: datasource=github-releases depName=mozilla/sccache versioning=semver
 ARG SCCACHE_VERSION=0.14.0
