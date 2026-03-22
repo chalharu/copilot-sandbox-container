@@ -5,6 +5,9 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 doc_coauthor_skill_dir="${repo_root}/.github/skills/doc-coauthoring"
 doc_coauthor_skill_file="${doc_coauthor_skill_dir}/SKILL.md"
+yamllint_skill_dir="${repo_root}/.github/skills/containerized-yamllint-ops"
+yamllint_skill_file="${yamllint_skill_dir}/SKILL.md"
+yamllint_script_file="${yamllint_skill_dir}/scripts/podman-yamllint.sh"
 repo_skill_dir="${repo_root}/.github/skills/pr-fix-workflow"
 repo_skill_file="${repo_skill_dir}/SKILL.md"
 repo_reference_file="${repo_skill_dir}/references/validation-and-delivery.md"
@@ -14,6 +17,12 @@ skill_creator_license_file="${skill_creator_dir}/LICENSE.txt"
 repo_git_commit_dir="${repo_root}/.github/skills/git-commit"
 generic_skill_dir="${repo_root}/containers/control-plane/skills/repo-change-delivery"
 generic_skill_file="${generic_skill_dir}/SKILL.md"
+rust_skill_dir="${repo_root}/containers/control-plane/skills/containerized-rust-ops"
+rust_skill_file="${rust_skill_dir}/SKILL.md"
+rust_runtime_reference_file="${rust_skill_dir}/references/runtime-quirks.md"
+rust_podman_script_file="${rust_skill_dir}/scripts/podman-rust.sh"
+rust_k8s_script_file="${rust_skill_dir}/scripts/k8s-rust.sh"
+rust_sccache_image_dockerfile="${rust_skill_dir}/assets/sccache-image/Dockerfile"
 commit_skill_dir="${repo_root}/containers/control-plane/skills/git-commit"
 commit_skill_file="${commit_skill_dir}/SKILL.md"
 pull_request_skill_dir="${repo_root}/containers/control-plane/skills/pull-request-workflow"
@@ -23,9 +32,11 @@ dockerfile_path="${repo_root}/containers/control-plane/Dockerfile"
 entrypoint_path="${repo_root}/containers/control-plane/bin/control-plane-entrypoint"
 package_dir="$(mktemp -d)"
 doc_coauthor_package_file="${package_dir}/doc-coauthoring.skill"
+yamllint_package_file="${package_dir}/containerized-yamllint-ops.skill"
 repo_package_file="${package_dir}/pr-fix-workflow.skill"
 skill_creator_package_file="${package_dir}/skill-creator.skill"
 generic_package_file="${package_dir}/repo-change-delivery.skill"
+rust_package_file="${package_dir}/containerized-rust-ops.skill"
 commit_package_file="${package_dir}/git-commit.skill"
 pull_request_package_file="${package_dir}/pull-request-workflow.skill"
 
@@ -108,11 +119,18 @@ require_command "${container_bin}"
 
 printf '%s\n' 'repo-change-delivery-skills-test: checking skill files' >&2
 assert_file_present "${doc_coauthor_skill_file}"
+assert_file_present "${yamllint_skill_file}"
+assert_file_present "${yamllint_script_file}"
 assert_file_present "${repo_skill_file}"
 assert_file_present "${repo_reference_file}"
 assert_file_present "${skill_creator_skill_file}"
 assert_file_present "${skill_creator_license_file}"
 assert_file_present "${generic_skill_file}"
+assert_file_present "${rust_skill_file}"
+assert_file_present "${rust_runtime_reference_file}"
+assert_file_present "${rust_podman_script_file}"
+assert_file_present "${rust_k8s_script_file}"
+assert_file_present "${rust_sccache_image_dockerfile}"
 assert_file_present "${commit_skill_file}"
 assert_file_present "${pull_request_skill_file}"
 assert_file_present "${bundled_reference_file}"
@@ -124,6 +142,8 @@ assert_file_absent "${generic_skill_dir}/references/api_reference.md"
 assert_file_absent "${generic_skill_dir}/assets/example_asset.txt"
 
 assert_file_contains "${doc_coauthor_skill_file}" 'name: doc-coauthoring'
+assert_file_contains "${yamllint_skill_file}" 'name: containerized-yamllint-ops'
+assert_file_contains "${yamllint_skill_file}" 'localhost/yamllint:test'
 assert_file_contains "${skill_creator_skill_file}" 'name: skill-creator'
 assert_file_contains "${generic_skill_file}" 'name: repo-change-delivery'
 assert_file_contains "${generic_skill_file}" 'full implementation loop'
@@ -133,6 +153,10 @@ assert_file_contains "${generic_skill_file}" "\`git-commit\` and \`pull-request-
 assert_file_not_contains "${generic_skill_file}" 'CONTROL_PLANE_TOOLCHAIN=podman'
 assert_file_not_contains "${generic_skill_file}" '.github/workflows/control-plane-ci.yml'
 assert_file_not_contains "${generic_skill_file}" './scripts/test-k8s-job.sh'
+assert_file_contains "${rust_skill_file}" 'name: containerized-rust-ops'
+assert_file_contains "${rust_skill_file}" 'assets/sccache-image/Dockerfile'
+assert_file_not_contains "${rust_skill_file}" '.github/skills/containerized-rust-ops'
+assert_file_not_contains "${rust_runtime_reference_file}" '.copilot-cache'
 
 assert_file_contains "${commit_skill_file}" 'name: git-commit'
 assert_file_contains "${commit_skill_file}" 'Conventional Commits'
@@ -158,6 +182,7 @@ assert_file_contains "${repo_reference_file}" './scripts/test-current-cluster-re
 assert_file_contains "${repo_reference_file}" '.github/workflows/control-plane-ci.yml'
 assert_file_not_contains "${repo_reference_file}" 'git fetch origin main'
 
+assert_file_contains "${bundled_reference_file}" "\`containerized-rust-ops\`"
 assert_file_contains "${bundled_reference_file}" "\`git-commit\`"
 assert_file_contains "${bundled_reference_file}" "\`pull-request-workflow\`"
 
@@ -182,7 +207,23 @@ build_image_for_toolchain "${toolchain}" "${yamllint_image}" containers/yamllint
   -w /workspace/.github/skills/skill-creator/scripts \
   --entrypoint python3 \
   "${yamllint_image}" \
+  quick_validate.py /workspace/.github/skills/containerized-yamllint-ops
+
+"${container_bin}" run --rm --user "$(id -u):$(id -g)" \
+  -e PYTHONDONTWRITEBYTECODE=1 \
+  -v "${repo_root}:/workspace" \
+  -w /workspace/.github/skills/skill-creator/scripts \
+  --entrypoint python3 \
+  "${yamllint_image}" \
   quick_validate.py /workspace/containers/control-plane/skills/repo-change-delivery
+
+"${container_bin}" run --rm --user "$(id -u):$(id -g)" \
+  -e PYTHONDONTWRITEBYTECODE=1 \
+  -v "${repo_root}:/workspace" \
+  -w /workspace/.github/skills/skill-creator/scripts \
+  --entrypoint python3 \
+  "${yamllint_image}" \
+  quick_validate.py /workspace/containers/control-plane/skills/containerized-rust-ops
 
 "${container_bin}" run --rm --user "$(id -u):$(id -g)" \
   -e PYTHONDONTWRITEBYTECODE=1 \
@@ -216,14 +257,18 @@ build_image_for_toolchain "${toolchain}" "${yamllint_image}" containers/yamllint
   quick_validate.py /workspace/.github/skills/skill-creator
 
 package_skill_to_host /workspace/.github/skills/doc-coauthoring "${doc_coauthor_package_file}"
+package_skill_to_host /workspace/.github/skills/containerized-yamllint-ops "${yamllint_package_file}"
 package_skill_to_host /workspace/.github/skills/pr-fix-workflow "${repo_package_file}"
 package_skill_to_host /workspace/.github/skills/skill-creator "${skill_creator_package_file}"
 package_skill_to_host /workspace/containers/control-plane/skills/repo-change-delivery "${generic_package_file}"
+package_skill_to_host /workspace/containers/control-plane/skills/containerized-rust-ops "${rust_package_file}"
 package_skill_to_host /workspace/containers/control-plane/skills/git-commit "${commit_package_file}"
 package_skill_to_host /workspace/containers/control-plane/skills/pull-request-workflow "${pull_request_package_file}"
 
 assert_file_present "${doc_coauthor_package_file}"
+assert_file_present "${yamllint_package_file}"
 assert_file_present "${generic_package_file}"
+assert_file_present "${rust_package_file}"
 assert_file_present "${commit_package_file}"
 assert_file_present "${pull_request_package_file}"
 assert_file_present "${repo_package_file}"

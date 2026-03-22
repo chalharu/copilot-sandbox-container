@@ -195,10 +195,11 @@ fi
 if [[ "${mode}" == "podman" ]]; then
   local_mount_dir=""
   podman_args=(run --rm -v "${workspace}:/workspace")
+  control_plane_tmp_root="${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane-$(id -u)}"
 
   mkdir -p "${workspace}"
-  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/control-plane-run-$(id -u)}"
-  export TMPDIR="${TMPDIR:-/tmp/control-plane-$(id -u)}"
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-${control_plane_tmp_root}/run-$(id -u)}"
+  export TMPDIR="${TMPDIR:-${control_plane_tmp_root}/tmp-$(id -u)}"
   mkdir -p "${XDG_RUNTIME_DIR}"
   mkdir -p "${TMPDIR}"
   chmod 700 "${XDG_RUNTIME_DIR}"

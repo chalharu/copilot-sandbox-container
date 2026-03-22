@@ -194,7 +194,7 @@ ${service_account_yaml}
                  runtime_line="\$(grep -E "^(XDG_RUNTIME_DIR|TMPDIR|SCREENDIR|CONTAINER_HOST|DOCKER_HOST|CONTROL_PLANE_LOCAL_PODMAN_MODE|CONTROL_PLANE_PODMAN_DEFAULT_CGROUPS|CONTROL_PLANE_PODMAN_DEFAULT_NETWORK|CONTROL_PLANE_PODMAN_BUILD_ISOLATION)=" /home/copilot/.config/control-plane/runtime.env | tr "\n" " ")"
                  printf "job-check: runtime-env=%s\n" "\${runtime_line}"
                  [[ "\${runtime_line}" == *"XDG_RUNTIME_DIR=/run/user/1000"* ]]
-                 [[ "\${runtime_line}" == *"TMPDIR=/tmp/control-plane-1000"* ]]
+                 [[ "\${runtime_line}" == *"TMPDIR=/var/tmp/control-plane/tmp-1000"* ]]
                  [[ "\${runtime_line}" == *"SCREENDIR=/run/user/1000/screen"* ]]
                  [[ "\${runtime_line}" == *"CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service"* ]]
                  [[ "\${runtime_line}" == *"CONTROL_PLANE_PODMAN_DEFAULT_CGROUPS=disabled"* ]]

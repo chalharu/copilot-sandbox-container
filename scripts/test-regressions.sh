@@ -436,11 +436,14 @@ run_rootful_service_build_test() {
   local CONTAINER_HOST='unix:///var/tmp/control-plane/rootful-overlay/podman-root.sock'
   local DOCKER_HOST='unix:///var/tmp/control-plane/rootful-overlay/podman-root.sock'
   local selected_build_bin
+  local rootful_context_dir="${workdir}/rootful-context"
   export PATH TEST_REGRESSION_LOG_DIR CONTROL_PLANE_RUNTIME_ENV_FILE
   export CONTROL_PLANE_LOCAL_PODMAN_MODE CONTAINER_HOST DOCKER_HOST
+  mkdir -p "${rootful_context_dir}"
+  printf '%s\n' 'FROM docker.io/library/busybox:1.37.0' > "${rootful_context_dir}/Dockerfile"
   selected_build_bin="$(build_command_for_toolchain podman)"
   [[ "${selected_build_bin}" == "podman" ]]
-  build_image_for_toolchain podman quay.io/example/test:latest /tmp
+  build_image_for_toolchain podman quay.io/example/test:latest "${rootful_context_dir}"
 }
 
 run_rootful_service_build_test
@@ -451,7 +454,7 @@ grep -qx 'build' "${workdir}/remote-build.args"
 grep -qx -- '--tag' "${workdir}/remote-build.args"
 grep -qx -- '--isolation=chroot' "${workdir}/remote-build.args"
 grep -qx 'quay.io/example/test:latest' "${workdir}/remote-build.args"
-grep -qx '/tmp' "${workdir}/remote-build.args"
+grep -qx "${workdir}/rootful-context" "${workdir}/remote-build.args"
 
 printf '%s\n' 'regression-test: verifying interactive podman run returns promptly' >&2
 cat > "${workdir}/fake-bin/podman-run-interactive" <<'EOF'
@@ -520,6 +523,28 @@ if [[ "${detached_failure_status}" -eq 0 ]]; then
 fi
 grep -q 'rootless Podman is blocked by the outer runtime' <<<"${detached_failure_output}"
 
+printf '%s\n' 'regression-test: verifying control-plane-podman defaults runtime paths to /var/tmp/control-plane' >&2
+cat > "${workdir}/fake-bin/podman-env" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'XDG_RUNTIME_DIR=%s\n' "${XDG_RUNTIME_DIR:-}" > "${TEST_REGRESSION_LOG_DIR:?}/podman.env"
+printf 'TMPDIR=%s\n' "${TMPDIR:-}" >> "${TEST_REGRESSION_LOG_DIR:?}/podman.env"
+printf '%s\n' "$@" > "${TEST_REGRESSION_LOG_DIR:?}/podman.args"
+exit 0
+EOF
+chmod +x "${workdir}/fake-bin/podman-env"
+
+env -u XDG_RUNTIME_DIR -u TMPDIR \
+  CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+  TEST_REGRESSION_LOG_DIR="${workdir}" \
+  CONTROL_PLANE_PODMAN_BIN="${workdir}/fake-bin/podman-env" \
+  "${script_dir}/../containers/control-plane/bin/control-plane-podman" \
+  info
+
+grep -qx "XDG_RUNTIME_DIR=/var/tmp/control-plane-$(id -u)/run-$(id -u)" "${workdir}/podman.env"
+grep -qx "TMPDIR=/var/tmp/control-plane-$(id -u)/tmp-$(id -u)" "${workdir}/podman.env"
+grep -qx 'info' "${workdir}/podman.args"
+
 printf '%s\n' 'regression-test: verifying Copilot launcher applies CPU cap, nice, and secret env injection' >&2
 cat > "${workdir}/fake-bin/cpulimit" <<'EOF'
 #!/usr/bin/env bash
@@ -583,7 +608,7 @@ grep -qx -- '--yolo' "${workdir}/copilot.args"
 grep -qx -- '--secret-env-vars=COPILOT_GITHUB_TOKEN' "${workdir}/copilot.args"
 grep -qx 'COPILOT_GITHUB_TOKEN=copilot-token-for-test' "${workdir}/copilot.env"
 
-printf '%s\n' 'regression-test: verifying control-plane-run defaults runtime paths to /tmp' >&2
+printf '%s\n' 'regression-test: verifying control-plane-run defaults runtime paths to /var/tmp/control-plane' >&2
 cat > "${workdir}/fake-bin/podman-run-env" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -606,8 +631,8 @@ env -u XDG_RUNTIME_DIR -u TMPDIR \
   --image quay.io/example/test:latest \
   -- true
 
-grep -qx "XDG_RUNTIME_DIR=/tmp/control-plane-run-$(id -u)" "${workdir}/run.env"
-grep -qx "TMPDIR=/tmp/control-plane-$(id -u)" "${workdir}/run.env"
+grep -qx "XDG_RUNTIME_DIR=/var/tmp/control-plane-$(id -u)/run-$(id -u)" "${workdir}/run.env"
+grep -qx "TMPDIR=/var/tmp/control-plane-$(id -u)/tmp-$(id -u)" "${workdir}/run.env"
 grep -qx 'run' "${workdir}/run.args"
 grep -qx -- '--rm' "${workdir}/run.args"
 grep -qx -- '-v' "${workdir}/run.args"

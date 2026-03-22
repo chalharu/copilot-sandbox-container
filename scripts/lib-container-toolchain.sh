@@ -128,6 +128,43 @@ build_command_for_toolchain() {
   esac
 }
 
+build_context_hash() {
+  local context_dir="$1"
+
+  [[ -d "${context_dir}" ]] || {
+    printf 'Build context directory not found: %s\n' "${context_dir}" >&2
+    exit 1
+  }
+  require_command tar
+  require_command sha256sum
+
+  tar \
+    --sort=name \
+    --mtime='UTC 1970-01-01' \
+    --owner=0 \
+    --group=0 \
+    --numeric-owner \
+    -cf - \
+    -C "${context_dir}" \
+    . \
+    | sha256sum \
+    | awk '{print $1}'
+}
+
+build_context_hash_label_key() {
+  printf '%s\n' 'io.github.chalharu.control-plane.build-context-sha256'
+}
+
+image_context_hash_for_toolchain() {
+  local toolchain="$1"
+  local image_tag="$2"
+  local label_key="$3"
+  local container_bin
+
+  container_bin="$(container_runtime_for_toolchain "${toolchain}")"
+  "${container_bin}" image inspect --format "{{ index .Config.Labels \"${label_key}\" }}" "${image_tag}" 2>/dev/null
+}
+
 prefer_podman_remote_build() {
   [[ -n "${CONTAINER_HOST:-}" ]] \
     || [[ -n "${DOCKER_HOST:-}" ]] \
@@ -253,6 +290,9 @@ build_image_for_toolchain() {
   local context_dir="$3"
   local build_isolation=""
   local build_bin=""
+  local context_hash=""
+  local context_hash_label_key=""
+  local existing_context_hash=""
 
   load_control_plane_runtime_env
   build_isolation="${CONTROL_PLANE_PODMAN_BUILD_ISOLATION:-}"
@@ -260,23 +300,47 @@ build_image_for_toolchain() {
     build_isolation="chroot"
   fi
   build_bin="$(build_command_for_toolchain "${toolchain}")"
+  context_hash="$(build_context_hash "${context_dir}")"
+  context_hash_label_key="$(build_context_hash_label_key)"
+  existing_context_hash="$(image_context_hash_for_toolchain "${toolchain}" "${image_tag}" "${context_hash_label_key}" || true)"
+
+  if [[ -n "${existing_context_hash}" ]] && [[ "${existing_context_hash}" == "${context_hash}" ]]; then
+    printf 'Reusing %s; build context unchanged\n' "${image_tag}" >&2
+    return 0
+  fi
 
   case "${toolchain}" in
     docker)
-      docker buildx build --load -t "${image_tag}" "${context_dir}"
+      docker buildx build --load \
+        --label "${context_hash_label_key}=${context_hash}" \
+        -t "${image_tag}" \
+        "${context_dir}"
       ;;
     podman)
       if [[ "${build_bin}" == "buildah" ]]; then
         if [[ -n "${build_isolation}" ]] && [[ -z "${BUILDAH_ISOLATION:-}" ]]; then
-          BUILDAH_ISOLATION="${build_isolation}" buildah bud --tag "${image_tag}" "${context_dir}"
+          BUILDAH_ISOLATION="${build_isolation}" buildah bud \
+            --label "${context_hash_label_key}=${context_hash}" \
+            --tag "${image_tag}" \
+            "${context_dir}"
         else
-          buildah bud --tag "${image_tag}" "${context_dir}"
+          buildah bud \
+            --label "${context_hash_label_key}=${context_hash}" \
+            --tag "${image_tag}" \
+            "${context_dir}"
         fi
       else
         if [[ -n "${build_isolation}" ]]; then
-          podman build --isolation="${build_isolation}" --tag "${image_tag}" "${context_dir}"
+          podman build \
+            --isolation="${build_isolation}" \
+            --label "${context_hash_label_key}=${context_hash}" \
+            --tag "${image_tag}" \
+            "${context_dir}"
         else
-          podman build --tag "${image_tag}" "${context_dir}"
+          podman build \
+            --label "${context_hash_label_key}=${context_hash}" \
+            --tag "${image_tag}" \
+            "${context_dir}"
         fi
       fi
       ;;

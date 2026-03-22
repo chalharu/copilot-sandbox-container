@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
+import path from "node:path";
 import process from "node:process";
 import {
 	getChangedFiles,
@@ -137,13 +138,42 @@ function getCurrentRelevantFiles(repoRoot) {
 	return classifyFilesByPipeline(repoRoot, listDirtyFiles(repoRoot));
 }
 
+function resolveHookCacheRoot() {
+	return (
+		process.env.CONTROL_PLANE_HOOK_TMP_ROOT ??
+		path.join(
+			process.env.CONTROL_PLANE_TMP_ROOT ?? "/var/tmp/control-plane",
+			"hooks",
+		)
+	);
+}
+
+function buildToolEnv() {
+	const hookCacheRoot = resolveHookCacheRoot();
+	const npmCache = path.join(hookCacheRoot, "npm-cache");
+	const nodeCompileCache = path.join(hookCacheRoot, "node-compile-cache");
+
+	fs.mkdirSync(hookCacheRoot, { recursive: true });
+	fs.mkdirSync(npmCache, { recursive: true });
+	fs.mkdirSync(nodeCompileCache, { recursive: true });
+
+	return {
+		...process.env,
+		TMPDIR: process.env.TMPDIR ?? hookCacheRoot,
+		NODE_COMPILE_CACHE: process.env.NODE_COMPILE_CACHE ?? nodeCompileCache,
+		NPM_CONFIG_CACHE: process.env.NPM_CONFIG_CACHE ?? npmCache,
+		npm_config_cache: process.env.npm_config_cache ?? process.env.NPM_CONFIG_CACHE ?? npmCache,
+	};
+}
+
 function runStepWithFallback(repoRoot, toolIds, files) {
 	const attempted = [];
+	const toolEnv = buildToolEnv();
 
 	for (const toolId of toolIds) {
 		const tool = config.tools.get(toolId);
 		const args = tool.appendFiles ? [...tool.args, ...files] : tool.args;
-		const result = runCommand(tool.command, args, repoRoot);
+		const result = runCommand(tool.command, args, repoRoot, { env: toolEnv });
 
 		if (!result.error) {
 			return result;
