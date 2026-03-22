@@ -144,39 +144,38 @@
       ]
     },
     {
-      "id": "cargo-fmt",
-      "command": "cargo",
+      "id": "containerized-rust-fmt",
+      "command": "bash",
       "args": [
-        "fmt",
-        "--all"
+        "containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh",
+        "fmt"
       ],
       "appendFiles": false
     },
     {
-      "id": "cargo-clippy-fix",
-      "command": "cargo",
+      "id": "containerized-rust-clippy-fix",
+      "command": "bash",
       "args": [
-        "clippy",
-        "--fix",
-        "--allow-dirty",
-        "--allow-staged",
-        "--workspace",
-        "--all-targets"
+        "containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh",
+        "clippy-fix"
       ],
       "appendFiles": false
     },
     {
-      "id": "cargo-clippy-check",
-      "command": "cargo",
+      "id": "containerized-rust-clippy-check",
+      "command": "bash",
       "args": [
-        "clippy",
-        "--workspace",
-        "--all-targets",
-        "--",
-        "-D",
-        "warnings"
+        "containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh",
+        "clippy"
       ],
       "appendFiles": false
+    },
+    {
+      "id": "containerized-yamllint-check",
+      "command": "bash",
+      "args": [
+        ".github/skills/containerized-yamllint-ops/scripts/podman-yamllint.sh"
+      ]
     },
     {
       "id": "hadolint-check",
@@ -254,6 +253,21 @@
       ]
     },
     {
+      "id": "yaml",
+      "matcher": [
+        "\\.(?:ya?ml)$"
+      ],
+      "steps": [
+        {
+          "tools": [
+            "containerized-yamllint-check"
+          ],
+          "reportFailure": true,
+          "failureLabel": "Yamllint reported unresolved issues:"
+        }
+      ]
+    },
+    {
       "id": "python",
       "matcher": [
         "\\.(?:py|pyi|pyw)$"
@@ -291,27 +305,27 @@
       "steps": [
         {
           "tools": [
-            "cargo-fmt"
+            "containerized-rust-fmt"
           ],
           "reportFailure": true,
-          "failureLabel": "cargo fmt reported unresolved issues:"
+          "failureLabel": "Containerized Rust formatter reported unresolved issues:"
         },
         {
           "tools": [
-            "cargo-clippy-fix"
+            "containerized-rust-clippy-fix"
           ]
         },
         {
           "tools": [
-            "cargo-fmt"
+            "containerized-rust-fmt"
           ]
         },
         {
           "tools": [
-            "cargo-clippy-check"
+            "containerized-rust-clippy-check"
           ],
           "reportFailure": true,
-          "failureLabel": "Rust linter reported unresolved issues:"
+          "failureLabel": "Containerized Rust linter reported unresolved issues:"
         }
       ]
     },

@@ -9,6 +9,7 @@
 ## Bundled skill catalog
 
 - `control-plane-operations`: control-plane runtime, Podman, SSH, and Kubernetes Job execution guidance
+- `containerized-rust-ops`: reusable Rust validation helpers that keep large temp files and caches off `/tmp` and out of `.git`
 - `repo-change-delivery`: generic end-to-end repository delivery loop
 - `git-commit`: generic commit workflow with repository-convention message generation
 - `pull-request-workflow`: generic pull request creation, update, and hosted-check handling workflow

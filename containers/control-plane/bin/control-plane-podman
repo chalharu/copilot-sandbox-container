@@ -504,8 +504,9 @@ invoke_podman_command() {
   run_podman_with_live_stderr "${stderr_path}" "${command_args[@]}"
 }
 
-export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/podman-run-$(id -u)}"
-export TMPDIR="${TMPDIR:-/tmp/control-plane-$(id -u)}"
+control_plane_tmp_root="${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane-$(id -u)}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-${control_plane_tmp_root}/run-$(id -u)}"
+export TMPDIR="${TMPDIR:-${control_plane_tmp_root}/tmp-$(id -u)}"
 mkdir -p "${XDG_RUNTIME_DIR}"
 mkdir -p "${TMPDIR}"
 chmod 700 "${XDG_RUNTIME_DIR}"

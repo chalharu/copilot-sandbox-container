@@ -14,7 +14,11 @@ containers_storage_config_path="${containers_config_dir}/storage.conf"
 containers_engine_config_path="${containers_config_dir}/containers.conf"
 podman_state_root="${control_plane_home}/.copilot/containers"
 runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${control_plane_uid}}"
-tmp_dir="${TMPDIR:-/tmp/control-plane-${control_plane_uid}}"
+tmp_root="${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane}"
+hook_tmp_root="${CONTROL_PLANE_HOOK_TMP_ROOT:-${tmp_root}/hooks}"
+tmp_dir="${TMPDIR:-${tmp_root}/tmp-${control_plane_uid}}"
+node_compile_cache_dir="${CONTROL_PLANE_NODE_COMPILE_CACHE_DIR:-${hook_tmp_root}/node-compile-cache}"
+npm_cache_dir="${CONTROL_PLANE_NPM_CACHE_DIR:-${hook_tmp_root}/npm-cache}"
 screen_dir="${SCREENDIR:-${runtime_dir}/screen}"
 host_key_dir="${CONTROL_PLANE_HOST_KEY_DIR:-/var/lib/control-plane/ssh-host-keys}"
 bundled_skills_dir="/usr/local/share/control-plane/skills"
@@ -662,7 +666,10 @@ mkdir -p \
   "${copilot_session_state_dir}" \
   "${podman_state_dir}" \
   "${screen_dir}" \
+  "${hook_tmp_root}" \
   "${tmp_dir}" \
+  "${node_compile_cache_dir}" \
+  "${npm_cache_dir}" \
   "${job_transfer_root}" \
   "${host_key_dir}" \
   "/run/user/${control_plane_uid}" \
@@ -686,7 +693,10 @@ safe_chown_tree "${control_plane_user}:${control_plane_user}" \
   "${job_transfer_root}" \
   "${podman_state_dir}" \
   "${screen_dir}" \
+  "${hook_tmp_root}" \
   "${tmp_dir}" \
+  "${node_compile_cache_dir}" \
+  "${npm_cache_dir}" \
   "${runtime_dir}"
 ensure_path_ownership "${control_plane_user}:${control_plane_user}" \
   "${control_plane_home}/.copilot" \
@@ -696,7 +706,14 @@ ensure_path_ownership "${control_plane_user}:${control_plane_user}" \
   "${podman_graphroot}" \
   "${podman_graphroot}/${podman_storage_driver}" \
   "${podman_graphroot}/volumes" \
-  "${podman_runroot}"
+  "${podman_runroot}" \
+  "${screen_dir}" \
+  "${hook_tmp_root}" \
+  "${tmp_dir}" \
+  "${node_compile_cache_dir}" \
+  "${npm_cache_dir}" \
+  "${job_transfer_root}" \
+  "${runtime_dir}"
 chown "${control_plane_user}:${control_plane_user}" \
   "/run/user/${control_plane_uid}" \
   "${control_plane_home}" \
@@ -709,12 +726,24 @@ chown -h "${control_plane_user}:${control_plane_user}" "${control_plane_home}/.l
 chown root:root "${host_key_dir}"
 chown root:root /run/sshd
 chmod 755 "${control_plane_home}"
-chmod 700 "${control_plane_home}/.ssh" "${runtime_dir}" "${tmp_dir}" "${job_transfer_root}" "${screen_dir}"
+chmod 700 \
+  "${control_plane_home}/.ssh" \
+  "${runtime_dir}" \
+  "${hook_tmp_root}" \
+  "${tmp_dir}" \
+  "${node_compile_cache_dir}" \
+  "${npm_cache_dir}" \
+  "${job_transfer_root}" \
+  "${screen_dir}"
 # Jobs need to read the public SSH host key from an unprivileged shell to seed known_hosts.
 chmod 711 "${host_key_dir}"
 chmod 755 /run/sshd
 export XDG_RUNTIME_DIR="${runtime_dir}"
+export CONTROL_PLANE_TMP_ROOT="${tmp_root}"
+export CONTROL_PLANE_HOOK_TMP_ROOT="${hook_tmp_root}"
 export TMPDIR="${tmp_dir}"
+export NODE_COMPILE_CACHE="${node_compile_cache_dir}"
+export NPM_CONFIG_CACHE="${npm_cache_dir}"
 export SCREENDIR="${screen_dir}"
 touch "${authorized_keys_path}"
 chmod 600 "${authorized_keys_path}"
@@ -833,8 +862,14 @@ fi
   write_runtime_var CONTROL_PLANE_JOB_TRANSFER_HOST "${job_transfer_host}"
   write_runtime_var CONTROL_PLANE_JOB_TRANSFER_PORT "${job_transfer_port}"
   write_runtime_var CONTROL_PLANE_JOB_TRANSFER_USER "${job_transfer_user}"
+  write_runtime_var CONTROL_PLANE_TMP_ROOT "${tmp_root}"
+  write_runtime_var CONTROL_PLANE_HOOK_TMP_ROOT "${hook_tmp_root}"
+  write_runtime_var CONTROL_PLANE_NODE_COMPILE_CACHE_DIR "${node_compile_cache_dir}"
+  write_runtime_var CONTROL_PLANE_NPM_CACHE_DIR "${npm_cache_dir}"
   write_runtime_var XDG_RUNTIME_DIR "${runtime_dir}"
   write_runtime_var TMPDIR "${tmp_dir}"
+  write_runtime_var NODE_COMPILE_CACHE "${node_compile_cache_dir}"
+  write_runtime_var NPM_CONFIG_CACHE "${npm_cache_dir}"
   write_runtime_var SCREENDIR "${screen_dir}"
   if [[ -n "${TZ:-}" ]]; then
     write_runtime_var TZ "${TZ}"
