@@ -8,8 +8,14 @@ import { fileURLToPath } from "node:url";
 
 const currentFile = fileURLToPath(import.meta.url);
 const postToolUseDir = path.dirname(currentFile);
-const repoRoot = path.resolve(postToolUseDir, "..", "..", "..");
-const hooksConfigPath = path.join(repoRoot, ".github", "hooks", "hooks.json");
+const repoRoot = path.resolve(postToolUseDir, "..", "..", "..", "..");
+const bundledHooksConfigPath = path.join(
+	repoRoot,
+	"containers",
+	"control-plane",
+	"hooks",
+	"control-plane-hooks.json",
+);
 const bundledLintersConfigPath = path.join(
 	repoRoot,
 	"containers",
@@ -18,11 +24,11 @@ const bundledLintersConfigPath = path.join(
 	"postToolUse",
 	"linters.json",
 );
-const sourceRepoPostToolUseDir = path.join(
+const sourceBundledHooksDir = path.join(
 	repoRoot,
-	".github",
+	"containers",
+	"control-plane",
 	"hooks",
-	"postToolUse",
 );
 const sourceBundledPostToolUseDir = path.join(
 	repoRoot,
@@ -59,32 +65,26 @@ function setupRepo(t, prefix) {
 	run("git", ["init", "--quiet"], { cwd: repo });
 	run("git", ["config", "user.name", "test"], { cwd: repo });
 	run("git", ["config", "user.email", "test@example.com"], { cwd: repo });
-	fs.mkdirSync(path.join(repo, ".github", "hooks"), { recursive: true });
-	fs.mkdirSync(path.join(repo, "containers", "control-plane", "hooks"), {
+	fs.mkdirSync(path.join(repo, ".github"), {
+		recursive: true,
+	});
+	fs.mkdirSync(path.join(repo, ".copilot", "hooks"), {
 		recursive: true,
 	});
 	fs.cpSync(
-		sourceRepoPostToolUseDir,
-		path.join(repo, ".github", "hooks", "postToolUse"),
-		{
-			recursive: true,
-		},
+		path.join(sourceBundledHooksDir, "control-plane-hooks.json"),
+		path.join(repo, ".copilot", "hooks", "control-plane-hooks.json"),
 	);
 	fs.cpSync(
 		sourceBundledPostToolUseDir,
-		path.join(repo, "containers", "control-plane", "hooks", "postToolUse"),
+		path.join(repo, ".copilot", "hooks", "postToolUse"),
 		{
 			recursive: true,
 		},
 	);
 	fs.appendFileSync(
 		path.join(repo, ".git", "info", "exclude"),
-		[
-			"bin/",
-			"hook.log",
-			".github/hooks/postToolUse/",
-			"containers/control-plane/hooks/postToolUse/",
-		].join("\n") + "\n",
+		["bin/", "hook.log", ".copilot/hooks/"].join("\n") + "\n",
 		"utf8",
 	);
 
@@ -352,7 +352,7 @@ function makePythonRustDockerDirty(repo) {
 }
 
 function runHook(repo, env, toolResultType = "success") {
-	return run(process.execPath, [".github/hooks/postToolUse/main.mjs"], {
+	return run(process.execPath, [".copilot/hooks/postToolUse/main.mjs"], {
 		cwd: repo,
 		env,
 		input: JSON.stringify({
@@ -364,25 +364,27 @@ function runHook(repo, env, toolResultType = "success") {
 }
 
 test("hooks config uses one main postToolUse command", () => {
-	const hooksConfig = JSON.parse(fs.readFileSync(hooksConfigPath, "utf8"));
+	const hooksConfig = JSON.parse(
+		fs.readFileSync(bundledHooksConfigPath, "utf8"),
+	);
 	assert.equal(hooksConfig.hooks.postToolUse.length, 1);
 	assert.match(
 		hooksConfig.hooks.postToolUse[0].bash,
-		/\/usr\/local\/share\/control-plane\/hooks\/postToolUse\/main\.mjs/,
+		/\.copilot\/hooks\/postToolUse\/main\.mjs/,
 	);
-	assert.match(
-		hooksConfig.hooks.postToolUse[0].bash,
-		/\.github\/hooks\/postToolUse\/main\.mjs/,
+	assert.equal(
+		hooksConfig.hooks.postToolUse[0].bash.includes(".github/hooks"),
+		false,
 	);
 	assert.match(hooksConfig.hooks.postToolUse[0].bash, /NODE_COMPILE_CACHE=/);
 	assert.match(hooksConfig.hooks.postToolUse[0].bash, /NPM_CONFIG_CACHE=/);
 	assert.match(
 		hooksConfig.hooks.postToolUse[0].powershell,
-		/\/usr\/local\/share\/control-plane\/hooks\/postToolUse\/main\.mjs/,
+		/\.copilot\/hooks\/postToolUse\/main\.mjs/,
 	);
-	assert.match(
-		hooksConfig.hooks.postToolUse[0].powershell,
-		/\.github\/hooks\/postToolUse\/main\.mjs/,
+	assert.equal(
+		hooksConfig.hooks.postToolUse[0].powershell.includes(".github/hooks"),
+		false,
 	);
 	assert.match(
 		hooksConfig.hooks.postToolUse[0].powershell,
