@@ -114,7 +114,7 @@ target_cache="${CONTAINERIZED_RUST_TARGET_DIR:-${state_root}/target}"
 tool_tmp_dir="${CONTAINERIZED_RUST_WORK_TMPDIR:-${state_root}/tmp}"
 sccache_cache="${CONTAINERIZED_RUST_SCCACHE_DIR:-${control_plane_tmp_root}/sccache/${repo_key}}"
 sccache_image="${CONTAINERIZED_SCCACHE_IMAGE:-localhost/sccache:test}"
-sccache_image_context="${CONTAINERIZED_SCCACHE_IMAGE_CONTEXT:-${skill_root}/assets/sccache-image}"
+sccache_image_context="${CONTAINERIZED_SCCACHE_IMAGE_CONTEXT:-${repo_root}/containers/sccache}"
 sccache_image_label='io.github.chalharu.containerized-rust.sccache-context-sha256'
 
 mkdir -p "${base_tmp_root}" "${tool_tmp_dir}" "${rustup_cache}" "${cargo_cache}" "${target_cache}" "${sccache_cache}"

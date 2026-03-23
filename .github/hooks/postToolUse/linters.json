@@ -174,7 +174,7 @@
       "id": "containerized-yamllint-check",
       "command": "bash",
       "args": [
-        ".github/skills/containerized-yamllint-ops/scripts/podman-yamllint.sh"
+        "containers/control-plane/skills/containerized-yamllint-ops/scripts/podman-yamllint.sh"
       ]
     },
     {

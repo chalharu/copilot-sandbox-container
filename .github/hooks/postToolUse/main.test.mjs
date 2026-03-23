@@ -174,16 +174,16 @@ function createToolStubs(
 				'printf "NODE_COMPILE_CACHE=%s\\n" "${NODE_COMPILE_CACHE:-}" >> "$HOOK_LOG"',
 				'printf "NPM_CONFIG_CACHE=%s\\n" "${NPM_CONFIG_CACHE:-}" >> "$HOOK_LOG"',
 				'if [ "$1" = "containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh" ] && [ "$2" = "fmt" ]; then',
-					"  exit 0",
+				"  exit 0",
 				"fi",
 				'if [ "$1" = "containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh" ] && [ "$2" = "clippy-fix" ]; then',
-					"  exit 0",
+				"  exit 0",
 				"fi",
 				'if [ "$1" = "containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh" ] && [ "$2" = "clippy" ]; then',
 				'  printf "clippy unresolved\\n" >&2',
 				"  exit 1",
 				"fi",
-				'if [ "$1" = ".github/skills/containerized-yamllint-ops/scripts/podman-yamllint.sh" ]; then',
+				'if [ "$1" = "containers/control-plane/skills/containerized-yamllint-ops/scripts/podman-yamllint.sh" ]; then',
 				'  printf "yamllint unresolved in %s\\n" "$2" >&2',
 				"  exit 1",
 				"fi",
@@ -299,9 +299,13 @@ function seedPythonRustDockerRepo(repo) {
 		"FROM alpine:3.20\nRUN echo hello\n",
 		"utf8",
 	);
-	run("git", ["add", "app.py", "sample.yaml", "Cargo.toml", "src/lib.rs", "Dockerfile"], {
-		cwd: repo,
-	});
+	run(
+		"git",
+		["add", "app.py", "sample.yaml", "Cargo.toml", "src/lib.rs", "Dockerfile"],
+		{
+			cwd: repo,
+		},
+	);
 	run("git", ["commit", "-m", "init"], { cwd: repo, stdio: "ignore" });
 }
 
@@ -344,7 +348,10 @@ test("hooks config uses one main postToolUse command", () => {
 		/NODE_COMPILE_CACHE=.*node \.github\/hooks\/postToolUse\/main\.mjs/,
 	);
 	assert.match(hooksConfig.hooks.postToolUse[0].bash, /NPM_CONFIG_CACHE=/);
-	assert.match(hooksConfig.hooks.postToolUse[0].powershell, /NODE_COMPILE_CACHE/);
+	assert.match(
+		hooksConfig.hooks.postToolUse[0].powershell,
+		/NODE_COMPILE_CACHE/,
+	);
 	assert.match(hooksConfig.hooks.postToolUse[0].powershell, /NPM_CONFIG_CACHE/);
 });
 
@@ -526,13 +533,16 @@ test("main hook runs Python Rust YAML and Dockerfile pipelines", (t) => {
 	);
 	assert.match(
 		hookLog,
-		/bash \.github\/skills\/containerized-yamllint-ops\/scripts\/podman-yamllint\.sh sample\.yaml/,
+		/bash containers\/control-plane\/skills\/containerized-yamllint-ops\/scripts\/podman-yamllint\.sh sample\.yaml/,
 	);
 	assert.match(hookLog, /hadolint Dockerfile/);
 	assert.match(hookLog, /NODE_COMPILE_CACHE=.+node-compile-cache/);
 	assert.match(hookLog, /NPM_CONFIG_CACHE=.+npm-cache/);
 	assert.match(result.stderr, /Ruff reported unresolved issues:/);
-	assert.match(result.stderr, /Containerized Rust linter reported unresolved issues:/);
+	assert.match(
+		result.stderr,
+		/Containerized Rust linter reported unresolved issues:/,
+	);
 	assert.match(result.stderr, /Yamllint reported unresolved issues:/);
 	assert.match(result.stderr, /Hadolint reported unresolved issues:/);
 	assert.match(result.stderr, /ruff unresolved in app\.py/);

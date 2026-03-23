@@ -29,7 +29,7 @@ Examples:
 - `bash ~/.copilot/skills/containerized-rust-ops/scripts/podman-rust.sh -- cargo test --workspace --all-targets -- --nocapture`
 - `bash ~/.copilot/skills/containerized-rust-ops/scripts/podman-rust.sh -- cargo llvm-cov --workspace --all-targets --summary-only`
 
-The helper keeps toolchain state under disk-backed `TMPDIR` / `/var/tmp`, stores `sccache` in a dedicated sibling cache directory, keeps `target` ephemeral, and builds or reuses the bundled `assets/sccache-image/` container instead of bootstrapping `sccache` from source on every run.
+The helper keeps toolchain state under disk-backed `TMPDIR` / `/var/tmp`, stores `sccache` in a dedicated sibling cache directory, keeps `target` ephemeral, and builds or reuses the shared `containers/sccache/` container instead of bootstrapping `sccache` from source on every run.
 
 ## Run control-plane Kubernetes validation
 
@@ -51,6 +51,6 @@ When containerized Rust performance or correctness regresses, keep these surface
 - `scripts/podman-rust.sh` for local containerized runs
 - `scripts/k8s-rust.sh` for long control-plane jobs
 - `scripts/install-cargo-llvm-cov.sh` for release-based `cargo-llvm-cov` bootstrap
-- `assets/sccache-image/Dockerfile` for the cached `sccache` container image
+- `containers/sccache/Dockerfile` for the cached `sccache` container image
 
 Do not reintroduce `.git`-backed caches, memory-backed `/tmp` defaults, or repo-specific `.github/skills/...` paths into these helpers. Those are known-bad in this environment.
