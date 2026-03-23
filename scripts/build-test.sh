@@ -56,7 +56,7 @@ run_regressions_group() {
     "${script_dir}/test-ci-workflow-parallelization.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
-    "${script_dir}/test-github-hooks.sh"
+    "${script_dir}/test-github-hooks.sh" "${control_plane_image}"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-image-maintenance.sh"
