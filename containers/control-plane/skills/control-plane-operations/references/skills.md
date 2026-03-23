@@ -11,20 +11,28 @@
 - `containerized-yamllint-ops`: reusable YAML lint helper that runs through the pinned `containers/yamllint` image
 - `control-plane-operations`: control-plane runtime, Podman, SSH, and Kubernetes Job execution guidance
 - `containerized-rust-ops`: reusable Rust validation helpers that keep large temp files and caches off `/tmp` and out of `.git`
+- `doc-coauthoring`: bundled from the external skill manifest in `containers/control-plane/config/external-skills.yaml`
 - `repo-change-delivery`: generic end-to-end repository delivery loop
 - `git-commit`: generic commit workflow with repository-convention message generation
 - `pull-request-workflow`: generic pull request creation, update, and hosted-check handling workflow
+- `skill-creator`: bundled from the external skill manifest in `containers/control-plane/config/external-skills.yaml`
 
 ## Update a bundled skill
 
-1. Edit `containers/control-plane/skills/<skill-name>/`.
-2. Keep `SKILL.md` concise and move detailed material into `references/` when needed.
-3. Ensure `containers/control-plane/Dockerfile` still copies `containers/control-plane/skills/` into `/usr/local/share/control-plane/skills/`.
-4. Ensure `containers/control-plane/bin/control-plane-entrypoint` still syncs each bundled skill directory into `~/.copilot/skills/`.
-5. Validate structure with:
+1. Edit `containers/control-plane/skills/<skill-name>/` when the bundled skill is maintained in this repository.
+2. For manifest-defined external skills such as `doc-coauthoring` and `skill-creator`, update `containers/control-plane/config/external-skills.yaml` instead of editing a checked-in skill copy.
+3. Keep `SKILL.md` concise and move detailed material into `references/` when needed.
+4. Ensure `containers/control-plane/Dockerfile` still copies `containers/control-plane/skills/` into `/usr/local/share/control-plane/skills/` and overlays the manifest-defined external skills into the same directory.
+5. Ensure `containers/control-plane/bin/control-plane-entrypoint` still syncs each bundled skill directory into `~/.copilot/skills/`.
+6. Validate structure with:
 
    ```bash
-   python3 .github/skills/skill-creator/scripts/package_skill.py containers/control-plane/skills/<skill-name>
+   workdir="$(mktemp -d)"
+   scripts/install-git-skills-from-manifest.sh containers/control-plane/config/external-skills.yaml "${workdir}/external-skills"
+   (
+     cd "${workdir}/external-skills/skill-creator"
+     python3 -m scripts.package_skill containers/control-plane/skills/<skill-name>
+   )
    ```
 
 ## Combine with repo-local skills

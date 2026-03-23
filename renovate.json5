@@ -89,7 +89,16 @@
   customManagers: [
     {
       customType: "regex",
-      managerFilePatterns: ["/^scripts\\/(lint|validate-renovate-config)\\.sh$/"],
+      managerFilePatterns: ["/^containers\\/control-plane\\/config\\/external-skills\\.yaml$/"],
+      matchStrings: [
+        "- repository:\\s*(?<depName>\\S+)\\s+ref:\\s*(?<currentDigest>[a-f0-9]{40})\\s+# renovate: datasource=(?<datasource>\\S+) currentValue=(?<currentValue>\\S+)",
+      ],
+    },
+    {
+      customType: "regex",
+      managerFilePatterns: [
+        "/^(scripts\\/(lint|validate-renovate-config)\\.sh|containers\\/control-plane\\/bin\\/install-git-skills-from-manifest)$/",
+      ],
       matchStrings: [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s+[a-z_]+=\"\\$\\{[A-Z0-9_]+:-[^:@\"}]+:(?<currentValue>[^@\"}]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?\\}\"",
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s+[a-z_]+=\"\\$\\{[A-Z0-9_]+:-(?<currentValue>[A-Za-z0-9._-]+)\\}\"",
