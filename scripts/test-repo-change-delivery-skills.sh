@@ -46,6 +46,7 @@ source "${script_dir}/lib-container-toolchain.sh"
 toolchain="$(detect_build_test_toolchain)"
 container_bin="$(container_runtime_for_toolchain "${toolchain}")"
 yamllint_image="${CONTROL_PLANE_YAMLLINT_IMAGE_TAG:-localhost/yamllint:test}"
+sccache_image="${CONTROL_PLANE_SCCACHE_IMAGE_TAG:-localhost/sccache:test}"
 
 cleanup() {
   rm -rf "${package_dir}"
@@ -192,6 +193,7 @@ assert_file_contains "${entrypoint_path}" "for source_dir in \"\${bundled_skills
 
 printf '%s\n' 'repo-change-delivery-skills-test: validating and packaging skills' >&2
 build_image_for_toolchain "${toolchain}" "${yamllint_image}" containers/yamllint
+build_image_for_toolchain "${toolchain}" "${sccache_image}" containers/control-plane/skills/containerized-rust-ops/assets/sccache-image
 
 "${container_bin}" run --rm --user "$(id -u):$(id -g)" \
   -e PYTHONDONTWRITEBYTECODE=1 \
