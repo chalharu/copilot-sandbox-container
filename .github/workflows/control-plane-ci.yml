@@ -364,20 +364,27 @@ jobs:
       - name: Build yamllint image for publishing
         run: podman build --tag localhost/yamllint:test containers/yamllint
 
+      - name: Build sccache image for publishing
+        run: podman build --tag localhost/sccache:test containers/control-plane/skills/containerized-rust-ops/assets/sccache-image
+
       - name: Read published image versions
         id: image_versions
         run: |
           control_plane_version="$(sed -n 's/^ARG COPILOT_CLI_VERSION=//p' containers/control-plane/Dockerfile)"
           yamllint_version="$(sed -n 's/^ARG YAMLLINT_VERSION=//p' containers/yamllint/Dockerfile)"
+          sccache_version="$(sed -n 's/^ARG SCCACHE_VERSION=//p' containers/control-plane/skills/containerized-rust-ops/assets/sccache-image/Dockerfile)"
           test -n "${control_plane_version}"
           test -n "${yamllint_version}"
+          test -n "${sccache_version}"
           printf 'control_plane_component_tag=copilot-%s\n' "${control_plane_version}" >> "${GITHUB_OUTPUT}"
           printf 'yamllint_component_tag=%s\n' "${yamllint_version}" >> "${GITHUB_OUTPUT}"
+          printf 'sccache_component_tag=%s\n' "${sccache_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Publish architecture image tags
         env:
           GHCR_CONTROL_PLANE_IMAGE: ghcr.io/${{ github.repository }}/control-plane
           GHCR_YAMLLINT_IMAGE: ghcr.io/${{ github.repository }}/yamllint
+          GHCR_SCCACHE_IMAGE: ghcr.io/${{ github.repository }}/sccache
           GITHUB_SHA: ${{ github.sha }}
           IMAGE_ARCH: ${{ matrix.image_arch }}
         run: |
@@ -385,10 +392,14 @@ jobs:
           podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${{ steps.image_versions.outputs.control_plane_component_tag }}-${IMAGE_ARCH}"
           podman tag localhost/yamllint:test "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
           podman tag localhost/yamllint:test "${GHCR_YAMLLINT_IMAGE}:${{ steps.image_versions.outputs.yamllint_component_tag }}-${IMAGE_ARCH}"
+          podman tag localhost/sccache:test "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
+          podman tag localhost/sccache:test "${GHCR_SCCACHE_IMAGE}:${{ steps.image_versions.outputs.sccache_component_tag }}-${IMAGE_ARCH}"
           podman push "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
           podman push "${GHCR_CONTROL_PLANE_IMAGE}:${{ steps.image_versions.outputs.control_plane_component_tag }}-${IMAGE_ARCH}"
           podman push "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
           podman push "${GHCR_YAMLLINT_IMAGE}:${{ steps.image_versions.outputs.yamllint_component_tag }}-${IMAGE_ARCH}"
+          podman push "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
+          podman push "${GHCR_SCCACHE_IMAGE}:${{ steps.image_versions.outputs.sccache_component_tag }}-${IMAGE_ARCH}"
 
   publish-manifests:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -411,10 +422,13 @@ jobs:
         run: |
           control_plane_version="$(sed -n 's/^ARG COPILOT_CLI_VERSION=//p' containers/control-plane/Dockerfile)"
           yamllint_version="$(sed -n 's/^ARG YAMLLINT_VERSION=//p' containers/yamllint/Dockerfile)"
+          sccache_version="$(sed -n 's/^ARG SCCACHE_VERSION=//p' containers/control-plane/skills/containerized-rust-ops/assets/sccache-image/Dockerfile)"
           test -n "${control_plane_version}"
           test -n "${yamllint_version}"
+          test -n "${sccache_version}"
           printf 'control_plane_component_tag=copilot-%s\n' "${control_plane_version}" >> "${GITHUB_OUTPUT}"
           printf 'yamllint_component_tag=%s\n' "${yamllint_version}" >> "${GITHUB_OUTPUT}"
+          printf 'sccache_component_tag=%s\n' "${sccache_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Log in to GHCR
         run: printf '%s' "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
@@ -423,6 +437,7 @@ jobs:
         env:
           GHCR_CONTROL_PLANE_IMAGE: ghcr.io/${{ github.repository }}/control-plane
           GHCR_YAMLLINT_IMAGE: ghcr.io/${{ github.repository }}/yamllint
+          GHCR_SCCACHE_IMAGE: ghcr.io/${{ github.repository }}/sccache
           GITHUB_SHA: ${{ github.sha }}
         run: |
           create_manifest() {
@@ -457,6 +472,16 @@ jobs:
             "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-amd64" \
             "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-arm64"
 
+          create_manifest "localhost/sccache:manifest-sha" "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}" \
+            "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-amd64" \
+            "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-arm64"
+          create_manifest "localhost/sccache:manifest-latest" "${GHCR_SCCACHE_IMAGE}:latest" \
+            "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-amd64" \
+            "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-arm64"
+          create_manifest "localhost/sccache:manifest-version" "${GHCR_SCCACHE_IMAGE}:${{ steps.image_versions.outputs.sccache_component_tag }}" \
+            "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-amd64" \
+            "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-arm64"
+
   cleanup-packages:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
@@ -472,6 +497,7 @@ jobs:
         package_suffix:
           - control-plane
           - yamllint
+          - sccache
     steps:
       - name: Delete old GHCR package versions
         uses: actions/delete-package-versions@v5.0.0

@@ -13,10 +13,32 @@ cleanup() {
 }
 trap cleanup EXIT
 
+assert_file_contains() {
+  local path="$1"
+  local expected="$2"
+
+  grep -Fq -- "${expected}" "${path}" || {
+    printf 'Expected %s to contain: %s\n' "${path}" "${expected}" >&2
+    exit 1
+  }
+}
+
+assert_file_matches() {
+  local path="$1"
+  local expected_pattern="$2"
+
+  grep -Eq -- "${expected_pattern}" "${path}" || {
+    printf 'Expected %s to match: %s\n' "${path}" "${expected_pattern}" >&2
+    exit 1
+  }
+}
+
 context_dir="${workdir}/context"
 fake_bin_dir="${workdir}/fake-bin"
 podman_log="${workdir}/podman.log"
 label_store="${workdir}/podman-label"
+workflow_path="${repo_root}/.github/workflows/control-plane-ci.yml"
+renovate_config_path="${repo_root}/renovate.json5"
 mkdir -p "${context_dir}" "${fake_bin_dir}"
 cat > "${context_dir}/Dockerfile" <<'EOF'
 FROM docker.io/library/busybox:1.37.0
@@ -82,7 +104,17 @@ build_image_for_toolchain podman localhost/image-maintenance:test "${context_dir
 [[ "${first_hash}" != "${second_hash}" ]]
 grep -Fq "build --isolation=chroot --label $(build_context_hash_label_key)=${second_hash} --tag localhost/image-maintenance:test ${context_dir}" "${podman_log}"
 
+printf '%s\n' 'image-maintenance-test: verifying sccache helper image release wiring' >&2
+assert_file_contains "${workflow_path}" 'podman build --tag localhost/sccache:test containers/control-plane/skills/containerized-rust-ops/assets/sccache-image'
+assert_file_contains "${workflow_path}" "GHCR_SCCACHE_IMAGE: ghcr.io/\${{ github.repository }}/sccache"
+assert_file_contains "${workflow_path}" "podman tag localhost/sccache:test \"\${GHCR_SCCACHE_IMAGE}:\${GITHUB_SHA}-\${IMAGE_ARCH}\""
+assert_file_contains "${workflow_path}" "podman push \"\${GHCR_SCCACHE_IMAGE}:\${{ steps.image_versions.outputs.sccache_component_tag }}-\${IMAGE_ARCH}\""
+assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache:manifest-latest\" \"\${GHCR_SCCACHE_IMAGE}:latest\""
+assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache:manifest-version\" \"\${GHCR_SCCACHE_IMAGE}:\${{ steps.image_versions.outputs.sccache_component_tag }}\""
+assert_file_matches "${workflow_path}" '^[[:space:]]+- sccache$'
+assert_file_contains "${renovate_config_path}" '/^containers\\/control-plane\\/skills\\/containerized-rust-ops\\/assets\\/sccache-image\\/Dockerfile$/'
+
 printf '%s\n' 'image-maintenance-test: verifying GHCR cleanup keeps tagged images' >&2
-grep -Fq 'delete-only-untagged-versions: '\''true'\''' "${repo_root}/.github/workflows/control-plane-ci.yml"
+assert_file_contains "${workflow_path}" 'delete-only-untagged-versions: '\''true'\'''
 
 printf '%s\n' 'image-maintenance-test: maintenance workflows ok' >&2
