@@ -7,7 +7,7 @@ destination_root="${2:?usage: install-git-skills-from-manifest <manifest-path> <
 checkout_root="$(mktemp -d)"
 manifest_to_tsv_js="${script_dir}/external-skills-manifest-to-tsv.mjs"
 # renovate: datasource=npm depName=js-yaml
-js_yaml_version="${CONTROL_PLANE_JS_YAML_VERSION:-4.1.0}"
+js_yaml_version="${CONTROL_PLANE_JS_YAML_VERSION:-4.1.1}"
 
 cleanup() {
   rm -rf "${checkout_root}"
