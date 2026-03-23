@@ -116,6 +116,8 @@ sccache_cache="${CONTAINERIZED_RUST_SCCACHE_DIR:-${control_plane_tmp_root}/sccac
 sccache_image="${CONTAINERIZED_SCCACHE_IMAGE:-localhost/sccache:test}"
 sccache_image_context="${CONTAINERIZED_SCCACHE_IMAGE_CONTEXT:-${repo_root}/containers/sccache}"
 sccache_image_label='io.github.chalharu.containerized-rust.sccache-context-sha256'
+sccache_binary="${cargo_cache}/bin/sccache"
+sccache_binary_context_hash_path="${cargo_cache}/bin/sccache.context-sha256"
 
 mkdir -p "${base_tmp_root}" "${tool_tmp_dir}" "${rustup_cache}" "${cargo_cache}" "${target_cache}" "${sccache_cache}"
 chmod 700 "${tool_tmp_dir}" 2>/dev/null || true
@@ -160,14 +162,29 @@ ensure_sccache_image() {
 }
 
 install_sccache_from_image() {
-  if [[ -x "${cargo_cache}/bin/sccache" ]]; then
+  local context_hash
+
+  context_hash="$(build_context_hash "${sccache_image_context}")"
+  if [[ -x "${sccache_binary}" ]] \
+    && [[ -f "${sccache_binary_context_hash_path}" ]] \
+    && [[ "$(<"${sccache_binary_context_hash_path}")" == "${context_hash}" ]]; then
     return
   fi
 
   ensure_sccache_image
   mkdir -p "${cargo_cache}/bin"
-  "${podman_cmd[@]}" run --rm --entrypoint cat "${sccache_image}" /usr/local/bin/sccache > "${cargo_cache}/bin/sccache"
-  chmod 0755 "${cargo_cache}/bin/sccache"
+  # The helper image is intentionally shell-less, so extract the binary with podman cp.
+  (
+    set -euo pipefail
+    container_id="$("${podman_cmd[@]}" create "${sccache_image}")"
+    cleanup() {
+      "${podman_cmd[@]}" rm "${container_id}" >/dev/null
+    }
+    trap cleanup EXIT
+    "${podman_cmd[@]}" cp "${container_id}:/usr/local/bin/sccache" "${sccache_binary}"
+  )
+  chmod 0755 "${sccache_binary}"
+  printf '%s\n' "${context_hash}" > "${sccache_binary_context_hash_path}"
 }
 
 ensure_tools() {

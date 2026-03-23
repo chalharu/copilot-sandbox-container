@@ -33,12 +33,41 @@ assert_file_matches() {
   }
 }
 
+job_block() {
+  local job_name="$1"
+
+  awk -v start="  ${job_name}:" '
+    $0 == start {
+      printing = 1
+    }
+    printing && $0 != start && $0 ~ /^  [a-z0-9-]+:$/ {
+      exit
+    }
+    printing {
+      print
+    }
+  ' "${workflow_path}"
+}
+
+assert_block_contains() {
+  local block="$1"
+  local expected="$2"
+  local description="$3"
+
+  grep -Fq -- "${expected}" <<<"${block}" || {
+    printf 'Expected %s to contain: %s\n' "${description}" "${expected}" >&2
+    printf '%s\n' "${block}" >&2
+    exit 1
+  }
+}
+
 context_dir="${workdir}/context"
 fake_bin_dir="${workdir}/fake-bin"
 podman_log="${workdir}/podman.log"
 label_store="${workdir}/podman-label"
 workflow_path="${repo_root}/.github/workflows/control-plane-ci.yml"
 renovate_config_path="${repo_root}/renovate.json5"
+sccache_dockerfile_path="${repo_root}/containers/sccache/Dockerfile"
 mkdir -p "${context_dir}" "${fake_bin_dir}"
 cat > "${context_dir}/Dockerfile" <<'EOF'
 FROM docker.io/library/busybox:1.37.0
@@ -105,6 +134,48 @@ build_image_for_toolchain podman localhost/image-maintenance:test "${context_dir
 grep -Fq "build --isolation=chroot --label $(build_context_hash_label_key)=${second_hash} --tag localhost/image-maintenance:test ${context_dir}" "${podman_log}"
 
 printf '%s\n' 'image-maintenance-test: verifying sccache helper image release wiring' >&2
+assert_file_contains "${sccache_dockerfile_path}" 'FROM docker.io/library/alpine:3.23.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659 AS fetcher'
+assert_file_contains "${sccache_dockerfile_path}" 'FROM scratch'
+assert_file_contains "${sccache_dockerfile_path}" 'COPY --from=fetcher /out/ /'
+assert_file_contains "${sccache_dockerfile_path}" 'USER 65532:65532'
+
+helper_image_changes_block="$(job_block helper-image-changes)"
+publish_block="$(job_block publish-architecture-images)"
+manifest_block="$(job_block publish-manifests)"
+
+[[ -n "${helper_image_changes_block}" ]] || {
+  printf 'Expected helper-image-changes job in %s\n' "${workflow_path}" >&2
+  exit 1
+}
+[[ -n "${publish_block}" ]] || {
+  printf 'Expected publish-architecture-images job in %s\n' "${workflow_path}" >&2
+  exit 1
+}
+[[ -n "${manifest_block}" ]] || {
+  printf 'Expected publish-manifests job in %s\n' "${workflow_path}" >&2
+  exit 1
+}
+
+assert_block_contains "${helper_image_changes_block}" 'fetch-depth: 0' 'helper-image-changes job block'
+assert_block_contains "${helper_image_changes_block}" "yamllint_changed=\"\$(changed_in_range containers/yamllint)\"" 'helper-image-changes job block'
+assert_block_contains "${helper_image_changes_block}" "sccache_changed=\"\$(changed_in_range containers/sccache)\"" 'helper-image-changes job block'
+assert_block_contains "${helper_image_changes_block}" "printf 'yamllint_changed=%s\\n' \"\${yamllint_changed}\" >> \"\${GITHUB_OUTPUT}\"" 'helper-image-changes job block'
+assert_block_contains "${helper_image_changes_block}" "printf 'sccache_changed=%s\\n' \"\${sccache_changed}\" >> \"\${GITHUB_OUTPUT}\"" 'helper-image-changes job block'
+
+assert_block_contains "${publish_block}" '- helper-image-changes' 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" "if: needs.helper-image-changes.outputs.yamllint_changed == 'true'" 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" "if: needs.helper-image-changes.outputs.sccache_changed == 'true'" 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" "PUBLISH_YAMLLINT: \${{ needs.helper-image-changes.outputs.yamllint_changed }}" 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" "PUBLISH_SCCACHE: \${{ needs.helper-image-changes.outputs.sccache_changed }}" 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" "if [[ \"\${PUBLISH_YAMLLINT}\" == \"true\" ]]; then" 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" "if [[ \"\${PUBLISH_SCCACHE}\" == \"true\" ]]; then" 'publish-architecture-images job block'
+
+assert_block_contains "${manifest_block}" '- helper-image-changes' 'publish-manifests job block'
+assert_block_contains "${manifest_block}" "PUBLISH_YAMLLINT: \${{ needs.helper-image-changes.outputs.yamllint_changed }}" 'publish-manifests job block'
+assert_block_contains "${manifest_block}" "PUBLISH_SCCACHE: \${{ needs.helper-image-changes.outputs.sccache_changed }}" 'publish-manifests job block'
+assert_block_contains "${manifest_block}" "if [[ \"\${PUBLISH_YAMLLINT}\" == \"true\" ]]; then" 'publish-manifests job block'
+assert_block_contains "${manifest_block}" "if [[ \"\${PUBLISH_SCCACHE}\" == \"true\" ]]; then" 'publish-manifests job block'
+
 assert_file_contains "${workflow_path}" 'podman build --tag localhost/sccache:test containers/sccache'
 assert_file_contains "${workflow_path}" "GHCR_SCCACHE_IMAGE: ghcr.io/\${{ github.repository }}/sccache"
 assert_file_contains "${workflow_path}" "podman tag localhost/sccache:test \"\${GHCR_SCCACHE_IMAGE}:\${GITHUB_SHA}-\${IMAGE_ARCH}\""

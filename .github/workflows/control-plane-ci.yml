@@ -310,6 +310,48 @@ jobs:
           CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar
         run: ./scripts/build-test.sh --skip-image-build --group kind-jobs-transfer
 
+  helper-image-changes:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: Detect Helper Image Changes
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      yamllint_changed: ${{ steps.detect.outputs.yamllint_changed }}
+      sccache_changed: ${{ steps.detect.outputs.sccache_changed }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Detect helper image changes
+        id: detect
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          before_sha="${BEFORE_SHA}"
+          changed_in_range() {
+            local path="$1"
+            if git diff --quiet "${before_sha}" "${GITHUB_SHA}" -- "${path}"; then
+              printf 'false\n'
+            else
+              printf 'true\n'
+            fi
+          }
+
+          if [[ -z "${before_sha}" ]] || [[ "${before_sha}" == '0000000000000000000000000000000000000000' ]]; then
+            yamllint_changed=true
+            sccache_changed=true
+          else
+            yamllint_changed="$(changed_in_range containers/yamllint)"
+            sccache_changed="$(changed_in_range containers/sccache)"
+          fi
+
+          printf 'yamllint_changed=%s\n' "${yamllint_changed}" >> "${GITHUB_OUTPUT}"
+          printf 'sccache_changed=%s\n' "${sccache_changed}" >> "${GITHUB_OUTPUT}"
+
   publish-architecture-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Publish Architecture Images (${{ matrix.architecture_label }})
@@ -321,6 +363,7 @@ jobs:
       - integration-kind-session
       - integration-kind-jobs
       - integration-kind-jobs-transfer
+      - helper-image-changes
     strategy:
       fail-fast: false
       matrix:
@@ -356,15 +399,18 @@ jobs:
         run: printf '%s' "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Prepare DHI images
+        if: needs.helper-image-changes.outputs.yamllint_changed == 'true'
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: ./scripts/prepare-dhi-images.sh
 
       - name: Build yamllint image for publishing
+        if: needs.helper-image-changes.outputs.yamllint_changed == 'true'
         run: podman build --tag localhost/yamllint:test containers/yamllint
 
       - name: Build sccache image for publishing
+        if: needs.helper-image-changes.outputs.sccache_changed == 'true'
         run: podman build --tag localhost/sccache:test containers/sccache
 
       - name: Read published image versions
@@ -387,24 +433,32 @@ jobs:
           GHCR_SCCACHE_IMAGE: ghcr.io/${{ github.repository }}/sccache
           GITHUB_SHA: ${{ github.sha }}
           IMAGE_ARCH: ${{ matrix.image_arch }}
+          PUBLISH_YAMLLINT: ${{ needs.helper-image-changes.outputs.yamllint_changed }}
+          PUBLISH_SCCACHE: ${{ needs.helper-image-changes.outputs.sccache_changed }}
         run: |
           podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
           podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${{ steps.image_versions.outputs.control_plane_component_tag }}-${IMAGE_ARCH}"
-          podman tag localhost/yamllint:test "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
-          podman tag localhost/yamllint:test "${GHCR_YAMLLINT_IMAGE}:${{ steps.image_versions.outputs.yamllint_component_tag }}-${IMAGE_ARCH}"
-          podman tag localhost/sccache:test "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
-          podman tag localhost/sccache:test "${GHCR_SCCACHE_IMAGE}:${{ steps.image_versions.outputs.sccache_component_tag }}-${IMAGE_ARCH}"
           podman push "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
           podman push "${GHCR_CONTROL_PLANE_IMAGE}:${{ steps.image_versions.outputs.control_plane_component_tag }}-${IMAGE_ARCH}"
-          podman push "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
-          podman push "${GHCR_YAMLLINT_IMAGE}:${{ steps.image_versions.outputs.yamllint_component_tag }}-${IMAGE_ARCH}"
-          podman push "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
-          podman push "${GHCR_SCCACHE_IMAGE}:${{ steps.image_versions.outputs.sccache_component_tag }}-${IMAGE_ARCH}"
+          if [[ "${PUBLISH_YAMLLINT}" == "true" ]]; then
+            podman tag localhost/yamllint:test "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
+            podman tag localhost/yamllint:test "${GHCR_YAMLLINT_IMAGE}:${{ steps.image_versions.outputs.yamllint_component_tag }}-${IMAGE_ARCH}"
+            podman push "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
+            podman push "${GHCR_YAMLLINT_IMAGE}:${{ steps.image_versions.outputs.yamllint_component_tag }}-${IMAGE_ARCH}"
+          fi
+          if [[ "${PUBLISH_SCCACHE}" == "true" ]]; then
+            podman tag localhost/sccache:test "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
+            podman tag localhost/sccache:test "${GHCR_SCCACHE_IMAGE}:${{ steps.image_versions.outputs.sccache_component_tag }}-${IMAGE_ARCH}"
+            podman push "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
+            podman push "${GHCR_SCCACHE_IMAGE}:${{ steps.image_versions.outputs.sccache_component_tag }}-${IMAGE_ARCH}"
+          fi
 
   publish-manifests:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    needs: publish-architecture-images
+    needs:
+      - publish-architecture-images
+      - helper-image-changes
     permissions:
       contents: read
       packages: write
@@ -439,6 +493,8 @@ jobs:
           GHCR_YAMLLINT_IMAGE: ghcr.io/${{ github.repository }}/yamllint
           GHCR_SCCACHE_IMAGE: ghcr.io/${{ github.repository }}/sccache
           GITHUB_SHA: ${{ github.sha }}
+          PUBLISH_YAMLLINT: ${{ needs.helper-image-changes.outputs.yamllint_changed }}
+          PUBLISH_SCCACHE: ${{ needs.helper-image-changes.outputs.sccache_changed }}
         run: |
           create_manifest() {
             local manifest_name="$1"
@@ -462,25 +518,29 @@ jobs:
             "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-amd64" \
             "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-arm64"
 
-          create_manifest "localhost/yamllint:manifest-sha" "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}" \
-            "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-amd64" \
-            "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-arm64"
-          create_manifest "localhost/yamllint:manifest-latest" "${GHCR_YAMLLINT_IMAGE}:latest" \
-            "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-amd64" \
-            "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-arm64"
-          create_manifest "localhost/yamllint:manifest-version" "${GHCR_YAMLLINT_IMAGE}:${{ steps.image_versions.outputs.yamllint_component_tag }}" \
-            "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-amd64" \
-            "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-arm64"
+          if [[ "${PUBLISH_YAMLLINT}" == "true" ]]; then
+            create_manifest "localhost/yamllint:manifest-sha" "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}" \
+              "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-amd64" \
+              "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-arm64"
+            create_manifest "localhost/yamllint:manifest-latest" "${GHCR_YAMLLINT_IMAGE}:latest" \
+              "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-amd64" \
+              "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-arm64"
+            create_manifest "localhost/yamllint:manifest-version" "${GHCR_YAMLLINT_IMAGE}:${{ steps.image_versions.outputs.yamllint_component_tag }}" \
+              "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-amd64" \
+              "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-arm64"
+          fi
 
-          create_manifest "localhost/sccache:manifest-sha" "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}" \
-            "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-amd64" \
-            "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-arm64"
-          create_manifest "localhost/sccache:manifest-latest" "${GHCR_SCCACHE_IMAGE}:latest" \
-            "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-amd64" \
-            "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-arm64"
-          create_manifest "localhost/sccache:manifest-version" "${GHCR_SCCACHE_IMAGE}:${{ steps.image_versions.outputs.sccache_component_tag }}" \
-            "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-amd64" \
-            "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-arm64"
+          if [[ "${PUBLISH_SCCACHE}" == "true" ]]; then
+            create_manifest "localhost/sccache:manifest-sha" "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}" \
+              "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-amd64" \
+              "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-arm64"
+            create_manifest "localhost/sccache:manifest-latest" "${GHCR_SCCACHE_IMAGE}:latest" \
+              "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-amd64" \
+              "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-arm64"
+            create_manifest "localhost/sccache:manifest-version" "${GHCR_SCCACHE_IMAGE}:${{ steps.image_versions.outputs.sccache_component_tag }}" \
+              "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-amd64" \
+              "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-arm64"
+          fi
 
   cleanup-packages:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
