@@ -3,8 +3,9 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
-doc_coauthor_skill_dir="${repo_root}/.github/skills/doc-coauthoring"
-doc_coauthor_skill_file="${doc_coauthor_skill_dir}/SKILL.md"
+upstream_skills_ref_file="${repo_root}/containers/control-plane/config/anthropic-skills.ref"
+upstream_fetch_script="${script_dir}/fetch-anthropic-skills.sh"
+legacy_doc_coauthor_skill_dir="${repo_root}/.github/skills/doc-coauthoring"
 legacy_yamllint_skill_dir="${repo_root}/.github/skills/containerized-yamllint-ops"
 yamllint_skill_dir="${repo_root}/containers/control-plane/skills/containerized-yamllint-ops"
 yamllint_skill_file="${yamllint_skill_dir}/SKILL.md"
@@ -12,9 +13,7 @@ yamllint_script_file="${yamllint_skill_dir}/scripts/podman-yamllint.sh"
 repo_skill_dir="${repo_root}/.github/skills/pr-fix-workflow"
 repo_skill_file="${repo_skill_dir}/SKILL.md"
 repo_reference_file="${repo_skill_dir}/references/validation-and-delivery.md"
-skill_creator_dir="${repo_root}/.github/skills/skill-creator"
-skill_creator_skill_file="${skill_creator_dir}/SKILL.md"
-skill_creator_license_file="${skill_creator_dir}/LICENSE.txt"
+legacy_skill_creator_dir="${repo_root}/.github/skills/skill-creator"
 repo_git_commit_dir="${repo_root}/.github/skills/git-commit"
 generic_skill_dir="${repo_root}/containers/control-plane/skills/repo-change-delivery"
 generic_skill_file="${generic_skill_dir}/SKILL.md"
@@ -29,10 +28,18 @@ commit_skill_dir="${repo_root}/containers/control-plane/skills/git-commit"
 commit_skill_file="${commit_skill_dir}/SKILL.md"
 pull_request_skill_dir="${repo_root}/containers/control-plane/skills/pull-request-workflow"
 pull_request_skill_file="${pull_request_skill_dir}/SKILL.md"
+control_plane_ops_skill_file="${repo_root}/containers/control-plane/skills/control-plane-operations/SKILL.md"
 bundled_reference_file="${repo_root}/containers/control-plane/skills/control-plane-operations/references/skills.md"
 dockerfile_path="${repo_root}/containers/control-plane/Dockerfile"
 entrypoint_path="${repo_root}/containers/control-plane/bin/control-plane-entrypoint"
+control_plane_image="${CONTROL_PLANE_IMAGE_TAG:-localhost/control-plane:test}"
 package_dir="$(mktemp -d)"
+upstream_checkout_dir=""
+doc_coauthor_skill_dir=""
+doc_coauthor_skill_file=""
+skill_creator_dir=""
+skill_creator_skill_file=""
+skill_creator_license_file=""
 doc_coauthor_package_file="${package_dir}/doc-coauthoring.skill"
 yamllint_package_file="${package_dir}/containerized-yamllint-ops.skill"
 repo_package_file="${package_dir}/pr-fix-workflow.skill"
@@ -41,6 +48,7 @@ generic_package_file="${package_dir}/repo-change-delivery.skill"
 rust_package_file="${package_dir}/containerized-rust-ops.skill"
 commit_package_file="${package_dir}/git-commit.skill"
 pull_request_package_file="${package_dir}/pull-request-workflow.skill"
+backtick='`'
 
 # shellcheck source=scripts/lib-container-toolchain.sh
 source "${script_dir}/lib-container-toolchain.sh"
@@ -93,6 +101,17 @@ assert_file_not_contains() {
   fi
 }
 
+run_skill_creator_python() {
+  "${container_bin}" run --rm --user "$(id -u):$(id -g)" \
+    -e PYTHONDONTWRITEBYTECODE=1 \
+    -v "${repo_root}:/workspace" \
+    -v "${upstream_checkout_dir}:/opt/anthropic-skills:ro" \
+    -w /opt/anthropic-skills/skills/skill-creator \
+    --entrypoint python3 \
+    "${yamllint_image}" \
+    -m "$@"
+}
+
 package_skill_to_host() {
   local skill_path="$1"
   local package_path="$2"
@@ -100,7 +119,8 @@ package_skill_to_host() {
   "${container_bin}" run --rm --user "$(id -u):$(id -g)" \
     -e PYTHONDONTWRITEBYTECODE=1 \
     -v "${repo_root}:/workspace" \
-    -w /workspace/.github/skills/skill-creator/scripts \
+    -v "${upstream_checkout_dir}:/opt/anthropic-skills:ro" \
+    -w /opt/anthropic-skills/skills/skill-creator \
     --entrypoint python3 \
     "${yamllint_image}" \
     -c 'import pathlib, subprocess, sys
@@ -108,11 +128,11 @@ skill_dir = pathlib.Path(sys.argv[1])
 out_dir = pathlib.Path("/tmp") / f"{skill_dir.name}-package"
 out_dir.mkdir(parents=True, exist_ok=True)
 subprocess.run(
-    ["python3", "package_skill.py", str(skill_dir), str(out_dir)],
+    ["python3", "-m", "scripts.package_skill", str(skill_dir), str(out_dir)],
     check=True,
     stdout=sys.stderr,
     stderr=sys.stderr,
-)
+) 
 sys.stdout.buffer.write((out_dir / f"{skill_dir.name}.skill").read_bytes())' \
     "${skill_path}" \
     > "${package_path}"
@@ -120,7 +140,17 @@ sys.stdout.buffer.write((out_dir / f"{skill_dir.name}.skill").read_bytes())' \
 
 require_command "${container_bin}"
 
+printf '%s\n' 'repo-change-delivery-skills-test: fetching pinned upstream skills' >&2
+upstream_checkout_dir="$("${upstream_fetch_script}" "${package_dir}")"
+doc_coauthor_skill_dir="${upstream_checkout_dir}/skills/doc-coauthoring"
+doc_coauthor_skill_file="${doc_coauthor_skill_dir}/SKILL.md"
+skill_creator_dir="${upstream_checkout_dir}/skills/skill-creator"
+skill_creator_skill_file="${skill_creator_dir}/SKILL.md"
+skill_creator_license_file="${skill_creator_dir}/LICENSE.txt"
+
 printf '%s\n' 'repo-change-delivery-skills-test: checking skill files' >&2
+assert_file_present "${upstream_skills_ref_file}"
+assert_file_present "${upstream_fetch_script}"
 assert_file_present "${doc_coauthor_skill_file}"
 assert_file_present "${yamllint_skill_file}"
 assert_file_present "${yamllint_script_file}"
@@ -136,9 +166,12 @@ assert_file_present "${rust_k8s_script_file}"
 assert_file_present "${sccache_image_dockerfile}"
 assert_file_present "${commit_skill_file}"
 assert_file_present "${pull_request_skill_file}"
+assert_file_present "${control_plane_ops_skill_file}"
 assert_file_present "${bundled_reference_file}"
 assert_file_present "${dockerfile_path}"
 assert_file_present "${entrypoint_path}"
+assert_file_absent "${legacy_doc_coauthor_skill_dir}"
+assert_file_absent "${legacy_skill_creator_dir}"
 assert_file_absent "${repo_git_commit_dir}"
 assert_file_absent "${legacy_yamllint_skill_dir}"
 assert_file_absent "${legacy_rust_sccache_image_dockerfile}"
@@ -189,6 +222,7 @@ assert_file_not_contains "${repo_skill_file}" 'Commit only on a non-main branch'
 assert_file_not_contains "${repo_skill_file}" "After each commit, \`git fetch origin main\`"
 
 assert_file_contains "${repo_reference_file}" './scripts/test-repo-change-delivery-skills.sh'
+assert_file_contains "${repo_reference_file}" 'scripts/fetch-anthropic-skills.sh'
 assert_file_contains "${repo_reference_file}" 'CONTROL_PLANE_TOOLCHAIN=podman ./scripts/lint.sh'
 assert_file_contains "${repo_reference_file}" 'CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh'
 assert_file_contains "${repo_reference_file}" './scripts/test-k8s-job.sh'
@@ -196,86 +230,43 @@ assert_file_contains "${repo_reference_file}" './scripts/test-current-cluster-re
 assert_file_contains "${repo_reference_file}" '.github/workflows/control-plane-ci.yml'
 assert_file_not_contains "${repo_reference_file}" 'git fetch origin main'
 
-assert_file_contains "${bundled_reference_file}" "\`containerized-yamllint-ops\`"
-assert_file_contains "${bundled_reference_file}" "\`containerized-rust-ops\`"
-assert_file_contains "${bundled_reference_file}" "\`git-commit\`"
-assert_file_contains "${bundled_reference_file}" "\`pull-request-workflow\`"
+assert_file_contains "${control_plane_ops_skill_file}" 'scripts/fetch-anthropic-skills.sh'
+assert_file_not_contains "${control_plane_ops_skill_file}" '.github/skills/skill-creator/scripts/package_skill.py'
 
-assert_file_contains "${dockerfile_path}" 'COPY skills/ /usr/local/share/control-plane/skills/'
+assert_file_contains "${bundled_reference_file}" "${backtick}containerized-yamllint-ops${backtick}"
+assert_file_contains "${bundled_reference_file}" "${backtick}containerized-rust-ops${backtick}"
+assert_file_contains "${bundled_reference_file}" "${backtick}doc-coauthoring${backtick}"
+assert_file_contains "${bundled_reference_file}" "${backtick}git-commit${backtick}"
+assert_file_contains "${bundled_reference_file}" "${backtick}pull-request-workflow${backtick}"
+assert_file_contains "${bundled_reference_file}" "${backtick}skill-creator${backtick}"
+assert_file_contains "${bundled_reference_file}" 'scripts/fetch-anthropic-skills.sh'
+assert_file_not_contains "${bundled_reference_file}" '.github/skills/skill-creator/scripts/package_skill.py'
+
+assert_file_contains "${dockerfile_path}" 'ANTHROPIC_SKILLS_REPOSITORY'
+assert_file_contains "${dockerfile_path}" 'config/anthropic-skills.ref'
+assert_file_contains "${dockerfile_path}" 'skills/doc-coauthoring'
+assert_file_contains "${dockerfile_path}" 'skills/skill-creator'
 assert_file_contains "${entrypoint_path}" 'install_bundled_control_plane_skills'
 assert_file_contains "${entrypoint_path}" "for source_dir in \"\${bundled_skills_dir}\"/*; do"
 
 printf '%s\n' 'repo-change-delivery-skills-test: validating and packaging skills' >&2
 build_image_for_toolchain "${toolchain}" "${yamllint_image}" containers/yamllint
 build_image_for_toolchain "${toolchain}" "${sccache_image}" containers/sccache
+build_image_for_toolchain "${toolchain}" "${control_plane_image}" containers/control-plane
 
-"${container_bin}" run --rm --user "$(id -u):$(id -g)" \
-  -e PYTHONDONTWRITEBYTECODE=1 \
-  -v "${repo_root}:/workspace" \
-  -w /workspace/.github/skills/skill-creator/scripts \
-  --entrypoint python3 \
-  "${yamllint_image}" \
-  quick_validate.py /workspace/.github/skills/doc-coauthoring
+run_skill_creator_python scripts.quick_validate /opt/anthropic-skills/skills/doc-coauthoring
+run_skill_creator_python scripts.quick_validate /workspace/containers/control-plane/skills/containerized-yamllint-ops
+run_skill_creator_python scripts.quick_validate /workspace/containers/control-plane/skills/repo-change-delivery
+run_skill_creator_python scripts.quick_validate /workspace/containers/control-plane/skills/containerized-rust-ops
+run_skill_creator_python scripts.quick_validate /workspace/containers/control-plane/skills/git-commit
+run_skill_creator_python scripts.quick_validate /workspace/containers/control-plane/skills/pull-request-workflow
+run_skill_creator_python scripts.quick_validate /workspace/.github/skills/pr-fix-workflow
+run_skill_creator_python scripts.quick_validate /opt/anthropic-skills/skills/skill-creator
 
-"${container_bin}" run --rm --user "$(id -u):$(id -g)" \
-  -e PYTHONDONTWRITEBYTECODE=1 \
-  -v "${repo_root}:/workspace" \
-  -w /workspace/.github/skills/skill-creator/scripts \
-  --entrypoint python3 \
-  "${yamllint_image}" \
-  quick_validate.py /workspace/containers/control-plane/skills/containerized-yamllint-ops
-
-"${container_bin}" run --rm --user "$(id -u):$(id -g)" \
-  -e PYTHONDONTWRITEBYTECODE=1 \
-  -v "${repo_root}:/workspace" \
-  -w /workspace/.github/skills/skill-creator/scripts \
-  --entrypoint python3 \
-  "${yamllint_image}" \
-  quick_validate.py /workspace/containers/control-plane/skills/repo-change-delivery
-
-"${container_bin}" run --rm --user "$(id -u):$(id -g)" \
-  -e PYTHONDONTWRITEBYTECODE=1 \
-  -v "${repo_root}:/workspace" \
-  -w /workspace/.github/skills/skill-creator/scripts \
-  --entrypoint python3 \
-  "${yamllint_image}" \
-  quick_validate.py /workspace/containers/control-plane/skills/containerized-rust-ops
-
-"${container_bin}" run --rm --user "$(id -u):$(id -g)" \
-  -e PYTHONDONTWRITEBYTECODE=1 \
-  -v "${repo_root}:/workspace" \
-  -w /workspace/.github/skills/skill-creator/scripts \
-  --entrypoint python3 \
-  "${yamllint_image}" \
-  quick_validate.py /workspace/containers/control-plane/skills/git-commit
-
-"${container_bin}" run --rm --user "$(id -u):$(id -g)" \
-  -e PYTHONDONTWRITEBYTECODE=1 \
-  -v "${repo_root}:/workspace" \
-  -w /workspace/.github/skills/skill-creator/scripts \
-  --entrypoint python3 \
-  "${yamllint_image}" \
-  quick_validate.py /workspace/containers/control-plane/skills/pull-request-workflow
-
-"${container_bin}" run --rm --user "$(id -u):$(id -g)" \
-  -e PYTHONDONTWRITEBYTECODE=1 \
-  -v "${repo_root}:/workspace" \
-  -w /workspace/.github/skills/skill-creator/scripts \
-  --entrypoint python3 \
-  "${yamllint_image}" \
-  quick_validate.py /workspace/.github/skills/pr-fix-workflow
-
-"${container_bin}" run --rm --user "$(id -u):$(id -g)" \
-  -v "${repo_root}:/workspace" \
-  -w /workspace/.github/skills/skill-creator/scripts \
-  --entrypoint python3 \
-  "${yamllint_image}" \
-  quick_validate.py /workspace/.github/skills/skill-creator
-
-package_skill_to_host /workspace/.github/skills/doc-coauthoring "${doc_coauthor_package_file}"
+package_skill_to_host /opt/anthropic-skills/skills/doc-coauthoring "${doc_coauthor_package_file}"
 package_skill_to_host /workspace/containers/control-plane/skills/containerized-yamllint-ops "${yamllint_package_file}"
 package_skill_to_host /workspace/.github/skills/pr-fix-workflow "${repo_package_file}"
-package_skill_to_host /workspace/.github/skills/skill-creator "${skill_creator_package_file}"
+package_skill_to_host /opt/anthropic-skills/skills/skill-creator "${skill_creator_package_file}"
 package_skill_to_host /workspace/containers/control-plane/skills/repo-change-delivery "${generic_package_file}"
 package_skill_to_host /workspace/containers/control-plane/skills/containerized-rust-ops "${rust_package_file}"
 package_skill_to_host /workspace/containers/control-plane/skills/git-commit "${commit_package_file}"
@@ -289,4 +280,16 @@ assert_file_present "${commit_package_file}"
 assert_file_present "${pull_request_package_file}"
 assert_file_present "${repo_package_file}"
 assert_file_present "${skill_creator_package_file}"
+
+# shellcheck disable=SC2016
+"${container_bin}" run --rm --entrypoint bash "${control_plane_image}" -lc '
+set -euo pipefail
+doc_root=/usr/local/share/control-plane/skills/doc-coauthoring
+skill_creator_root=/usr/local/share/control-plane/skills/skill-creator
+test -r "$doc_root/SKILL.md"
+grep -Fqx "name: doc-coauthoring" "$doc_root/SKILL.md"
+test -r "$skill_creator_root/SKILL.md"
+test -r "$skill_creator_root/LICENSE.txt"
+grep -Fqx "name: skill-creator" "$skill_creator_root/SKILL.md"'
+
 printf '%s\n' 'repo-change-delivery-skills-test: skills ok' >&2

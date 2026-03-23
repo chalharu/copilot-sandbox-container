@@ -4,6 +4,7 @@ FROM node:24.14.0-bookworm-slim@sha256:d8e448a56fc63242f70026718378bd4b00f8c82e7
 ARG COPILOT_CLI_VERSION=1.0.10
 # renovate: datasource=github-releases depName=kubernetes-sigs/kind
 ARG KIND_VERSION=v0.31.0
+ARG ANTHROPIC_SKILLS_REPOSITORY=https://github.com/anthropics/skills
 ARG CONTROL_PLANE_UID=1000
 ARG CONTROL_PLANE_GID=1000
 ARG CONTROL_PLANE_USER=copilot
@@ -116,6 +117,7 @@ COPY --chmod=644 config/screenrc /etc/screenrc
 COPY --chmod=644 config/storage.conf /home/${CONTROL_PLANE_USER}/.config/containers/storage.conf
 COPY --chmod=644 config/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
 COPY --chmod=644 config/profile-control-plane-session.sh /etc/profile.d/control-plane-session.sh
+COPY --chmod=644 config/anthropic-skills.ref /tmp/anthropic-skills.ref
 COPY skills/ /usr/local/share/control-plane/skills/
 COPY hooks/ /usr/local/share/control-plane/hooks/
 COPY --chmod=755 bin/control-plane-podman /usr/local/bin/control-plane-podman
@@ -132,7 +134,16 @@ COPY --chmod=755 bin/k8s-job-pod /usr/local/bin/k8s-job-pod
 COPY --chmod=755 bin/k8s-job-logs /usr/local/bin/k8s-job-logs
 COPY --chmod=755 bin/k8s-job-run /usr/local/bin/k8s-job-run
 
-RUN ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/podman \
+RUN anthropic_skills_ref="$(tr -d '\n' < /tmp/anthropic-skills.ref)" \
+    && upstream_skills_dir="$(mktemp -d)/anthropic-skills" \
+    && git clone "${ANTHROPIC_SKILLS_REPOSITORY}" "${upstream_skills_dir}" \
+    && git -C "${upstream_skills_dir}" checkout --detach "${anthropic_skills_ref}" \
+    && test -f "${upstream_skills_dir}/skills/doc-coauthoring/SKILL.md" \
+    && test -f "${upstream_skills_dir}/skills/skill-creator/SKILL.md" \
+    && cp -a "${upstream_skills_dir}/skills/doc-coauthoring" /usr/local/share/control-plane/skills/ \
+    && cp -a "${upstream_skills_dir}/skills/skill-creator" /usr/local/share/control-plane/skills/ \
+    && rm -rf "${upstream_skills_dir%/anthropic-skills}" /tmp/anthropic-skills.ref \
+    && ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/podman \
     && ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/docker \
     && ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen \
     && usermod --shell /usr/local/bin/control-plane-ssh-shell "${CONTROL_PLANE_USER}" \

@@ -92,8 +92,6 @@ while IFS= read -r markdown_file; do
   markdown_files+=("/workspace/${markdown_file#./}")
 done < <(
   find . \
-    -path './.github/skills/doc-coauthoring' -prune -o \
-    -path './.github/skills/skill-creator' -prune -o \
     -type f -name '*.md' -print | LC_ALL=C sort
 )
 
