@@ -14,7 +14,7 @@ const bundledHooksConfigPath = path.join(
 	"containers",
 	"control-plane",
 	"hooks",
-	"control-plane-hooks.json",
+	"hooks.json",
 );
 const bundledLintersConfigPath = path.join(
 	repoRoot,
@@ -72,8 +72,8 @@ function setupRepo(t, prefix) {
 		recursive: true,
 	});
 	fs.cpSync(
-		path.join(sourceBundledHooksDir, "control-plane-hooks.json"),
-		path.join(repo, ".copilot", "hooks", "control-plane-hooks.json"),
+		path.join(sourceBundledHooksDir, "hooks.json"),
+		path.join(repo, ".copilot", "hooks", "hooks.json"),
 	);
 	fs.cpSync(
 		sourceBundledPostToolUseDir,

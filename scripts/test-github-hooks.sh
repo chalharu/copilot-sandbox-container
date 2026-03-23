@@ -29,14 +29,14 @@ printf '%s\n' 'test-github-hooks.sh: verifying bundled postToolUse hook in contr
 "${container_bin}" run --rm \
   "${control_plane_image}" \
   bash -lc '
-    test -f /usr/local/share/control-plane/hooks/control-plane-hooks.json
+    test -f /usr/local/share/control-plane/hooks/hooks.json
     test -f /usr/local/share/control-plane/hooks/postToolUse/main.mjs
     test -f /usr/local/share/control-plane/hooks/postToolUse/linters.json
     test -f /usr/local/share/control-plane/hooks/postToolUse/lib/incremental-files.mjs
-    test -f /home/copilot/.copilot/hooks/control-plane-hooks.json
+    test -f /home/copilot/.copilot/hooks/hooks.json
     test -f /home/copilot/.copilot/hooks/postToolUse/main.mjs
     test -f /home/copilot/.copilot/hooks/postToolUse/linters.json
     test -f /home/copilot/.copilot/hooks/postToolUse/lib/incremental-files.mjs
-    grep -Fq ".copilot/hooks/postToolUse/main.mjs" /home/copilot/.copilot/hooks/control-plane-hooks.json
-    ! grep -Fq ".github/hooks" /home/copilot/.copilot/hooks/control-plane-hooks.json
+    grep -Fq ".copilot/hooks/postToolUse/main.mjs" /home/copilot/.copilot/hooks/hooks.json
+    ! grep -Fq ".github/hooks" /home/copilot/.copilot/hooks/hooks.json
   '
