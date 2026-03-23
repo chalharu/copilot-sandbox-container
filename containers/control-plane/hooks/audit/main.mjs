@@ -140,6 +140,31 @@ function runSqlite(dbPath, sql) {
 	return result.stdout;
 }
 
+function querySingleInteger(dbPath, sql) {
+	const output = runSqlite(dbPath, sql).trim();
+	if (output === "") {
+		return null;
+	}
+
+	const value = Number.parseInt(output, 10);
+	if (!Number.isSafeInteger(value)) {
+		throw new Error(
+			`Expected sqlite3 to return a safe integer, received: ${output}`,
+		);
+	}
+
+	return value;
+}
+
+function tableHasColumn(dbPath, tableName, columnName) {
+	const output = runSqlite(dbPath, `PRAGMA table_info(${tableName});`);
+	return output
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line !== "")
+		.some((line) => line.split("|")[1] === columnName);
+}
+
 function ensureDatabase(dbPath) {
 	ensureDirectory(path.dirname(dbPath));
 	ensureRegularFileOrAbsent(dbPath, "Audit log database path");
@@ -152,6 +177,7 @@ function ensureDatabase(dbPath) {
 			"\tcreated_at_ms INTEGER NOT NULL,",
 			"\tcwd TEXT NOT NULL,",
 			"\trepo_path TEXT NOT NULL,",
+			"\tppid INTEGER,",
 			"\tgit_remotes_json TEXT,",
 			"\tsession_source TEXT,",
 			"\tinitial_prompt TEXT,",
@@ -164,6 +190,13 @@ function ensureDatabase(dbPath) {
 			"CREATE INDEX IF NOT EXISTS audit_events_event_type_created_at_idx ON audit_events (event_type, created_at_ms);",
 			"CREATE INDEX IF NOT EXISTS audit_events_created_at_idx ON audit_events (created_at_ms, id);",
 		].join("\n"),
+	);
+	if (!tableHasColumn(dbPath, "audit_events", "ppid")) {
+		runSqlite(dbPath, "ALTER TABLE audit_events ADD COLUMN ppid INTEGER;");
+	}
+	runSqlite(
+		dbPath,
+		"CREATE INDEX IF NOT EXISTS audit_events_ppid_created_at_idx ON audit_events (ppid, created_at_ms);",
 	);
 	fs.chmodSync(dbPath, 0o600);
 }
@@ -267,6 +300,10 @@ function sqlInteger(value) {
 	return `${value}`;
 }
 
+function sqlNullableInteger(value) {
+	return value === null || value === undefined ? "NULL" : sqlInteger(value);
+}
+
 function buildAuditEvent(eventType, payload) {
 	const cwd = path.resolve(normalizeText(payload.cwd) ?? process.cwd());
 	const repoPath = resolveRepoPath(cwd);
@@ -276,6 +313,7 @@ function buildAuditEvent(eventType, payload) {
 		createdAtMs: normalizeTimestamp(payload.timestamp),
 		cwd,
 		repoPath,
+		ppid: Number.isSafeInteger(process.ppid) ? process.ppid : null,
 		gitRemotesJson: resolveGitRemotes(repoPath),
 		sessionSource:
 			eventType === "sessionStart" ? normalizeText(payload.source) : null,
@@ -304,8 +342,28 @@ function buildAuditEvent(eventType, payload) {
 	};
 }
 
-function insertAuditEvent(dbPath, event) {
-	runSqlite(
+function buildPruneAuditSql(maxRecords, protectedId) {
+	const retainedRecords = Math.max(1, maxRecords - Math.ceil(maxRecords / 4));
+	return [
+		"DELETE FROM audit_events",
+		"WHERE id IN (",
+		"\tSELECT id",
+		"\tFROM audit_events",
+		`\tWHERE id != ${sqlInteger(protectedId)}`,
+		"\tORDER BY created_at_ms ASC, id ASC",
+		"\tLIMIT (",
+		"\t\tSELECT CASE",
+		`\t\t\tWHEN COUNT(*) > ${sqlInteger(maxRecords)} THEN COUNT(*) - ${sqlInteger(retainedRecords)}`,
+		"\t\t\tELSE 0",
+		"\t\tEND",
+		"\t\tFROM audit_events",
+		"\t)",
+		");",
+	];
+}
+
+function insertAuditEvent(dbPath, event, maxRecords) {
+	const insertedId = querySingleInteger(
 		dbPath,
 		[
 			"INSERT INTO audit_events (",
@@ -313,6 +371,7 @@ function insertAuditEvent(dbPath, event) {
 			"\tcreated_at_ms,",
 			"\tcwd,",
 			"\trepo_path,",
+			"\tppid,",
 			"\tgit_remotes_json,",
 			"\tsession_source,",
 			"\tinitial_prompt,",
@@ -326,6 +385,7 @@ function insertAuditEvent(dbPath, event) {
 			`\t${sqlInteger(event.createdAtMs)},`,
 			`\t${sqlText(event.cwd)},`,
 			`\t${sqlText(event.repoPath)},`,
+			`\t${sqlNullableInteger(event.ppid)},`,
 			`\t${sqlText(event.gitRemotesJson)},`,
 			`\t${sqlText(event.sessionSource)},`,
 			`\t${sqlText(event.initialPrompt)},`,
@@ -335,32 +395,14 @@ function insertAuditEvent(dbPath, event) {
 			`\t${sqlText(event.toolResultType)},`,
 			`\t${sqlText(event.toolResultText)}`,
 			");",
+			"SELECT last_insert_rowid();",
 		].join("\n"),
 	);
 	fs.chmodSync(dbPath, 0o600);
-}
-
-function pruneOldestAuditEvents(dbPath, maxRecords) {
-	const retainedRecords = Math.max(1, maxRecords - Math.ceil(maxRecords / 4));
-	runSqlite(
-		dbPath,
-		[
-			"DELETE FROM audit_events",
-			"WHERE id IN (",
-			"\tSELECT id",
-			"\tFROM audit_events",
-			"\tORDER BY created_at_ms ASC, id ASC",
-			"\tLIMIT (",
-			"\t\tSELECT CASE",
-			`\t\t\tWHEN COUNT(*) > ${sqlInteger(maxRecords)} THEN COUNT(*) - ${sqlInteger(retainedRecords)}`,
-			"\t\t\tELSE 0",
-			"\t\tEND",
-			"\t\tFROM audit_events",
-			"\t)",
-			");",
-		].join("\n"),
-	);
-	fs.chmodSync(dbPath, 0o600);
+	if (TOOL_EVENT_TYPES.has(event.eventType)) {
+		runSqlite(dbPath, buildPruneAuditSql(maxRecords, insertedId).join("\n"));
+		fs.chmodSync(dbPath, 0o600);
+	}
 }
 
 async function main() {
@@ -372,10 +414,8 @@ async function main() {
 	const maxRecords = resolveAuditLogMaxRecords();
 
 	ensureDatabase(dbPath);
-	insertAuditEvent(dbPath, buildAuditEvent(eventType, input));
-	if (TOOL_EVENT_TYPES.has(eventType)) {
-		pruneOldestAuditEvents(dbPath, maxRecords);
-	}
+	const event = buildAuditEvent(eventType, input);
+	insertAuditEvent(dbPath, event, maxRecords);
 }
 
 main().catch((error) => {

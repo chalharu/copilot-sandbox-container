@@ -43,6 +43,7 @@ git init --quiet
 git config user.name test
 git config user.email test@example.com
 git remote add origin https://example.com/demo/repo.git
+audit_shell_pid="$$"
 
 test "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" = "/home/copilot/.copilot/session-state/audit/audit-log.db"
 test "${CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS}" = "8"
@@ -76,6 +77,7 @@ sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT tool_name FROM audit_events
 sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT tool_args_json FROM audit_events WHERE event_type = 'preToolUse';" | grep -Fq '"command":"printf hello"'
 sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT tool_result_type FROM audit_events WHERE event_type = 'postToolUse';" | grep -qx 'success'
 sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT tool_result_text FROM audit_events WHERE event_type = 'postToolUse';" | grep -qx 'ok'
+sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT COUNT(*) FROM audit_events WHERE ppid = ${audit_shell_pid};" | grep -qx '4'
 
 cat <<'JSON' | node "${HOME}/.copilot/hooks/audit/main.mjs" preToolUse
 {"timestamp":1704614800000,"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"printf second\"}"}
@@ -108,6 +110,20 @@ sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT MIN(created_at_ms) FROM aud
 sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT MAX(created_at_ms) FROM audit_events;" | grep -qx '1704615300000'
 sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT event_type FROM audit_events ORDER BY created_at_ms ASC, id ASC LIMIT 1;" | grep -qx 'postToolUse'
 sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT tool_name FROM audit_events ORDER BY created_at_ms DESC, id DESC LIMIT 1;" | grep -qx 'git'
+sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT COUNT(*) FROM audit_events WHERE ppid = ${audit_shell_pid};" | grep -qx '7'
+
+cat <<'JSON' | node "${HOME}/.copilot/hooks/audit/main.mjs" preToolUse
+{"timestamp":1704614300000,"cwd":"/workspace","toolName":"history-replayed-pre","toolArgs":"{\"command\":\"printf replay-pre\"}"}
+JSON
+
+cat <<'JSON' | node "${HOME}/.copilot/hooks/audit/main.mjs" postToolUse
+{"timestamp":1704614300100,"cwd":"/workspace","toolName":"history-replayed-post","toolArgs":"{\"command\":\"printf replay-post\"}","toolResult":{"resultType":"success","textResultForLlm":"replayed ok"}}
+JSON
+
+sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT COUNT(*) FROM audit_events;" | grep -qx '6'
+sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT COUNT(*) FROM audit_events WHERE tool_name = 'history-replayed-post';" | grep -qx '1'
+sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT created_at_ms FROM audit_events WHERE tool_name = 'history-replayed-post';" | grep -qx '1704614300100'
+sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT COUNT(*) FROM audit_events WHERE ppid = ${audit_shell_pid};" | grep -qx '6'
 printf '%s\n' 'audit-logging-ok'
 EOF
 chmod 755 "${workdir}/audit-check.sh"
