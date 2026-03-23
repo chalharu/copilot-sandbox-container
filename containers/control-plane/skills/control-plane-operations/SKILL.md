@@ -37,7 +37,7 @@ Read `references/control-plane-run.md` when you need command-routing guidance. R
 - This skill is sourced from the image at `containers/control-plane/skills/control-plane-operations` and synchronized into `~/.copilot/skills/control-plane-operations` at container start.
 - Keep image-wide operational guidance here so it is available even when `/workspace` points at a different repository.
 - Use repo-local `.github/skills/` only for repository-specific additions or overrides.
-- Package finished changes by fetching the pinned upstream `skill-creator` helper with `scripts/fetch-anthropic-skills.sh`, changing into `<checkout-dir>/skills/skill-creator`, and running `python3 -m scripts.package_skill <skill-dir>` when you want structure validation.
+- Package finished changes by installing the pinned upstream `skill-creator` helper with `scripts/install-git-skill.sh <repo-url> <git-ref> <skill-path> <destination>`, changing into the installed `skill-creator` directory, and running `python3 -m scripts.package_skill <skill-dir>` when you want structure validation.
 
 ## Quick Checks
 

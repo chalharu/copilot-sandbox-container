@@ -5,6 +5,8 @@ ARG COPILOT_CLI_VERSION=1.0.10
 # renovate: datasource=github-releases depName=kubernetes-sigs/kind
 ARG KIND_VERSION=v0.31.0
 ARG ANTHROPIC_SKILLS_REPOSITORY=https://github.com/anthropics/skills
+ARG DOC_COAUTHORING_SKILL_PATH=skills/doc-coauthoring
+ARG SKILL_CREATOR_SKILL_PATH=skills/skill-creator
 ARG CONTROL_PLANE_UID=1000
 ARG CONTROL_PLANE_GID=1000
 ARG CONTROL_PLANE_USER=copilot
@@ -134,15 +136,27 @@ COPY --chmod=755 bin/k8s-job-pod /usr/local/bin/k8s-job-pod
 COPY --chmod=755 bin/k8s-job-logs /usr/local/bin/k8s-job-logs
 COPY --chmod=755 bin/k8s-job-run /usr/local/bin/k8s-job-run
 
-RUN anthropic_skills_ref="$(tr -d '\n' < /tmp/anthropic-skills.ref)" \
-    && upstream_skills_dir="$(mktemp -d)/anthropic-skills" \
-    && git clone "${ANTHROPIC_SKILLS_REPOSITORY}" "${upstream_skills_dir}" \
-    && git -C "${upstream_skills_dir}" checkout --detach "${anthropic_skills_ref}" \
-    && test -f "${upstream_skills_dir}/skills/doc-coauthoring/SKILL.md" \
-    && test -f "${upstream_skills_dir}/skills/skill-creator/SKILL.md" \
-    && cp -a "${upstream_skills_dir}/skills/doc-coauthoring" /usr/local/share/control-plane/skills/ \
-    && cp -a "${upstream_skills_dir}/skills/skill-creator" /usr/local/share/control-plane/skills/ \
-    && rm -rf "${upstream_skills_dir%/anthropic-skills}" /tmp/anthropic-skills.ref \
+RUN install_git_skill() { \
+        local repository_url="$1"; \
+        local git_ref="$2"; \
+        local skill_path="$3"; \
+        local destination_dir="$4"; \
+        local checkout_dir; \
+        local source_skill_dir; \
+        checkout_dir="$(mktemp -d)"; \
+        git clone "${repository_url}" "${checkout_dir}/repo"; \
+        git -C "${checkout_dir}/repo" checkout --detach "${git_ref}"; \
+        source_skill_dir="${checkout_dir}/repo/${skill_path}"; \
+        test -f "${source_skill_dir}/SKILL.md"; \
+        install -d -m 0755 "$(dirname "${destination_dir}")"; \
+        rm -rf "${destination_dir}"; \
+        cp -a "${source_skill_dir}" "${destination_dir}"; \
+        rm -rf "${checkout_dir}"; \
+    }; \
+    anthropic_skills_ref="$(grep -Ev '^[[:space:]]*(#|$)' /tmp/anthropic-skills.ref | tail -n1)" \
+    && install_git_skill "${ANTHROPIC_SKILLS_REPOSITORY}" "${anthropic_skills_ref}" "${DOC_COAUTHORING_SKILL_PATH}" /usr/local/share/control-plane/skills/doc-coauthoring \
+    && install_git_skill "${ANTHROPIC_SKILLS_REPOSITORY}" "${anthropic_skills_ref}" "${SKILL_CREATOR_SKILL_PATH}" /usr/local/share/control-plane/skills/skill-creator \
+    && rm -f /tmp/anthropic-skills.ref \
     && ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/podman \
     && ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/docker \
     && ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen \

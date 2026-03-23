@@ -27,9 +27,11 @@
 6. Validate structure with:
 
    ```bash
-   checkout_dir="$(scripts/fetch-anthropic-skills.sh "$(mktemp -d)")"
+   workdir="$(mktemp -d)"
+   anthropic_ref="$(grep -Ev '^[[:space:]]*(#|$)' containers/control-plane/config/anthropic-skills.ref | tail -n1)"
+   scripts/install-git-skill.sh "https://github.com/anthropics/skills" "${anthropic_ref}" "skills/skill-creator" "${workdir}/skill-creator"
    (
-     cd "${checkout_dir}/skills/skill-creator"
+     cd "${workdir}/skill-creator"
      python3 -m scripts.package_skill containers/control-plane/skills/<skill-name>
    )
    ```
