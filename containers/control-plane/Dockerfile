@@ -117,6 +117,7 @@ COPY --chmod=644 config/storage.conf /home/${CONTROL_PLANE_USER}/.config/contain
 COPY --chmod=644 config/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
 COPY --chmod=644 config/profile-control-plane-session.sh /etc/profile.d/control-plane-session.sh
 COPY skills/ /usr/local/share/control-plane/skills/
+COPY hooks/ /usr/local/share/control-plane/hooks/
 COPY --chmod=755 bin/control-plane-podman /usr/local/bin/control-plane-podman
 COPY --chmod=755 bin/control-plane-screen /usr/local/bin/control-plane-screen
 COPY --chmod=755 bin/control-plane-entrypoint /usr/local/bin/control-plane-entrypoint
@@ -137,6 +138,8 @@ RUN ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/podman \
     && usermod --shell /usr/local/bin/control-plane-ssh-shell "${CONTROL_PLANE_USER}" \
     && find /usr/local/share/control-plane/skills -type d -exec chmod 755 {} + \
     && find /usr/local/share/control-plane/skills -type f -exec chmod 644 {} + \
+    && find /usr/local/share/control-plane/hooks -type d -exec chmod 755 {} + \
+    && find /usr/local/share/control-plane/hooks -type f -exec chmod 644 {} + \
     && chown -R "${CONTROL_PLANE_USER}:${CONTROL_PLANE_USER}" "/home/${CONTROL_PLANE_USER}/.config"
 
 WORKDIR /workspace

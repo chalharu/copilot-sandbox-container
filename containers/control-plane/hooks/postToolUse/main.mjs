@@ -17,22 +17,106 @@ import {
 } from "./lib/incremental-files.mjs";
 
 const STATE_SUBPATH = [".copilot-hooks", "post-tool-use-state.json"];
-const config = loadLintersConfig();
 
-function loadLintersConfig() {
-	const raw = fs.readFileSync(
-		new URL("./linters.json", import.meta.url),
-		"utf8",
-	);
-	const parsed = JSON.parse(raw);
-	const tools = new Map();
-	const pipelines = [];
+function describeConfigPath(configPath) {
+	return configPath instanceof URL ? configPath.pathname : configPath;
+}
 
-	for (const tool of parsed.tools ?? []) {
-		if (tools.has(tool.id)) {
-			throw new Error(`Duplicate tool id: ${tool.id}`);
+function validateConfigEntries(entries, entryKind, configDescription) {
+	const entryLabel = entryKind.slice(0, -1);
+	const seenIds = new Set();
+
+	if (!Array.isArray(entries)) {
+		throw new Error(
+			`Linters config at ${configDescription} must define ${entryKind} as an array.`,
+		);
+	}
+
+	for (const entry of entries) {
+		if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+			throw new Error(
+				`Each ${entryLabel} in ${configDescription} must be a JSON object.`,
+			);
 		}
 
+		if (typeof entry.id !== "string" || entry.id === "") {
+			throw new Error(
+				`Each ${entryLabel} in ${configDescription} must define a non-empty string id.`,
+			);
+		}
+
+		if (seenIds.has(entry.id)) {
+			throw new Error(
+				`Duplicate ${entryLabel} id in ${configDescription}: ${entry.id}`,
+			);
+		}
+
+		seenIds.add(entry.id);
+	}
+}
+
+function readLintersConfigFile(configPath, { optional = false } = {}) {
+	const configDescription = describeConfigPath(configPath);
+	let raw;
+
+	try {
+		raw = fs.readFileSync(configPath, "utf8");
+	} catch (error) {
+		if (
+			optional &&
+			error &&
+			typeof error === "object" &&
+			"code" in error &&
+			error.code === "ENOENT"
+		) {
+			return null;
+		}
+
+		throw new Error(
+			`Failed to read linters config at ${configDescription}: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+
+	let parsed;
+	try {
+		parsed = JSON.parse(raw);
+	} catch (error) {
+		throw new Error(
+			`Failed to parse linters config at ${configDescription}: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new Error(
+			`Linters config at ${configDescription} must contain a top-level JSON object.`,
+		);
+	}
+
+	if (parsed.tools !== undefined) {
+		validateConfigEntries(parsed.tools, "tools", configDescription);
+	}
+
+	if (parsed.pipelines !== undefined) {
+		validateConfigEntries(parsed.pipelines, "pipelines", configDescription);
+	}
+
+	return parsed;
+}
+
+function mergeConfigEntries(baseEntries, overrideEntries) {
+	const mergedEntries = new Map();
+
+	for (const entry of [...baseEntries, ...overrideEntries]) {
+		mergedEntries.set(entry.id, entry);
+	}
+
+	return [...mergedEntries.values()];
+}
+
+function normalizeToolDefinitions(toolDefinitions) {
+	const tools = new Map();
+
+	for (const tool of toolDefinitions) {
 		if (tool.args !== undefined && !Array.isArray(tool.args)) {
 			throw new Error(`Tool "${tool.id}" args must be an array.`);
 		}
@@ -51,11 +135,13 @@ function loadLintersConfig() {
 		});
 	}
 
-	for (const pipeline of parsed.pipelines ?? []) {
-		if (pipelines.some((entry) => entry.id === pipeline.id)) {
-			throw new Error(`Duplicate pipeline id: ${pipeline.id}`);
-		}
+	return tools;
+}
 
+function normalizePipelineDefinitions(pipelineDefinitions, tools) {
+	const pipelines = [];
+
+	for (const pipeline of pipelineDefinitions) {
 		if (!Array.isArray(pipeline.steps) || pipeline.steps.length === 0) {
 			throw new Error(
 				`Pipeline "${pipeline.id}" must define at least one step.`,
@@ -85,6 +171,30 @@ function loadLintersConfig() {
 	}
 
 	return {
+		pipelines,
+	};
+}
+
+function loadLintersConfig(repoRoot) {
+	const bundledConfig = readLintersConfigFile(
+		new URL("./linters.json", import.meta.url),
+	);
+	const repoConfig = readLintersConfigFile(
+		path.join(repoRoot, ".github", "linters.json"),
+		{ optional: true },
+	);
+	const tools = normalizeToolDefinitions(
+		mergeConfigEntries(bundledConfig.tools ?? [], repoConfig?.tools ?? []),
+	);
+	const { pipelines } = normalizePipelineDefinitions(
+		mergeConfigEntries(
+			bundledConfig.pipelines ?? [],
+			repoConfig?.pipelines ?? [],
+		),
+		tools,
+	);
+
+	return {
 		tools,
 		pipelines,
 	};
@@ -112,7 +222,7 @@ function matchesPipeline(pipeline, relativePath) {
 	return pipeline.matcher.test(relativePath);
 }
 
-function classifyFilesByPipeline(repoRoot, files) {
+function classifyFilesByPipeline(config, repoRoot, files) {
 	const filesByPipeline = new Map(
 		config.pipelines.map((pipeline) => [pipeline.id, []]),
 	);
@@ -134,8 +244,8 @@ function classifyFilesByPipeline(repoRoot, files) {
 	return { matchedFiles, filesByPipeline };
 }
 
-function getCurrentRelevantFiles(repoRoot) {
-	return classifyFilesByPipeline(repoRoot, listDirtyFiles(repoRoot));
+function getCurrentRelevantFiles(config, repoRoot) {
+	return classifyFilesByPipeline(config, repoRoot, listDirtyFiles(repoRoot));
 }
 
 function resolveHookCacheRoot() {
@@ -162,11 +272,12 @@ function buildToolEnv() {
 		TMPDIR: process.env.TMPDIR ?? hookCacheRoot,
 		NODE_COMPILE_CACHE: process.env.NODE_COMPILE_CACHE ?? nodeCompileCache,
 		NPM_CONFIG_CACHE: process.env.NPM_CONFIG_CACHE ?? npmCache,
-		npm_config_cache: process.env.npm_config_cache ?? process.env.NPM_CONFIG_CACHE ?? npmCache,
+		npm_config_cache:
+			process.env.npm_config_cache ?? process.env.NPM_CONFIG_CACHE ?? npmCache,
 	};
 }
 
-function runStepWithFallback(repoRoot, toolIds, files) {
+function runStepWithFallback(config, repoRoot, toolIds, files) {
 	const attempted = [];
 	const toolEnv = buildToolEnv();
 
@@ -193,7 +304,7 @@ function runStepWithFallback(repoRoot, toolIds, files) {
 	};
 }
 
-function runPipelines(repoRoot, filesByPipeline) {
+function runPipelines(config, repoRoot, filesByPipeline) {
 	let exitCode = 0;
 	let hasReportedFailure = false;
 
@@ -204,7 +315,7 @@ function runPipelines(repoRoot, filesByPipeline) {
 		}
 
 		for (const step of pipeline.steps) {
-			const result = runStepWithFallback(repoRoot, step.tools, files);
+			const result = runStepWithFallback(config, repoRoot, step.tools, files);
 
 			if ((result.status ?? 0) === 0 || !step.reportFailure) {
 				continue;
@@ -242,9 +353,10 @@ async function main() {
 			? input.cwd
 			: process.cwd();
 	const repoRoot = getRepoRoot(cwd);
+	const config = loadLintersConfig(repoRoot);
 	const stateFilePath = resolveStateFilePath(repoRoot, STATE_SUBPATH);
 	const previousSignatures = loadState(stateFilePath);
-	const currentRelevantFiles = getCurrentRelevantFiles(repoRoot);
+	const currentRelevantFiles = getCurrentRelevantFiles(config, repoRoot);
 	const changedFiles = getChangedFiles(
 		repoRoot,
 		currentRelevantFiles.matchedFiles,
@@ -257,13 +369,14 @@ async function main() {
 	}
 
 	process.exitCode = runPipelines(
+		config,
 		repoRoot,
-		classifyFilesByPipeline(repoRoot, changedFiles).filesByPipeline,
+		classifyFilesByPipeline(config, repoRoot, changedFiles).filesByPipeline,
 	);
 	saveState(
 		stateFilePath,
 		repoRoot,
-		getCurrentRelevantFiles(repoRoot).matchedFiles,
+		getCurrentRelevantFiles(config, repoRoot).matchedFiles,
 	);
 }
 

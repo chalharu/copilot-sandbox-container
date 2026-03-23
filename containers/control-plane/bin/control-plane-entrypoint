@@ -23,6 +23,8 @@ screen_dir="${SCREENDIR:-${runtime_dir}/screen}"
 host_key_dir="${CONTROL_PLANE_HOST_KEY_DIR:-/var/lib/control-plane/ssh-host-keys}"
 bundled_skills_dir="/usr/local/share/control-plane/skills"
 copilot_skills_dir="${control_plane_home}/.copilot/skills"
+bundled_hooks_dir="/usr/local/share/control-plane/hooks"
+copilot_hooks_dir="${control_plane_home}/.copilot/hooks"
 authorized_keys_path="${control_plane_home}/.ssh/authorized_keys"
 kube_dir="${control_plane_home}/.kube"
 kubeconfig_path="${kube_dir}/config"
@@ -615,6 +617,40 @@ install_bundled_control_plane_skills() {
   fi
 }
 
+install_bundled_control_plane_hooks() {
+  local source_path
+  local target_path
+  local nullglob_was_set=0
+
+  [[ -d "${bundled_hooks_dir}" ]] || return 0
+
+  mkdir -p "${copilot_hooks_dir}"
+  if shopt -q nullglob; then
+    nullglob_was_set=1
+  fi
+  shopt -s nullglob
+  for source_path in "${bundled_hooks_dir}"/*; do
+    [[ -e "${source_path}" ]] || continue
+    target_path="${copilot_hooks_dir}/$(basename "${source_path}")"
+    rm -rf "${target_path}"
+    if [[ -d "${source_path}" ]]; then
+      mkdir -p "${target_path}"
+      cp -R "${source_path}/." "${target_path}/"
+      find "${target_path}" -type d -exec chmod 755 {} +
+      find "${target_path}" -type f -exec chmod 644 {} +
+    elif [[ -f "${source_path}" ]]; then
+      cp "${source_path}" "${target_path}"
+      chmod 644 "${target_path}"
+    else
+      continue
+    fi
+    safe_chown_tree "${control_plane_user}:${control_plane_user}" "${target_path}"
+  done
+  if [[ "${nullglob_was_set}" -eq 0 ]]; then
+    shopt -u nullglob
+  fi
+}
+
 configure_git_credential_helper() {
   local hostname="$1"
   local helper_key="credential.https://${hostname}.helper"
@@ -660,6 +696,7 @@ mkdir -p \
   "${runtime_config_dir}" \
   "${kube_dir}" \
   "${control_plane_home}/.ssh" \
+  "${copilot_hooks_dir}" \
   "${copilot_skills_dir}" \
   "${control_plane_workspace}" \
   "${podman_state_root}" \
@@ -690,6 +727,7 @@ safe_chown_tree "${control_plane_user}:${control_plane_user}" \
   "${runtime_config_dir}" \
   "${kube_dir}" \
   "${control_plane_home}/.ssh" \
+  "${copilot_hooks_dir}" \
   "${control_plane_workspace}" \
   "${job_transfer_root}" \
   "${podman_state_dir}" \
@@ -702,6 +740,7 @@ safe_chown_tree "${control_plane_user}:${control_plane_user}" \
   "${runtime_dir}"
 ensure_path_ownership "${control_plane_user}:${control_plane_user}" \
   "${control_plane_home}/.copilot" \
+  "${copilot_hooks_dir}" \
   "${copilot_session_state_dir}" \
   "${podman_state_root}" \
   "${podman_state_dir}" \
@@ -909,6 +948,7 @@ chmod 644 "${containers_storage_config_path}"
 chown "${control_plane_user}:${control_plane_user}" "${containers_engine_config_path}"
 chmod 644 "${containers_engine_config_path}"
 
+install_bundled_control_plane_hooks
 install_bundled_control_plane_skills
 configure_copilot
 configure_gh_hosts

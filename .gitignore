@@ -15,8 +15,8 @@ downloads/
 eggs/
 .eggs/
 lib/
-!.github/hooks/postToolUse/lib/
-!.github/hooks/postToolUse/lib/*.mjs
+!containers/control-plane/hooks/postToolUse/lib/
+!containers/control-plane/hooks/postToolUse/lib/*.mjs
 lib64/
 parts/
 sdist/

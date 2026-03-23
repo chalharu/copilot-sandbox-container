@@ -8,18 +8,32 @@ import { fileURLToPath } from "node:url";
 
 const currentFile = fileURLToPath(import.meta.url);
 const postToolUseDir = path.dirname(currentFile);
-const repoRoot = path.resolve(postToolUseDir, "..", "..", "..");
-const hooksConfigPath = path.join(repoRoot, ".github", "hooks", "hooks.json");
-const lintersConfigPath = path.join(
+const repoRoot = path.resolve(postToolUseDir, "..", "..", "..", "..");
+const bundledHooksConfigPath = path.join(
 	repoRoot,
-	".github",
+	"containers",
+	"control-plane",
+	"hooks",
+	"hooks.json",
+);
+const bundledLintersConfigPath = path.join(
+	repoRoot,
+	"containers",
+	"control-plane",
 	"hooks",
 	"postToolUse",
 	"linters.json",
 );
-const sourcePostToolUseDir = path.join(
+const sourceBundledHooksDir = path.join(
 	repoRoot,
-	".github",
+	"containers",
+	"control-plane",
+	"hooks",
+);
+const sourceBundledPostToolUseDir = path.join(
+	repoRoot,
+	"containers",
+	"control-plane",
 	"hooks",
 	"postToolUse",
 );
@@ -51,17 +65,26 @@ function setupRepo(t, prefix) {
 	run("git", ["init", "--quiet"], { cwd: repo });
 	run("git", ["config", "user.name", "test"], { cwd: repo });
 	run("git", ["config", "user.email", "test@example.com"], { cwd: repo });
-	fs.mkdirSync(path.join(repo, ".github", "hooks"), { recursive: true });
+	fs.mkdirSync(path.join(repo, ".github"), {
+		recursive: true,
+	});
+	fs.mkdirSync(path.join(repo, ".copilot", "hooks"), {
+		recursive: true,
+	});
 	fs.cpSync(
-		sourcePostToolUseDir,
-		path.join(repo, ".github", "hooks", "postToolUse"),
+		path.join(sourceBundledHooksDir, "hooks.json"),
+		path.join(repo, ".copilot", "hooks", "hooks.json"),
+	);
+	fs.cpSync(
+		sourceBundledPostToolUseDir,
+		path.join(repo, ".copilot", "hooks", "postToolUse"),
 		{
 			recursive: true,
 		},
 	);
 	fs.appendFileSync(
 		path.join(repo, ".git", "info", "exclude"),
-		["bin/", "hook.log", ".github/hooks/postToolUse/"].join("\n") + "\n",
+		["bin/", "hook.log", ".copilot/hooks/"].join("\n") + "\n",
 		"utf8",
 	);
 
@@ -329,7 +352,7 @@ function makePythonRustDockerDirty(repo) {
 }
 
 function runHook(repo, env, toolResultType = "success") {
-	return run(process.execPath, [".github/hooks/postToolUse/main.mjs"], {
+	return run(process.execPath, [".copilot/hooks/postToolUse/main.mjs"], {
 		cwd: repo,
 		env,
 		input: JSON.stringify({
@@ -341,13 +364,28 @@ function runHook(repo, env, toolResultType = "success") {
 }
 
 test("hooks config uses one main postToolUse command", () => {
-	const hooksConfig = JSON.parse(fs.readFileSync(hooksConfigPath, "utf8"));
+	const hooksConfig = JSON.parse(
+		fs.readFileSync(bundledHooksConfigPath, "utf8"),
+	);
 	assert.equal(hooksConfig.hooks.postToolUse.length, 1);
 	assert.match(
 		hooksConfig.hooks.postToolUse[0].bash,
-		/NODE_COMPILE_CACHE=.*node \.github\/hooks\/postToolUse\/main\.mjs/,
+		/\.copilot\/hooks\/postToolUse\/main\.mjs/,
 	);
+	assert.equal(
+		hooksConfig.hooks.postToolUse[0].bash.includes(".github/hooks"),
+		false,
+	);
+	assert.match(hooksConfig.hooks.postToolUse[0].bash, /NODE_COMPILE_CACHE=/);
 	assert.match(hooksConfig.hooks.postToolUse[0].bash, /NPM_CONFIG_CACHE=/);
+	assert.match(
+		hooksConfig.hooks.postToolUse[0].powershell,
+		/\.copilot\/hooks\/postToolUse\/main\.mjs/,
+	);
+	assert.equal(
+		hooksConfig.hooks.postToolUse[0].powershell.includes(".github/hooks"),
+		false,
+	);
 	assert.match(
 		hooksConfig.hooks.postToolUse[0].powershell,
 		/NODE_COMPILE_CACHE/,
@@ -356,7 +394,9 @@ test("hooks config uses one main postToolUse command", () => {
 });
 
 test("linters config defines concrete tools and language pipelines", () => {
-	const lintersConfig = JSON.parse(fs.readFileSync(lintersConfigPath, "utf8"));
+	const lintersConfig = JSON.parse(
+		fs.readFileSync(bundledLintersConfigPath, "utf8"),
+	);
 	const markdownlintFixNpx = lintersConfig.tools.find(
 		(tool) => tool.id === "markdownlint-fix-npx",
 	);
@@ -551,27 +591,22 @@ test("main hook runs Python Rust YAML and Dockerfile pipelines", (t) => {
 	assert.match(result.stderr, /hadolint unresolved in Dockerfile/);
 });
 
-test("main hook uses the first matching pipeline", (t) => {
-	const repo = setupRepo(t, "hook-pipeline-order-");
+test("main hook merges bundled linters config with .github overrides", (t) => {
+	const repo = setupRepo(t, "hook-config-merge-");
 	seedRepo(repo);
+	makeFilesDirty(repo);
 	fs.writeFileSync(
-		path.join(repo, ".github", "hooks", "postToolUse", "linters.json"),
+		path.join(repo, ".github", "linters.json"),
 		JSON.stringify(
 			{
 				tools: [
-					{ id: "first-tool-check", command: "first-tool", args: ["check"] },
-					{ id: "second-tool-check", command: "second-tool", args: ["check"] },
+					{ id: "repo-scripts-check", command: "second-tool", args: ["check"] },
 				],
 				pipelines: [
 					{
-						id: "all",
-						matcher: ["\\.md$", "\\.ts$"],
-						steps: [{ tools: ["first-tool-check"] }],
-					},
-					{
 						id: "scripts",
-						matcher: ["\\.ts$"],
-						steps: [{ tools: ["second-tool-check"] }],
+						matcher: ["\\.(?:[cm]?[jt]s|[jt]sx)$"],
+						steps: [{ tools: ["repo-scripts-check"] }],
 					},
 				],
 			},
@@ -580,26 +615,28 @@ test("main hook uses the first matching pipeline", (t) => {
 		),
 		"utf8",
 	);
-	fs.writeFileSync(
-		path.join(repo, "index.ts"),
-		"export const value=1\n",
-		"utf8",
-	);
 
 	const { env, logFile } = createToolStubs(repo, {
-		markdownlint: false,
 		biome: false,
 		oxlint: false,
 		eslint: false,
-		firstTool: true,
 		secondTool: true,
 	});
 	const result = runHook(repo, env);
 	const hookLog = fs.readFileSync(logFile, "utf8");
 
-	assert.equal(result.status, 0);
-	assert.match(hookLog, /first-tool check index\.ts/);
-	assert.equal(hookLog.includes("second-tool check index.ts"), false);
+	assert.equal(result.status, 1);
+	assert.match(hookLog, /--fix README\.md/);
+	assert.match(hookLog, /second-tool check index\.ts/);
+	assert.equal(hookLog.includes("biome check --write index.ts"), false);
+	assert.equal(hookLog.includes("oxlint --fix index.ts"), false);
+	assert.match(result.stderr, /remaining markdown issue in README\.md/);
+	assert.equal(
+		result.stderr.includes(
+			"JavaScript/TypeScript linter reported unresolved issues:",
+		),
+		false,
+	);
 });
 
 test("main hook skips all work when tool use is denied", (t) => {
