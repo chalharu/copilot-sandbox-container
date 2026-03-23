@@ -8,6 +8,7 @@
 
 ## Bundled skill catalog
 
+- `containerized-yamllint-ops`: reusable YAML lint helper that runs through the pinned `containers/yamllint` image
 - `control-plane-operations`: control-plane runtime, Podman, SSH, and Kubernetes Job execution guidance
 - `containerized-rust-ops`: reusable Rust validation helpers that keep large temp files and caches off `/tmp` and out of `.git`
 - `repo-change-delivery`: generic end-to-end repository delivery loop

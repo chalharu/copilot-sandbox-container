@@ -798,6 +798,7 @@ test "\${VISUAL}" = "vim"
 test "\${GH_PAGER}" = "cat"
 printf '%s\n' 'kind-test remote: locale and editor env ok' >&2
 test -f ~/.copilot/skills/control-plane-operations/SKILL.md
+test -f ~/.copilot/skills/containerized-yamllint-ops/SKILL.md
 test -f ~/.copilot/skills/repo-change-delivery/SKILL.md
 test -f ~/.copilot/config.json
 test -f ~/.copilot/command-history-state.json

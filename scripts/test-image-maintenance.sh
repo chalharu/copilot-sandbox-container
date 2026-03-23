@@ -105,14 +105,14 @@ build_image_for_toolchain podman localhost/image-maintenance:test "${context_dir
 grep -Fq "build --isolation=chroot --label $(build_context_hash_label_key)=${second_hash} --tag localhost/image-maintenance:test ${context_dir}" "${podman_log}"
 
 printf '%s\n' 'image-maintenance-test: verifying sccache helper image release wiring' >&2
-assert_file_contains "${workflow_path}" 'podman build --tag localhost/sccache:test containers/control-plane/skills/containerized-rust-ops/assets/sccache-image'
+assert_file_contains "${workflow_path}" 'podman build --tag localhost/sccache:test containers/sccache'
 assert_file_contains "${workflow_path}" "GHCR_SCCACHE_IMAGE: ghcr.io/\${{ github.repository }}/sccache"
 assert_file_contains "${workflow_path}" "podman tag localhost/sccache:test \"\${GHCR_SCCACHE_IMAGE}:\${GITHUB_SHA}-\${IMAGE_ARCH}\""
 assert_file_contains "${workflow_path}" "podman push \"\${GHCR_SCCACHE_IMAGE}:\${{ steps.image_versions.outputs.sccache_component_tag }}-\${IMAGE_ARCH}\""
 assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache:manifest-latest\" \"\${GHCR_SCCACHE_IMAGE}:latest\""
 assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache:manifest-version\" \"\${GHCR_SCCACHE_IMAGE}:\${{ steps.image_versions.outputs.sccache_component_tag }}\""
 assert_file_matches "${workflow_path}" '^[[:space:]]+- sccache$'
-assert_file_contains "${renovate_config_path}" '/^containers\\/control-plane\\/skills\\/containerized-rust-ops\\/assets\\/sccache-image\\/Dockerfile$/'
+assert_file_contains "${renovate_config_path}" '/^containers\\/(control-plane|yamllint|sccache)\\/Dockerfile$/'
 
 printf '%s\n' 'image-maintenance-test: verifying GHCR cleanup keeps tagged images' >&2
 assert_file_contains "${workflow_path}" 'delete-only-untagged-versions: '\''true'\'''

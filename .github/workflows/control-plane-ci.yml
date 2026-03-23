@@ -365,14 +365,14 @@ jobs:
         run: podman build --tag localhost/yamllint:test containers/yamllint
 
       - name: Build sccache image for publishing
-        run: podman build --tag localhost/sccache:test containers/control-plane/skills/containerized-rust-ops/assets/sccache-image
+        run: podman build --tag localhost/sccache:test containers/sccache
 
       - name: Read published image versions
         id: image_versions
         run: |
           control_plane_version="$(sed -n 's/^ARG COPILOT_CLI_VERSION=//p' containers/control-plane/Dockerfile)"
           yamllint_version="$(sed -n 's/^ARG YAMLLINT_VERSION=//p' containers/yamllint/Dockerfile)"
-          sccache_version="$(sed -n 's/^ARG SCCACHE_VERSION=//p' containers/control-plane/skills/containerized-rust-ops/assets/sccache-image/Dockerfile)"
+          sccache_version="$(sed -n 's/^ARG SCCACHE_VERSION=//p' containers/sccache/Dockerfile)"
           test -n "${control_plane_version}"
           test -n "${yamllint_version}"
           test -n "${sccache_version}"
@@ -422,7 +422,7 @@ jobs:
         run: |
           control_plane_version="$(sed -n 's/^ARG COPILOT_CLI_VERSION=//p' containers/control-plane/Dockerfile)"
           yamllint_version="$(sed -n 's/^ARG YAMLLINT_VERSION=//p' containers/yamllint/Dockerfile)"
-          sccache_version="$(sed -n 's/^ARG SCCACHE_VERSION=//p' containers/control-plane/skills/containerized-rust-ops/assets/sccache-image/Dockerfile)"
+          sccache_version="$(sed -n 's/^ARG SCCACHE_VERSION=//p' containers/sccache/Dockerfile)"
           test -n "${control_plane_version}"
           test -n "${yamllint_version}"
           test -n "${sccache_version}"

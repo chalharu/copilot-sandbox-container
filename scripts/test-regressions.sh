@@ -124,6 +124,7 @@ skill_output="$("${container_bin}" run --rm \
   bash -lc "set -euo pipefail
 su -s /bin/bash copilot -c 'set -euo pipefail
 control_skill_root=\"\$HOME/.copilot/skills/control-plane-operations\"
+yamllint_skill_root=\"\$HOME/.copilot/skills/containerized-yamllint-ops\"
 delivery_skill_root=\"\$HOME/.copilot/skills/repo-change-delivery\"
 commit_skill_root=\"\$HOME/.copilot/skills/git-commit\"
 pull_request_skill_root=\"\$HOME/.copilot/skills/pull-request-workflow\"
@@ -132,6 +133,9 @@ test -r \"\$control_skill_root/SKILL.md\"
 test -x \"\$control_skill_root/references\"
 test -r \"\$control_skill_root/references/control-plane-run.md\"
 test -r \"\$control_skill_root/references/skills.md\"
+test ! -L \"\$yamllint_skill_root\"
+test -r \"\$yamllint_skill_root/SKILL.md\"
+grep -Fqx \"name: containerized-yamllint-ops\" \"\$yamllint_skill_root/SKILL.md\"
 test ! -L \"\$delivery_skill_root\"
 test -r \"\$delivery_skill_root/SKILL.md\"
 grep -Fqx \"name: repo-change-delivery\" \"\$delivery_skill_root/SKILL.md\"
