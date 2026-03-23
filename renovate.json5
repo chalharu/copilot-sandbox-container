@@ -89,9 +89,9 @@
   customManagers: [
     {
       customType: "regex",
-      managerFilePatterns: ["/^containers\\/control-plane\\/config\\/anthropic-skills\\.ref$/"],
+      managerFilePatterns: ["/^containers\\/control-plane\\/config\\/external-skills\\.yaml$/"],
       matchStrings: [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) currentValue=(?<currentValue>\\S+)\\s+(?<currentDigest>[a-f0-9]{40})",
+        "- repository:\\s*(?<depName>\\S+)\\s+ref:\\s*(?<currentDigest>[a-f0-9]{40})\\s+# renovate: datasource=(?<datasource>\\S+) currentValue=(?<currentValue>\\S+)",
       ],
     },
     {

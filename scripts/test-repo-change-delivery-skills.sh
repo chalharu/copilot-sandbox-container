@@ -3,9 +3,9 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
-upstream_skills_ref_file="${repo_root}/containers/control-plane/config/anthropic-skills.ref"
-git_skill_installer="${script_dir}/install-git-skill.sh"
-anthropic_skills_repository="https://github.com/anthropics/skills"
+external_skills_manifest="${repo_root}/containers/control-plane/config/external-skills.yaml"
+git_skills_manifest_installer="${script_dir}/install-git-skills-from-manifest.sh"
+legacy_external_skills_ref_file="${repo_root}/containers/control-plane/config/anthropic-skills.ref"
 legacy_doc_coauthor_skill_dir="${repo_root}/.github/skills/doc-coauthoring"
 legacy_yamllint_skill_dir="${repo_root}/.github/skills/containerized-yamllint-ops"
 yamllint_skill_dir="${repo_root}/containers/control-plane/skills/containerized-yamllint-ops"
@@ -36,7 +36,6 @@ entrypoint_path="${repo_root}/containers/control-plane/bin/control-plane-entrypo
 control_plane_image="${CONTROL_PLANE_IMAGE_TAG:-localhost/control-plane:test}"
 package_dir="$(mktemp -d)"
 external_skill_dir="${package_dir}/external-skills"
-upstream_skills_ref=""
 doc_coauthor_skill_dir="${external_skill_dir}/doc-coauthoring"
 doc_coauthor_skill_file="${doc_coauthor_skill_dir}/SKILL.md"
 skill_creator_dir="${external_skill_dir}/skill-creator"
@@ -142,15 +141,12 @@ sys.stdout.buffer.write((out_dir / f"{skill_dir.name}.skill").read_bytes())' \
 
 require_command "${container_bin}"
 
-upstream_skills_ref="$(grep -Ev '^[[:space:]]*(#|$)' "${upstream_skills_ref_file}" | tail -n1)"
-
 printf '%s\n' 'repo-change-delivery-skills-test: fetching pinned upstream skills' >&2
-"${git_skill_installer}" "${anthropic_skills_repository}" "${upstream_skills_ref}" skills/doc-coauthoring "${doc_coauthor_skill_dir}"
-"${git_skill_installer}" "${anthropic_skills_repository}" "${upstream_skills_ref}" skills/skill-creator "${skill_creator_dir}"
+"${git_skills_manifest_installer}" "${external_skills_manifest}" "${external_skill_dir}"
 
 printf '%s\n' 'repo-change-delivery-skills-test: checking skill files' >&2
-assert_file_present "${upstream_skills_ref_file}"
-assert_file_present "${git_skill_installer}"
+assert_file_present "${external_skills_manifest}"
+assert_file_present "${git_skills_manifest_installer}"
 assert_file_present "${doc_coauthor_skill_file}"
 assert_file_present "${yamllint_skill_file}"
 assert_file_present "${yamllint_script_file}"
@@ -170,9 +166,11 @@ assert_file_present "${control_plane_ops_skill_file}"
 assert_file_present "${bundled_reference_file}"
 assert_file_present "${dockerfile_path}"
 assert_file_present "${entrypoint_path}"
+assert_file_absent "${legacy_external_skills_ref_file}"
 assert_file_absent "${legacy_doc_coauthor_skill_dir}"
 assert_file_absent "${legacy_skill_creator_dir}"
 assert_file_absent "${script_dir}/fetch-anthropic-skills.sh"
+assert_file_absent "${script_dir}/install-git-skill.sh"
 assert_file_absent "${repo_git_commit_dir}"
 assert_file_absent "${legacy_yamllint_skill_dir}"
 assert_file_absent "${legacy_rust_sccache_image_dockerfile}"
@@ -181,8 +179,10 @@ assert_file_absent "${generic_skill_dir}/references/api_reference.md"
 assert_file_absent "${generic_skill_dir}/assets/example_asset.txt"
 
 assert_file_contains "${doc_coauthor_skill_file}" 'name: doc-coauthoring'
-assert_file_contains "${upstream_skills_ref_file}" 'depName=https://github.com/anthropics/skills'
-assert_file_contains "${upstream_skills_ref_file}" 'currentValue=main'
+assert_file_contains "${external_skills_manifest}" 'repository: https://github.com/anthropics/skills'
+assert_file_contains "${external_skills_manifest}" 'skills/doc-coauthoring'
+assert_file_contains "${external_skills_manifest}" 'skills/skill-creator'
+assert_file_contains "${external_skills_manifest}" 'currentValue=main'
 assert_file_contains "${yamllint_skill_file}" 'name: containerized-yamllint-ops'
 assert_file_contains "${yamllint_skill_file}" 'containers/control-plane/skills/containerized-yamllint-ops/scripts/podman-yamllint.sh'
 assert_file_contains "${yamllint_skill_file}" 'localhost/yamllint:test'
@@ -232,8 +232,9 @@ assert_file_contains "${repo_reference_file}" './scripts/test-current-cluster-re
 assert_file_contains "${repo_reference_file}" '.github/workflows/control-plane-ci.yml'
 assert_file_not_contains "${repo_reference_file}" 'git fetch origin main'
 assert_file_not_contains "${repo_reference_file}" 'install-git-skill.sh'
+assert_file_not_contains "${repo_reference_file}" 'install-git-skills-from-manifest.sh'
 
-assert_file_contains "${control_plane_ops_skill_file}" 'scripts/install-git-skill.sh'
+assert_file_contains "${control_plane_ops_skill_file}" 'scripts/install-git-skills-from-manifest.sh'
 assert_file_not_contains "${control_plane_ops_skill_file}" '.github/skills/skill-creator/scripts/package_skill.py'
 
 assert_file_contains "${bundled_reference_file}" "${backtick}containerized-yamllint-ops${backtick}"
@@ -242,14 +243,15 @@ assert_file_contains "${bundled_reference_file}" "${backtick}doc-coauthoring${ba
 assert_file_contains "${bundled_reference_file}" "${backtick}git-commit${backtick}"
 assert_file_contains "${bundled_reference_file}" "${backtick}pull-request-workflow${backtick}"
 assert_file_contains "${bundled_reference_file}" "${backtick}skill-creator${backtick}"
-assert_file_contains "${bundled_reference_file}" 'scripts/install-git-skill.sh'
+assert_file_contains "${bundled_reference_file}" 'scripts/install-git-skills-from-manifest.sh'
 assert_file_not_contains "${bundled_reference_file}" '.github/skills/skill-creator/scripts/package_skill.py'
 
-assert_file_contains "${dockerfile_path}" 'ANTHROPIC_SKILLS_REPOSITORY'
-assert_file_contains "${dockerfile_path}" 'DOC_COAUTHORING_SKILL_PATH'
-assert_file_contains "${dockerfile_path}" 'SKILL_CREATOR_SKILL_PATH'
-assert_file_contains "${dockerfile_path}" 'config/anthropic-skills.ref'
-assert_file_contains "${dockerfile_path}" 'install_git_skill()'
+assert_file_contains "${dockerfile_path}" 'config/external-skills.yaml'
+assert_file_contains "${dockerfile_path}" 'install-git-skills-from-manifest'
+assert_file_not_contains "${dockerfile_path}" 'ANTHROPIC_SKILLS_REPOSITORY'
+assert_file_not_contains "${dockerfile_path}" 'DOC_COAUTHORING_SKILL_PATH'
+assert_file_not_contains "${dockerfile_path}" 'SKILL_CREATOR_SKILL_PATH'
+assert_file_not_contains "${dockerfile_path}" 'config/anthropic-skills.ref'
 assert_file_contains "${entrypoint_path}" 'install_bundled_control_plane_skills'
 assert_file_contains "${entrypoint_path}" "for source_dir in \"\${bundled_skills_dir}\"/*; do"
 

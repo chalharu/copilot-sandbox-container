@@ -4,9 +4,6 @@ FROM node:24.14.0-bookworm-slim@sha256:d8e448a56fc63242f70026718378bd4b00f8c82e7
 ARG COPILOT_CLI_VERSION=1.0.10
 # renovate: datasource=github-releases depName=kubernetes-sigs/kind
 ARG KIND_VERSION=v0.31.0
-ARG ANTHROPIC_SKILLS_REPOSITORY=https://github.com/anthropics/skills
-ARG DOC_COAUTHORING_SKILL_PATH=skills/doc-coauthoring
-ARG SKILL_CREATOR_SKILL_PATH=skills/skill-creator
 ARG CONTROL_PLANE_UID=1000
 ARG CONTROL_PLANE_GID=1000
 ARG CONTROL_PLANE_USER=copilot
@@ -119,13 +116,14 @@ COPY --chmod=644 config/screenrc /etc/screenrc
 COPY --chmod=644 config/storage.conf /home/${CONTROL_PLANE_USER}/.config/containers/storage.conf
 COPY --chmod=644 config/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
 COPY --chmod=644 config/profile-control-plane-session.sh /etc/profile.d/control-plane-session.sh
-COPY --chmod=644 config/anthropic-skills.ref /tmp/anthropic-skills.ref
+COPY --chmod=644 config/external-skills.yaml /tmp/external-skills.yaml
 COPY skills/ /usr/local/share/control-plane/skills/
 COPY hooks/ /usr/local/share/control-plane/hooks/
 COPY --chmod=755 bin/control-plane-podman /usr/local/bin/control-plane-podman
 COPY --chmod=755 bin/control-plane-screen /usr/local/bin/control-plane-screen
 COPY --chmod=755 bin/control-plane-entrypoint /usr/local/bin/control-plane-entrypoint
 COPY --chmod=755 bin/control-plane-copilot /usr/local/bin/control-plane-copilot
+COPY --chmod=755 bin/install-git-skills-from-manifest /usr/local/bin/install-git-skills-from-manifest
 COPY --chmod=755 bin/control-plane-job-transfer /usr/local/bin/control-plane-job-transfer
 COPY --chmod=755 bin/control-plane-run /usr/local/bin/control-plane-run
 COPY --chmod=755 bin/control-plane-session /usr/local/bin/control-plane-session
@@ -136,27 +134,8 @@ COPY --chmod=755 bin/k8s-job-pod /usr/local/bin/k8s-job-pod
 COPY --chmod=755 bin/k8s-job-logs /usr/local/bin/k8s-job-logs
 COPY --chmod=755 bin/k8s-job-run /usr/local/bin/k8s-job-run
 
-RUN install_git_skill() { \
-        local repository_url="$1"; \
-        local git_ref="$2"; \
-        local skill_path="$3"; \
-        local destination_dir="$4"; \
-        local checkout_dir; \
-        local source_skill_dir; \
-        checkout_dir="$(mktemp -d)"; \
-        git clone "${repository_url}" "${checkout_dir}/repo"; \
-        git -C "${checkout_dir}/repo" checkout --detach "${git_ref}"; \
-        source_skill_dir="${checkout_dir}/repo/${skill_path}"; \
-        test -f "${source_skill_dir}/SKILL.md"; \
-        install -d -m 0755 "$(dirname "${destination_dir}")"; \
-        rm -rf "${destination_dir}"; \
-        cp -a "${source_skill_dir}" "${destination_dir}"; \
-        rm -rf "${checkout_dir}"; \
-    }; \
-    anthropic_skills_ref="$(grep -Ev '^[[:space:]]*(#|$)' /tmp/anthropic-skills.ref | tail -n1)" \
-    && install_git_skill "${ANTHROPIC_SKILLS_REPOSITORY}" "${anthropic_skills_ref}" "${DOC_COAUTHORING_SKILL_PATH}" /usr/local/share/control-plane/skills/doc-coauthoring \
-    && install_git_skill "${ANTHROPIC_SKILLS_REPOSITORY}" "${anthropic_skills_ref}" "${SKILL_CREATOR_SKILL_PATH}" /usr/local/share/control-plane/skills/skill-creator \
-    && rm -f /tmp/anthropic-skills.ref \
+RUN /usr/local/bin/install-git-skills-from-manifest /tmp/external-skills.yaml /usr/local/share/control-plane/skills \
+    && rm -f /tmp/external-skills.yaml /usr/local/bin/install-git-skills-from-manifest \
     && ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/podman \
     && ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/docker \
     && ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen \
