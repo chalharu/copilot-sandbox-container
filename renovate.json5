@@ -97,7 +97,10 @@
     },
     {
       customType: "regex",
-      managerFilePatterns: ["/^containers\\/(control-plane|yamllint)\\/Dockerfile$/"],
+      managerFilePatterns: [
+        "/^containers\\/(control-plane|yamllint)\\/Dockerfile$/",
+        "/^containers\\/control-plane\\/skills\\/containerized-rust-ops\\/assets\\/sccache-image\\/Dockerfile$/",
+      ],
       matchStrings: [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s+ARG [A-Z0-9_]+=(?<currentValue>\\S+)",
       ],

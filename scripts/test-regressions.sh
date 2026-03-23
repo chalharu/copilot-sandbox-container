@@ -534,7 +534,7 @@ exit 0
 EOF
 chmod +x "${workdir}/fake-bin/podman-env"
 
-env -u XDG_RUNTIME_DIR -u TMPDIR \
+env -u XDG_RUNTIME_DIR -u TMPDIR -u CONTROL_PLANE_TMP_ROOT \
   CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
   TEST_REGRESSION_LOG_DIR="${workdir}" \
   CONTROL_PLANE_PODMAN_BIN="${workdir}/fake-bin/podman-env" \
@@ -621,7 +621,7 @@ chmod +x "${workdir}/fake-bin/podman-run-env"
 
 runtime_workspace="${workdir}/workspace"
 
-env -u XDG_RUNTIME_DIR -u TMPDIR \
+env -u XDG_RUNTIME_DIR -u TMPDIR -u CONTROL_PLANE_TMP_ROOT \
   CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
   TEST_REGRESSION_LOG_DIR="${workdir}" \
   CONTROL_PLANE_PODMAN_BIN="${workdir}/fake-bin/podman-run-env" \
