@@ -1,4 +1,4 @@
-FROM docker.io/library/alpine:3.23.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659
+FROM docker.io/library/alpine:3.23.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659 AS fetcher
 
 # renovate: datasource=github-releases depName=mozilla/sccache versioning=semver
 ARG SCCACHE_VERSION=0.14.0
@@ -30,7 +30,20 @@ RUN case "$(apk --print-arch)" in \
     && test -n "${checksum}" \
     && printf '%s  %s\n' "${checksum}" "/tmp/${asset}" | sha256sum -c - \
     && tar -xzf "/tmp/${asset}" -C /tmp \
-    && install -m 0755 "$(find /tmp -type f -name sccache -print -quit)" /usr/local/bin/sccache \
+    && mkdir -p /out/usr/local/bin /out/etc/ssl/certs /out/home/nonroot /out/tmp \
+    && install -m 0755 "$(find /tmp -type f -name sccache -print -quit)" /out/usr/local/bin/sccache \
+    && cp /etc/ssl/certs/ca-certificates.crt /out/etc/ssl/certs/ca-certificates.crt \
+    && chmod 1777 /out/tmp \
+    && chown 65532:65532 /out/home/nonroot \
     && rm -rf /tmp/*
+
+FROM scratch
+
+COPY --from=fetcher /out/ /
+
+ENV HOME=/home/nonroot \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+USER 65532:65532
+WORKDIR /home/nonroot
 
 ENTRYPOINT ["/usr/local/bin/sccache"]

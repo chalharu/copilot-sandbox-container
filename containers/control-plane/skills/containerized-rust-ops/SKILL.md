@@ -29,7 +29,7 @@ Examples:
 - `bash ~/.copilot/skills/containerized-rust-ops/scripts/podman-rust.sh -- cargo test --workspace --all-targets -- --nocapture`
 - `bash ~/.copilot/skills/containerized-rust-ops/scripts/podman-rust.sh -- cargo llvm-cov --workspace --all-targets --summary-only`
 
-The helper keeps toolchain state under disk-backed `TMPDIR` / `/var/tmp`, stores `sccache` in a dedicated sibling cache directory, keeps `target` ephemeral, and builds or reuses the shared `containers/sccache/` container instead of bootstrapping `sccache` from source on every run.
+The helper keeps toolchain state under disk-backed `TMPDIR` / `/var/tmp`, stores `sccache` in a dedicated sibling cache directory, keeps `target` ephemeral, and builds or reuses the shared `containers/sccache/` container while refreshing the extracted `sccache` binary only when that image context changes instead of bootstrapping `sccache` from source on every run.
 
 ## Run control-plane Kubernetes validation
 
