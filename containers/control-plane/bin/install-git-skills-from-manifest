@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 manifest_path="${1:?usage: install-git-skills-from-manifest <manifest-path> <destination-root>}"
 destination_root="${2:?usage: install-git-skills-from-manifest <manifest-path> <destination-root>}"
 checkout_root="$(mktemp -d)"
+manifest_to_tsv_js="${script_dir}/external-skills-manifest-to-tsv.mjs"
+# renovate: datasource=npm depName=js-yaml
+js_yaml_version="${CONTROL_PLANE_JS_YAML_VERSION:-4.1.0}"
 
 cleanup() {
   rm -rf "${checkout_root}"
@@ -19,143 +23,20 @@ require_command() {
   }
 }
 
-parse_manifest() {
-  awk '
-    function trim(value) {
-      sub(/^[[:space:]]+/, "", value)
-      sub(/[[:space:]]+$/, "", value)
-      return value
-    }
-
-    function normalize_value(value) {
-      sub(/[[:space:]]+#.*$/, "", value)
-      value = trim(value)
-
-      if ((value ~ /^".*"$/) || (value ~ /^'\''.*'\''$/)) {
-        value = substr(value, 2, length(value) - 2)
-      }
-
-      return value
-    }
-
-    function fail(message) {
-      printf "%s:%d: %s\n", FILENAME, NR, message > "/dev/stderr"
-      exit 1
-    }
-
-    function flush_entry(    item_index) {
-      if (repository == "") {
-        return
-      }
-
-      if (git_ref == "") {
-        fail("manifest entry is missing ref")
-      }
-
-      if (skill_count == 0) {
-        fail("manifest entry is missing skills")
-      }
-
-      for (item_index = 1; item_index <= skill_count; item_index++) {
-        printf "%s\t%s\t%s\n", repository, git_ref, skills[item_index]
-      }
-
-      delete skills
-      skill_count = 0
-      repository = ""
-      git_ref = ""
-      in_skills = 0
-    }
-
-    BEGIN {
-      skill_count = 0
-      in_skills = 0
-    }
-
-    {
-      line = $0
-      sub(/\r$/, "", line)
-
-      if (line ~ /^[[:space:]]*$/) {
-        next
-      }
-
-      if (line ~ /^[[:space:]]*---[[:space:]]*$/) {
-        next
-      }
-
-      if (line ~ /^[[:space:]]*#/) {
-        next
-      }
-
-      if (line ~ /^- repository:[[:space:]]*/) {
-        flush_entry()
-        repository = line
-        sub(/^- repository:[[:space:]]*/, "", repository)
-        repository = normalize_value(repository)
-
-        if (repository == "") {
-          fail("manifest entry is missing repository")
-        }
-
-        next
-      }
-
-      if (line ~ /^  ref:[[:space:]]*/) {
-        if (repository == "") {
-          fail("ref must follow repository")
-        }
-
-        git_ref = line
-        sub(/^  ref:[[:space:]]*/, "", git_ref)
-        git_ref = normalize_value(git_ref)
-
-        if (git_ref == "") {
-          fail("manifest entry is missing ref value")
-        }
-
-        in_skills = 0
-        next
-      }
-
-      if (line ~ /^  skills:[[:space:]]*$/) {
-        if (repository == "") {
-          fail("skills must follow repository")
-        }
-
-        in_skills = 1
-        next
-      }
-
-      if (line ~ /^    -[[:space:]]*/) {
-        if (!in_skills) {
-          fail("skill path must appear under skills")
-        }
-
-        skill_path = line
-        sub(/^    -[[:space:]]*/, "", skill_path)
-        skill_path = normalize_value(skill_path)
-
-        if (skill_path == "") {
-          fail("skill path is empty")
-        }
-
-        skills[++skill_count] = skill_path
-        next
-      }
-
-      fail("unsupported manifest syntax: " line)
-    }
-
-    END {
-      flush_entry()
-    }
-  ' "${manifest_path}"
-}
-
 require_command git
+require_command node
 test -f "${manifest_path}"
+test -f "${manifest_to_tsv_js}"
 install -d -m 0755 "${destination_root}"
+
+run_js_yaml() {
+  require_command npm
+  NPM_CONFIG_CACHE="${checkout_root}/npm-cache" \
+  NPM_CONFIG_FUND=false \
+  NPM_CONFIG_PROGRESS=false \
+  NPM_CONFIG_UPDATE_NOTIFIER=false \
+    npm exec --yes --package "js-yaml@${js_yaml_version}" -- js-yaml "${manifest_path}"
+}
 
 declare -A checkout_dirs=()
 declare -A installed_skills=()
@@ -198,7 +79,7 @@ while IFS=$'\t' read -r repository_url git_ref skill_path; do
   rm -rf "${destination_dir}"
   cp -a "${source_skill_dir}" "${destination_dir}"
   installed_count=$((installed_count + 1))
-done < <(parse_manifest "${manifest_path}")
+done < <(run_js_yaml | node "${manifest_to_tsv_js}" "${manifest_path}")
 
 (( installed_count > 0 )) || {
   printf 'Manifest did not define any skills: %s\n' "${manifest_path}" >&2

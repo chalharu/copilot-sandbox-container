@@ -4,6 +4,8 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 external_skills_manifest="${repo_root}/containers/control-plane/config/external-skills.yaml"
+git_skills_manifest_installer_bin="${repo_root}/containers/control-plane/bin/install-git-skills-from-manifest"
+git_skills_manifest_parser_js="${repo_root}/containers/control-plane/bin/external-skills-manifest-to-tsv.mjs"
 git_skills_manifest_installer="${script_dir}/install-git-skills-from-manifest.sh"
 legacy_external_skills_ref_file="${repo_root}/containers/control-plane/config/anthropic-skills.ref"
 legacy_doc_coauthor_skill_dir="${repo_root}/.github/skills/doc-coauthoring"
@@ -146,6 +148,8 @@ printf '%s\n' 'repo-change-delivery-skills-test: fetching pinned upstream skills
 
 printf '%s\n' 'repo-change-delivery-skills-test: checking skill files' >&2
 assert_file_present "${external_skills_manifest}"
+assert_file_present "${git_skills_manifest_installer_bin}"
+assert_file_present "${git_skills_manifest_parser_js}"
 assert_file_present "${git_skills_manifest_installer}"
 assert_file_present "${doc_coauthor_skill_file}"
 assert_file_present "${yamllint_skill_file}"
@@ -183,6 +187,9 @@ assert_file_contains "${external_skills_manifest}" 'repository: https://github.c
 assert_file_contains "${external_skills_manifest}" 'skills/doc-coauthoring'
 assert_file_contains "${external_skills_manifest}" 'skills/skill-creator'
 assert_file_contains "${external_skills_manifest}" 'currentValue=main'
+assert_file_contains "${git_skills_manifest_installer_bin}" 'depName=js-yaml'
+assert_file_contains "${git_skills_manifest_installer_bin}" "npm exec --yes --package \"js-yaml@\${js_yaml_version}\""
+assert_file_not_contains "${git_skills_manifest_installer_bin}" "awk '"
 assert_file_contains "${yamllint_skill_file}" 'name: containerized-yamllint-ops'
 assert_file_contains "${yamllint_skill_file}" 'containers/control-plane/skills/containerized-yamllint-ops/scripts/podman-yamllint.sh'
 assert_file_contains "${yamllint_skill_file}" 'localhost/yamllint:test'
@@ -248,6 +255,7 @@ assert_file_not_contains "${bundled_reference_file}" '.github/skills/skill-creat
 
 assert_file_contains "${dockerfile_path}" 'config/external-skills.yaml'
 assert_file_contains "${dockerfile_path}" 'install-git-skills-from-manifest'
+assert_file_contains "${dockerfile_path}" 'external-skills-manifest-to-tsv.mjs'
 assert_file_not_contains "${dockerfile_path}" 'ANTHROPIC_SKILLS_REPOSITORY'
 assert_file_not_contains "${dockerfile_path}" 'DOC_COAUTHORING_SKILL_PATH'
 assert_file_not_contains "${dockerfile_path}" 'SKILL_CREATOR_SKILL_PATH'

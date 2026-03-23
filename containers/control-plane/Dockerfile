@@ -124,6 +124,7 @@ COPY --chmod=755 bin/control-plane-screen /usr/local/bin/control-plane-screen
 COPY --chmod=755 bin/control-plane-entrypoint /usr/local/bin/control-plane-entrypoint
 COPY --chmod=755 bin/control-plane-copilot /usr/local/bin/control-plane-copilot
 COPY --chmod=755 bin/install-git-skills-from-manifest /usr/local/bin/install-git-skills-from-manifest
+COPY --chmod=644 bin/external-skills-manifest-to-tsv.mjs /usr/local/bin/external-skills-manifest-to-tsv.mjs
 COPY --chmod=755 bin/control-plane-job-transfer /usr/local/bin/control-plane-job-transfer
 COPY --chmod=755 bin/control-plane-run /usr/local/bin/control-plane-run
 COPY --chmod=755 bin/control-plane-session /usr/local/bin/control-plane-session
@@ -135,7 +136,10 @@ COPY --chmod=755 bin/k8s-job-logs /usr/local/bin/k8s-job-logs
 COPY --chmod=755 bin/k8s-job-run /usr/local/bin/k8s-job-run
 
 RUN /usr/local/bin/install-git-skills-from-manifest /tmp/external-skills.yaml /usr/local/share/control-plane/skills \
-    && rm -f /tmp/external-skills.yaml /usr/local/bin/install-git-skills-from-manifest \
+    && rm -f \
+        /tmp/external-skills.yaml \
+        /usr/local/bin/install-git-skills-from-manifest \
+        /usr/local/bin/external-skills-manifest-to-tsv.mjs \
     && ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/podman \
     && ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/docker \
     && ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen \
