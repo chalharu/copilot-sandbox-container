@@ -347,15 +347,21 @@ spec:
             # inside the control-plane container. The Podman image cache stays on
             # a disposable emptyDir under /var/lib/control-plane/rootful-podman,
             # while the runtime dir moves to a sibling emptyDir-backed path under
-            # /var/tmp/control-plane/rootful-overlay so Podman temp data avoids
-            # tmpfs-backed /run and does not consume the persistent copilot
-            # session or workspace PVCs.
+            # /var/tmp/control-plane/rootful-overlay so Podman temp data stays on
+            # disposable cache storage instead of the persistent copilot session
+            # or workspace PVCs.
             - name: CONTROL_PLANE_LOCAL_PODMAN_MODE
               value: rootful-service
             - name: CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER
               value: overlay
             - name: CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR
               value: /var/tmp/control-plane/rootful-overlay
+            # Audit logs are written to ~/.copilot/session-state/audit/audit-log.db
+            # on the shared copilot session PVC. Tune the retained row cap to
+            # adjust history depth; when a tool hook sees more than this many
+            # rows, it deletes the oldest rows until roughly 3/4 of the cap remains.
+            - name: CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS
+              value: "10000"
             # `cpulimit` treats 100 as roughly one CPU core, which keeps an
             # interactive Copilot session from monopolizing the node.
             - name: CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT

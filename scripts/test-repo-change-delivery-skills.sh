@@ -88,7 +88,7 @@ assert_file_contains() {
   local path="$1"
   local expected="$2"
 
-  grep -Fq "${expected}" "${path}" || {
+  grep -Fq -- "${expected}" "${path}" || {
     printf 'Expected %s to contain: %s\n' "${path}" "${expected}" >&2
     exit 1
   }
@@ -98,7 +98,7 @@ assert_file_not_contains() {
   local path="$1"
   local unexpected="$2"
 
-  if grep -Fq "${unexpected}" "${path}"; then
+  if grep -Fq -- "${unexpected}" "${path}"; then
     printf 'Did not expect %s to contain: %s\n' "${path}" "${unexpected}" >&2
     exit 1
   fi

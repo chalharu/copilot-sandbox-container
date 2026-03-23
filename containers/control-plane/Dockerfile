@@ -34,12 +34,13 @@ RUN apt-get update -o Acquire::Retries=3 \
         openssh-server \
         podman \
         procps \
-        rclone \
-        screen \
-        slirp4netns \
-        tini \
-        uidmap \
-        vim \
+         rclone \
+         screen \
+         slirp4netns \
+         sqlite3 \
+         tini \
+         uidmap \
+         vim \
     && printf '%s\n' \
         'en_US.UTF-8 UTF-8' \
         'ja_JP.UTF-8 UTF-8' \

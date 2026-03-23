@@ -52,8 +52,8 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 2. 再現性を重視するなら `latest` ではなく commit SHA tag を使う
 3. `control-plane-auth` Secret の `ssh-public-key` を自分の公開鍵へ差し替える
 4. `gh` 認証は Secret 側で管理し、簡単な GitHub.com 用なら `gh-github-token`、複数 host や `git_protocol: ssh` を含めたいなら `gh-hosts.yml` を使う
-5. 永続化は RWX の copilot session PVC と RWO の `/workspace` PVC を基本にし、前者へ `~/.copilot/config.json`、`~/.copilot/command-history-state.json`、`~/.copilot/session-state`、`~/.config/gh`、`~/.ssh`、SSH host key をまとめる。`~/.copilot/tmp` と `/var/lib/control-plane/rootful-podman` は emptyDir の ephemeral storage に置き、sample manifest の rootful-service は `overlay` を既定にする
-6. Copilot CLI の追加設定は `control-plane-config` ConfigMap の `copilot-config.json` へ書き、PVC 上の既存 `~/.copilot/config.json` へ merge させる
+5. 永続化は RWX の copilot session PVC と RWO の `/workspace` PVC を基本にし、前者へ `~/.copilot/config.json`、`~/.copilot/command-history-state.json`、`~/.copilot/session-state`、`~/.copilot/session-state/audit/audit-log.db`、`~/.config/gh`、`~/.ssh`、SSH host key をまとめる。`~/.copilot/tmp` と `/var/lib/control-plane/rootful-podman` は emptyDir の ephemeral storage に置き、sample manifest の rootful-service は `overlay` を既定にする
+6. Copilot CLI の追加設定は `control-plane-config` ConfigMap の `copilot-config.json` へ書き、PVC 上の既存 `~/.copilot/config.json` へ merge させる。監査ログ DB の保持件数は Deployment env の `CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）で調整し、超過時は次の tool hook 実行で古いレコードから削除される
 7. 必要なら `dockerhub-username` / `dockerhub-token` と `copilot-github-token` も入れる
 8. `CONTROL_PLANE_JOB_TRANSFER_IMAGE` は Control Plane image と同じ published tag に合わせる
 9. `storageClassName` と PVC サイズをクラスタに合わせる。`control-plane-copilot-session-pvc` は RWX を想定しているので、sample manifest の `replace-me-with-rwx-storage-class` を実クラスタ向けに置き換える
