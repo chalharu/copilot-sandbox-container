@@ -9,13 +9,6 @@ import { fileURLToPath } from "node:url";
 const currentFile = fileURLToPath(import.meta.url);
 const postToolUseDir = path.dirname(currentFile);
 const repoRoot = path.resolve(postToolUseDir, "..", "..", "..", "..");
-const bundledHooksConfigPath = path.join(
-	repoRoot,
-	"containers",
-	"control-plane",
-	"hooks",
-	"hooks.json",
-);
 const bundledLintersConfigPath = path.join(
 	repoRoot,
 	"containers",
@@ -23,12 +16,6 @@ const bundledLintersConfigPath = path.join(
 	"hooks",
 	"postToolUse",
 	"linters.json",
-);
-const sourceBundledHooksDir = path.join(
-	repoRoot,
-	"containers",
-	"control-plane",
-	"hooks",
 );
 const sourceBundledPostToolUseDir = path.join(
 	repoRoot,
@@ -71,10 +58,6 @@ function setupRepo(t, prefix) {
 	fs.mkdirSync(path.join(repo, ".copilot", "hooks"), {
 		recursive: true,
 	});
-	fs.cpSync(
-		path.join(sourceBundledHooksDir, "hooks.json"),
-		path.join(repo, ".copilot", "hooks", "hooks.json"),
-	);
 	fs.cpSync(
 		sourceBundledPostToolUseDir,
 		path.join(repo, ".copilot", "hooks", "postToolUse"),
@@ -362,36 +345,6 @@ function runHook(repo, env, toolResultType = "success") {
 		}),
 	});
 }
-
-test("hooks config uses one main postToolUse command", () => {
-	const hooksConfig = JSON.parse(
-		fs.readFileSync(bundledHooksConfigPath, "utf8"),
-	);
-	assert.equal(hooksConfig.hooks.postToolUse.length, 1);
-	assert.match(
-		hooksConfig.hooks.postToolUse[0].bash,
-		/\.copilot\/hooks\/postToolUse\/main\.mjs/,
-	);
-	assert.equal(
-		hooksConfig.hooks.postToolUse[0].bash.includes(".github/hooks"),
-		false,
-	);
-	assert.match(hooksConfig.hooks.postToolUse[0].bash, /NODE_COMPILE_CACHE=/);
-	assert.match(hooksConfig.hooks.postToolUse[0].bash, /NPM_CONFIG_CACHE=/);
-	assert.match(
-		hooksConfig.hooks.postToolUse[0].powershell,
-		/\.copilot\/hooks\/postToolUse\/main\.mjs/,
-	);
-	assert.equal(
-		hooksConfig.hooks.postToolUse[0].powershell.includes(".github/hooks"),
-		false,
-	);
-	assert.match(
-		hooksConfig.hooks.postToolUse[0].powershell,
-		/NODE_COMPILE_CACHE/,
-	);
-	assert.match(hooksConfig.hooks.postToolUse[0].powershell, /NPM_CONFIG_CACHE/);
-});
 
 test("linters config defines concrete tools and language pipelines", () => {
 	const lintersConfig = JSON.parse(

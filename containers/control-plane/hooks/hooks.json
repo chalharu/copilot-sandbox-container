@@ -1,11 +1,45 @@
 {
   "version": 1,
   "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "hook_script=\"${HOME}/.copilot/hooks/audit/main.mjs\" && node \"$hook_script\" sessionStart",
+        "powershell": "$hookScript = Join-Path $HOME '.copilot/hooks/audit/main.mjs'; node $hookScript sessionStart",
+        "cwd": ".",
+        "timeoutSec": 30
+      }
+    ],
+    "userPromptSubmitted": [
+      {
+        "type": "command",
+        "bash": "hook_script=\"${HOME}/.copilot/hooks/audit/main.mjs\" && node \"$hook_script\" userPromptSubmitted",
+        "powershell": "$hookScript = Join-Path $HOME '.copilot/hooks/audit/main.mjs'; node $hookScript userPromptSubmitted",
+        "cwd": ".",
+        "timeoutSec": 30
+      }
+    ],
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "hook_script=\"${HOME}/.copilot/hooks/audit/main.mjs\" && node \"$hook_script\" preToolUse",
+        "powershell": "$hookScript = Join-Path $HOME '.copilot/hooks/audit/main.mjs'; node $hookScript preToolUse",
+        "cwd": ".",
+        "timeoutSec": 30
+      }
+    ],
     "postToolUse": [
       {
         "type": "command",
-        "bash": "hook_tmp_root=\"${CONTROL_PLANE_HOOK_TMP_ROOT:-${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane}/hooks}\" && mkdir -p \"$hook_tmp_root\" && hook_script=\"${HOME}/.copilot/hooks/postToolUse/main.mjs\" && NODE_COMPILE_CACHE=\"${NODE_COMPILE_CACHE:-$hook_tmp_root/node-compile-cache}\" NPM_CONFIG_CACHE=\"${NPM_CONFIG_CACHE:-$hook_tmp_root/npm-cache}\" node \"$hook_script\"",
-        "powershell": "$hookTmpRoot = if ($env:CONTROL_PLANE_HOOK_TMP_ROOT) { $env:CONTROL_PLANE_HOOK_TMP_ROOT } elseif ($env:CONTROL_PLANE_TMP_ROOT) { Join-Path $env:CONTROL_PLANE_TMP_ROOT 'hooks' } else { '/var/tmp/control-plane/hooks' }; New-Item -ItemType Directory -Force -Path $hookTmpRoot | Out-Null; $hookScript = Join-Path $HOME '.copilot/hooks/postToolUse/main.mjs'; if (-not $env:NODE_COMPILE_CACHE) { $env:NODE_COMPILE_CACHE = Join-Path $hookTmpRoot 'node-compile-cache' }; if (-not $env:NPM_CONFIG_CACHE) { $env:NPM_CONFIG_CACHE = Join-Path $hookTmpRoot 'npm-cache' }; node $hookScript",
+        "bash": "hook_script=\"${HOME}/.copilot/hooks/audit/main.mjs\" && node \"$hook_script\" postToolUse",
+        "powershell": "$hookScript = Join-Path $HOME '.copilot/hooks/audit/main.mjs'; node $hookScript postToolUse",
+        "cwd": ".",
+        "timeoutSec": 30
+      },
+      {
+        "type": "command",
+        "bash": "hook_script=\"${HOME}/.copilot/hooks/postToolUse/main.mjs\" && node \"$hook_script\"",
+        "powershell": "$hookScript = Join-Path $HOME '.copilot/hooks/postToolUse/main.mjs'; node $hookScript",
         "cwd": ".",
         "timeoutSec": 30
       }

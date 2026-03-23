@@ -7,6 +7,8 @@ control_plane_home="$(getent passwd "${control_plane_user}" | cut -d: -f6)"
 control_plane_workspace="${CONTROL_PLANE_WORKSPACE:-/workspace}"
 copilot_config_path="${control_plane_home}/.copilot/config.json"
 copilot_session_state_dir="${control_plane_home}/.copilot/session-state"
+audit_log_db_path="${copilot_session_state_dir}/audit/audit-log.db"
+audit_log_db_dir="$(dirname "${audit_log_db_path}")"
 gh_config_dir="${control_plane_home}/.config/gh"
 gh_hosts_path="${gh_config_dir}/hosts.yml"
 containers_config_dir="${control_plane_home}/.config/containers"
@@ -44,6 +46,7 @@ dockerhub_username="${DOCKERHUB_USERNAME:-}"
 dockerhub_token="${DOCKERHUB_TOKEN:-}"
 git_user_name="${CONTROL_PLANE_GIT_USER_NAME:-}"
 git_user_email="${CONTROL_PLANE_GIT_USER_EMAIL:-}"
+audit_log_max_records="${CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS:-10000}"
 copilot_cpu_limit_percent="${CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT:-100}"
 copilot_nice_level="${CONTROL_PLANE_COPILOT_NICE_LEVEL:-10}"
 podman_storage_driver="${CONTROL_PLANE_PODMAN_STORAGE_DRIVER:-}"
@@ -105,6 +108,11 @@ case "${rootful_podman_storage_driver}" in
     exit 1
     ;;
 esac
+
+if [[ ! "${audit_log_max_records}" =~ ^[0-9]+$ ]] || (( audit_log_max_records <= 0 )); then
+  printf 'CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS must be a positive integer: %s\n' "${audit_log_max_records}" >&2
+  exit 1
+fi
 
 podman_state_dir="${podman_state_root}/${podman_storage_driver}"
 podman_graphroot="${podman_state_dir}/storage"
@@ -701,6 +709,7 @@ mkdir -p \
   "${control_plane_workspace}" \
   "${podman_state_root}" \
   "${copilot_session_state_dir}" \
+  "${audit_log_db_dir}" \
   "${podman_state_dir}" \
   "${screen_dir}" \
   "${tmp_root}" \
@@ -729,6 +738,7 @@ safe_chown_tree "${control_plane_user}:${control_plane_user}" \
   "${control_plane_home}/.ssh" \
   "${copilot_hooks_dir}" \
   "${control_plane_workspace}" \
+  "${audit_log_db_dir}" \
   "${job_transfer_root}" \
   "${podman_state_dir}" \
   "${screen_dir}" \
@@ -742,6 +752,7 @@ ensure_path_ownership "${control_plane_user}:${control_plane_user}" \
   "${control_plane_home}/.copilot" \
   "${copilot_hooks_dir}" \
   "${copilot_session_state_dir}" \
+  "${audit_log_db_dir}" \
   "${podman_state_root}" \
   "${podman_state_dir}" \
   "${podman_graphroot}" \
@@ -776,6 +787,7 @@ chmod 700 \
   "${tmp_dir}" \
   "${node_compile_cache_dir}" \
   "${npm_cache_dir}" \
+  "${audit_log_db_dir}" \
   "${job_transfer_root}" \
   "${screen_dir}"
 # Jobs need to read the public SSH host key from an unprivileged shell to seed known_hosts.
@@ -909,6 +921,8 @@ fi
   write_runtime_var CONTROL_PLANE_HOOK_TMP_ROOT "${hook_tmp_root}"
   write_runtime_var CONTROL_PLANE_NODE_COMPILE_CACHE_DIR "${node_compile_cache_dir}"
   write_runtime_var CONTROL_PLANE_NPM_CACHE_DIR "${npm_cache_dir}"
+  write_runtime_var CONTROL_PLANE_AUDIT_LOG_DB_PATH "${audit_log_db_path}"
+  write_runtime_var CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS "${audit_log_max_records}"
   write_runtime_var XDG_RUNTIME_DIR "${runtime_dir}"
   write_runtime_var TMPDIR "${tmp_dir}"
   write_runtime_var NODE_COMPILE_CACHE "${node_compile_cache_dir}"
