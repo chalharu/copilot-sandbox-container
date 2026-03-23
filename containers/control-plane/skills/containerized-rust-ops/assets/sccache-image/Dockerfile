@@ -6,10 +6,12 @@ ARG SCCACHE_RELEASE_BASE_URL=https://github.com/mozilla/sccache/releases/downloa
 
 SHELL ["/bin/ash", "-euxo", "pipefail", "-c"]
 
+# Alpine repositories roll package revisions forward, so exact apk pins make main-branch publish builds brittle.
+# hadolint ignore=DL3018
 RUN apk add --no-cache \
-    ca-certificates=20250911-r0 \
-    curl=8.14.1-r2 \
-    tar=1.35-r2
+    ca-certificates \
+    curl \
+    tar
 
 RUN case "$(apk --print-arch)" in \
       x86_64) asset="sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz" ;; \
