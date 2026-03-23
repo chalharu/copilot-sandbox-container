@@ -666,6 +666,7 @@ mkdir -p \
   "${copilot_session_state_dir}" \
   "${podman_state_dir}" \
   "${screen_dir}" \
+  "${tmp_root}" \
   "${hook_tmp_root}" \
   "${tmp_dir}" \
   "${node_compile_cache_dir}" \
@@ -693,6 +694,7 @@ safe_chown_tree "${control_plane_user}:${control_plane_user}" \
   "${job_transfer_root}" \
   "${podman_state_dir}" \
   "${screen_dir}" \
+  "${tmp_root}" \
   "${hook_tmp_root}" \
   "${tmp_dir}" \
   "${node_compile_cache_dir}" \
@@ -708,6 +710,7 @@ ensure_path_ownership "${control_plane_user}:${control_plane_user}" \
   "${podman_graphroot}/volumes" \
   "${podman_runroot}" \
   "${screen_dir}" \
+  "${tmp_root}" \
   "${hook_tmp_root}" \
   "${tmp_dir}" \
   "${node_compile_cache_dir}" \
@@ -729,6 +732,7 @@ chmod 755 "${control_plane_home}"
 chmod 700 \
   "${control_plane_home}/.ssh" \
   "${runtime_dir}" \
+  "${tmp_root}" \
   "${hook_tmp_root}" \
   "${tmp_dir}" \
   "${node_compile_cache_dir}" \

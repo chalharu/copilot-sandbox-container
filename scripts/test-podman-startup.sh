@@ -159,6 +159,7 @@ cat > "${workdir}/rootful-startup-check.sh" <<'EOF'
 set -euo pipefail
 
 rootful_storage_conf=/var/tmp/control-plane/rootful-overlay/storage.conf
+copilot_uid="$(id -u copilot)"
 
 grep -q '^CONTAINER_HOST=unix:///var/tmp/control-plane/rootful-overlay/podman-root.sock$' /home/copilot/.config/control-plane/runtime.env
 grep -qx 'driver = "overlay"' "${rootful_storage_conf}"
@@ -169,6 +170,12 @@ if [[ -e /dev/fuse ]]; then
 else
   ! grep -q 'mount_program' "${rootful_storage_conf}"
 fi
+su -s /bin/bash copilot -c '
+  test -w /var/tmp/control-plane
+  mkdir -p "/var/tmp/control-plane/run-'"${copilot_uid}"'" "/var/tmp/control-plane/tmp-'"${copilot_uid}"'"
+  test -w "/var/tmp/control-plane/run-'"${copilot_uid}"'"
+  test -w "/var/tmp/control-plane/tmp-'"${copilot_uid}"'"
+'
 printf '%s\n' rootful-ok
 EOF
 chmod +x "${workdir}/rootful-startup-check.sh"
