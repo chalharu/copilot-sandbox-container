@@ -3,6 +3,7 @@ FROM docker.io/library/rust:1.94.0-bookworm@sha256:365468470075493dc4583f4738700
 WORKDIR /build/control-plane-exec-policy
 COPY exec-policy-preload/Cargo.toml exec-policy-preload/Cargo.lock ./
 COPY exec-policy-preload/src ./src
+COPY hooks/preToolUse/deny-rules.yaml ./hooks/preToolUse/deny-rules.yaml
 RUN cargo test --locked --release \
     && cargo build --locked --release
 
@@ -129,12 +130,7 @@ COPY --chmod=644 config/external-skills.yaml /tmp/external-skills.yaml
 COPY skills/ /usr/local/share/control-plane/skills/
 COPY hooks/ /usr/local/share/control-plane/hooks/
 COPY --from=exec-policy-builder /build/control-plane-exec-policy/target/release/libcontrol_plane_exec_policy.so /usr/local/lib/libcontrol_plane_exec_policy.so
-RUN npm ci --prefix /usr/local/share/control-plane/hooks/preToolUse \
-        --ignore-scripts \
-        --omit=dev \
-        --no-audit \
-        --no-fund \
-    && npm cache clean --force
+COPY --from=exec-policy-builder /build/control-plane-exec-policy/target/release/control-plane-pre-tool-use-hook /usr/local/share/control-plane/hooks/preToolUse/main
 COPY --chmod=755 bin/control-plane-podman /usr/local/bin/control-plane-podman
 COPY --chmod=755 bin/control-plane-screen /usr/local/bin/control-plane-screen
 COPY --chmod=755 bin/control-plane-entrypoint /usr/local/bin/control-plane-entrypoint
@@ -164,6 +160,7 @@ RUN /usr/local/bin/install-git-skills-from-manifest /tmp/external-skills.yaml /u
     && find /usr/local/share/control-plane/skills -type f -exec chmod 644 {} + \
     && find /usr/local/share/control-plane/hooks -type d -exec chmod 755 {} + \
     && find /usr/local/share/control-plane/hooks -type f -exec chmod 644 {} + \
+    && chmod 755 /usr/local/share/control-plane/hooks/preToolUse/main \
     && for git_hook in pre-commit pre-push; do \
          if [ -f "/usr/local/share/control-plane/hooks/git/${git_hook}" ]; then chmod 755 "/usr/local/share/control-plane/hooks/git/${git_hook}"; fi; \
        done \

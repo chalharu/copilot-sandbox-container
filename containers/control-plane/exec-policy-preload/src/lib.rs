@@ -1,13 +1,17 @@
-mod config;
-mod git;
+pub mod command;
+pub mod config;
+pub mod hook;
+mod policy;
+mod shell;
 
+use command::{CommandInvocation, EnvBinding};
 use libc::{c_char, c_int, c_void};
 use std::ffi::CStr;
-use std::path::Path;
 use std::sync::OnceLock;
 
 type ExecveFn =
     unsafe extern "C" fn(*const c_char, *const *const c_char, *const *const c_char) -> c_int;
+type ExecvFn = unsafe extern "C" fn(*const c_char, *const *const c_char) -> c_int;
 type ExecveatFn = unsafe extern "C" fn(
     c_int,
     *const c_char,
@@ -24,16 +28,15 @@ type PosixSpawnFn = unsafe extern "C" fn(
     *const *mut c_char,
 ) -> c_int;
 
-struct PolicyEvaluation {
-    deny_reason: Option<String>,
-}
-
 static EXECVE_SYMBOL: OnceLock<usize> = OnceLock::new();
+static EXECV_SYMBOL: OnceLock<usize> = OnceLock::new();
+static EXECVP_SYMBOL: OnceLock<usize> = OnceLock::new();
+static EXECVPE_SYMBOL: OnceLock<usize> = OnceLock::new();
 static EXECVEAT_SYMBOL: OnceLock<usize> = OnceLock::new();
 static POSIX_SPAWN_SYMBOL: OnceLock<usize> = OnceLock::new();
 static POSIX_SPAWNP_SYMBOL: OnceLock<usize> = OnceLock::new();
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 /// # Safety
 ///
 /// This function replaces libc's `execve` via `LD_PRELOAD` and must be called
@@ -43,16 +46,65 @@ pub unsafe extern "C" fn execve(
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> c_int {
-    if let Some(reason) = block_reason_for_exec(filename, argv) {
+    if let Some(reason) = block_reason_for_exec(filename, argv, envp) {
         emit_policy_message(&reason);
         set_errno(libc::EACCES);
         return -1;
     }
 
-    real_execve()(filename, argv, envp)
+    unsafe { real_execve()(filename, argv, envp) }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// This function replaces libc's `execv` via `LD_PRELOAD` and must be called
+/// with the same valid pointers and C ABI contract that libc expects.
+pub unsafe extern "C" fn execv(path: *const c_char, argv: *const *const c_char) -> c_int {
+    if let Some(reason) = block_reason_for_exec(path, argv, std::ptr::null()) {
+        emit_policy_message(&reason);
+        set_errno(libc::EACCES);
+        return -1;
+    }
+
+    unsafe { real_execv()(path, argv) }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// This function replaces libc's `execvp` via `LD_PRELOAD` and must be called
+/// with the same valid pointers and C ABI contract that libc expects.
+pub unsafe extern "C" fn execvp(file: *const c_char, argv: *const *const c_char) -> c_int {
+    if let Some(reason) = block_reason_for_exec(file, argv, std::ptr::null()) {
+        emit_policy_message(&reason);
+        set_errno(libc::EACCES);
+        return -1;
+    }
+
+    unsafe { real_execvp()(file, argv) }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// This function replaces libc's `execvpe` via `LD_PRELOAD` and must be called
+/// with the same valid pointers and C ABI contract that libc expects.
+pub unsafe extern "C" fn execvpe(
+    file: *const c_char,
+    argv: *const *const c_char,
+    envp: *const *const c_char,
+) -> c_int {
+    if let Some(reason) = block_reason_for_exec(file, argv, envp) {
+        emit_policy_message(&reason);
+        set_errno(libc::EACCES);
+        return -1;
+    }
+
+    unsafe { real_execvpe()(file, argv, envp) }
+}
+
+#[unsafe(no_mangle)]
 /// # Safety
 ///
 /// This function replaces libc's `execveat` via `LD_PRELOAD` and must be called
@@ -64,16 +116,16 @@ pub unsafe extern "C" fn execveat(
     envp: *const *const c_char,
     flags: c_int,
 ) -> c_int {
-    if let Some(reason) = block_reason_for_exec(pathname, argv) {
+    if let Some(reason) = block_reason_for_exec(pathname, argv, envp) {
         emit_policy_message(&reason);
         set_errno(libc::EACCES);
         return -1;
     }
 
-    real_execveat()(dirfd, pathname, argv, envp, flags)
+    unsafe { real_execveat()(dirfd, pathname, argv, envp, flags) }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 /// # Safety
 ///
 /// This function replaces libc's `posix_spawn` via `LD_PRELOAD` and must be
@@ -86,15 +138,15 @@ pub unsafe extern "C" fn posix_spawn(
     argv: *const *mut c_char,
     envp: *const *mut c_char,
 ) -> c_int {
-    if let Some(reason) = block_reason_for_exec(path, argv.cast()) {
+    if let Some(reason) = block_reason_for_exec(path, argv.cast(), envp.cast()) {
         emit_policy_message(&reason);
         return libc::EACCES;
     }
 
-    real_posix_spawn()(pid, path, file_actions, attrp, argv, envp)
+    unsafe { real_posix_spawn()(pid, path, file_actions, attrp, argv, envp) }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 /// # Safety
 ///
 /// This function replaces libc's `posix_spawnp` via `LD_PRELOAD` and must be
@@ -107,60 +159,90 @@ pub unsafe extern "C" fn posix_spawnp(
     argv: *const *mut c_char,
     envp: *const *mut c_char,
 ) -> c_int {
-    if let Some(reason) = block_reason_for_exec(file, argv.cast()) {
+    if let Some(reason) = block_reason_for_exec(file, argv.cast(), envp.cast()) {
         emit_policy_message(&reason);
         return libc::EACCES;
     }
 
-    real_posix_spawnp()(pid, file, file_actions, attrp, argv, envp)
+    unsafe { real_posix_spawnp()(pid, file, file_actions, attrp, argv, envp) }
 }
 
-fn block_reason_for_exec(path: *const c_char, argv: *const *const c_char) -> Option<String> {
+fn block_reason_for_exec(
+    path: *const c_char,
+    argv: *const *const c_char,
+    envp: *const *const c_char,
+) -> Option<String> {
     let command_path = path_to_string(path);
     let argv = argv_to_vec(argv);
-
+    let env_bindings = envp_to_bindings(envp);
     let cwd = std::env::current_dir().ok();
-    match evaluate_exec_policy(&command_path, &argv, cwd.as_deref()) {
-        Ok(evaluation) => evaluation.deny_reason,
-        Err(error) if git::looks_like_git_invocation(&command_path, &argv) => Some(error),
-        Err(_) => None,
+    let repo_root = cwd.as_deref().and_then(config::discover_repo_root).or(cwd);
+
+    let rules = match config::load_rules(repo_root.as_deref()) {
+        Ok(rules) => rules,
+        Err(error) => {
+            emit_policy_message(&format!("failed to load rules: {error}"));
+            return None;
+        }
+    };
+
+    let mut invocation = CommandInvocation::from_exec(&command_path, &argv, env_bindings)?;
+    for _ in 0..4 {
+        if let Some(reason) = policy::match_exec_rule(&rules, &invocation) {
+            return Some(reason);
+        }
+        let Some(next_invocation) = invocation.unwrap_env_wrapper() else {
+            break;
+        };
+        invocation = next_invocation;
     }
-}
-
-fn evaluate_exec_policy(
-    command_path: &str,
-    argv: &[String],
-    cwd: Option<&Path>,
-) -> Result<PolicyEvaluation, String> {
-    let is_git_invocation = git::looks_like_git_invocation(command_path, argv);
-    let repo_root = cwd.and_then(config::discover_repo_root);
-    let rules = config::load_rules(repo_root.as_deref())?;
-    let candidates = git::build_command_candidates(command_path, argv);
-
-    let deny_reason = find_matching_reason(&rules, &candidates);
-
-    let _ = is_git_invocation;
-    Ok(PolicyEvaluation { deny_reason })
+    None
 }
 
 unsafe fn real_execve() -> ExecveFn {
-    std::mem::transmute(*EXECVE_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"execve\0")))
+    unsafe {
+        std::mem::transmute(*EXECVE_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"execve\0")))
+    }
+}
+
+unsafe fn real_execv() -> ExecvFn {
+    unsafe {
+        std::mem::transmute(*EXECV_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"execv\0")))
+    }
+}
+
+unsafe fn real_execvp() -> ExecvFn {
+    unsafe {
+        std::mem::transmute(*EXECVP_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"execvp\0")))
+    }
+}
+
+unsafe fn real_execvpe() -> ExecveFn {
+    unsafe {
+        std::mem::transmute(*EXECVPE_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"execvpe\0")))
+    }
 }
 
 unsafe fn real_execveat() -> ExecveatFn {
-    std::mem::transmute(*EXECVEAT_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"execveat\0")))
+    unsafe {
+        std::mem::transmute(*EXECVEAT_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"execveat\0")))
+    }
 }
 
 unsafe fn real_posix_spawn() -> PosixSpawnFn {
-    std::mem::transmute(
-        *POSIX_SPAWN_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"posix_spawn\0")),
-    )
+    unsafe {
+        std::mem::transmute(
+            *POSIX_SPAWN_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"posix_spawn\0")),
+        )
+    }
 }
 
 unsafe fn real_posix_spawnp() -> PosixSpawnFn {
-    std::mem::transmute(
-        *POSIX_SPAWNP_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"posix_spawnp\0")),
-    )
+    unsafe {
+        std::mem::transmute(
+            *POSIX_SPAWNP_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"posix_spawnp\0")),
+        )
+    }
 }
 
 fn resolve_symbol_or_abort(name: &'static [u8]) -> usize {
@@ -216,8 +298,38 @@ fn argv_to_vec(argv: *const *const c_char) -> Vec<String> {
         );
         index += 1;
     }
-
     collected
+}
+
+fn envp_to_bindings(envp: *const *const c_char) -> Vec<EnvBinding> {
+    if envp.is_null() {
+        return std::env::vars()
+            .map(|(name, value)| EnvBinding {
+                name,
+                value: Some(value),
+            })
+            .collect();
+    }
+
+    let mut bindings = Vec::new();
+    let mut index = 0;
+    loop {
+        let current = unsafe { *envp.add(index) };
+        if current.is_null() {
+            break;
+        }
+        let raw = unsafe { CStr::from_ptr(current) }
+            .to_string_lossy()
+            .into_owned();
+        if let Some((name, value)) = raw.split_once('=') {
+            bindings.push(EnvBinding {
+                name: name.to_string(),
+                value: Some(value.to_string()),
+            });
+        }
+        index += 1;
+    }
+    bindings
 }
 
 fn set_errno(value: c_int) {
@@ -226,34 +338,47 @@ fn set_errno(value: c_int) {
     }
 }
 
-fn find_matching_reason(
-    rules: &[config::CompiledPatternEntry],
-    candidates: &[String],
-) -> Option<String> {
-    rules.iter().find_map(|entry| {
-        entry
-            .regexes
-            .iter()
-            .any(|regex| candidates.iter().any(|candidate| regex.is_match(candidate)))
-            .then(|| entry.reason.clone())
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use super::find_matching_reason;
-    use crate::config::CompiledPatternEntry;
+    use crate::command::{CommandInvocation, EnvBinding};
+    use crate::config::{
+        CompiledNormalization, CompiledProtectedEnv, CompiledRule, CompiledRuleGroup,
+    };
+    use crate::policy::match_exec_rule;
     use regex::Regex;
 
     #[test]
-    fn matches_normalized_candidates_against_rules() {
-        let rules = vec![CompiledPatternEntry {
-            reason: "repo-local policy".to_string(),
-            regexes: vec![Regex::new("^git status(?: .+)? --short(?: |$)").unwrap()],
+    fn exec_rule_matching_uses_generic_facts() {
+        let groups = vec![CompiledRuleGroup {
+            tool_name: "bash".to_string(),
+            column: "command".to_string(),
+            normalization: CompiledNormalization::default(),
+            rules: vec![CompiledRule {
+                reason: "blocked".to_string(),
+                all_patterns: vec![
+                    Regex::new("^basename:git$").unwrap(),
+                    Regex::new("^arg:push$").unwrap(),
+                ],
+                any_patterns: vec![Regex::new("^arg:-f$").unwrap()],
+                protected_env: vec![CompiledProtectedEnv {
+                    name_patterns: vec![Regex::new("^GIT_CONFIG_GLOBAL$").unwrap()],
+                    allow_value_patterns: Vec::new(),
+                }],
+            }],
         }];
+        let invocation = CommandInvocation::from_exec(
+            "git",
+            &["git".to_string(), "push".to_string(), "-f".to_string()],
+            vec![EnvBinding {
+                name: "GIT_CONFIG_GLOBAL".to_string(),
+                value: Some("/tmp/evil".to_string()),
+            }],
+        )
+        .unwrap();
 
-        let reason = find_matching_reason(&rules, &[String::from("git status --short")]);
-
-        assert_eq!(reason.as_deref(), Some("repo-local policy"));
+        assert_eq!(
+            match_exec_rule(&groups, &invocation).as_deref(),
+            Some("blocked")
+        );
     }
 }

@@ -8,10 +8,45 @@ pub const DEFAULT_RULES_PATH: &str =
     "/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml";
 const REPO_RULES_RELATIVE_PATH: &str = ".github/pre-tool-use-rules.yaml";
 
+#[derive(Clone, Debug, Default)]
+pub struct CompiledNormalization {
+    pub option_value_matchers: Vec<Regex>,
+}
+
+impl CompiledNormalization {
+    pub fn matches_value_option(&self, token: &str) -> bool {
+        self.option_value_matchers
+            .iter()
+            .any(|regex| regex.is_match(token))
+    }
+}
+
 #[derive(Clone, Debug)]
-pub struct CompiledPatternEntry {
+pub struct CompiledRuleGroup {
+    pub tool_name: String,
+    pub column: String,
+    pub normalization: CompiledNormalization,
+    pub rules: Vec<CompiledRule>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CompiledRule {
     pub reason: String,
-    pub regexes: Vec<Regex>,
+    pub all_patterns: Vec<Regex>,
+    pub any_patterns: Vec<Regex>,
+    pub protected_env: Vec<CompiledProtectedEnv>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CompiledProtectedEnv {
+    pub name_patterns: Vec<Regex>,
+    pub allow_value_patterns: Vec<Regex>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawNormalization {
+    #[serde(default, rename = "optionValueMatchers")]
+    option_value_matchers: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -19,16 +54,31 @@ struct RawRuleGroup {
     #[serde(rename = "toolName")]
     tool_name: String,
     column: String,
-    patterns: Vec<RawPatternEntry>,
+    #[serde(default)]
+    normalization: RawNormalization,
+    rules: Vec<RawRule>,
 }
 
 #[derive(Debug, Deserialize)]
-struct RawPatternEntry {
-    patterns: Vec<String>,
+struct RawRule {
+    #[serde(default)]
+    all: Vec<String>,
+    #[serde(default)]
+    any: Vec<String>,
+    #[serde(default, rename = "protectedEnv")]
+    protected_env: Vec<RawProtectedEnv>,
     reason: String,
 }
 
-static BUNDLED_RULES: OnceLock<Result<Vec<CompiledPatternEntry>, String>> = OnceLock::new();
+#[derive(Debug, Deserialize)]
+struct RawProtectedEnv {
+    #[serde(default, rename = "namePatterns")]
+    name_patterns: Vec<String>,
+    #[serde(default, rename = "allowValuePatterns")]
+    allow_value_patterns: Vec<String>,
+}
+
+static BUNDLED_RULES: OnceLock<Result<Vec<CompiledRuleGroup>, String>> = OnceLock::new();
 
 pub fn discover_repo_root(start: &Path) -> Option<PathBuf> {
     let mut current = Some(start);
@@ -48,26 +98,44 @@ pub fn resolve_rules_path() -> PathBuf {
             return PathBuf::from(trimmed);
         }
     }
-    PathBuf::from(DEFAULT_RULES_PATH)
-}
 
-pub fn load_rules(repo_root: Option<&Path>) -> Result<Vec<CompiledPatternEntry>, String> {
-    let mut rules = load_bundled_rules()?.clone();
-    if let Some(root) = repo_root {
-        let repo_rules_path = root.join(REPO_RULES_RELATIVE_PATH);
-        rules.extend(load_rule_file(&repo_rules_path, true)?);
+    let installed = PathBuf::from(DEFAULT_RULES_PATH);
+    if installed.exists() {
+        return installed;
     }
-    Ok(rules)
+
+    for relative_path in [
+        "../hooks/preToolUse/deny-rules.yaml",
+        "./hooks/preToolUse/deny-rules.yaml",
+    ] {
+        let workspace_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(relative_path)
+            .canonicalize()
+            .unwrap_or_else(|_| Path::new(env!("CARGO_MANIFEST_DIR")).join(relative_path));
+        if workspace_path.exists() {
+            return workspace_path;
+        }
+    }
+
+    installed
 }
 
-fn load_bundled_rules() -> Result<&'static Vec<CompiledPatternEntry>, String> {
+pub fn load_rules(repo_root: Option<&Path>) -> Result<Vec<CompiledRuleGroup>, String> {
+    let mut groups = load_bundled_rules()?.clone();
+    if let Some(root) = repo_root {
+        groups.extend(load_rule_file(&root.join(REPO_RULES_RELATIVE_PATH), true)?);
+    }
+    Ok(groups)
+}
+
+fn load_bundled_rules() -> Result<&'static Vec<CompiledRuleGroup>, String> {
     match BUNDLED_RULES.get_or_init(|| load_rule_file(&resolve_rules_path(), false)) {
-        Ok(rules) => Ok(rules),
+        Ok(groups) => Ok(groups),
         Err(error) => Err(error.clone()),
     }
 }
 
-fn load_rule_file(path: &Path, optional: bool) -> Result<Vec<CompiledPatternEntry>, String> {
+fn load_rule_file(path: &Path, optional: bool) -> Result<Vec<CompiledRuleGroup>, String> {
     let raw = match fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(error) if optional && error.kind() == std::io::ErrorKind::NotFound => {
@@ -85,8 +153,8 @@ fn load_rule_file(path: &Path, optional: bool) -> Result<Vec<CompiledPatternEntr
     parse_rule_groups(&raw, path)
 }
 
-fn parse_rule_groups(raw: &str, path: &Path) -> Result<Vec<CompiledPatternEntry>, String> {
-    let groups: Vec<RawRuleGroup> = serde_yaml::from_str(raw).map_err(|error| {
+fn parse_rule_groups(raw: &str, path: &Path) -> Result<Vec<CompiledRuleGroup>, String> {
+    let groups: Vec<RawRuleGroup> = serde_yml::from_str(raw).map_err(|error| {
         format!(
             "failed to parse exec policy rules at {}: {}",
             path.display(),
@@ -94,31 +162,18 @@ fn parse_rule_groups(raw: &str, path: &Path) -> Result<Vec<CompiledPatternEntry>
         )
     })?;
 
-    let mut entries = Vec::new();
-    for (group_index, group) in groups.into_iter().enumerate() {
-        validate_rule_group(&group, path, group_index)?;
-        if group.tool_name != "bash" || group.column != "command" {
-            continue;
-        }
-
-        for (pattern_index, pattern) in group.patterns.into_iter().enumerate() {
-            entries.push(compile_pattern_entry(
-                pattern,
-                path,
-                group_index,
-                pattern_index,
-            )?);
-        }
-    }
-
-    Ok(entries)
+    groups
+        .into_iter()
+        .enumerate()
+        .map(|(group_index, group)| compile_rule_group(group, path, group_index))
+        .collect()
 }
 
-fn validate_rule_group(
-    group: &RawRuleGroup,
+fn compile_rule_group(
+    group: RawRuleGroup,
     path: &Path,
     group_index: usize,
-) -> Result<(), String> {
+) -> Result<CompiledRuleGroup, String> {
     let description = format!("group {} in {}", group_index + 1, path.display());
     if group.tool_name.trim().is_empty() {
         return Err(format!("{description} must define a non-empty toolName."));
@@ -126,56 +181,134 @@ fn validate_rule_group(
     if group.column.trim().is_empty() {
         return Err(format!("{description} must define a non-empty column."));
     }
-    if group.patterns.is_empty() {
+    if group.rules.is_empty() {
         return Err(format!(
-            "{description} must define patterns as a non-empty array."
+            "{description} must define rules as a non-empty array."
         ));
     }
-    Ok(())
+
+    Ok(CompiledRuleGroup {
+        tool_name: group.tool_name,
+        column: group.column,
+        normalization: CompiledNormalization {
+            option_value_matchers: compile_patterns(
+                group.normalization.option_value_matchers,
+                &format!("normalization.optionValueMatchers in {description}"),
+            )?,
+        },
+        rules: group
+            .rules
+            .into_iter()
+            .enumerate()
+            .map(|(rule_index, rule)| compile_rule(rule, path, group_index, rule_index))
+            .collect::<Result<Vec<_>, _>>()?,
+    })
 }
 
-fn compile_pattern_entry(
-    pattern: RawPatternEntry,
+fn compile_rule(
+    rule: RawRule,
     path: &Path,
     group_index: usize,
-    pattern_index: usize,
-) -> Result<CompiledPatternEntry, String> {
+    rule_index: usize,
+) -> Result<CompiledRule, String> {
     let description = format!(
-        "pattern {} in group {} of {}",
-        pattern_index + 1,
+        "rule {} in group {} of {}",
+        rule_index + 1,
         group_index + 1,
         path.display()
     );
-
-    if pattern.reason.trim().is_empty() {
+    if rule.reason.trim().is_empty() {
         return Err(format!("{description} must define a non-empty reason."));
     }
-    if pattern.patterns.is_empty() || pattern.patterns.iter().any(|entry| entry.is_empty()) {
+    if rule.all.is_empty() && rule.any.is_empty() && rule.protected_env.is_empty() {
         return Err(format!(
-            "{description} must define patterns as a non-empty array of strings."
+            "{description} must define at least one of all, any, or protectedEnv."
         ));
     }
 
-    let regexes = pattern
-        .patterns
+    Ok(CompiledRule {
+        reason: rule.reason,
+        all_patterns: compile_patterns(rule.all, &format!("all in {description}"))?,
+        any_patterns: compile_patterns(rule.any, &format!("any in {description}"))?,
+        protected_env: rule
+            .protected_env
+            .into_iter()
+            .enumerate()
+            .map(|(env_index, entry)| compile_protected_env(entry, &description, env_index))
+            .collect::<Result<Vec<_>, _>>()?,
+    })
+}
+
+fn compile_protected_env(
+    entry: RawProtectedEnv,
+    rule_description: &str,
+    env_index: usize,
+) -> Result<CompiledProtectedEnv, String> {
+    let description = format!("protectedEnv {} in {rule_description}", env_index + 1);
+    if entry.name_patterns.is_empty() {
+        return Err(format!(
+            "{description} must define namePatterns as a non-empty array."
+        ));
+    }
+
+    Ok(CompiledProtectedEnv {
+        name_patterns: compile_patterns(
+            entry.name_patterns,
+            &format!("namePatterns in {description}"),
+        )?,
+        allow_value_patterns: compile_patterns(
+            entry.allow_value_patterns,
+            &format!("allowValuePatterns in {description}"),
+        )?,
+    })
+}
+
+fn compile_patterns(entries: Vec<String>, description: &str) -> Result<Vec<Regex>, String> {
+    entries
         .into_iter()
         .enumerate()
-        .map(|(regex_index, entry)| {
-            Regex::new(&entry).map_err(|error| {
+        .map(|(index, entry)| {
+            if entry.is_empty() {
+                return Err(format!(
+                    "pattern {} in {} must be a non-empty string.",
+                    index + 1,
+                    description
+                ));
+            }
+            let expanded = expand_env_placeholders(&entry);
+            Regex::new(&expanded).map_err(|error| {
                 format!(
                     "invalid regex pattern {} in {}: {}",
-                    regex_index + 1,
+                    index + 1,
                     description,
                     error
                 )
             })
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect()
+}
 
-    Ok(CompiledPatternEntry {
-        reason: pattern.reason,
-        regexes,
-    })
+fn expand_env_placeholders(input: &str) -> String {
+    static PLACEHOLDER_REGEX: OnceLock<Regex> = OnceLock::new();
+    let placeholder_regex = PLACEHOLDER_REGEX
+        .get_or_init(|| Regex::new(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}").expect("placeholder regex"));
+
+    let mut expanded = String::with_capacity(input.len());
+    let mut last = 0;
+    for captures in placeholder_regex.captures_iter(input) {
+        let Some(full_match) = captures.get(0) else {
+            continue;
+        };
+        let Some(name_match) = captures.get(1) else {
+            continue;
+        };
+        expanded.push_str(&input[last..full_match.start()]);
+        let value = std::env::var(name_match.as_str()).unwrap_or_default();
+        expanded.push_str(&regex::escape(&value));
+        last = full_match.end();
+    }
+    expanded.push_str(&input[last..]);
+    expanded
 }
 
 #[cfg(test)]
@@ -186,27 +319,52 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn parse_rule_groups_keeps_bash_command_entries_only() {
+    fn parse_rule_groups_keeps_generic_rule_groups() {
         let yaml = r#"
 - toolName: bash
   column: command
-  patterns:
-    - patterns:
-        - '^git push(?: .+)? -f(?: |$)'
-      reason: force push blocked
-- toolName: view
-  column: path
-  patterns:
-    - patterns:
-        - '.*'
-      reason: ignored
+  normalization:
+    optionValueMatchers:
+      - '^-m$'
+  rules:
+    - all:
+        - '^basename:git$'
+        - '^arg:commit$'
+      any:
+        - '^arg:--no-verify$'
+        - '^arg:-n$'
+      reason: commit blocked
 "#;
 
-        let rules = parse_rule_groups(yaml, Path::new("/tmp/rules.yaml")).unwrap();
+        let groups = parse_rule_groups(yaml, Path::new("/tmp/rules.yaml")).unwrap();
 
-        assert_eq!(rules.len(), 1);
-        assert_eq!(rules[0].reason, "force push blocked");
-        assert!(rules[0].regexes[0].is_match("git push -f origin HEAD"));
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].rules.len(), 1);
+        assert_eq!(groups[0].normalization.option_value_matchers.len(), 1);
+    }
+
+    #[test]
+    fn parse_rule_groups_expands_env_placeholders() {
+        unsafe {
+            std::env::set_var("CONTROL_PLANE_TEST_ALLOWED_PATH", "/tmp/allowed");
+        }
+        let yaml = r#"
+- toolName: bash
+  column: command
+  rules:
+    - protectedEnv:
+        - namePatterns:
+            - '^GIT_CONFIG_GLOBAL$'
+          allowValuePatterns:
+            - '^${CONTROL_PLANE_TEST_ALLOWED_PATH}$'
+      reason: env blocked
+"#;
+
+        let groups = parse_rule_groups(yaml, Path::new("/tmp/rules.yaml")).unwrap();
+
+        assert!(
+            groups[0].rules[0].protected_env[0].allow_value_patterns[0].is_match("/tmp/allowed")
+        );
     }
 
     #[test]

@@ -1,24 +1,26 @@
 # preToolUse policy hook
 
-Copilot CLI の `preToolUse` hook で、bundled な禁止コマンドポリシーを適用する hook です。`bash` tool で実行される Git コマンドを shell 風に分解し、宣言的な deny rule に一致したものを `permissionDecision: "deny"` で拒否します。同じ YAML rule は、Control Plane runtime に注入される Rust 製 `LD_PRELOAD` exec policy library からも再利用され、`node` や shell script が実行した実プロセスの `git` invocation も exec 時に拒否します。
+Copilot CLI の `preToolUse` hook で、bundled な禁止コマンドポリシーを適用する Rust hook です。hook binary と `LD_PRELOAD` exec policy library は同じ Rust engine と同じ YAML rule を共有し、`node` や shell script 経由の実プロセス実行も含めて一貫した deny 判定を行います。
 
 ## Config
 
-bundled rule は `deny-rules.yaml` で管理します。loader には `js-yaml` を使い、schema 自体は `toolName` / `column` を group の上位に寄せた compact 形式にしています。
+bundled rule は `deny-rules.yaml` で管理します。schema は `toolName` / `column` を group の上位に寄せつつ、generic な command fact matching と protected environment rule を表現できる compact YAML です。
 
 対象 repo では任意で `.github/pre-tool-use-rules.yaml` を置くと、bundled rule に追加できます。
 
 ```yaml
 - toolName: bash
   column: command
-  patterns:
-    - patterns:
-        - '^git status(?: .+)? --short(?: |$)'
+  rules:
+    - all:
+        - '^basename:git$'
+        - '^arg:status$'
+        - '^arg:--short$'
       reason: repo-local policy
 ```
 
 ## Matching model
 
-pattern 自体は grep/regex 風ですが、`bash` の `command` はそのまま生文字列に対して評価しません。まず shell 風に token 化して command chain を分割し、Git command はさらに `git <subcommand> <normalized-args...>` へ正規化してから pattern を当てます。
+`bash.command` は生文字列 grep ではなく、shell 風 token 化と command chain 分割、`sh -c` / `bash -lc` unwrap、環境変数 prefix 解析を行ったうえで generic fact へ変換して評価します。fact は `basename:<name>`、`arg:<token>`、`command:<joined tokens>` のような形式で、rule 側は `all` / `any` の regex で宣言します。
 
-これにより `FOO=1 git push --force`, `git -C repo push -f`, `cmd1 && git commit --no-verify` に加えて `sh -c 'git push -f'` や `bash -lc "git commit --no-verify"` のような wrapper 経由も扱えます。`git commit -m "-n"` や subcommand 後の `--` 以降の token では誤検知せず、`git push --force-with-lease` は bundled policy では許可します。
+さらに `protectedEnv` を使うと、特定の環境変数名と許可値を宣言的に制限できます。bundled policy では `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` などの Git config override を保護しつつ、`git push --force-with-lease` は引き続き許可します。

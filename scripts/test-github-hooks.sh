@@ -9,26 +9,13 @@ command -v node >/dev/null 2>&1 || {
   exit 1
 }
 
-command -v npm >/dev/null 2>&1 || {
-  printf 'test-github-hooks.sh: npm is required\n' >&2
-  exit 1
-}
-
 [[ ! -e .github/hooks ]] || {
   printf 'test-github-hooks.sh: .github/hooks should not exist anymore\n' >&2
   exit 1
 }
 
-npm ci \
-  --prefix containers/control-plane/hooks/preToolUse \
-  --ignore-scripts \
-  --no-audit \
-  --no-fund \
-  --silent
-
 node --test \
   containers/control-plane/hooks/audit/main.test.mjs \
-  containers/control-plane/hooks/preToolUse/main.test.mjs \
   containers/control-plane/hooks/postToolUse/main.test.mjs \
   containers/control-plane/hooks/git/main.test.mjs
 
@@ -50,7 +37,7 @@ set -euo pipefail
 test -f /usr/local/share/control-plane/hooks/hooks.json
 test -f /usr/local/share/control-plane/hooks/audit/main.mjs
 test -f /usr/local/share/control-plane/hooks/auditAnalysis/main.mjs
-test -f /usr/local/share/control-plane/hooks/preToolUse/main.mjs
+test -x /usr/local/share/control-plane/hooks/preToolUse/main
 test -f /usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml
 test -f /usr/local/lib/libcontrol_plane_exec_policy.so
 test -x /usr/local/share/control-plane/hooks/git/pre-commit
@@ -71,7 +58,7 @@ test "$(stat -c '%a %U %G' "${GIT_CONFIG_GLOBAL}")" = "644 root root"
 test -f /home/copilot/.copilot/hooks/hooks.json
 test -f /home/copilot/.copilot/hooks/audit/main.mjs
 test -f /home/copilot/.copilot/hooks/auditAnalysis/main.mjs
-test -f /home/copilot/.copilot/hooks/preToolUse/main.mjs
+test -x /home/copilot/.copilot/hooks/preToolUse/main
 test -f /home/copilot/.copilot/hooks/preToolUse/deny-rules.yaml
 test -f /usr/local/lib/libcontrol_plane_exec_policy.so
 test -x /home/copilot/.copilot/hooks/git/pre-commit
@@ -84,7 +71,7 @@ git config --global --get core.hooksPath | grep -qx /usr/local/share/control-pla
 grep -Fq "COPILOT_HOME" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/audit/main.mjs" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/auditAnalysis/main.mjs" /home/copilot/.copilot/hooks/hooks.json
-grep -Fq "hooks/preToolUse/main.mjs" /home/copilot/.copilot/hooks/hooks.json
+grep -Fq "hooks/preToolUse/main" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/postToolUse/main.mjs" /home/copilot/.copilot/hooks/hooks.json
 ! grep -Fq ".github/hooks" /home/copilot/.copilot/hooks/hooks.json
 if su -s /bin/bash copilot -lc "printf tamper >> \"${GIT_CONFIG_GLOBAL}\"" 2>/dev/null; then

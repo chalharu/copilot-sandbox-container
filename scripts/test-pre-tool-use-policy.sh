@@ -43,12 +43,12 @@ git init --quiet
 git config user.name test
 git config user.email test@example.com
 
-hook_script="${HOME}/.copilot/hooks/preToolUse/main.mjs"
+hook_script="${HOME}/.copilot/hooks/preToolUse/main"
 hook_config="${HOME}/.copilot/hooks/preToolUse/deny-rules.yaml"
 exec_policy_library="${CONTROL_PLANE_EXEC_POLICY_LIBRARY:-}"
 exec_policy_rules="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE:-}"
 
-test -f "${hook_script}"
+test -x "${hook_script}"
 test -f "${hook_config}"
 test -n "${exec_policy_library}"
 test -n "${exec_policy_rules}"
@@ -58,18 +58,25 @@ test "${LD_PRELOAD}" = "${exec_policy_library}"
 
 run_hook() {
   local payload="$1"
-  printf '%s' "${payload}" | node "${hook_script}"
+  printf '%s' "${payload}" | "${hook_script}"
 }
 
 assert_denied_exec() {
   local expected_reason="$1"
   shift
 
+  local command
   local stderr_file
   local status
+  printf -v command '%q ' "$@"
   stderr_file="$(mktemp)"
   set +e
-  "$@" > /dev/null 2>"${stderr_file}"
+  env \
+    LD_PRELOAD="${LD_PRELOAD}" \
+    CONTROL_PLANE_EXEC_POLICY_LIBRARY="${CONTROL_PLANE_EXEC_POLICY_LIBRARY}" \
+    CONTROL_PLANE_EXEC_POLICY_RULES_FILE="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE}" \
+    GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL}" \
+    bash -lc "${command}" > /dev/null 2>"${stderr_file}"
   status=$?
   set -e
 
@@ -109,13 +116,19 @@ printf '%s\n' "${wrapped_deny}" | jq -e '.permissionDecisionReason | contains("g
 allow_output="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git push -n origin HEAD\"}"}')"
 test -z "${allow_output}"
 
+env_override_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"GIT_CONFIG_GLOBAL=/tmp/evil git status --short\"}"}')"
+printf '%s\n' "${env_override_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
+printf '%s\n' "${env_override_deny}" | jq -e '.permissionDecisionReason | contains("Git config environment overrides")' >/dev/null
+
 mkdir -p .github
 cat > .github/pre-tool-use-rules.yaml <<'YAML'
 - toolName: bash
   column: command
-  patterns:
-    - patterns:
-        - '^git status(?: .+)? --short(?: |$)'
+  rules:
+    - all:
+        - '^basename:git$'
+        - '^arg:status$'
+        - '^arg:--short$'
       reason: repo-local policy
 YAML
 
@@ -125,6 +138,7 @@ printf '%s\n' "${override_deny}" | jq -e '.permissionDecisionReason == "repo-loc
 
 assert_denied_exec 'git commit --no-verify' git commit --no-verify -m skip
 assert_denied_exec 'Force pushes are blocked' git push -f origin HEAD
+assert_denied_exec 'Git config environment overrides are blocked' env GIT_CONFIG_GLOBAL=/tmp/evil git status --short
 assert_denied_exec 'repo-local policy' git status --short
 
 cat > /tmp/force-push-wrapper.sh <<'WRAPPER'
@@ -161,9 +175,36 @@ grep -Fq 'control-plane exec policy:' "${node_stderr}"
 grep -Fq 'Force pushes are blocked' "${node_stderr}"
 rm -f "${node_stderr}"
 
+allow_env_stderr="$(mktemp)"
+set +e
+env \
+  LD_PRELOAD="${LD_PRELOAD}" \
+  CONTROL_PLANE_EXEC_POLICY_LIBRARY="${CONTROL_PLANE_EXEC_POLICY_LIBRARY}" \
+  CONTROL_PLANE_EXEC_POLICY_RULES_FILE="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE}" \
+  GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL}" \
+  bash -lc 'git rev-parse --git-dir' > /dev/null 2>"${allow_env_stderr}"
+allow_env_status=$?
+set -e
+if grep -Fq 'control-plane exec policy:' "${allow_env_stderr}"; then
+  printf '%s\n' 'Did not expect managed GIT_CONFIG_GLOBAL to be denied by exec policy' >&2
+  cat "${allow_env_stderr}" >&2
+  exit 1
+fi
+if [[ "${allow_env_status}" -ne 0 ]]; then
+  printf '%s\n' 'Expected managed GIT_CONFIG_GLOBAL to remain allowed' >&2
+  cat "${allow_env_stderr}" >&2
+  exit 1
+fi
+rm -f "${allow_env_stderr}"
+
 allow_stderr="$(mktemp)"
 set +e
-git push --force-with-lease origin HEAD > /dev/null 2>"${allow_stderr}"
+env \
+  LD_PRELOAD="${LD_PRELOAD}" \
+  CONTROL_PLANE_EXEC_POLICY_LIBRARY="${CONTROL_PLANE_EXEC_POLICY_LIBRARY}" \
+  CONTROL_PLANE_EXEC_POLICY_RULES_FILE="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE}" \
+  GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL}" \
+  bash -lc 'git push --force-with-lease origin HEAD' > /dev/null 2>"${allow_stderr}"
 allow_status=$?
 set -e
 if grep -Fq 'control-plane exec policy:' "${allow_stderr}"; then

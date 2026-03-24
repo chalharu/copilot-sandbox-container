@@ -1,7 +1,0 @@
-{
-  "name": "control-plane-pre-tool-use-hook",
-  "private": true,
-  "dependencies": {
-    "js-yaml": "4.1.0"
-  }
-}

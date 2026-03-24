@@ -29,8 +29,8 @@
       },
       {
         "type": "command",
-        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/preToolUse/main.mjs\" && node \"$hook_script\"",
-        "powershell": "$hookRoot = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME '.copilot' }; $hookScript = Join-Path $hookRoot 'hooks/preToolUse/main.mjs'; node $hookScript",
+        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/preToolUse/main\" && \"$hook_script\"",
+        "powershell": "$hookRoot = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME '.copilot' }; $hookScript = Join-Path $hookRoot 'hooks/preToolUse/main'; & $hookScript",
         "cwd": ".",
         "timeoutSec": 30
       }

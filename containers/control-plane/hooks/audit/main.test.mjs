@@ -56,9 +56,13 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 	);
 	assert.match(
 		hooksConfig.hooks.preToolUse[1].bash,
-		/\/hooks\/preToolUse\/main\.mjs/,
+		/\/hooks\/preToolUse\/main/,
 	);
-	assert.match(hooksConfig.hooks.preToolUse[1].bash, /node "\$hook_script"$/);
+	assert.doesNotMatch(
+		hooksConfig.hooks.preToolUse[1].bash,
+		/node "\$hook_script"/,
+	);
+	assert.match(hooksConfig.hooks.preToolUse[1].bash, /"\$hook_script"$/);
 	assert.match(
 		hooksConfig.hooks.postToolUse[0].bash,
 		/\/hooks\/audit\/main\.mjs/,
@@ -144,12 +148,9 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 	);
 	assert.match(
 		hooksConfig.hooks.preToolUse[1].powershell,
-		/hooks\/preToolUse\/main\.mjs/,
+		/hooks\/preToolUse\/main/,
 	);
-	assert.match(
-		hooksConfig.hooks.preToolUse[1].powershell,
-		/node \$hookScript$/,
-	);
+	assert.match(hooksConfig.hooks.preToolUse[1].powershell, /& \$hookScript$/);
 	assert.match(
 		hooksConfig.hooks.postToolUse[1].powershell,
 		/hooks\/postToolUse\/main\.mjs/,
