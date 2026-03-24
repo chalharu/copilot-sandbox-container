@@ -28,17 +28,19 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 	assert.equal(hooksConfig.hooks.sessionEnd.length, 1);
 	assert.equal(hooksConfig.hooks.errorOccurred.length, 1);
 
+	assert.match(hooksConfig.hooks.sessionStart[0].bash, /COPILOT_HOME/);
 	assert.match(
 		hooksConfig.hooks.sessionStart[0].bash,
-		/\.copilot\/hooks\/audit\/main\.mjs/,
+		/\/hooks\/audit\/main\.mjs/,
 	);
+	assert.match(hooksConfig.hooks.sessionStart[0].bash, /\.copilot/);
 	assert.match(
 		hooksConfig.hooks.sessionStart[0].bash,
 		/node "\$hook_script" sessionStart/,
 	);
 	assert.match(
 		hooksConfig.hooks.userPromptSubmitted[0].bash,
-		/\.copilot\/hooks\/audit\/main\.mjs/,
+		/\/hooks\/audit\/main\.mjs/,
 	);
 	assert.match(
 		hooksConfig.hooks.userPromptSubmitted[0].bash,
@@ -46,7 +48,7 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 	);
 	assert.match(
 		hooksConfig.hooks.preToolUse[0].bash,
-		/\.copilot\/hooks\/audit\/main\.mjs/,
+		/\/hooks\/audit\/main\.mjs/,
 	);
 	assert.match(
 		hooksConfig.hooks.preToolUse[0].bash,
@@ -54,7 +56,7 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 	);
 	assert.match(
 		hooksConfig.hooks.postToolUse[0].bash,
-		/\.copilot\/hooks\/audit\/main\.mjs/,
+		/\/hooks\/audit\/main\.mjs/,
 	);
 	assert.match(
 		hooksConfig.hooks.postToolUse[0].bash,
@@ -62,12 +64,12 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 	);
 	assert.match(
 		hooksConfig.hooks.postToolUse[1].bash,
-		/\.copilot\/hooks\/postToolUse\/main\.mjs/,
+		/\/hooks\/postToolUse\/main\.mjs/,
 	);
 	assert.match(hooksConfig.hooks.postToolUse[1].bash, /node "\$hook_script"$/);
 	assert.match(
 		hooksConfig.hooks.agentStop[0].bash,
-		/\.copilot\/hooks\/auditAnalysis\/main\.mjs/,
+		/\/hooks\/auditAnalysis\/main\.mjs/,
 	);
 	assert.match(
 		hooksConfig.hooks.agentStop[0].bash,
@@ -75,7 +77,7 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 	);
 	assert.match(
 		hooksConfig.hooks.subagentStop[0].bash,
-		/\.copilot\/hooks\/auditAnalysis\/main\.mjs/,
+		/\/hooks\/auditAnalysis\/main\.mjs/,
 	);
 	assert.match(
 		hooksConfig.hooks.subagentStop[0].bash,
@@ -83,7 +85,7 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 	);
 	assert.match(
 		hooksConfig.hooks.sessionEnd[0].bash,
-		/\.copilot\/hooks\/auditAnalysis\/main\.mjs/,
+		/\/hooks\/auditAnalysis\/main\.mjs/,
 	);
 	assert.match(
 		hooksConfig.hooks.sessionEnd[0].bash,
@@ -91,7 +93,7 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 	);
 	assert.match(
 		hooksConfig.hooks.errorOccurred[0].bash,
-		/\.copilot\/hooks\/auditAnalysis\/main\.mjs/,
+		/\/hooks\/auditAnalysis\/main\.mjs/,
 	);
 	assert.match(
 		hooksConfig.hooks.errorOccurred[0].bash,
@@ -125,9 +127,10 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 		);
 	}
 
+	assert.match(hooksConfig.hooks.postToolUse[0].powershell, /COPILOT_HOME/);
 	assert.match(
 		hooksConfig.hooks.postToolUse[0].powershell,
-		/\.copilot\/hooks\/audit\/main\.mjs/,
+		/hooks\/audit\/main\.mjs/,
 	);
 	assert.match(
 		hooksConfig.hooks.postToolUse[0].powershell,
@@ -135,7 +138,7 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 	);
 	assert.match(
 		hooksConfig.hooks.postToolUse[1].powershell,
-		/\.copilot\/hooks\/postToolUse\/main\.mjs/,
+		/hooks\/postToolUse\/main\.mjs/,
 	);
 	assert.match(
 		hooksConfig.hooks.postToolUse[1].powershell,
@@ -143,7 +146,7 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 	);
 	assert.match(
 		hooksConfig.hooks.agentStop[0].powershell,
-		/\.copilot\/hooks\/auditAnalysis\/main\.mjs/,
+		/hooks\/auditAnalysis\/main\.mjs/,
 	);
 	assert.match(
 		hooksConfig.hooks.agentStop[0].powershell,
@@ -151,7 +154,7 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 	);
 	assert.match(
 		hooksConfig.hooks.subagentStop[0].powershell,
-		/\.copilot\/hooks\/auditAnalysis\/main\.mjs/,
+		/hooks\/auditAnalysis\/main\.mjs/,
 	);
 	assert.match(
 		hooksConfig.hooks.subagentStop[0].powershell,
@@ -159,7 +162,7 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 	);
 	assert.match(
 		hooksConfig.hooks.sessionEnd[0].powershell,
-		/\.copilot\/hooks\/auditAnalysis\/main\.mjs/,
+		/hooks\/auditAnalysis\/main\.mjs/,
 	);
 	assert.match(
 		hooksConfig.hooks.sessionEnd[0].powershell,
@@ -167,7 +170,7 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 	);
 	assert.match(
 		hooksConfig.hooks.errorOccurred[0].powershell,
-		/\.copilot\/hooks\/auditAnalysis\/main\.mjs/,
+		/hooks\/auditAnalysis\/main\.mjs/,
 	);
 	assert.match(
 		hooksConfig.hooks.errorOccurred[0].powershell,
