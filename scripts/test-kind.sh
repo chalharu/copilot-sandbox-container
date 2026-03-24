@@ -465,6 +465,33 @@ data:
     }
 ---
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: control-plane-env
+  namespace: ${namespace}
+data:
+  SSH_PUBLIC_KEY_FILE: /var/run/control-plane-auth/ssh-public-key
+  COPILOT_CONFIG_JSON_FILE: /var/run/control-plane-config/copilot-config.json
+  GH_HOSTS_YML_FILE: /var/run/control-plane-auth/gh-hosts.yml
+  GH_GITHUB_TOKEN_FILE: /var/run/control-plane-auth/gh-github-token
+  CONTROL_PLANE_K8S_NAMESPACE: ${namespace}
+  CONTROL_PLANE_JOB_NAMESPACE: ${job_namespace}
+  CONTROL_PLANE_WORKSPACE_PVC: control-plane-workspace-pvc
+  CONTROL_PLANE_WORKSPACE_SUBPATH: workspace
+  CONTROL_PLANE_JOB_WORKSPACE_PVC: control-plane-workspace-pvc
+  CONTROL_PLANE_JOB_WORKSPACE_SUBPATH: workspace
+  CONTROL_PLANE_JOB_SERVICE_ACCOUNT: control-plane-job
+  CONTROL_PLANE_RUN_MODE: k8s-job
+  CONTROL_PLANE_LOCAL_PODMAN_MODE: rootful-service
+  CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER: overlay
+  CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR: /var/tmp/control-plane/rootful-overlay
+  CONTROL_PLANE_JOB_TRANSFER_IMAGE: ${control_plane_image}
+  CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane.${namespace}.svc.cluster.local
+  CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"
+  CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT: "100"
+  CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: Never
+---
+apiVersion: v1
 kind: Service
 metadata:
   name: control-plane
@@ -617,47 +644,9 @@ spec:
         - name: control-plane
           image: ${control_plane_image}
           imagePullPolicy: Never
-          env:
-            - name: SSH_PUBLIC_KEY_FILE
-              value: /var/run/control-plane-auth/ssh-public-key
-            - name: COPILOT_CONFIG_JSON_FILE
-              value: /var/run/control-plane-config/copilot-config.json
-            - name: GH_HOSTS_YML_FILE
-              value: /var/run/control-plane-auth/gh-hosts.yml
-            - name: GH_GITHUB_TOKEN_FILE
-              value: /var/run/control-plane-auth/gh-github-token
-            - name: CONTROL_PLANE_K8S_NAMESPACE
-              value: ${namespace}
-            - name: CONTROL_PLANE_JOB_NAMESPACE
-              value: ${job_namespace}
-            - name: CONTROL_PLANE_WORKSPACE_PVC
-              value: control-plane-workspace-pvc
-            - name: CONTROL_PLANE_WORKSPACE_SUBPATH
-              value: workspace
-            - name: CONTROL_PLANE_JOB_WORKSPACE_PVC
-              value: control-plane-workspace-pvc
-            - name: CONTROL_PLANE_JOB_WORKSPACE_SUBPATH
-              value: workspace
-            - name: CONTROL_PLANE_JOB_SERVICE_ACCOUNT
-              value: control-plane-job
-            - name: CONTROL_PLANE_RUN_MODE
-              value: k8s-job
-            - name: CONTROL_PLANE_LOCAL_PODMAN_MODE
-              value: rootful-service
-            - name: CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER
-              value: overlay
-            - name: CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR
-              value: /var/tmp/control-plane/rootful-overlay
-            - name: CONTROL_PLANE_JOB_TRANSFER_IMAGE
-              value: ${control_plane_image}
-            - name: CONTROL_PLANE_JOB_TRANSFER_HOST
-              value: control-plane.${namespace}.svc.cluster.local
-            - name: CONTROL_PLANE_JOB_TRANSFER_PORT
-              value: "2222"
-            - name: CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT
-              value: "100"
-            - name: CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
-              value: Never
+          envFrom:
+            - configMapRef:
+                name: control-plane-env
           # Keep the Kind test on the same current-cluster-compatible profile as
           # the sample manifest: drop: ALL, explicit capability re-adds, and a
           # rootful local Podman remote-service fallback instead of nested
