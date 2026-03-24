@@ -136,77 +136,80 @@ function describeConfigPath(configPath) {
 	return configPath instanceof URL ? configPath.pathname : configPath;
 }
 
-function validateRuleShape(rule, configDescription, seenIds) {
-	if (!rule || typeof rule !== "object" || Array.isArray(rule)) {
-		throw new Error(`Each rule in ${configDescription} must be a JSON object.`);
+function normalizePatternEntry(
+	entry,
+	configDescription,
+	groupIndex,
+	patternIndex,
+) {
+	const patternDescription = `pattern ${patternIndex + 1} in group ${groupIndex + 1} of ${configDescription}`;
+	if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+		throw new Error(`${patternDescription} must be a JSON object.`);
 	}
-
-	if (typeof rule.id !== "string" || rule.id === "") {
-		throw new Error(
-			`Each rule in ${configDescription} must define a non-empty string id.`,
-		);
-	}
-
-	if (seenIds.has(rule.id)) {
-		throw new Error(`Duplicate rule id in ${configDescription}: ${rule.id}`);
-	}
-	seenIds.add(rule.id);
 
 	if (
-		!Array.isArray(rule.toolNames) ||
-		rule.toolNames.length === 0 ||
-		rule.toolNames.some(
-			(toolName) => typeof toolName !== "string" || toolName === "",
+		!Array.isArray(entry.patterns) ||
+		entry.patterns.length === 0 ||
+		entry.patterns.some(
+			(pattern) => typeof pattern !== "string" || pattern === "",
 		)
 	) {
 		throw new Error(
-			`Rule "${rule.id}" in ${configDescription} must define toolNames as a non-empty array of strings.`,
+			`${patternDescription} must define patterns as a non-empty array of strings.`,
 		);
 	}
 
-	if (typeof rule.reason !== "string" || rule.reason === "") {
+	if (typeof entry.reason !== "string" || entry.reason === "") {
 		throw new Error(
-			`Rule "${rule.id}" in ${configDescription} must define a non-empty string reason.`,
+			`${patternDescription} must define a non-empty string reason.`,
 		);
 	}
 
-	if (
-		!rule.match ||
-		typeof rule.match !== "object" ||
-		Array.isArray(rule.match)
-	) {
+	return {
+		reason: entry.reason,
+		regexes: entry.patterns.map((pattern, regexIndex) => {
+			try {
+				return new RegExp(pattern);
+			} catch (error) {
+				throw new Error(
+					`Invalid regex pattern ${regexIndex + 1} in ${patternDescription}: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+		}),
+	};
+}
+
+function normalizeRuleGroup(group, configDescription, groupIndex) {
+	const groupDescription = `group ${groupIndex + 1} in ${configDescription}`;
+	if (!group || typeof group !== "object" || Array.isArray(group)) {
+		throw new Error(`${groupDescription} must be a JSON object.`);
+	}
+
+	if (typeof group.toolName !== "string" || group.toolName === "") {
 		throw new Error(
-			`Rule "${rule.id}" in ${configDescription} must define match as a JSON object.`,
+			`${groupDescription} must define a non-empty string toolName.`,
 		);
 	}
 
-	if (rule.match.kind !== "gitCli") {
+	if (typeof group.column !== "string" || group.column === "") {
 		throw new Error(
-			`Rule "${rule.id}" in ${configDescription} must use match.kind "gitCli".`,
+			`${groupDescription} must define a non-empty string column.`,
 		);
 	}
 
-	if (
-		typeof rule.match.subcommand !== "string" ||
-		rule.match.subcommand === ""
-	) {
+	if (!Array.isArray(group.patterns) || group.patterns.length === 0) {
 		throw new Error(
-			`Rule "${rule.id}" in ${configDescription} must define a non-empty gitCli subcommand.`,
+			`${groupDescription} must define patterns as a non-empty array.`,
 		);
 	}
 
-	for (const fieldName of ["allOfArgs", "anyOfArgs"]) {
-		const value = rule.match[fieldName];
-		if (
-			value !== undefined &&
-			(!Array.isArray(value) ||
-				value.some((entry) => typeof entry !== "string" || entry === ""))
-		) {
-			throw new Error(
-				`Rule "${rule.id}" in ${configDescription} must define ${fieldName} as an array of non-empty strings when present.`,
-			);
-		}
-	}
+	return {
+		toolName: group.toolName,
+		column: group.column,
+		patterns: group.patterns.map((entry, patternIndex) =>
+			normalizePatternEntry(entry, configDescription, groupIndex, patternIndex),
+		),
+	};
 }
 
 function readRulesConfigFile(configPath, { optional = false } = {}) {
@@ -240,67 +243,28 @@ function readRulesConfigFile(configPath, { optional = false } = {}) {
 		);
 	}
 
-	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+	if (!Array.isArray(parsed)) {
 		throw new Error(
-			`preToolUse rules config at ${configDescription} must contain a top-level JSON object.`,
+			`preToolUse rules config at ${configDescription} must contain a top-level JSON array.`,
 		);
 	}
 
-	if (!Array.isArray(parsed.rules)) {
-		throw new Error(
-			`preToolUse rules config at ${configDescription} must define rules as an array.`,
-		);
-	}
-
-	const seenIds = new Set();
-	for (const rule of parsed.rules) {
-		validateRuleShape(rule, configDescription, seenIds);
-	}
-
-	return parsed;
-}
-
-function mergeRules(baseRules, repoRules, repoConfigDescription) {
-	const bundledRuleIds = new Set(baseRules.map((rule) => rule.id));
-
-	for (const rule of repoRules) {
-		if (bundledRuleIds.has(rule.id)) {
-			throw new Error(
-				`preToolUse rules config at ${repoConfigDescription} cannot override bundled rule id: ${rule.id}`,
-			);
-		}
-	}
-
-	return [...baseRules, ...repoRules];
+	return parsed.map((group, groupIndex) =>
+		normalizeRuleGroup(group, configDescription, groupIndex),
+	);
 }
 
 function loadRules(repoRoot) {
-	const bundledConfig = readRulesConfigFile(
+	const bundledGroups = readRulesConfigFile(
 		new URL("./deny-rules.json", import.meta.url),
 	);
-	const repoConfig = readRulesConfigFile(
-		path.join(repoRoot, ".github", "pre-tool-use-rules.json"),
-		{ optional: true },
-	);
-	const repoConfigPath = path.join(
-		repoRoot,
-		".github",
-		"pre-tool-use-rules.json",
-	);
+	const repoGroups =
+		readRulesConfigFile(
+			path.join(repoRoot, ".github", "pre-tool-use-rules.json"),
+			{ optional: true },
+		) ?? [];
 
-	return mergeRules(
-		bundledConfig.rules,
-		repoConfig?.rules ?? [],
-		repoConfigPath,
-	).map((rule) => ({
-		...rule,
-		match: {
-			...rule.match,
-			subcommand: rule.match.subcommand.toLowerCase(),
-			allOfArgs: rule.match.allOfArgs ?? [],
-			anyOfArgs: rule.match.anyOfArgs ?? [],
-		},
-	}));
+	return [...bundledGroups, ...repoGroups];
 }
 
 function tokenizeShellCommand(command) {
@@ -562,48 +526,39 @@ function normalizeGitArgs(subcommand, args) {
 	return normalizedArgs;
 }
 
-function argumentMatches(token, expected) {
-	return token === expected;
+function buildGitPatternCandidate(parsedGitCommand) {
+	return ["git", parsedGitCommand.subcommand, ...parsedGitCommand.args].join(
+		" ",
+	);
 }
 
-function matchesGitRule(rule, command) {
-	const shellCommands = splitShellCommands(tokenizeShellCommand(command));
-
-	for (const commandTokens of shellCommands) {
+function buildCommandCandidates(command) {
+	const candidates = [];
+	for (const commandTokens of splitShellCommands(
+		tokenizeShellCommand(command),
+	)) {
+		if (commandTokens.length === 0) {
+			continue;
+		}
 		const gitTokens = resolveGitInvocation(commandTokens);
-		if (gitTokens === null) {
-			continue;
+		if (gitTokens !== null) {
+			const parsedGitCommand = extractGitSubcommand(gitTokens);
+			if (parsedGitCommand !== null) {
+				candidates.push(buildGitPatternCandidate(parsedGitCommand));
+				continue;
+			}
 		}
 
-		const parsedGitCommand = extractGitSubcommand(gitTokens);
-		if (
-			parsedGitCommand === null ||
-			parsedGitCommand.subcommand !== rule.match.subcommand
-		) {
-			continue;
-		}
-
-		if (
-			!rule.match.allOfArgs.every((expectedArg) =>
-				parsedGitCommand.args.some((arg) => argumentMatches(arg, expectedArg)),
-			)
-		) {
-			continue;
-		}
-
-		if (
-			rule.match.anyOfArgs.length > 0 &&
-			!rule.match.anyOfArgs.some((expectedArg) =>
-				parsedGitCommand.args.some((arg) => argumentMatches(arg, expectedArg)),
-			)
-		) {
-			continue;
-		}
-
-		return true;
+		candidates.push(commandTokens.join(" "));
 	}
 
-	return false;
+	return candidates;
+}
+
+function matchesPatternEntry(patternEntry, candidates) {
+	return patternEntry.regexes.some((regex) =>
+		candidates.some((candidate) => regex.test(candidate)),
+	);
 }
 
 function evaluateRules(rules, input) {
@@ -613,20 +568,28 @@ function evaluateRules(rules, input) {
 	}
 
 	const toolArgs = parseToolArgs(input.toolArgs);
-	const command =
-		toolArgs &&
-		typeof toolArgs === "object" &&
-		typeof toolArgs.command === "string"
-			? toolArgs.command
-			: null;
-
-	for (const rule of rules) {
-		if (!rule.toolNames.includes(toolName) || command === null) {
+	for (const ruleGroup of rules) {
+		if (ruleGroup.toolName !== toolName || toolArgs === null) {
 			continue;
 		}
 
-		if (rule.match.kind === "gitCli" && matchesGitRule(rule, command)) {
-			return rule;
+		const value =
+			typeof toolArgs[ruleGroup.column] === "string"
+				? toolArgs[ruleGroup.column]
+				: null;
+		if (value === null) {
+			continue;
+		}
+
+		const candidates =
+			ruleGroup.column === "command" && toolName === "bash"
+				? buildCommandCandidates(value)
+				: [value];
+
+		for (const patternEntry of ruleGroup.patterns) {
+			if (matchesPatternEntry(patternEntry, candidates)) {
+				return patternEntry;
+			}
 		}
 	}
 

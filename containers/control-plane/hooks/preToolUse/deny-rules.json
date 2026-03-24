@@ -1,50 +1,29 @@
-{
-  "version": 1,
-  "rules": [
-    {
-      "id": "git-commit-no-verify",
-      "toolNames": [
-        "bash"
-      ],
-      "match": {
-        "kind": "gitCli",
-        "subcommand": "commit",
-        "anyOfArgs": [
-          "--no-verify",
-          "-n"
-        ]
+[
+  {
+    "toolName": "bash",
+    "column": "command",
+    "patterns": [
+      {
+        "patterns": [
+          "^git commit(?: .+)? --no-verify(?: |$)",
+          "^git commit(?: .+)? -n(?: |$)"
+        ],
+        "reason": "git commit --no-verify is blocked by control-plane policy. Run git commit without --no-verify so hooks stay enforced."
       },
-      "reason": "git commit --no-verify is blocked by control-plane policy. Run git commit without --no-verify so hooks stay enforced."
-    },
-    {
-      "id": "git-push-no-verify",
-      "toolNames": [
-        "bash"
-      ],
-      "match": {
-        "kind": "gitCli",
-        "subcommand": "push",
-        "allOfArgs": [
-          "--no-verify"
-        ]
+      {
+        "patterns": [
+          "^git push(?: .+)? --no-verify(?: |$)"
+        ],
+        "reason": "git push --no-verify is blocked by control-plane policy. Run git push without --no-verify so push hooks still run."
       },
-      "reason": "git push --no-verify is blocked by control-plane policy. Run git push without --no-verify so push hooks still run."
-    },
-    {
-      "id": "git-push-force",
-      "toolNames": [
-        "bash"
-      ],
-      "match": {
-        "kind": "gitCli",
-        "subcommand": "push",
-        "anyOfArgs": [
-          "--force",
-          "--force-with-lease",
-          "-f"
-        ]
-      },
-      "reason": "Force pushes are blocked by control-plane policy. Push without --force or --force-with-lease."
-    }
-  ]
-}
+      {
+        "patterns": [
+          "^git push(?: .+)? --force(?: |$)",
+          "^git push(?: .+)? --force-with-lease(?: |$)",
+          "^git push(?: .+)? -f(?: |$)"
+        ],
+        "reason": "Force pushes are blocked by control-plane policy. Push without --force or --force-with-lease."
+      }
+    ]
+  }
+]

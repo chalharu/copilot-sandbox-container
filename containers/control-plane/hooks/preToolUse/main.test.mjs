@@ -84,21 +84,19 @@ test("bundled preToolUse rules define git safety protections", () => {
 	const rulesConfig = JSON.parse(
 		fs.readFileSync(bundledRulesConfigPath, "utf8"),
 	);
-	assert.equal(rulesConfig.version, 1);
-	assert.equal(rulesConfig.rules.length, 3);
-	assert.deepEqual(
-		rulesConfig.rules.map((rule) => rule.id),
-		["git-commit-no-verify", "git-push-no-verify", "git-push-force"],
-	);
-	assert.deepEqual(rulesConfig.rules[0].toolNames, ["bash"]);
-	assert.equal(rulesConfig.rules[0].match.kind, "gitCli");
-	assert.equal(rulesConfig.rules[0].match.subcommand, "commit");
-	assert.deepEqual(rulesConfig.rules[0].match.anyOfArgs, ["--no-verify", "-n"]);
-	assert.equal(rulesConfig.rules[2].match.subcommand, "push");
-	assert.deepEqual(rulesConfig.rules[2].match.anyOfArgs, [
-		"--force",
-		"--force-with-lease",
-		"-f",
+	assert.equal(Array.isArray(rulesConfig), true);
+	assert.equal(rulesConfig.length, 1);
+	assert.equal(rulesConfig[0].toolName, "bash");
+	assert.equal(rulesConfig[0].column, "command");
+	assert.equal(rulesConfig[0].patterns.length, 3);
+	assert.deepEqual(rulesConfig[0].patterns[0].patterns, [
+		"^git commit(?: .+)? --no-verify(?: |$)",
+		"^git commit(?: .+)? -n(?: |$)",
+	]);
+	assert.deepEqual(rulesConfig[0].patterns[2].patterns, [
+		"^git push(?: .+)? --force(?: |$)",
+		"^git push(?: .+)? --force-with-lease(?: |$)",
+		"^git push(?: .+)? -f(?: |$)",
 	]);
 });
 
@@ -256,19 +254,18 @@ test("hook merges bundled rules with repo-local additions", (t) => {
 	fs.writeFileSync(
 		path.join(repo, ".github", "pre-tool-use-rules.json"),
 		JSON.stringify(
-			{
-				rules: [
-					{
-						id: "repo-block-status",
-						toolNames: ["bash"],
-						match: {
-							kind: "gitCli",
-							subcommand: "status",
+			[
+				{
+					toolName: "bash",
+					column: "command",
+					patterns: [
+						{
+							patterns: ["^git status(?: .+)? --short(?: |$)"],
+							reason: "repo-local policy",
 						},
-						reason: "repo-local policy",
-					},
-				],
-			},
+					],
+				},
+			],
 			null,
 			2,
 		),
@@ -303,24 +300,23 @@ test("hook merges bundled rules with repo-local additions", (t) => {
 	);
 });
 
-test("hook rejects repo-local configs that reuse bundled rule ids", (t) => {
-	const repo = setupRepo(t, "pre-tool-use-duplicate-id-");
+test("hook rejects repo-local configs with invalid regex patterns", (t) => {
+	const repo = setupRepo(t, "pre-tool-use-invalid-regex-");
 	fs.writeFileSync(
 		path.join(repo, ".github", "pre-tool-use-rules.json"),
 		JSON.stringify(
-			{
-				rules: [
-					{
-						id: "git-commit-no-verify",
-						toolNames: ["bash"],
-						match: {
-							kind: "gitCli",
-							subcommand: "status",
+			[
+				{
+					toolName: "bash",
+					column: "command",
+					patterns: [
+						{
+							patterns: ["("],
+							reason: "broken regex",
 						},
-						reason: "attempted override",
-					},
-				],
-			},
+					],
+				},
+			],
 			null,
 			2,
 		),
@@ -336,8 +332,5 @@ test("hook rejects repo-local configs that reuse bundled rule ids", (t) => {
 
 	assert.equal(result.status, 1);
 	assert.equal(result.stdout, "");
-	assert.match(
-		result.stderr,
-		/cannot override bundled rule id: git-commit-no-verify/,
-	);
+	assert.match(result.stderr, /Invalid regex pattern 1/);
 });

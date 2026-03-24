@@ -75,19 +75,20 @@ test -z "${allow_output}"
 
 mkdir -p .github
 cat > .github/pre-tool-use-rules.json <<'JSON'
-{
-  "rules": [
-    {
-      "id": "repo-block-status",
-      "toolNames": ["bash"],
-      "match": {
-        "kind": "gitCli",
-        "subcommand": "status"
-      },
-      "reason": "repo-local policy"
-    }
-  ]
-}
+[
+  {
+    "toolName": "bash",
+    "column": "command",
+    "patterns": [
+      {
+        "patterns": [
+          "^git status(?: .+)? --short(?: |$)"
+        ],
+        "reason": "repo-local policy"
+      }
+    ]
+  }
+]
 JSON
 
 override_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git status --short\"}"}')"
