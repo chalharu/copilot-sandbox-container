@@ -1,22 +1,19 @@
 commandRules:
-  - toolName: bash
-    column: command
-    rules:
-      - rule:
-          - git
-          - commit
-          - --no-verify|-n
-        reason: git commit --no-verify is blocked by control-plane policy. Run git commit without --no-verify so hooks stay enforced.
-      - rule:
-          - git
-          - push
-          - --no-verify
-        reason: git push --no-verify is blocked by control-plane policy. Run git push without --no-verify so push hooks still run.
-      - rule:
-          - git
-          - push
-          - --force|-f
-        reason: Force pushes are blocked by control-plane policy. Push without --force. Use --force-with-lease when you need a guarded overwrite.
+  - rule:
+      - git
+      - commit
+      - --no-verify|-n
+    reason: git commit --no-verify is blocked by control-plane policy. Run git commit without --no-verify so hooks stay enforced.
+  - rule:
+      - git
+      - push
+      - --no-verify
+    reason: git push --no-verify is blocked by control-plane policy. Run git push without --no-verify so push hooks still run.
+  - rule:
+      - git
+      - push
+      - --force|-f
+    reason: Force pushes are blocked by control-plane policy. Push without --force. Use --force-with-lease when you need a guarded overwrite.
 protectedEnvironments:
   - GIT_CONFIG_GLOBAL
   - GIT_CONFIG_SYSTEM

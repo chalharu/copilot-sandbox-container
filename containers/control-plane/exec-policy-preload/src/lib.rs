@@ -341,22 +341,18 @@ fn set_errno(value: c_int) {
 #[cfg(test)]
 mod tests {
     use crate::command::CommandInvocation;
-    use crate::config::{CompiledConfig, CompiledRule, CompiledRuleGroup};
+    use crate::config::{CompiledConfig, CompiledRule};
     use crate::policy::match_exec_rule;
     use regex::Regex;
 
     #[test]
     fn exec_rule_matching_uses_token_sequences() {
         let config = CompiledConfig {
-            command_rule_groups: vec![CompiledRuleGroup {
-                tool_name: "bash".to_string(),
-                column: "command".to_string(),
-                rules: vec![CompiledRule {
-                    reason: "blocked".to_string(),
-                    basename_pattern: Regex::new("^(?:git)$").unwrap(),
-                    command_patterns: vec![Regex::new("^(?:push)$").unwrap()],
-                    option_patterns: vec![Regex::new("^(?:-f)$").unwrap()],
-                }],
+            command_rules: vec![CompiledRule {
+                reason: "blocked".to_string(),
+                basename_pattern: Regex::new("^(?:git)$").unwrap(),
+                command_patterns: vec![Regex::new("^(?:push)$").unwrap()],
+                option_patterns: vec![Regex::new("^(?:-f)$").unwrap()],
             }],
             protected_environments: vec![Regex::new("^(?:GIT_CONFIG_GLOBAL)$").unwrap()],
         };

@@ -25,7 +25,7 @@ struct HookInput {
 pub fn evaluate_pre_tool_use(raw_input: &str) -> Result<Option<HookDecision>, String> {
     let input = parse_hook_input(raw_input)?;
     let tool_name = input.tool_name.unwrap_or_default();
-    if tool_name.is_empty() {
+    if tool_name != "bash" {
         return Ok(None);
     }
 
@@ -42,7 +42,7 @@ pub fn evaluate_pre_tool_use(raw_input: &str) -> Result<Option<HookDecision>, St
         return Ok(None);
     };
     let invocations = shell::parse_shell_command(command);
-    let matched_reason = policy::match_hook_rule(&rules, &tool_name, "command", &invocations);
+    let matched_reason = policy::match_hook_rule(&rules, &invocations);
 
     Ok(matched_reason.map(|reason| HookDecision {
         permission_decision: "deny".to_string(),
@@ -253,14 +253,11 @@ mod tests {
             repo.join(".github/pre-tool-use-rules.yaml"),
             r#"
 commandRules:
-  - toolName: bash
-    column: command
-    rules:
-      - rule:
-          - git
-          - status
-          - --short
-        reason: repo-local policy
+  - rule:
+      - git
+      - status
+      - --short
+    reason: repo-local policy
 "#,
         )
         .unwrap();
@@ -279,12 +276,9 @@ commandRules:
             repo.join(".github/pre-tool-use-rules.yaml"),
             r#"
 commandRules:
-  - toolName: bash
-    column: command
-    rules:
-      - rule:
-          - '['
-        reason: invalid
+  - rule:
+      - '['
+    reason: invalid
 "#,
         )
         .unwrap();
@@ -295,21 +289,16 @@ commandRules:
     }
 
     #[test]
-    fn rejects_repo_local_rules_with_removed_normalization_field() {
-        let repo = setup_repo("pre-tool-use-removed-normalization");
+    fn rejects_repo_local_rules_with_removed_group_fields() {
+        let repo = setup_repo("pre-tool-use-removed-group-fields");
         fs::write(
             repo.join(".github/pre-tool-use-rules.yaml"),
             r#"
 commandRules:
   - toolName: bash
-    column: command
-    normalization:
-      optionValueMatchers:
-        - '^-m$'
-    rules:
-      - rule:
-          - git
-        reason: invalid
+    rule:
+      - git
+    reason: invalid
 "#,
         )
         .unwrap();
@@ -317,6 +306,6 @@ commandRules:
         let error = evaluate_pre_tool_use(&hook_input(&repo, "git status", "bash")).unwrap_err();
 
         assert!(error.contains("unknown field"));
-        assert!(error.contains("normalization"));
+        assert!(error.contains("toolName"));
     }
 }

@@ -12,15 +12,8 @@ pub const PROTECTED_ENVIRONMENT_REASON: &str = "Protected environment overrides 
 
 #[derive(Clone, Debug, Default)]
 pub struct CompiledConfig {
-    pub command_rule_groups: Vec<CompiledRuleGroup>,
+    pub command_rules: Vec<CompiledRule>,
     pub protected_environments: Vec<Regex>,
-}
-
-#[derive(Clone, Debug)]
-pub struct CompiledRuleGroup {
-    pub tool_name: String,
-    pub column: String,
-    pub rules: Vec<CompiledRule>,
 }
 
 #[derive(Clone, Debug)]
@@ -35,18 +28,9 @@ pub struct CompiledRule {
 #[serde(deny_unknown_fields)]
 struct RawConfig {
     #[serde(default, rename = "commandRules")]
-    command_rules: Vec<RawRuleGroup>,
+    command_rules: Vec<RawRule>,
     #[serde(default, rename = "protectedEnvironments")]
     protected_environments: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawRuleGroup {
-    #[serde(rename = "toolName")]
-    tool_name: String,
-    column: String,
-    rules: Vec<RawRule>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -102,9 +86,7 @@ pub fn load_rules(repo_root: Option<&Path>) -> Result<CompiledConfig, String> {
     let mut config = load_bundled_rules()?.clone();
     if let Some(root) = repo_root {
         let repo_config = load_rule_file(&root.join(REPO_RULES_RELATIVE_PATH), true)?;
-        config
-            .command_rule_groups
-            .extend(repo_config.command_rule_groups);
+        config.command_rules.extend(repo_config.command_rules);
         config
             .protected_environments
             .extend(repo_config.protected_environments);
@@ -150,11 +132,11 @@ fn parse_config(raw: &str, path: &Path) -> Result<CompiledConfig, String> {
 }
 
 fn compile_config(config: RawConfig, path: &Path) -> Result<CompiledConfig, String> {
-    let command_rule_groups = config
+    let command_rules = config
         .command_rules
         .into_iter()
         .enumerate()
-        .map(|(group_index, group)| compile_rule_group(group, path, group_index))
+        .map(|(rule_index, rule)| compile_rule(rule, path, rule_index))
         .collect::<Result<Vec<_>, _>>()?;
 
     let protected_environments = compile_patterns(
@@ -162,7 +144,7 @@ fn compile_config(config: RawConfig, path: &Path) -> Result<CompiledConfig, Stri
         &format!("protectedEnvironments in {}", path.display()),
     )?;
 
-    if command_rule_groups.is_empty() && protected_environments.is_empty() {
+    if command_rules.is_empty() && protected_environments.is_empty() {
         return Err(format!(
             "{} must define at least one commandRules entry or protectedEnvironments pattern.",
             path.display()
@@ -170,53 +152,13 @@ fn compile_config(config: RawConfig, path: &Path) -> Result<CompiledConfig, Stri
     }
 
     Ok(CompiledConfig {
-        command_rule_groups,
+        command_rules,
         protected_environments,
     })
 }
 
-fn compile_rule_group(
-    group: RawRuleGroup,
-    path: &Path,
-    group_index: usize,
-) -> Result<CompiledRuleGroup, String> {
-    let description = format!("group {} in {}", group_index + 1, path.display());
-    if group.tool_name.trim().is_empty() {
-        return Err(format!("{description} must define a non-empty toolName."));
-    }
-    if group.column.trim().is_empty() {
-        return Err(format!("{description} must define a non-empty column."));
-    }
-    if group.rules.is_empty() {
-        return Err(format!(
-            "{description} must define rules as a non-empty array."
-        ));
-    }
-
-    Ok(CompiledRuleGroup {
-        tool_name: group.tool_name,
-        column: group.column,
-        rules: group
-            .rules
-            .into_iter()
-            .enumerate()
-            .map(|(rule_index, rule)| compile_rule(rule, path, group_index, rule_index))
-            .collect::<Result<Vec<_>, _>>()?,
-    })
-}
-
-fn compile_rule(
-    rule: RawRule,
-    path: &Path,
-    group_index: usize,
-    rule_index: usize,
-) -> Result<CompiledRule, String> {
-    let description = format!(
-        "rule {} in group {} of {}",
-        rule_index + 1,
-        group_index + 1,
-        path.display()
-    );
+fn compile_rule(rule: RawRule, path: &Path, rule_index: usize) -> Result<CompiledRule, String> {
+    let description = format!("commandRule {} in {}", rule_index + 1, path.display());
     if rule.reason.trim().is_empty() {
         return Err(format!("{description} must define a non-empty reason."));
     }
@@ -320,22 +262,18 @@ mod tests {
     fn parse_config_keeps_command_rules_and_protected_environments() {
         let yaml = r#"
 commandRules:
-  - toolName: bash
-    column: command
-    rules:
-      - rule:
-          - git
-          - commit
-          - --no-verify|-n
-        reason: commit blocked
+  - rule:
+      - git
+      - commit
+      - --no-verify|-n
+    reason: commit blocked
 protectedEnvironments:
   - GIT_CONFIG_GLOBAL
 "#;
 
         let config = parse_config(yaml, Path::new("/tmp/rules.yaml")).unwrap();
 
-        assert_eq!(config.command_rule_groups.len(), 1);
-        assert_eq!(config.command_rule_groups[0].rules.len(), 1);
+        assert_eq!(config.command_rules.len(), 1);
         assert_eq!(config.protected_environments.len(), 1);
     }
 
@@ -355,13 +293,13 @@ protectedEnvironments:
     }
 
     #[test]
-    fn parse_config_rejects_removed_fields() {
+    fn parse_config_rejects_removed_group_fields() {
         let yaml = r#"
 commandRules:
   - toolName: bash
     column: command
     rules:
-      - all:
+      - rule:
           - git
         reason: blocked
 "#;
@@ -369,7 +307,7 @@ commandRules:
         let error = parse_config(yaml, Path::new("/tmp/rules.yaml")).unwrap_err();
 
         assert!(error.contains("unknown field"));
-        assert!(error.contains("all"));
+        assert!(error.contains("toolName"));
     }
 
     #[test]

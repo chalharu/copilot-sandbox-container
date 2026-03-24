@@ -123,14 +123,11 @@ printf '%s\n' "${env_override_deny}" | jq -e '.permissionDecisionReason | contai
 mkdir -p .github
 cat > .github/pre-tool-use-rules.yaml <<'YAML'
 commandRules:
-  - toolName: bash
-    column: command
-    rules:
-      - rule:
-          - git
-          - status
-          - --short
-        reason: repo-local policy
+  - rule:
+      - git
+      - status
+      - --short
+    reason: repo-local policy
 YAML
 
 override_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git status --short\"}"}')"

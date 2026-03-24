@@ -1,13 +1,9 @@
 use crate::command::{CommandInvocation, EnvBinding};
-use crate::config::{
-    CompiledConfig, CompiledRule, CompiledRuleGroup, PROTECTED_ENVIRONMENT_REASON,
-};
+use crate::config::{CompiledConfig, CompiledRule, PROTECTED_ENVIRONMENT_REASON};
 use std::ffi::OsStr;
 
 pub fn match_hook_rule(
     config: &CompiledConfig,
-    tool_name: &str,
-    column: &str,
     invocations: &[CommandInvocation],
 ) -> Option<String> {
     if protected_environment_overridden(&config.protected_environments, invocations) {
@@ -15,10 +11,9 @@ pub fn match_hook_rule(
     }
 
     config
-        .command_rule_groups
+        .command_rules
         .iter()
-        .filter(|group| group.tool_name == tool_name && group.column == column)
-        .find_map(|group| match_group(group, invocations))
+        .find_map(|rule| match_rule(rule, invocations))
 }
 
 pub fn match_exec_rule(config: &CompiledConfig, invocation: &CommandInvocation) -> Option<String> {
@@ -30,19 +25,16 @@ pub fn match_exec_rule(config: &CompiledConfig, invocation: &CommandInvocation) 
     }
 
     config
-        .command_rule_groups
+        .command_rules
         .iter()
-        .filter(|group| group.column == "command")
-        .find_map(|group| match_group(group, std::slice::from_ref(invocation)))
+        .find_map(|rule| match_rule(rule, std::slice::from_ref(invocation)))
 }
 
-fn match_group(group: &CompiledRuleGroup, invocations: &[CommandInvocation]) -> Option<String> {
+fn match_rule(rule: &CompiledRule, invocations: &[CommandInvocation]) -> Option<String> {
     for invocation in invocations {
         let tokens = invocation.normalized_tokens();
-        for rule in &group.rules {
-            if rule_matches(rule, &tokens) {
-                return Some(rule.reason.clone());
-            }
+        if rule_matches(rule, &tokens) {
+            return Some(rule.reason.clone());
         }
     }
     None
@@ -106,7 +98,7 @@ fn binding_differs_from_parent(binding: &EnvBinding) -> bool {
 mod tests {
     use super::match_exec_rule;
     use crate::command::{CommandInvocation, EnvBinding};
-    use crate::config::{CompiledConfig, CompiledRule, CompiledRuleGroup};
+    use crate::config::{CompiledConfig, CompiledRule};
     use regex::Regex;
 
     #[test]
@@ -115,15 +107,11 @@ mod tests {
             std::env::set_var("GIT_CONFIG_GLOBAL", "/managed");
         }
         let config = CompiledConfig {
-            command_rule_groups: vec![CompiledRuleGroup {
-                tool_name: "bash".to_string(),
-                column: "command".to_string(),
-                rules: vec![CompiledRule {
-                    reason: "blocked".to_string(),
-                    basename_pattern: Regex::new("^(?:git)$").unwrap(),
-                    command_patterns: vec![Regex::new("^(?:commit)$").unwrap()],
-                    option_patterns: vec![Regex::new("^(?:--no-verify|-n)$").unwrap()],
-                }],
+            command_rules: vec![CompiledRule {
+                reason: "blocked".to_string(),
+                basename_pattern: Regex::new("^(?:git)$").unwrap(),
+                command_patterns: vec![Regex::new("^(?:commit)$").unwrap()],
+                option_patterns: vec![Regex::new("^(?:--no-verify|-n)$").unwrap()],
             }],
             protected_environments: vec![Regex::new("^(?:GIT_CONFIG_GLOBAL)$").unwrap()],
         };
