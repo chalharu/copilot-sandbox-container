@@ -8,24 +8,10 @@ pub const DEFAULT_RULES_PATH: &str =
     "/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml";
 const REPO_RULES_RELATIVE_PATH: &str = ".github/pre-tool-use-rules.yaml";
 
-#[derive(Clone, Debug, Default)]
-pub struct CompiledNormalization {
-    pub option_value_matchers: Vec<Regex>,
-}
-
-impl CompiledNormalization {
-    pub fn matches_value_option(&self, token: &str) -> bool {
-        self.option_value_matchers
-            .iter()
-            .any(|regex| regex.is_match(token))
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct CompiledRuleGroup {
     pub tool_name: String,
     pub column: String,
-    pub normalization: CompiledNormalization,
     pub rules: Vec<CompiledRule>,
 }
 
@@ -43,23 +29,17 @@ pub struct CompiledProtectedEnv {
     pub allow_value_patterns: Vec<Regex>,
 }
 
-#[derive(Debug, Default, Deserialize)]
-struct RawNormalization {
-    #[serde(default, rename = "optionValueMatchers")]
-    option_value_matchers: Vec<String>,
-}
-
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawRuleGroup {
     #[serde(rename = "toolName")]
     tool_name: String,
     column: String,
-    #[serde(default)]
-    normalization: RawNormalization,
     rules: Vec<RawRule>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawRule {
     #[serde(default)]
     all: Vec<String>,
@@ -71,6 +51,7 @@ struct RawRule {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawProtectedEnv {
     #[serde(default, rename = "namePatterns")]
     name_patterns: Vec<String>,
@@ -190,12 +171,6 @@ fn compile_rule_group(
     Ok(CompiledRuleGroup {
         tool_name: group.tool_name,
         column: group.column,
-        normalization: CompiledNormalization {
-            option_value_matchers: compile_patterns(
-                group.normalization.option_value_matchers,
-                &format!("normalization.optionValueMatchers in {description}"),
-            )?,
-        },
         rules: group
             .rules
             .into_iter()
@@ -323,9 +298,6 @@ mod tests {
         let yaml = r#"
 - toolName: bash
   column: command
-  normalization:
-    optionValueMatchers:
-      - '^-m$'
   rules:
     - all:
         - '^basename:git$'
@@ -340,7 +312,6 @@ mod tests {
 
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].rules.len(), 1);
-        assert_eq!(groups[0].normalization.option_value_matchers.len(), 1);
     }
 
     #[test]
@@ -365,6 +336,26 @@ mod tests {
         assert!(
             groups[0].rules[0].protected_env[0].allow_value_patterns[0].is_match("/tmp/allowed")
         );
+    }
+
+    #[test]
+    fn parse_rule_groups_rejects_unknown_fields() {
+        let yaml = r#"
+- toolName: bash
+  column: command
+  normalization:
+    optionValueMatchers:
+      - '^-m$'
+  rules:
+    - all:
+        - '^basename:git$'
+      reason: blocked
+"#;
+
+        let error = parse_rule_groups(yaml, Path::new("/tmp/rules.yaml")).unwrap_err();
+
+        assert!(error.contains("unknown field"));
+        assert!(error.contains("normalization"));
     }
 
     #[test]

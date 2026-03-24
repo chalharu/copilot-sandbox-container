@@ -341,9 +341,7 @@ fn set_errno(value: c_int) {
 #[cfg(test)]
 mod tests {
     use crate::command::{CommandInvocation, EnvBinding};
-    use crate::config::{
-        CompiledNormalization, CompiledProtectedEnv, CompiledRule, CompiledRuleGroup,
-    };
+    use crate::config::{CompiledProtectedEnv, CompiledRule, CompiledRuleGroup};
     use crate::policy::match_exec_rule;
     use regex::Regex;
 
@@ -352,7 +350,6 @@ mod tests {
         let groups = vec![CompiledRuleGroup {
             tool_name: "bash".to_string(),
             column: "command".to_string(),
-            normalization: CompiledNormalization::default(),
             rules: vec![CompiledRule {
                 reason: "blocked".to_string(),
                 all_patterns: vec![

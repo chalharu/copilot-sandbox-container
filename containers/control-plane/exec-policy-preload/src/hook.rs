@@ -291,4 +291,29 @@ mod tests {
 
         assert!(error.contains("invalid regex pattern"));
     }
+
+    #[test]
+    fn rejects_repo_local_rules_with_removed_normalization_field() {
+        let repo = setup_repo("pre-tool-use-removed-normalization");
+        fs::write(
+            repo.join(".github/pre-tool-use-rules.yaml"),
+            r#"
+- toolName: bash
+  column: command
+  normalization:
+    optionValueMatchers:
+      - '^-m$'
+  rules:
+    - all:
+        - '^basename:git$'
+      reason: invalid
+"#,
+        )
+        .unwrap();
+
+        let error = evaluate_pre_tool_use(&hook_input(&repo, "git status", "bash")).unwrap_err();
+
+        assert!(error.contains("unknown field"));
+        assert!(error.contains("normalization"));
+    }
 }

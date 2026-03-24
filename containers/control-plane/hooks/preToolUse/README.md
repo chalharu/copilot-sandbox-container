@@ -21,6 +21,6 @@ bundled rule は `deny-rules.yaml` で管理します。schema は `toolName` / 
 
 ## Matching model
 
-`bash.command` は生文字列 grep ではなく、shell 風 token 化と command chain 分割、`sh -c` / `bash -lc` unwrap、環境変数 prefix 解析を行ったうえで generic fact へ変換して評価します。fact は `basename:<name>`、`arg:<token>`、`command:<joined tokens>` のような形式で、rule 側は `all` / `any` の regex で宣言します。
+`bash.command` は生文字列 grep ではなく、shell 風 token 化と command chain 分割、`sh -c` / `bash -lc` unwrap、環境変数 prefix 解析を行ったうえで generic fact へ変換して評価します。fact は `basename:<name>`、`arg:<token>`、`command:<joined tokens>` のような形式で、rule 側は `all` / `any` の regex で宣言します。`git commit -m "-n"` のような値つき option による誤検知を避けるための option-value 判定は engine 内で処理し、YAML には持ち込みません。
 
 さらに `protectedEnv` を使うと、特定の環境変数名と許可値を宣言的に制限できます。bundled policy では `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` などの Git config override を保護しつつ、`git push --force-with-lease` は引き続き許可します。

@@ -1,4 +1,3 @@
-use crate::config::CompiledNormalization;
 use std::path::Path;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,14 +48,14 @@ impl CommandInvocation {
         })
     }
 
-    pub fn facts(&self, normalization: &CompiledNormalization) -> Vec<String> {
+    pub fn facts(&self) -> Vec<String> {
         let mut facts = Vec::new();
         push_unique(&mut facts, format!("exec:{}", self.executable));
         push_unique(&mut facts, format!("basename:{}", self.executable_basename));
         if !self.raw_tokens.is_empty() {
             push_unique(&mut facts, format!("command:{}", self.raw_tokens.join(" ")));
         }
-        for arg in normalize_args(&self.args, normalization) {
+        for arg in normalize_args(&self.args) {
             push_unique(&mut facts, format!("arg:{arg}"));
         }
         facts
@@ -90,7 +89,40 @@ pub fn merge_env_bindings(parent: &[EnvBinding], child: &[EnvBinding]) -> Vec<En
     merged
 }
 
-fn normalize_args(args: &[String], normalization: &CompiledNormalization) -> Vec<String> {
+// Keep value-taking option handling inside the parser so the YAML stays focused on policy.
+const OPTIONS_WITH_VALUE: &[&str] = &[
+    "-c",
+    "-C",
+    "-F",
+    "-m",
+    "-o",
+    "-t",
+    "--author",
+    "--cleanup",
+    "--config-env",
+    "--date",
+    "--exec",
+    "--exec-path",
+    "--file",
+    "--fixup",
+    "--git-dir",
+    "--literal-pathspecs-from-file",
+    "--message",
+    "--namespace",
+    "--pathspec-from-file",
+    "--push-option",
+    "--reedit-message",
+    "--receive-pack",
+    "--repo",
+    "--reuse-message",
+    "--squash",
+    "--super-prefix",
+    "--template",
+    "--trailer",
+    "--work-tree",
+];
+
+fn normalize_args(args: &[String]) -> Vec<String> {
     let mut normalized = Vec::new();
     let mut index = 0;
 
@@ -112,8 +144,7 @@ fn normalize_args(args: &[String], normalization: &CompiledNormalization) -> Vec
                 .map(|(name, _)| name)
                 .unwrap_or(token.as_str())
                 .to_string();
-            let consumes_next =
-                !token.contains('=') && normalization.matches_value_option(&option_name);
+            let consumes_next = !token.contains('=') && option_takes_value(&option_name);
             normalized.push(option_name);
             index += if consumes_next { 2 } else { 1 };
             continue;
@@ -124,7 +155,7 @@ fn normalize_args(args: &[String], normalization: &CompiledNormalization) -> Vec
         for short_index in 1..chars.len() {
             let option_name = format!("-{}", chars[short_index]);
             normalized.push(option_name.clone());
-            if normalization.matches_value_option(&option_name) {
+            if option_takes_value(&option_name) {
                 consumes_next = short_index == chars.len() - 1;
                 break;
             }
@@ -137,6 +168,10 @@ fn normalize_args(args: &[String], normalization: &CompiledNormalization) -> Vec
     }
 
     normalized
+}
+
+fn option_takes_value(token: &str) -> bool {
+    OPTIONS_WITH_VALUE.contains(&token)
 }
 
 struct EnvWrapperPrefix {
@@ -224,14 +259,6 @@ fn push_unique(facts: &mut Vec<String>, fact: String) {
 #[cfg(test)]
 mod tests {
     use super::{CommandInvocation, EnvBinding};
-    use crate::config::CompiledNormalization;
-    use regex::Regex;
-
-    fn git_normalization() -> CompiledNormalization {
-        CompiledNormalization {
-            option_value_matchers: vec![Regex::new("^-m$").unwrap(), Regex::new("^-C$").unwrap()],
-        }
-    }
 
     #[test]
     fn skips_option_values_and_keeps_flags() {
@@ -248,7 +275,7 @@ mod tests {
         )
         .unwrap();
 
-        let facts = invocation.facts(&git_normalization());
+        let facts = invocation.facts();
 
         assert!(facts.contains(&"arg:commit".to_string()));
         assert!(facts.contains(&"arg:-m".to_string()));
@@ -270,7 +297,7 @@ mod tests {
         )
         .unwrap();
 
-        let facts = invocation.facts(&git_normalization());
+        let facts = invocation.facts();
 
         assert!(facts.contains(&"arg:-n".to_string()));
         assert!(facts.contains(&"arg:-m".to_string()));
@@ -292,7 +319,7 @@ mod tests {
         )
         .unwrap();
 
-        let facts = invocation.facts(&git_normalization());
+        let facts = invocation.facts();
 
         assert!(facts.contains(&"arg:--no-verify".to_string()));
         assert!(!facts.contains(&"arg:--force".to_string()));

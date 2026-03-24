@@ -25,7 +25,7 @@ pub fn match_exec_rule(
 
 fn match_group(group: &CompiledRuleGroup, invocations: &[CommandInvocation]) -> Option<String> {
     for invocation in invocations {
-        let facts = invocation.facts(&group.normalization);
+        let facts = invocation.facts();
         for rule in &group.rules {
             if rule_matches(rule, &facts, &invocation.env_bindings) {
                 return Some(rule.reason.clone());
@@ -85,9 +85,7 @@ fn protected_env_violated(entry: &CompiledProtectedEnv, env_bindings: &[EnvBindi
 mod tests {
     use super::match_exec_rule;
     use crate::command::{CommandInvocation, EnvBinding};
-    use crate::config::{
-        CompiledNormalization, CompiledProtectedEnv, CompiledRule, CompiledRuleGroup,
-    };
+    use crate::config::{CompiledProtectedEnv, CompiledRule, CompiledRuleGroup};
     use regex::Regex;
 
     #[test]
@@ -95,9 +93,6 @@ mod tests {
         let groups = vec![CompiledRuleGroup {
             tool_name: "bash".to_string(),
             column: "command".to_string(),
-            normalization: CompiledNormalization {
-                option_value_matchers: vec![Regex::new("^-m$").unwrap()],
-            },
             rules: vec![CompiledRule {
                 reason: "blocked".to_string(),
                 all_patterns: vec![Regex::new("^basename:git$").unwrap()],
