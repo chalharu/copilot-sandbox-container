@@ -34,6 +34,7 @@ printf '%s\n' 'test-github-hooks.sh: verifying bundled hooks in control-plane im
   bash -lc '
     test -f /usr/local/share/control-plane/hooks/hooks.json
     test -f /usr/local/share/control-plane/hooks/audit/main.mjs
+    test -f /usr/local/share/control-plane/hooks/auditAnalysis/main.mjs
     test -x /usr/local/share/control-plane/hooks/git/pre-commit
     test -x /usr/local/share/control-plane/hooks/git/pre-push
     test -f /usr/local/share/control-plane/hooks/git/lib/common.sh
@@ -42,6 +43,7 @@ printf '%s\n' 'test-github-hooks.sh: verifying bundled hooks in control-plane im
     test -f /usr/local/share/control-plane/hooks/postToolUse/lib/incremental-files.mjs
     test -f /home/copilot/.copilot/hooks/hooks.json
     test -f /home/copilot/.copilot/hooks/audit/main.mjs
+    test -f /home/copilot/.copilot/hooks/auditAnalysis/main.mjs
     test -x /home/copilot/.copilot/hooks/git/pre-commit
     test -x /home/copilot/.copilot/hooks/git/pre-push
     test -f /home/copilot/.copilot/hooks/git/lib/common.sh
@@ -50,6 +52,7 @@ printf '%s\n' 'test-github-hooks.sh: verifying bundled hooks in control-plane im
     test -f /home/copilot/.copilot/hooks/postToolUse/lib/incremental-files.mjs
     git config --file /home/copilot/.gitconfig --get core.hooksPath | grep -qx /home/copilot/.copilot/hooks/git
     grep -Fq ".copilot/hooks/audit/main.mjs" /home/copilot/.copilot/hooks/hooks.json
+    grep -Fq ".copilot/hooks/auditAnalysis/main.mjs" /home/copilot/.copilot/hooks/hooks.json
     grep -Fq ".copilot/hooks/postToolUse/main.mjs" /home/copilot/.copilot/hooks/hooks.json
     ! grep -Fq ".github/hooks" /home/copilot/.copilot/hooks/hooks.json
   '

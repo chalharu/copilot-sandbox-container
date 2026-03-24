@@ -146,7 +146,17 @@ data:
   # ~/.copilot/config.json stored on the PVC.
   copilot-config.json: |
     {
-      "telemetry": false
+      "telemetry": false,
+      "controlPlane": {
+        "auditAnalysis": {
+          "enabled": true,
+          "targetRepository": {
+            "url": "https://example.com/chalharu/copilot-sandbox-container"
+          },
+          "minimumEvidenceCount": 3,
+          "repeatThreshold": 3
+        }
+      }
     }
 ---
 apiVersion: v1
@@ -360,6 +370,10 @@ spec:
             # on the shared copilot session PVC. Tune the retained row cap to
             # adjust history depth; when a tool hook sees more than this many
             # rows, it deletes the oldest rows until roughly 3/4 of the cap remains.
+            # A bundled postToolUse analysis hook also writes derived findings to
+            # ~/.copilot/session-state/audit/audit-analysis.db and reads its
+            # target repository / thresholds from controlPlane.auditAnalysis in
+            # copilot-config.json.
             - name: CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS
               value: "10000"
             # `cpulimit` treats 100 as roughly one CPU core, which keeps an

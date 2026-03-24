@@ -43,6 +43,42 @@
         "cwd": ".",
         "timeoutSec": 30
       }
+    ],
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "hook_script=\"${HOME}/.copilot/hooks/auditAnalysis/main.mjs\" && node \"$hook_script\" agentStop",
+        "powershell": "$hookScript = Join-Path $HOME '.copilot/hooks/auditAnalysis/main.mjs'; node $hookScript agentStop",
+        "cwd": ".",
+        "timeoutSec": 30
+      }
+    ],
+    "subagentStop": [
+      {
+        "type": "command",
+        "bash": "hook_script=\"${HOME}/.copilot/hooks/auditAnalysis/main.mjs\" && node \"$hook_script\" subagentStop",
+        "powershell": "$hookScript = Join-Path $HOME '.copilot/hooks/auditAnalysis/main.mjs'; node $hookScript subagentStop",
+        "cwd": ".",
+        "timeoutSec": 30
+      }
+    ],
+    "sessionEnd": [
+      {
+        "type": "command",
+        "bash": "hook_script=\"${HOME}/.copilot/hooks/auditAnalysis/main.mjs\" && node \"$hook_script\" sessionEnd",
+        "powershell": "$hookScript = Join-Path $HOME '.copilot/hooks/auditAnalysis/main.mjs'; node $hookScript sessionEnd",
+        "cwd": ".",
+        "timeoutSec": 30
+      }
+    ],
+    "errorOccurred": [
+      {
+        "type": "command",
+        "bash": "hook_script=\"${HOME}/.copilot/hooks/auditAnalysis/main.mjs\" && node \"$hook_script\" errorOccurred",
+        "powershell": "$hookScript = Join-Path $HOME '.copilot/hooks/auditAnalysis/main.mjs'; node $hookScript errorOccurred",
+        "cwd": ".",
+        "timeoutSec": 30
+      }
     ]
   }
 }
