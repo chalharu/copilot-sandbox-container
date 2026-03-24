@@ -44,7 +44,8 @@ git_hook_require_executable_or_absent() {
 
 git_hook_run_post_tool_use_linter() {
   local repo_root="$1"
-  local hook_script="${HOME}/.copilot/hooks/postToolUse/main.mjs"
+  local hook_root="${COPILOT_HOME:-${HOME}/.copilot}"
+  local hook_script="${hook_root}/hooks/postToolUse/main.mjs"
 
   command -v node >/dev/null 2>&1 || {
     printf 'Global git hooks require node on PATH to run %s\n' "${hook_script}" >&2

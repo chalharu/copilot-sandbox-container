@@ -5,8 +5,10 @@ control_plane_user="${CONTROL_PLANE_USER:-copilot}"
 control_plane_uid="$(id -u "${control_plane_user}")"
 control_plane_home="$(getent passwd "${control_plane_user}" | cut -d: -f6)"
 control_plane_workspace="${CONTROL_PLANE_WORKSPACE:-/workspace}"
-copilot_config_path="${control_plane_home}/.copilot/config.json"
-copilot_session_state_dir="${control_plane_home}/.copilot/session-state"
+copilot_state_dir="${control_plane_home}/.copilot"
+copilot_config_path="${copilot_state_dir}/config.json"
+copilot_command_history_state_path="${copilot_state_dir}/command-history-state.json"
+copilot_session_state_dir="${copilot_state_dir}/session-state"
 audit_log_db_path="${copilot_session_state_dir}/audit/audit-log.db"
 audit_log_db_dir="$(dirname "${audit_log_db_path}")"
 gh_config_dir="${control_plane_home}/.config/gh"
@@ -24,9 +26,13 @@ npm_cache_dir="${CONTROL_PLANE_NPM_CACHE_DIR:-${hook_tmp_root}/npm-cache}"
 screen_dir="${SCREENDIR:-${runtime_dir}/screen}"
 host_key_dir="${CONTROL_PLANE_HOST_KEY_DIR:-/var/lib/control-plane/ssh-host-keys}"
 bundled_skills_dir="/usr/local/share/control-plane/skills"
-copilot_skills_dir="${control_plane_home}/.copilot/skills"
+copilot_skills_dir="${copilot_state_dir}/skills"
 bundled_hooks_dir="/usr/local/share/control-plane/hooks"
-copilot_hooks_dir="${control_plane_home}/.copilot/hooks"
+bundled_git_hooks_dir="${bundled_hooks_dir}/git"
+copilot_hooks_dir="${copilot_state_dir}/hooks"
+copilot_logs_dir="${copilot_state_dir}/logs"
+copilot_agents_dir="${copilot_state_dir}/agents"
+copilot_mcp_config_path="${copilot_state_dir}/mcp-config.json"
 authorized_keys_path="${control_plane_home}/.ssh/authorized_keys"
 kube_dir="${control_plane_home}/.kube"
 kubeconfig_path="${kube_dir}/config"
@@ -36,7 +42,11 @@ runtime_config_path="${runtime_config_dir}/runtime.env"
 copilot_token_path="${runtime_config_dir}/copilot-github-token"
 dockerhub_username_path="${runtime_config_dir}/dockerhub-username"
 dockerhub_token_path="${runtime_config_dir}/dockerhub-token"
-git_config_path="${control_plane_home}/.gitconfig"
+managed_runtime_dir="${CONTROL_PLANE_MANAGED_RUNTIME_DIR:-/var/lib/control-plane/managed-runtime}"
+managed_copilot_home="${CONTROL_PLANE_MANAGED_COPILOT_HOME:-${managed_runtime_dir}/copilot-home}"
+managed_copilot_hooks_dir="${managed_copilot_home}/hooks"
+git_config_path="${CONTROL_PLANE_MANAGED_GIT_CONFIG_PATH:-${managed_runtime_dir}/gitconfig}"
+compat_git_config_path="${control_plane_home}/.gitconfig"
 copilot_config_json_file="${COPILOT_CONFIG_JSON_FILE:-}"
 gh_github_token="${GH_GITHUB_TOKEN:-}"
 gh_github_token_file="${GH_GITHUB_TOKEN_FILE:-}"
@@ -175,6 +185,22 @@ ensure_path_ownership() {
     [[ -e "${target}" ]] || continue
     chown "${owner}" "${target}"
   done
+}
+
+ensure_symlink_path() {
+  local link_path="$1"
+  local target_path="$2"
+
+  if [[ -L "${link_path}" ]]; then
+    if [[ "$(readlink "${link_path}")" == "${target_path}" ]]; then
+      return 0
+    fi
+    rm -f "${link_path}"
+  elif [[ -e "${link_path}" ]]; then
+    rm -rf "${link_path}"
+  fi
+
+  ln -s "${target_path}" "${link_path}"
 }
 
 directory_has_entries() {
@@ -625,46 +651,46 @@ install_bundled_control_plane_skills() {
   fi
 }
 
-install_bundled_control_plane_hooks() {
-  local source_path
-  local target_path
-  local hook_name
-  local nullglob_was_set=0
+configure_managed_copilot_home() {
+  require_regular_file_or_absent "${copilot_command_history_state_path}" "Copilot command history path"
 
+  mkdir -p "${managed_runtime_dir}" "${managed_copilot_home}" "${copilot_logs_dir}" "${copilot_agents_dir}"
+  touch "${copilot_command_history_state_path}"
+  chown "${control_plane_user}:${control_plane_user}" "${copilot_command_history_state_path}"
+  chmod 600 "${copilot_command_history_state_path}"
+  chown "${control_plane_user}:${control_plane_user}" "${copilot_logs_dir}" "${copilot_agents_dir}"
+  chown root:root "${managed_runtime_dir}" "${managed_copilot_home}"
+  chmod 755 "${managed_runtime_dir}" "${managed_copilot_home}"
+
+  ensure_symlink_path "${managed_copilot_home}/config.json" "${copilot_config_path}"
+  ensure_symlink_path "${managed_copilot_home}/command-history-state.json" "${copilot_command_history_state_path}"
+  ensure_symlink_path "${managed_copilot_home}/session-state" "${copilot_session_state_dir}"
+  ensure_symlink_path "${managed_copilot_home}/logs" "${copilot_logs_dir}"
+  ensure_symlink_path "${managed_copilot_home}/skills" "${copilot_skills_dir}"
+  ensure_symlink_path "${managed_copilot_home}/agents" "${copilot_agents_dir}"
+  ensure_symlink_path "${managed_copilot_home}/mcp-config.json" "${copilot_mcp_config_path}"
+
+  chown -h root:root \
+    "${managed_copilot_home}/config.json" \
+    "${managed_copilot_home}/command-history-state.json" \
+    "${managed_copilot_home}/session-state" \
+    "${managed_copilot_home}/logs" \
+    "${managed_copilot_home}/skills" \
+    "${managed_copilot_home}/agents" \
+    "${managed_copilot_home}/mcp-config.json"
+}
+
+install_bundled_control_plane_hooks() {
   [[ -d "${bundled_hooks_dir}" ]] || return 0
 
-  mkdir -p "${copilot_hooks_dir}"
-  if shopt -q nullglob; then
-    nullglob_was_set=1
-  fi
-  shopt -s nullglob
-  for source_path in "${bundled_hooks_dir}"/*; do
-    [[ -e "${source_path}" ]] || continue
-    target_path="${copilot_hooks_dir}/$(basename "${source_path}")"
-    rm -rf "${target_path}"
-    if [[ -d "${source_path}" ]]; then
-      mkdir -p "${target_path}"
-      cp -R "${source_path}/." "${target_path}/"
-      find "${target_path}" -type d -exec chmod 755 {} +
-      find "${target_path}" -type f -exec chmod 644 {} +
-      if [[ "$(basename "${source_path}")" == "git" ]]; then
-        for hook_name in pre-commit pre-push; do
-          if [[ -f "${target_path}/${hook_name}" ]]; then
-            chmod 755 "${target_path}/${hook_name}"
-          fi
-        done
-      fi
-    elif [[ -f "${source_path}" ]]; then
-      cp "${source_path}" "${target_path}"
-      chmod 644 "${target_path}"
-    else
-      continue
-    fi
-    safe_chown_tree "${control_plane_user}:${control_plane_user}" "${target_path}"
-  done
-  if [[ "${nullglob_was_set}" -eq 0 ]]; then
-    shopt -u nullglob
-  fi
+  mkdir -p "${managed_runtime_dir}" "${managed_copilot_home}"
+  chown root:root "${managed_runtime_dir}" "${managed_copilot_home}"
+  chmod 755 "${managed_runtime_dir}" "${managed_copilot_home}"
+
+  ensure_symlink_path "${managed_copilot_hooks_dir}" "${bundled_hooks_dir}"
+  ensure_symlink_path "${copilot_hooks_dir}" "${bundled_hooks_dir}"
+
+  chown -h root:root "${managed_copilot_hooks_dir}" "${copilot_hooks_dir}"
 }
 
 configure_git_credential_helper() {
@@ -695,31 +721,34 @@ configure_git() {
     git config --file "${git_config_path}" --replace-all user.email "${git_user_email}"
   fi
 
-  if [[ ! -d "${copilot_hooks_dir}/git" ]]; then
-    printf 'Expected bundled git hooks at %s\n' "${copilot_hooks_dir}/git" >&2
+  if [[ ! -d "${bundled_git_hooks_dir}" ]]; then
+    printf 'Expected bundled git hooks at %s\n' "${bundled_git_hooks_dir}" >&2
     exit 1
   fi
 
-  git config --file "${git_config_path}" --replace-all core.hooksPath "${copilot_hooks_dir}/git"
+  git config --file "${git_config_path}" --replace-all core.hooksPath "${bundled_git_hooks_dir}"
   configure_git_credential_helper github.com "${gh_bin}"
   configure_git_credential_helper gist.github.com "${gh_bin}"
 
-  chown "${control_plane_user}:${control_plane_user}" "${git_config_path}"
-  chmod 600 "${git_config_path}"
+  chown root:root "${git_config_path}"
+  chmod 644 "${git_config_path}"
+  ensure_symlink_path "${compat_git_config_path}" "${git_config_path}"
+  chown -h root:root "${compat_git_config_path}"
 }
 
 require_container_capabilities "$@"
 
 mkdir -p \
-  "${control_plane_home}/.copilot" \
+  "${copilot_state_dir}" \
   "${containers_config_dir}" \
   "${gh_config_dir}" \
   "${control_plane_home}/.local/share" \
   "${runtime_config_dir}" \
   "${kube_dir}" \
   "${control_plane_home}/.ssh" \
-  "${copilot_hooks_dir}" \
   "${copilot_skills_dir}" \
+  "${copilot_logs_dir}" \
+  "${copilot_agents_dir}" \
   "${control_plane_workspace}" \
   "${podman_state_root}" \
   "${copilot_session_state_dir}" \
@@ -750,7 +779,6 @@ safe_chown_tree "${control_plane_user}:${control_plane_user}" \
   "${runtime_config_dir}" \
   "${kube_dir}" \
   "${control_plane_home}/.ssh" \
-  "${copilot_hooks_dir}" \
   "${control_plane_workspace}" \
   "${audit_log_db_dir}" \
   "${job_transfer_root}" \
@@ -763,9 +791,11 @@ safe_chown_tree "${control_plane_user}:${control_plane_user}" \
   "${npm_cache_dir}" \
   "${runtime_dir}"
 ensure_path_ownership "${control_plane_user}:${control_plane_user}" \
-  "${control_plane_home}/.copilot" \
-  "${copilot_hooks_dir}" \
+  "${copilot_state_dir}" \
   "${copilot_session_state_dir}" \
+  "${copilot_skills_dir}" \
+  "${copilot_logs_dir}" \
+  "${copilot_agents_dir}" \
   "${audit_log_db_dir}" \
   "${podman_state_root}" \
   "${podman_state_dir}" \
@@ -814,6 +844,8 @@ export TMPDIR="${tmp_dir}"
 export NODE_COMPILE_CACHE="${node_compile_cache_dir}"
 export NPM_CONFIG_CACHE="${npm_cache_dir}"
 export SCREENDIR="${screen_dir}"
+export COPILOT_HOME="${managed_copilot_home}"
+export GIT_CONFIG_GLOBAL="${git_config_path}"
 touch "${authorized_keys_path}"
 chmod 600 "${authorized_keys_path}"
 chown "${control_plane_user}:${control_plane_user}" "${authorized_keys_path}"
@@ -931,12 +963,14 @@ fi
   write_runtime_var CONTROL_PLANE_JOB_TRANSFER_HOST "${job_transfer_host}"
   write_runtime_var CONTROL_PLANE_JOB_TRANSFER_PORT "${job_transfer_port}"
   write_runtime_var CONTROL_PLANE_JOB_TRANSFER_USER "${job_transfer_user}"
+  write_runtime_var COPILOT_HOME "${managed_copilot_home}"
   write_runtime_var CONTROL_PLANE_TMP_ROOT "${tmp_root}"
   write_runtime_var CONTROL_PLANE_HOOK_TMP_ROOT "${hook_tmp_root}"
   write_runtime_var CONTROL_PLANE_NODE_COMPILE_CACHE_DIR "${node_compile_cache_dir}"
   write_runtime_var CONTROL_PLANE_NPM_CACHE_DIR "${npm_cache_dir}"
   write_runtime_var CONTROL_PLANE_AUDIT_LOG_DB_PATH "${audit_log_db_path}"
   write_runtime_var CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS "${audit_log_max_records}"
+  write_runtime_var GIT_CONFIG_GLOBAL "${git_config_path}"
   write_runtime_var XDG_RUNTIME_DIR "${runtime_dir}"
   write_runtime_var TMPDIR "${tmp_dir}"
   write_runtime_var NODE_COMPILE_CACHE "${node_compile_cache_dir}"
@@ -976,6 +1010,7 @@ chmod 644 "${containers_storage_config_path}"
 chown "${control_plane_user}:${control_plane_user}" "${containers_engine_config_path}"
 chmod 644 "${containers_engine_config_path}"
 
+configure_managed_copilot_home
 install_bundled_control_plane_hooks
 install_bundled_control_plane_skills
 configure_copilot

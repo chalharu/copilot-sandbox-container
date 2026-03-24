@@ -4,7 +4,7 @@ Copilot CLI の `sessionStart` / `userPromptSubmitted` / `preToolUse` / `postToo
 
 ## Copilot hooks
 
-Control Plane entrypoint は `containers/control-plane/hooks/` を `~/.copilot/hooks/` へ同期し、bundled hook JSON (`hooks.json`) から `~/.copilot/hooks/audit/main.mjs` を起動します。これにより repo ごとの `.github/hooks/` を置かなくても、共通の監査ログ hook を利用できます。
+Control Plane entrypoint は bundled hook JSON を root-owned な `COPILOT_HOME/hooks/` から読み、互換用に `~/.copilot/hooks/` symlink も張ります。`hooks.json` は `COPILOT_HOME` を優先して `hooks/audit/main.mjs` を起動するため、repo ごとの `.github/hooks/` を置かなくても、共通の監査ログ hook を保護された path から利用できます。
 
 監査ログは `~/.copilot/session-state/audit/audit-log.db` に保存されます。`sessionStart` では repo root と git remotes を含むプロジェクトコンテキストを記録し、`userPromptSubmitted` ではユーザープロンプト、`preToolUse` / `postToolUse` ではツール名・引数・結果を保存します。各 row は hook プロセスの親プロセス ID を表す `ppid` を持ち、SQLite 上の親子参照としては扱いません。
 

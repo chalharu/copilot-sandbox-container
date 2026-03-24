@@ -114,8 +114,17 @@ file_backed_output="$("${container_bin}" run --rm \
   "${control_plane_image}" \
   bash -l -se 2>&1 <<'EOF'
 set -euo pipefail
+test "${COPILOT_HOME}" = '/var/lib/control-plane/managed-runtime/copilot-home'
+test "${GIT_CONFIG_GLOBAL}" = '/var/lib/control-plane/managed-runtime/gitconfig'
 test "$(stat -c '%a %U %G' /home/copilot/.copilot/config.json)" = '600 copilot copilot'
 test "$(stat -c '%a %U %G' /home/copilot/.config/gh/hosts.yml)" = '600 copilot copilot'
+test "$(stat -c '%a %U %G' "${COPILOT_HOME}")" = '755 root root'
+test "$(stat -c '%a %U %G' "${COPILOT_HOME}/hooks/hooks.json")" = '644 root root'
+test "$(stat -c '%a %U %G' "${GIT_CONFIG_GLOBAL}")" = '644 root root'
+test -L /home/copilot/.copilot/hooks
+test "$(readlink /home/copilot/.copilot/hooks)" = '/usr/local/share/control-plane/hooks'
+test -L /home/copilot/.gitconfig
+test "$(readlink /home/copilot/.gitconfig)" = "${GIT_CONFIG_GLOBAL}"
 test "$(stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys)" = '711 root root'
 test "$(stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key)" = '600 root root'
 test "$(stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub)" = '644 root root'
@@ -126,6 +135,15 @@ test "$(stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519
 grep -Fxq 'HostKey /etc/ssh/ssh_host_ed25519_key' /etc/ssh/sshd_config
 ! grep -Fq 'HostKey /etc/ssh/ssh_host_rsa_key' /etc/ssh/sshd_config
 ! grep -Fq 'HostKey /etc/ssh/ssh_host_ecdsa_key' /etc/ssh/sshd_config
+git config --global --get core.hooksPath | grep -qx '/usr/local/share/control-plane/hooks/git'
+if su -s /bin/bash copilot -lc "printf tamper >> \"${GIT_CONFIG_GLOBAL}\"" 2>/dev/null; then
+  printf '%s\n' 'Expected managed global git config to be read-only for the Copilot user' >&2
+  exit 1
+fi
+if su -s /bin/bash copilot -lc "printf tamper >> \"${COPILOT_HOME}/hooks/hooks.json\"" 2>/dev/null; then
+  printf '%s\n' 'Expected managed Copilot hooks to be read-only for the Copilot user' >&2
+  exit 1
+fi
 su -s /bin/bash copilot -lc 'test -r /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub'
 if su -s /bin/bash copilot -lc 'test -r /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key'; then
   printf '%s\n' 'Expected Copilot user to be unable to read the private SSH host key' >&2
