@@ -340,41 +340,35 @@ fn set_errno(value: c_int) {
 
 #[cfg(test)]
 mod tests {
-    use crate::command::{CommandInvocation, EnvBinding};
-    use crate::config::{CompiledProtectedEnv, CompiledRule, CompiledRuleGroup};
+    use crate::command::CommandInvocation;
+    use crate::config::{CompiledConfig, CompiledRule, CompiledRuleGroup};
     use crate::policy::match_exec_rule;
     use regex::Regex;
 
     #[test]
-    fn exec_rule_matching_uses_generic_facts() {
-        let groups = vec![CompiledRuleGroup {
-            tool_name: "bash".to_string(),
-            column: "command".to_string(),
-            rules: vec![CompiledRule {
-                reason: "blocked".to_string(),
-                all_patterns: vec![
-                    Regex::new("^basename:git$").unwrap(),
-                    Regex::new("^arg:push$").unwrap(),
-                ],
-                any_patterns: vec![Regex::new("^arg:-f$").unwrap()],
-                protected_env: vec![CompiledProtectedEnv {
-                    name_patterns: vec![Regex::new("^GIT_CONFIG_GLOBAL$").unwrap()],
-                    allow_value_patterns: Vec::new(),
+    fn exec_rule_matching_uses_token_sequences() {
+        let config = CompiledConfig {
+            command_rule_groups: vec![CompiledRuleGroup {
+                tool_name: "bash".to_string(),
+                column: "command".to_string(),
+                rules: vec![CompiledRule {
+                    reason: "blocked".to_string(),
+                    basename_pattern: Regex::new("^(?:git)$").unwrap(),
+                    command_patterns: vec![Regex::new("^(?:push)$").unwrap()],
+                    option_patterns: vec![Regex::new("^(?:-f)$").unwrap()],
                 }],
             }],
-        }];
+            protected_environments: vec![Regex::new("^(?:GIT_CONFIG_GLOBAL)$").unwrap()],
+        };
         let invocation = CommandInvocation::from_exec(
             "git",
             &["git".to_string(), "push".to_string(), "-f".to_string()],
-            vec![EnvBinding {
-                name: "GIT_CONFIG_GLOBAL".to_string(),
-                value: Some("/tmp/evil".to_string()),
-            }],
+            Vec::new(),
         )
         .unwrap();
 
         assert_eq!(
-            match_exec_rule(&groups, &invocation).as_deref(),
+            match_exec_rule(&config, &invocation).as_deref(),
             Some("blocked")
         );
     }

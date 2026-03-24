@@ -193,7 +193,7 @@ mod tests {
         assert!(
             decision
                 .permission_decision_reason
-                .contains("Git config environment overrides")
+                .contains("Protected environment overrides")
         );
     }
 
@@ -252,14 +252,15 @@ mod tests {
         fs::write(
             repo.join(".github/pre-tool-use-rules.yaml"),
             r#"
-- toolName: bash
-  column: command
-  rules:
-    - all:
-        - '^basename:git$'
-        - '^arg:status$'
-        - '^arg:--short$'
-      reason: repo-local policy
+commandRules:
+  - toolName: bash
+    column: command
+    rules:
+      - rule:
+          - git
+          - status
+          - --short
+        reason: repo-local policy
 "#,
         )
         .unwrap();
@@ -277,12 +278,13 @@ mod tests {
         fs::write(
             repo.join(".github/pre-tool-use-rules.yaml"),
             r#"
-- toolName: bash
-  column: command
-  rules:
-    - all:
-        - '['
-      reason: invalid
+commandRules:
+  - toolName: bash
+    column: command
+    rules:
+      - rule:
+          - '['
+        reason: invalid
 "#,
         )
         .unwrap();
@@ -298,15 +300,16 @@ mod tests {
         fs::write(
             repo.join(".github/pre-tool-use-rules.yaml"),
             r#"
-- toolName: bash
-  column: command
-  normalization:
-    optionValueMatchers:
-      - '^-m$'
-  rules:
-    - all:
-        - '^basename:git$'
-      reason: invalid
+commandRules:
+  - toolName: bash
+    column: command
+    normalization:
+      optionValueMatchers:
+        - '^-m$'
+    rules:
+      - rule:
+          - git
+        reason: invalid
 "#,
         )
         .unwrap();

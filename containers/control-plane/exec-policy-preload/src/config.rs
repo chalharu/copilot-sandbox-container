@@ -8,6 +8,14 @@ pub const DEFAULT_RULES_PATH: &str =
     "/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml";
 const REPO_RULES_RELATIVE_PATH: &str = ".github/pre-tool-use-rules.yaml";
 
+pub const PROTECTED_ENVIRONMENT_REASON: &str = "Protected environment overrides are blocked by control-plane policy. Use the managed environment provided by the control plane.";
+
+#[derive(Clone, Debug, Default)]
+pub struct CompiledConfig {
+    pub command_rule_groups: Vec<CompiledRuleGroup>,
+    pub protected_environments: Vec<Regex>,
+}
+
 #[derive(Clone, Debug)]
 pub struct CompiledRuleGroup {
     pub tool_name: String,
@@ -18,15 +26,18 @@ pub struct CompiledRuleGroup {
 #[derive(Clone, Debug)]
 pub struct CompiledRule {
     pub reason: String,
-    pub all_patterns: Vec<Regex>,
-    pub any_patterns: Vec<Regex>,
-    pub protected_env: Vec<CompiledProtectedEnv>,
+    pub basename_pattern: Regex,
+    pub command_patterns: Vec<Regex>,
+    pub option_patterns: Vec<Regex>,
 }
 
-#[derive(Clone, Debug)]
-pub struct CompiledProtectedEnv {
-    pub name_patterns: Vec<Regex>,
-    pub allow_value_patterns: Vec<Regex>,
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawConfig {
+    #[serde(default, rename = "commandRules")]
+    command_rules: Vec<RawRuleGroup>,
+    #[serde(default, rename = "protectedEnvironments")]
+    protected_environments: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -41,25 +52,11 @@ struct RawRuleGroup {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawRule {
-    #[serde(default)]
-    all: Vec<String>,
-    #[serde(default)]
-    any: Vec<String>,
-    #[serde(default, rename = "protectedEnv")]
-    protected_env: Vec<RawProtectedEnv>,
+    rule: Vec<String>,
     reason: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawProtectedEnv {
-    #[serde(default, rename = "namePatterns")]
-    name_patterns: Vec<String>,
-    #[serde(default, rename = "allowValuePatterns")]
-    allow_value_patterns: Vec<String>,
-}
-
-static BUNDLED_RULES: OnceLock<Result<Vec<CompiledRuleGroup>, String>> = OnceLock::new();
+static BUNDLED_RULES: OnceLock<Result<CompiledConfig, String>> = OnceLock::new();
 
 pub fn discover_repo_root(start: &Path) -> Option<PathBuf> {
     let mut current = Some(start);
@@ -101,26 +98,32 @@ pub fn resolve_rules_path() -> PathBuf {
     installed
 }
 
-pub fn load_rules(repo_root: Option<&Path>) -> Result<Vec<CompiledRuleGroup>, String> {
-    let mut groups = load_bundled_rules()?.clone();
+pub fn load_rules(repo_root: Option<&Path>) -> Result<CompiledConfig, String> {
+    let mut config = load_bundled_rules()?.clone();
     if let Some(root) = repo_root {
-        groups.extend(load_rule_file(&root.join(REPO_RULES_RELATIVE_PATH), true)?);
+        let repo_config = load_rule_file(&root.join(REPO_RULES_RELATIVE_PATH), true)?;
+        config
+            .command_rule_groups
+            .extend(repo_config.command_rule_groups);
+        config
+            .protected_environments
+            .extend(repo_config.protected_environments);
     }
-    Ok(groups)
+    Ok(config)
 }
 
-fn load_bundled_rules() -> Result<&'static Vec<CompiledRuleGroup>, String> {
+fn load_bundled_rules() -> Result<&'static CompiledConfig, String> {
     match BUNDLED_RULES.get_or_init(|| load_rule_file(&resolve_rules_path(), false)) {
-        Ok(groups) => Ok(groups),
+        Ok(config) => Ok(config),
         Err(error) => Err(error.clone()),
     }
 }
 
-fn load_rule_file(path: &Path, optional: bool) -> Result<Vec<CompiledRuleGroup>, String> {
+fn load_rule_file(path: &Path, optional: bool) -> Result<CompiledConfig, String> {
     let raw = match fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(error) if optional && error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(Vec::new());
+            return Ok(CompiledConfig::default());
         }
         Err(error) => {
             return Err(format!(
@@ -131,11 +134,11 @@ fn load_rule_file(path: &Path, optional: bool) -> Result<Vec<CompiledRuleGroup>,
         }
     };
 
-    parse_rule_groups(&raw, path)
+    parse_config(&raw, path)
 }
 
-fn parse_rule_groups(raw: &str, path: &Path) -> Result<Vec<CompiledRuleGroup>, String> {
-    let groups: Vec<RawRuleGroup> = serde_yml::from_str(raw).map_err(|error| {
+fn parse_config(raw: &str, path: &Path) -> Result<CompiledConfig, String> {
+    let config: RawConfig = serde_yml::from_str(raw).map_err(|error| {
         format!(
             "failed to parse exec policy rules at {}: {}",
             path.display(),
@@ -143,11 +146,33 @@ fn parse_rule_groups(raw: &str, path: &Path) -> Result<Vec<CompiledRuleGroup>, S
         )
     })?;
 
-    groups
+    compile_config(config, path)
+}
+
+fn compile_config(config: RawConfig, path: &Path) -> Result<CompiledConfig, String> {
+    let command_rule_groups = config
+        .command_rules
         .into_iter()
         .enumerate()
         .map(|(group_index, group)| compile_rule_group(group, path, group_index))
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let protected_environments = compile_patterns(
+        config.protected_environments,
+        &format!("protectedEnvironments in {}", path.display()),
+    )?;
+
+    if command_rule_groups.is_empty() && protected_environments.is_empty() {
+        return Err(format!(
+            "{} must define at least one commandRules entry or protectedEnvironments pattern.",
+            path.display()
+        ));
+    }
+
+    Ok(CompiledConfig {
+        command_rule_groups,
+        protected_environments,
+    })
 }
 
 fn compile_rule_group(
@@ -195,46 +220,44 @@ fn compile_rule(
     if rule.reason.trim().is_empty() {
         return Err(format!("{description} must define a non-empty reason."));
     }
-    if rule.all.is_empty() && rule.any.is_empty() && rule.protected_env.is_empty() {
+    if rule.rule.is_empty() {
         return Err(format!(
-            "{description} must define at least one of all, any, or protectedEnv."
+            "{description} must define rule as a non-empty array."
         ));
     }
+    let mut raw_patterns = rule.rule.into_iter();
+    let basename = raw_patterns
+        .next()
+        .expect("rule must contain at least one pattern after validation");
+    let remaining_patterns: Vec<String> = raw_patterns.collect();
 
     Ok(CompiledRule {
         reason: rule.reason,
-        all_patterns: compile_patterns(rule.all, &format!("all in {description}"))?,
-        any_patterns: compile_patterns(rule.any, &format!("any in {description}"))?,
-        protected_env: rule
-            .protected_env
+        basename_pattern: compile_pattern(basename, &format!("basename in {description}"), 1)?,
+        command_patterns: remaining_patterns
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| !entry.starts_with('-'))
+            .map(|(index, entry)| {
+                compile_pattern(
+                    entry.clone(),
+                    &format!("command patterns in {description}"),
+                    index + 2,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        option_patterns: remaining_patterns
             .into_iter()
             .enumerate()
-            .map(|(env_index, entry)| compile_protected_env(entry, &description, env_index))
+            .filter(|(_, entry)| entry.starts_with('-'))
+            .map(|(index, entry)| {
+                compile_pattern(
+                    entry,
+                    &format!("option patterns in {description}"),
+                    index + 2,
+                )
+            })
             .collect::<Result<Vec<_>, _>>()?,
-    })
-}
-
-fn compile_protected_env(
-    entry: RawProtectedEnv,
-    rule_description: &str,
-    env_index: usize,
-) -> Result<CompiledProtectedEnv, String> {
-    let description = format!("protectedEnv {} in {rule_description}", env_index + 1);
-    if entry.name_patterns.is_empty() {
-        return Err(format!(
-            "{description} must define namePatterns as a non-empty array."
-        ));
-    }
-
-    Ok(CompiledProtectedEnv {
-        name_patterns: compile_patterns(
-            entry.name_patterns,
-            &format!("namePatterns in {description}"),
-        )?,
-        allow_value_patterns: compile_patterns(
-            entry.allow_value_patterns,
-            &format!("allowValuePatterns in {description}"),
-        )?,
     })
 }
 
@@ -242,25 +265,25 @@ fn compile_patterns(entries: Vec<String>, description: &str) -> Result<Vec<Regex
     entries
         .into_iter()
         .enumerate()
-        .map(|(index, entry)| {
-            if entry.is_empty() {
-                return Err(format!(
-                    "pattern {} in {} must be a non-empty string.",
-                    index + 1,
-                    description
-                ));
-            }
-            let expanded = expand_env_placeholders(&entry);
-            Regex::new(&expanded).map_err(|error| {
-                format!(
-                    "invalid regex pattern {} in {}: {}",
-                    index + 1,
-                    description,
-                    error
-                )
-            })
-        })
+        .map(|(index, entry)| compile_pattern(entry, description, index + 1))
         .collect()
+}
+
+fn compile_pattern(entry: String, description: &str, index: usize) -> Result<Regex, String> {
+    if entry.is_empty() {
+        return Err(format!(
+            "pattern {} in {} must be a non-empty string.",
+            index, description
+        ));
+    }
+    let expanded = expand_env_placeholders(&entry);
+    let anchored = format!("^(?:{expanded})$");
+    Regex::new(&anchored).map_err(|error| {
+        format!(
+            "invalid regex pattern {} in {}: {}",
+            index, description, error
+        )
+    })
 }
 
 fn expand_env_placeholders(input: &str) -> String {
@@ -288,74 +311,65 @@ fn expand_env_placeholders(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{discover_repo_root, parse_rule_groups};
+    use super::{discover_repo_root, parse_config};
     use std::fs;
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn parse_rule_groups_keeps_generic_rule_groups() {
+    fn parse_config_keeps_command_rules_and_protected_environments() {
         let yaml = r#"
-- toolName: bash
-  column: command
-  rules:
-    - all:
-        - '^basename:git$'
-        - '^arg:commit$'
-      any:
-        - '^arg:--no-verify$'
-        - '^arg:-n$'
-      reason: commit blocked
+commandRules:
+  - toolName: bash
+    column: command
+    rules:
+      - rule:
+          - git
+          - commit
+          - --no-verify|-n
+        reason: commit blocked
+protectedEnvironments:
+  - GIT_CONFIG_GLOBAL
 "#;
 
-        let groups = parse_rule_groups(yaml, Path::new("/tmp/rules.yaml")).unwrap();
+        let config = parse_config(yaml, Path::new("/tmp/rules.yaml")).unwrap();
 
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].rules.len(), 1);
+        assert_eq!(config.command_rule_groups.len(), 1);
+        assert_eq!(config.command_rule_groups[0].rules.len(), 1);
+        assert_eq!(config.protected_environments.len(), 1);
     }
 
     #[test]
-    fn parse_rule_groups_expands_env_placeholders() {
+    fn parse_config_expands_env_placeholders() {
         unsafe {
             std::env::set_var("CONTROL_PLANE_TEST_ALLOWED_PATH", "/tmp/allowed");
         }
         let yaml = r#"
-- toolName: bash
-  column: command
-  rules:
-    - protectedEnv:
-        - namePatterns:
-            - '^GIT_CONFIG_GLOBAL$'
-          allowValuePatterns:
-            - '^${CONTROL_PLANE_TEST_ALLOWED_PATH}$'
-      reason: env blocked
+protectedEnvironments:
+  - ${CONTROL_PLANE_TEST_ALLOWED_PATH}
 "#;
 
-        let groups = parse_rule_groups(yaml, Path::new("/tmp/rules.yaml")).unwrap();
+        let config = parse_config(yaml, Path::new("/tmp/rules.yaml")).unwrap();
 
-        assert!(
-            groups[0].rules[0].protected_env[0].allow_value_patterns[0].is_match("/tmp/allowed")
-        );
+        assert!(config.protected_environments[0].is_match("/tmp/allowed"));
     }
 
     #[test]
-    fn parse_rule_groups_rejects_unknown_fields() {
+    fn parse_config_rejects_removed_fields() {
         let yaml = r#"
-- toolName: bash
-  column: command
-  normalization:
-    optionValueMatchers:
-      - '^-m$'
-  rules:
-    - all:
-        - '^basename:git$'
-      reason: blocked
+commandRules:
+  - toolName: bash
+    column: command
+    rules:
+      - all:
+          - git
+        reason: blocked
 "#;
 
-        let error = parse_rule_groups(yaml, Path::new("/tmp/rules.yaml")).unwrap_err();
+        let error = parse_config(yaml, Path::new("/tmp/rules.yaml")).unwrap_err();
 
         assert!(error.contains("unknown field"));
-        assert!(error.contains("normalization"));
+        assert!(error.contains("all"));
     }
 
     #[test]

@@ -118,18 +118,19 @@ test -z "${allow_output}"
 
 env_override_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"GIT_CONFIG_GLOBAL=/tmp/evil git status --short\"}"}')"
 printf '%s\n' "${env_override_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
-printf '%s\n' "${env_override_deny}" | jq -e '.permissionDecisionReason | contains("Git config environment overrides")' >/dev/null
+printf '%s\n' "${env_override_deny}" | jq -e '.permissionDecisionReason | contains("Protected environment overrides")' >/dev/null
 
 mkdir -p .github
 cat > .github/pre-tool-use-rules.yaml <<'YAML'
-- toolName: bash
-  column: command
-  rules:
-    - all:
-        - '^basename:git$'
-        - '^arg:status$'
-        - '^arg:--short$'
-      reason: repo-local policy
+commandRules:
+  - toolName: bash
+    column: command
+    rules:
+      - rule:
+          - git
+          - status
+          - --short
+        reason: repo-local policy
 YAML
 
 override_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git status --short\"}"}')"
@@ -138,7 +139,7 @@ printf '%s\n' "${override_deny}" | jq -e '.permissionDecisionReason == "repo-loc
 
 assert_denied_exec 'git commit --no-verify' git commit --no-verify -m skip
 assert_denied_exec 'Force pushes are blocked' git push -f origin HEAD
-assert_denied_exec 'Git config environment overrides are blocked' env GIT_CONFIG_GLOBAL=/tmp/evil git status --short
+assert_denied_exec 'Protected environment overrides are blocked' env GIT_CONFIG_GLOBAL=/tmp/evil git status --short
 assert_denied_exec 'repo-local policy' git status --short
 
 cat > /tmp/force-push-wrapper.sh <<'WRAPPER'

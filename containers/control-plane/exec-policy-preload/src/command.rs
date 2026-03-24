@@ -48,17 +48,11 @@ impl CommandInvocation {
         })
     }
 
-    pub fn facts(&self) -> Vec<String> {
-        let mut facts = Vec::new();
-        push_unique(&mut facts, format!("exec:{}", self.executable));
-        push_unique(&mut facts, format!("basename:{}", self.executable_basename));
-        if !self.raw_tokens.is_empty() {
-            push_unique(&mut facts, format!("command:{}", self.raw_tokens.join(" ")));
-        }
-        for arg in normalize_args(&self.args) {
-            push_unique(&mut facts, format!("arg:{arg}"));
-        }
-        facts
+    pub fn normalized_tokens(&self) -> Vec<String> {
+        let mut tokens = Vec::with_capacity(self.args.len() + 1);
+        tokens.push(self.executable_basename.clone());
+        tokens.extend(normalize_args(&self.args));
+        tokens
     }
 
     pub fn unwrap_env_wrapper(&self) -> Option<Self> {
@@ -250,12 +244,6 @@ fn basename(value: &str) -> &str {
         .unwrap_or(value)
 }
 
-fn push_unique(facts: &mut Vec<String>, fact: String) {
-    if !fact.is_empty() && !facts.iter().any(|entry| entry == &fact) {
-        facts.push(fact);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{CommandInvocation, EnvBinding};
@@ -275,12 +263,13 @@ mod tests {
         )
         .unwrap();
 
-        let facts = invocation.facts();
+        let tokens = invocation.normalized_tokens();
 
-        assert!(facts.contains(&"arg:commit".to_string()));
-        assert!(facts.contains(&"arg:-m".to_string()));
-        assert!(facts.contains(&"arg:--no-verify".to_string()));
-        assert!(!facts.contains(&"arg:-n".to_string()));
+        assert_eq!(tokens[0], "git");
+        assert!(tokens.contains(&"commit".to_string()));
+        assert!(tokens.contains(&"-m".to_string()));
+        assert!(tokens.contains(&"--no-verify".to_string()));
+        assert!(!tokens.contains(&"-n".to_string()));
     }
 
     #[test]
@@ -297,11 +286,11 @@ mod tests {
         )
         .unwrap();
 
-        let facts = invocation.facts();
+        let tokens = invocation.normalized_tokens();
 
-        assert!(facts.contains(&"arg:-n".to_string()));
-        assert!(facts.contains(&"arg:-m".to_string()));
-        assert!(!facts.contains(&"arg:message".to_string()));
+        assert!(tokens.contains(&"-n".to_string()));
+        assert!(tokens.contains(&"-m".to_string()));
+        assert!(!tokens.contains(&"message".to_string()));
     }
 
     #[test]
@@ -319,10 +308,10 @@ mod tests {
         )
         .unwrap();
 
-        let facts = invocation.facts();
+        let tokens = invocation.normalized_tokens();
 
-        assert!(facts.contains(&"arg:--no-verify".to_string()));
-        assert!(!facts.contains(&"arg:--force".to_string()));
+        assert!(tokens.contains(&"--no-verify".to_string()));
+        assert!(!tokens.contains(&"--force".to_string()));
     }
 
     #[test]

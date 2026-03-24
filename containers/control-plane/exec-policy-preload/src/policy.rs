@@ -1,23 +1,36 @@
 use crate::command::{CommandInvocation, EnvBinding};
-use crate::config::{CompiledProtectedEnv, CompiledRule, CompiledRuleGroup};
+use crate::config::{
+    CompiledConfig, CompiledRule, CompiledRuleGroup, PROTECTED_ENVIRONMENT_REASON,
+};
+use std::ffi::OsStr;
 
 pub fn match_hook_rule(
-    groups: &[CompiledRuleGroup],
+    config: &CompiledConfig,
     tool_name: &str,
     column: &str,
     invocations: &[CommandInvocation],
 ) -> Option<String> {
-    groups
+    if protected_environment_overridden(&config.protected_environments, invocations) {
+        return Some(PROTECTED_ENVIRONMENT_REASON.to_string());
+    }
+
+    config
+        .command_rule_groups
         .iter()
         .filter(|group| group.tool_name == tool_name && group.column == column)
         .find_map(|group| match_group(group, invocations))
 }
 
-pub fn match_exec_rule(
-    groups: &[CompiledRuleGroup],
-    invocation: &CommandInvocation,
-) -> Option<String> {
-    groups
+pub fn match_exec_rule(config: &CompiledConfig, invocation: &CommandInvocation) -> Option<String> {
+    if protected_environment_overridden(
+        &config.protected_environments,
+        std::slice::from_ref(invocation),
+    ) {
+        return Some(PROTECTED_ENVIRONMENT_REASON.to_string());
+    }
+
+    config
+        .command_rule_groups
         .iter()
         .filter(|group| group.column == "command")
         .find_map(|group| match_group(group, std::slice::from_ref(invocation)))
@@ -25,9 +38,9 @@ pub fn match_exec_rule(
 
 fn match_group(group: &CompiledRuleGroup, invocations: &[CommandInvocation]) -> Option<String> {
     for invocation in invocations {
-        let facts = invocation.facts();
+        let tokens = invocation.normalized_tokens();
         for rule in &group.rules {
-            if rule_matches(rule, &facts, &invocation.env_bindings) {
+            if rule_matches(rule, &tokens) {
                 return Some(rule.reason.clone());
             }
         }
@@ -35,90 +48,138 @@ fn match_group(group: &CompiledRuleGroup, invocations: &[CommandInvocation]) -> 
     None
 }
 
-fn rule_matches(rule: &CompiledRule, facts: &[String], env_bindings: &[EnvBinding]) -> bool {
-    if !rule
-        .all_patterns
-        .iter()
-        .all(|regex| facts.iter().any(|fact| regex.is_match(fact)))
-    {
+fn rule_matches(rule: &CompiledRule, tokens: &[String]) -> bool {
+    let Some(first_token) = tokens.first() else {
+        return false;
+    };
+    if !rule.basename_pattern.is_match(first_token) {
         return false;
     }
 
-    if !rule.any_patterns.is_empty()
-        && !rule
-            .any_patterns
-            .iter()
-            .any(|regex| facts.iter().any(|fact| regex.is_match(fact)))
-    {
+    let (command_tokens, option_tokens): (Vec<_>, Vec<_>) = tokens
+        .iter()
+        .skip(1)
+        .partition(|token| !token.starts_with('-'));
+
+    if command_tokens.len() < rule.command_patterns.len() {
         return false;
     }
-
-    if rule.protected_env.is_empty() {
-        return true;
+    for (pattern, token) in rule.command_patterns.iter().zip(command_tokens.iter()) {
+        if !pattern.is_match(token) {
+            return false;
+        }
     }
 
-    rule.protected_env
+    rule.option_patterns
         .iter()
-        .any(|entry| protected_env_violated(entry, env_bindings))
+        .all(|pattern| option_tokens.iter().any(|token| pattern.is_match(token)))
 }
 
-fn protected_env_violated(entry: &CompiledProtectedEnv, env_bindings: &[EnvBinding]) -> bool {
-    env_bindings.iter().any(|binding| {
-        entry
-            .name_patterns
+fn protected_environment_overridden(
+    patterns: &[regex::Regex],
+    invocations: &[CommandInvocation],
+) -> bool {
+    invocations.iter().any(|invocation| {
+        invocation
+            .env_bindings
             .iter()
-            .any(|regex| regex.is_match(&binding.name))
-            && match binding.value.as_deref() {
-                Some(value) => {
-                    entry.allow_value_patterns.is_empty()
-                        || !entry
-                            .allow_value_patterns
-                            .iter()
-                            .any(|regex| regex.is_match(value))
-                }
-                None => true,
-            }
+            .any(|binding| protected_environment_binding_changed(patterns, binding))
     })
+}
+
+fn protected_environment_binding_changed(patterns: &[regex::Regex], binding: &EnvBinding) -> bool {
+    patterns.iter().any(|regex| regex.is_match(&binding.name))
+        && binding_differs_from_parent(binding)
+}
+
+fn binding_differs_from_parent(binding: &EnvBinding) -> bool {
+    let current = std::env::var_os(&binding.name);
+    match (binding.value.as_deref(), current) {
+        (Some(value), Some(current)) => current != OsStr::new(value),
+        (Some(_), None) => true,
+        (None, Some(_)) => true,
+        (None, None) => false,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::match_exec_rule;
     use crate::command::{CommandInvocation, EnvBinding};
-    use crate::config::{CompiledProtectedEnv, CompiledRule, CompiledRuleGroup};
+    use crate::config::{CompiledConfig, CompiledRule, CompiledRuleGroup};
     use regex::Regex;
 
     #[test]
-    fn matches_generic_arg_rules_and_protected_env() {
-        let groups = vec![CompiledRuleGroup {
-            tool_name: "bash".to_string(),
-            column: "command".to_string(),
-            rules: vec![CompiledRule {
-                reason: "blocked".to_string(),
-                all_patterns: vec![Regex::new("^basename:git$").unwrap()],
-                any_patterns: vec![Regex::new("^arg:--no-verify$").unwrap()],
-                protected_env: vec![CompiledProtectedEnv {
-                    name_patterns: vec![Regex::new("^GIT_CONFIG_GLOBAL$").unwrap()],
-                    allow_value_patterns: vec![Regex::new("^/allowed$").unwrap()],
+    fn matches_command_rules_and_protected_environments() {
+        unsafe {
+            std::env::set_var("GIT_CONFIG_GLOBAL", "/managed");
+        }
+        let config = CompiledConfig {
+            command_rule_groups: vec![CompiledRuleGroup {
+                tool_name: "bash".to_string(),
+                column: "command".to_string(),
+                rules: vec![CompiledRule {
+                    reason: "blocked".to_string(),
+                    basename_pattern: Regex::new("^(?:git)$").unwrap(),
+                    command_patterns: vec![Regex::new("^(?:commit)$").unwrap()],
+                    option_patterns: vec![Regex::new("^(?:--no-verify|-n)$").unwrap()],
                 }],
             }],
-        }];
-        let invocation = CommandInvocation::from_exec(
+            protected_environments: vec![Regex::new("^(?:GIT_CONFIG_GLOBAL)$").unwrap()],
+        };
+        let rule_invocation = CommandInvocation::from_exec(
             "git",
             &[
                 "git".to_string(),
                 "commit".to_string(),
                 "--no-verify".to_string(),
             ],
+            Vec::new(),
+        )
+        .unwrap();
+        let reordered_rule_invocation = CommandInvocation::from_exec(
+            "git",
+            &[
+                "git".to_string(),
+                "--no-verify".to_string(),
+                "commit".to_string(),
+            ],
+            Vec::new(),
+        )
+        .unwrap();
+        let protected_env_invocation = CommandInvocation::from_exec(
+            "git",
+            &["git".to_string(), "status".to_string()],
             vec![EnvBinding {
                 name: "GIT_CONFIG_GLOBAL".to_string(),
                 value: Some("/tmp/evil".to_string()),
             }],
         )
         .unwrap();
+        let managed_env_invocation = CommandInvocation::from_exec(
+            "git",
+            &["git".to_string(), "status".to_string()],
+            vec![EnvBinding {
+                name: "GIT_CONFIG_GLOBAL".to_string(),
+                value: Some("/managed".to_string()),
+            }],
+        )
+        .unwrap();
 
-        let reason = match_exec_rule(&groups, &invocation);
-
-        assert_eq!(reason.as_deref(), Some("blocked"));
+        assert_eq!(
+            match_exec_rule(&config, &rule_invocation).as_deref(),
+            Some("blocked")
+        );
+        assert_eq!(
+            match_exec_rule(&config, &reordered_rule_invocation).as_deref(),
+            Some("blocked")
+        );
+        assert!(
+            match_exec_rule(&config, &protected_env_invocation)
+                .as_deref()
+                .unwrap()
+                .contains("Protected environment overrides are blocked")
+        );
+        assert_eq!(match_exec_rule(&config, &managed_env_invocation), None);
     }
 }
