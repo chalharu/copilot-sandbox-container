@@ -628,6 +628,7 @@ install_bundled_control_plane_skills() {
 install_bundled_control_plane_hooks() {
   local source_path
   local target_path
+  local hook_name
   local nullglob_was_set=0
 
   [[ -d "${bundled_hooks_dir}" ]] || return 0
@@ -646,6 +647,13 @@ install_bundled_control_plane_hooks() {
       cp -R "${source_path}/." "${target_path}/"
       find "${target_path}" -type d -exec chmod 755 {} +
       find "${target_path}" -type f -exec chmod 644 {} +
+      if [[ "$(basename "${source_path}")" == "git" ]]; then
+        for hook_name in pre-commit pre-push; do
+          if [[ -f "${target_path}/${hook_name}" ]]; then
+            chmod 755 "${target_path}/${hook_name}"
+          fi
+        done
+      fi
     elif [[ -f "${source_path}" ]]; then
       cp "${source_path}" "${target_path}"
       chmod 644 "${target_path}"
@@ -687,6 +695,12 @@ configure_git() {
     git config --file "${git_config_path}" --replace-all user.email "${git_user_email}"
   fi
 
+  if [[ ! -d "${copilot_hooks_dir}/git" ]]; then
+    printf 'Expected bundled git hooks at %s\n' "${copilot_hooks_dir}/git" >&2
+    exit 1
+  fi
+
+  git config --file "${git_config_path}" --replace-all core.hooksPath "${copilot_hooks_dir}/git"
   configure_git_credential_helper github.com "${gh_bin}"
   configure_git_credential_helper gist.github.com "${gh_bin}"
 

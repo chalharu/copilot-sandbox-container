@@ -149,6 +149,9 @@ RUN /usr/local/bin/install-git-skills-from-manifest /tmp/external-skills.yaml /u
     && find /usr/local/share/control-plane/skills -type f -exec chmod 644 {} + \
     && find /usr/local/share/control-plane/hooks -type d -exec chmod 755 {} + \
     && find /usr/local/share/control-plane/hooks -type f -exec chmod 644 {} + \
+    && for git_hook in pre-commit pre-push; do \
+         if [ -f "/usr/local/share/control-plane/hooks/git/${git_hook}" ]; then chmod 755 "/usr/local/share/control-plane/hooks/git/${git_hook}"; fi; \
+       done \
     && chown -R "${CONTROL_PLANE_USER}:${CONTROL_PLANE_USER}" "/home/${CONTROL_PLANE_USER}/.config"
 
 WORKDIR /workspace
