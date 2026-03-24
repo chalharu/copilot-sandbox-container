@@ -38,6 +38,13 @@
       },
       {
         "type": "command",
+        "bash": "hook_script=\"${HOME}/.copilot/hooks/auditAnalysis/main.mjs\" && node \"$hook_script\"",
+        "powershell": "$hookScript = Join-Path $HOME '.copilot/hooks/auditAnalysis/main.mjs'; node $hookScript",
+        "cwd": ".",
+        "timeoutSec": 30
+      },
+      {
+        "type": "command",
         "bash": "hook_script=\"${HOME}/.copilot/hooks/postToolUse/main.mjs\" && node \"$hook_script\"",
         "powershell": "$hookScript = Join-Path $HOME '.copilot/hooks/postToolUse/main.mjs'; node $hookScript",
         "cwd": ".",

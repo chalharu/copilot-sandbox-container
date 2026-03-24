@@ -62,6 +62,9 @@ run_regressions_group() {
     "${script_dir}/test-audit-logging.sh" "${control_plane_image}"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
+    "${script_dir}/test-audit-analysis.sh" "${control_plane_image}"
+
+  CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-image-maintenance.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \

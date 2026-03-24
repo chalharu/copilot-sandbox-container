@@ -165,3 +165,21 @@ Refusing to install an empty gh hosts source from /var/run/control-plane-auth/gh
 ### 意味
 
 `GH_GITHUB_TOKEN_FILE` または `GH_HOSTS_YML_FILE` を env で指定したのに、対応する Secret key が無いか空です。`gh-hosts.yml` を使う場合はその file が優先され、無ければ `gh-github-token` から最小 `~/.config/gh/hosts.yml` を生成する、という順序で動きます。
+
+## 12. 監査分析 hook の設定が壊れている
+
+### 代表ログ
+
+```text
+control-plane audit analysis: Audit analysis config at /home/copilot/.copilot/config.json must define controlPlane.auditAnalysis as a JSON object.
+```
+
+### 意味
+
+`control-plane-config` ConfigMap の `copilot-config.json` overlay で、`controlPlane.auditAnalysis` が JSON object ではないか、壊れた値が入っています。bundled `audit-log-analysis` skill と `postToolUse` の analysis hook は同じ設定を読むため、ここが壊れると `~/.copilot/session-state/audit/audit-analysis.db` の更新も止まります。
+
+### 期待する確認結果
+
+- `~/.copilot/config.json` の `controlPlane.auditAnalysis` が JSON object
+- `~/.copilot/session-state/audit/audit-analysis.db` が存在する
+- `node ~/.copilot/skills/audit-log-analysis/scripts/audit-analysis.mjs status --json` が成功する

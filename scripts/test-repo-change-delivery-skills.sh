@@ -27,6 +27,9 @@ rust_podman_script_file="${rust_skill_dir}/scripts/podman-rust.sh"
 rust_k8s_script_file="${rust_skill_dir}/scripts/k8s-rust.sh"
 legacy_rust_sccache_image_dockerfile="${rust_skill_dir}/assets/sccache-image/Dockerfile"
 sccache_image_dockerfile="${repo_root}/containers/sccache/Dockerfile"
+audit_analysis_skill_dir="${repo_root}/containers/control-plane/skills/audit-log-analysis"
+audit_analysis_skill_file="${audit_analysis_skill_dir}/SKILL.md"
+audit_analysis_script_file="${audit_analysis_skill_dir}/scripts/audit-analysis.mjs"
 commit_skill_dir="${repo_root}/containers/control-plane/skills/git-commit"
 commit_skill_file="${commit_skill_dir}/SKILL.md"
 pull_request_skill_dir="${repo_root}/containers/control-plane/skills/pull-request-workflow"
@@ -49,6 +52,7 @@ repo_package_file="${package_dir}/pr-fix-workflow.skill"
 skill_creator_package_file="${package_dir}/skill-creator.skill"
 generic_package_file="${package_dir}/repo-change-delivery.skill"
 rust_package_file="${package_dir}/containerized-rust-ops.skill"
+audit_analysis_package_file="${package_dir}/audit-log-analysis.skill"
 commit_package_file="${package_dir}/git-commit.skill"
 pull_request_package_file="${package_dir}/pull-request-workflow.skill"
 backtick='`'
@@ -163,6 +167,8 @@ assert_file_present "${rust_skill_file}"
 assert_file_present "${rust_runtime_reference_file}"
 assert_file_present "${rust_podman_script_file}"
 assert_file_present "${rust_k8s_script_file}"
+assert_file_present "${audit_analysis_skill_file}"
+assert_file_present "${audit_analysis_script_file}"
 assert_file_present "${sccache_image_dockerfile}"
 assert_file_present "${commit_skill_file}"
 assert_file_present "${pull_request_skill_file}"
@@ -214,6 +220,10 @@ assert_file_not_contains "${rust_skill_file}" 'assets/sccache-image/Dockerfile'
 assert_file_contains "${rust_runtime_reference_file}" 'containers/sccache/'
 assert_file_not_contains "${rust_runtime_reference_file}" 'assets/sccache-image/'
 assert_file_not_contains "${rust_runtime_reference_file}" '.copilot-cache'
+assert_file_contains "${audit_analysis_skill_file}" 'name: audit-log-analysis'
+assert_file_contains "${audit_analysis_skill_file}" 'wrapping up a task'
+assert_file_contains "${audit_analysis_script_file}" 'automation_candidates'
+assert_file_contains "${audit_analysis_script_file}" 'controlPlane.auditAnalysis'
 
 assert_file_contains "${commit_skill_file}" 'name: git-commit'
 assert_file_contains "${commit_skill_file}" 'Conventional Commits'
@@ -246,6 +256,7 @@ assert_file_not_contains "${control_plane_ops_skill_file}" '.github/skills/skill
 
 assert_file_contains "${bundled_reference_file}" "${backtick}containerized-yamllint-ops${backtick}"
 assert_file_contains "${bundled_reference_file}" "${backtick}containerized-rust-ops${backtick}"
+assert_file_contains "${bundled_reference_file}" "${backtick}audit-log-analysis${backtick}"
 assert_file_contains "${bundled_reference_file}" "${backtick}doc-coauthoring${backtick}"
 assert_file_contains "${bundled_reference_file}" "${backtick}git-commit${backtick}"
 assert_file_contains "${bundled_reference_file}" "${backtick}pull-request-workflow${backtick}"
@@ -272,6 +283,7 @@ run_skill_creator_python scripts.quick_validate /opt/external-skills/doc-coautho
 run_skill_creator_python scripts.quick_validate /workspace/containers/control-plane/skills/containerized-yamllint-ops
 run_skill_creator_python scripts.quick_validate /workspace/containers/control-plane/skills/repo-change-delivery
 run_skill_creator_python scripts.quick_validate /workspace/containers/control-plane/skills/containerized-rust-ops
+run_skill_creator_python scripts.quick_validate /workspace/containers/control-plane/skills/audit-log-analysis
 run_skill_creator_python scripts.quick_validate /workspace/containers/control-plane/skills/git-commit
 run_skill_creator_python scripts.quick_validate /workspace/containers/control-plane/skills/pull-request-workflow
 run_skill_creator_python scripts.quick_validate /workspace/.github/skills/pr-fix-workflow
@@ -283,6 +295,7 @@ package_skill_to_host /workspace/.github/skills/pr-fix-workflow "${repo_package_
 package_skill_to_host /opt/external-skills/skill-creator "${skill_creator_package_file}"
 package_skill_to_host /workspace/containers/control-plane/skills/repo-change-delivery "${generic_package_file}"
 package_skill_to_host /workspace/containers/control-plane/skills/containerized-rust-ops "${rust_package_file}"
+package_skill_to_host /workspace/containers/control-plane/skills/audit-log-analysis "${audit_analysis_package_file}"
 package_skill_to_host /workspace/containers/control-plane/skills/git-commit "${commit_package_file}"
 package_skill_to_host /workspace/containers/control-plane/skills/pull-request-workflow "${pull_request_package_file}"
 
@@ -290,6 +303,7 @@ assert_file_present "${doc_coauthor_package_file}"
 assert_file_present "${yamllint_package_file}"
 assert_file_present "${generic_package_file}"
 assert_file_present "${rust_package_file}"
+assert_file_present "${audit_analysis_package_file}"
 assert_file_present "${commit_package_file}"
 assert_file_present "${pull_request_package_file}"
 assert_file_present "${repo_package_file}"
@@ -300,10 +314,14 @@ assert_file_present "${skill_creator_package_file}"
 set -euo pipefail
 doc_root=/usr/local/share/control-plane/skills/doc-coauthoring
 skill_creator_root=/usr/local/share/control-plane/skills/skill-creator
+audit_analysis_root=/usr/local/share/control-plane/skills/audit-log-analysis
 test -r "$doc_root/SKILL.md"
 grep -Fqx "name: doc-coauthoring" "$doc_root/SKILL.md"
 test -r "$skill_creator_root/SKILL.md"
 test -r "$skill_creator_root/LICENSE.txt"
-grep -Fqx "name: skill-creator" "$skill_creator_root/SKILL.md"'
+grep -Fqx "name: skill-creator" "$skill_creator_root/SKILL.md"
+test -r "$audit_analysis_root/SKILL.md"
+test -r "$audit_analysis_root/scripts/audit-analysis.mjs"
+grep -Fqx "name: audit-log-analysis" "$audit_analysis_root/SKILL.md"'
 
 printf '%s\n' 'repo-change-delivery-skills-test: skills ok' >&2

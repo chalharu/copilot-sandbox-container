@@ -11,6 +11,7 @@
 - `containerized-yamllint-ops`: reusable YAML lint helper that runs through the pinned `containers/yamllint` image
 - `control-plane-operations`: control-plane runtime, Podman, SSH, and Kubernetes Job execution guidance
 - `containerized-rust-ops`: reusable Rust validation helpers that keep large temp files and caches off `/tmp` and out of `.git`
+- `audit-log-analysis`: audit-log anomaly review and automation-candidate triage backed by a persistent SQLite analysis DB
 - `doc-coauthoring`: bundled from the external skill manifest in `containers/control-plane/config/external-skills.yaml`
 - `repo-change-delivery`: generic end-to-end repository delivery loop
 - `git-commit`: generic commit workflow with repository-convention message generation
