@@ -43,20 +43,40 @@ function writeExecutable(filePath, content) {
 	fs.writeFileSync(filePath, content, { mode: 0o755 });
 }
 
+function createIsolatedGitEnv(t, prefix) {
+	const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+	t.after(() => {
+		fs.rmSync(home, { recursive: true, force: true });
+	});
+
+	return {
+		home,
+		env: {
+			...process.env,
+			HOME: home,
+			XDG_CONFIG_HOME: path.join(home, ".config"),
+			GIT_CONFIG_NOSYSTEM: "1",
+			GIT_CONFIG_GLOBAL: path.join(home, ".gitconfig"),
+		},
+	};
+}
+
 function setupRepo(t, initialBranch = "main") {
 	const repo = fs.mkdtempSync(path.join(os.tmpdir(), "git-hook-repo-"));
 	t.after(() => {
 		fs.rmSync(repo, { recursive: true, force: true });
 	});
+	const { env } = createIsolatedGitEnv(t, "git-hook-bootstrap-home-");
 
 	run("git", ["init", `--initial-branch=${initialBranch}`, "--quiet"], {
 		cwd: repo,
+		env,
 	});
-	run("git", ["config", "user.name", "test"], { cwd: repo });
-	run("git", ["config", "user.email", "test@example.com"], { cwd: repo });
+	run("git", ["config", "user.name", "test"], { cwd: repo, env });
+	run("git", ["config", "user.email", "test@example.com"], { cwd: repo, env });
 	fs.writeFileSync(path.join(repo, "README.md"), "# Title\n", "utf8");
-	run("git", ["add", "README.md"], { cwd: repo });
-	run("git", ["commit", "-m", "init"], { cwd: repo, stdio: "ignore" });
+	run("git", ["add", "README.md"], { cwd: repo, env });
+	run("git", ["commit", "-m", "init"], { cwd: repo, env, stdio: "ignore" });
 
 	return repo;
 }
@@ -72,10 +92,7 @@ function setupBareRemote(t) {
 }
 
 function setupGlobalHooks(t, repo) {
-	const home = fs.mkdtempSync(path.join(os.tmpdir(), "git-hook-home-"));
-	t.after(() => {
-		fs.rmSync(home, { recursive: true, force: true });
-	});
+	const { home, env } = createIsolatedGitEnv(t, "git-hook-home-");
 
 	const copilotHooksDir = path.join(home, ".copilot", "hooks");
 	const bundledGitDir = path.join(copilotHooksDir, "git");
@@ -88,11 +105,6 @@ function setupGlobalHooks(t, repo) {
 	);
 	fs.chmodSync(path.join(bundledGitDir, "pre-commit"), 0o755);
 	fs.chmodSync(path.join(bundledGitDir, "pre-push"), 0o755);
-
-	const env = {
-		...process.env,
-		HOME: home,
-	};
 	run("git", ["config", "--global", "core.hooksPath", bundledGitDir], {
 		cwd: repo,
 		env,
