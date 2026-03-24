@@ -16,6 +16,7 @@ command -v node >/dev/null 2>&1 || {
 
 node --test \
   containers/control-plane/hooks/audit/main.test.mjs \
+  containers/control-plane/hooks/preToolUse/main.test.mjs \
   containers/control-plane/hooks/postToolUse/main.test.mjs \
   containers/control-plane/hooks/git/main.test.mjs
 
@@ -37,6 +38,8 @@ set -euo pipefail
 test -f /usr/local/share/control-plane/hooks/hooks.json
 test -f /usr/local/share/control-plane/hooks/audit/main.mjs
 test -f /usr/local/share/control-plane/hooks/auditAnalysis/main.mjs
+test -f /usr/local/share/control-plane/hooks/preToolUse/main.mjs
+test -f /usr/local/share/control-plane/hooks/preToolUse/deny-rules.json
 test -x /usr/local/share/control-plane/hooks/git/pre-commit
 test -x /usr/local/share/control-plane/hooks/git/pre-push
 test -f /usr/local/share/control-plane/hooks/git/lib/common.sh
@@ -55,6 +58,8 @@ test "$(stat -c '%a %U %G' "${GIT_CONFIG_GLOBAL}")" = "644 root root"
 test -f /home/copilot/.copilot/hooks/hooks.json
 test -f /home/copilot/.copilot/hooks/audit/main.mjs
 test -f /home/copilot/.copilot/hooks/auditAnalysis/main.mjs
+test -f /home/copilot/.copilot/hooks/preToolUse/main.mjs
+test -f /home/copilot/.copilot/hooks/preToolUse/deny-rules.json
 test -x /home/copilot/.copilot/hooks/git/pre-commit
 test -x /home/copilot/.copilot/hooks/git/pre-push
 test -f /home/copilot/.copilot/hooks/git/lib/common.sh
@@ -65,6 +70,7 @@ git config --global --get core.hooksPath | grep -qx /usr/local/share/control-pla
 grep -Fq "COPILOT_HOME" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/audit/main.mjs" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/auditAnalysis/main.mjs" /home/copilot/.copilot/hooks/hooks.json
+grep -Fq "hooks/preToolUse/main.mjs" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/postToolUse/main.mjs" /home/copilot/.copilot/hooks/hooks.json
 ! grep -Fq ".github/hooks" /home/copilot/.copilot/hooks/hooks.json
 if su -s /bin/bash copilot -lc "printf tamper >> \"${GIT_CONFIG_GLOBAL}\"" 2>/dev/null; then

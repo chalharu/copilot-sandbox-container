@@ -21,7 +21,7 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 	);
 	assert.equal(hooksConfig.hooks.sessionStart.length, 1);
 	assert.equal(hooksConfig.hooks.userPromptSubmitted.length, 1);
-	assert.equal(hooksConfig.hooks.preToolUse.length, 1);
+	assert.equal(hooksConfig.hooks.preToolUse.length, 2);
 	assert.equal(hooksConfig.hooks.postToolUse.length, 2);
 	assert.equal(hooksConfig.hooks.agentStop.length, 1);
 	assert.equal(hooksConfig.hooks.subagentStop.length, 1);
@@ -54,6 +54,11 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 		hooksConfig.hooks.preToolUse[0].bash,
 		/node "\$hook_script" preToolUse/,
 	);
+	assert.match(
+		hooksConfig.hooks.preToolUse[1].bash,
+		/\/hooks\/preToolUse\/main\.mjs/,
+	);
+	assert.match(hooksConfig.hooks.preToolUse[1].bash, /node "\$hook_script"$/);
 	assert.match(
 		hooksConfig.hooks.postToolUse[0].bash,
 		/\/hooks\/audit\/main\.mjs/,
@@ -108,6 +113,7 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 		hooksConfig.hooks.sessionStart[0],
 		hooksConfig.hooks.userPromptSubmitted[0],
 		hooksConfig.hooks.preToolUse[0],
+		hooksConfig.hooks.preToolUse[1],
 		hooksConfig.hooks.postToolUse[0],
 		hooksConfig.hooks.postToolUse[1],
 		hooksConfig.hooks.agentStop[0],
@@ -135,6 +141,14 @@ test("hooks config wires audit hooks, lifecycle analysis hooks, and bundled post
 	assert.match(
 		hooksConfig.hooks.postToolUse[0].powershell,
 		/node \$hookScript postToolUse/,
+	);
+	assert.match(
+		hooksConfig.hooks.preToolUse[1].powershell,
+		/hooks\/preToolUse\/main\.mjs/,
+	);
+	assert.match(
+		hooksConfig.hooks.preToolUse[1].powershell,
+		/node \$hookScript$/,
 	);
 	assert.match(
 		hooksConfig.hooks.postToolUse[1].powershell,
