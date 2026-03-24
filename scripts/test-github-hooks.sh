@@ -9,10 +9,22 @@ command -v node >/dev/null 2>&1 || {
   exit 1
 }
 
+command -v npm >/dev/null 2>&1 || {
+  printf 'test-github-hooks.sh: npm is required\n' >&2
+  exit 1
+}
+
 [[ ! -e .github/hooks ]] || {
   printf 'test-github-hooks.sh: .github/hooks should not exist anymore\n' >&2
   exit 1
 }
+
+npm ci \
+  --prefix containers/control-plane/hooks/preToolUse \
+  --ignore-scripts \
+  --no-audit \
+  --no-fund \
+  --silent
 
 node --test \
   containers/control-plane/hooks/audit/main.test.mjs \
@@ -39,7 +51,7 @@ test -f /usr/local/share/control-plane/hooks/hooks.json
 test -f /usr/local/share/control-plane/hooks/audit/main.mjs
 test -f /usr/local/share/control-plane/hooks/auditAnalysis/main.mjs
 test -f /usr/local/share/control-plane/hooks/preToolUse/main.mjs
-test -f /usr/local/share/control-plane/hooks/preToolUse/deny-rules.json
+test -f /usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml
 test -x /usr/local/share/control-plane/hooks/git/pre-commit
 test -x /usr/local/share/control-plane/hooks/git/pre-push
 test -f /usr/local/share/control-plane/hooks/git/lib/common.sh
@@ -59,7 +71,7 @@ test -f /home/copilot/.copilot/hooks/hooks.json
 test -f /home/copilot/.copilot/hooks/audit/main.mjs
 test -f /home/copilot/.copilot/hooks/auditAnalysis/main.mjs
 test -f /home/copilot/.copilot/hooks/preToolUse/main.mjs
-test -f /home/copilot/.copilot/hooks/preToolUse/deny-rules.json
+test -f /home/copilot/.copilot/hooks/preToolUse/deny-rules.yaml
 test -x /home/copilot/.copilot/hooks/git/pre-commit
 test -x /home/copilot/.copilot/hooks/git/pre-push
 test -f /home/copilot/.copilot/hooks/git/lib/common.sh

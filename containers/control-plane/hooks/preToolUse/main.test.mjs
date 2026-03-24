@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import jsYaml from "js-yaml";
 
 const currentFile = fileURLToPath(import.meta.url);
 const preToolUseDir = path.dirname(currentFile);
@@ -15,7 +16,7 @@ const bundledRulesConfigPath = path.join(
 	"control-plane",
 	"hooks",
 	"preToolUse",
-	"deny-rules.json",
+	"deny-rules.yaml",
 );
 const sourceBundledPreToolUseDir = path.join(
 	repoRoot,
@@ -23,6 +24,10 @@ const sourceBundledPreToolUseDir = path.join(
 	"control-plane",
 	"hooks",
 	"preToolUse",
+);
+const sourceBundledNodeModulesDir = path.join(
+	sourceBundledPreToolUseDir,
+	"node_modules",
 );
 
 function run(command, args, options = {}) {
@@ -53,13 +58,23 @@ function setupRepo(t, prefix) {
 	fs.mkdirSync(path.join(repo, ".copilot", "hooks"), {
 		recursive: true,
 	});
-	fs.cpSync(
-		sourceBundledPreToolUseDir,
-		path.join(repo, ".copilot", "hooks", "preToolUse"),
-		{
-			recursive: true,
-		},
+	const targetPreToolUseDir = path.join(
+		repo,
+		".copilot",
+		"hooks",
+		"preToolUse",
 	);
+	fs.cpSync(sourceBundledPreToolUseDir, targetPreToolUseDir, {
+		recursive: true,
+		filter: (source) => path.basename(source) !== "node_modules",
+	});
+	if (fs.existsSync(sourceBundledNodeModulesDir)) {
+		fs.symlinkSync(
+			sourceBundledNodeModulesDir,
+			path.join(targetPreToolUseDir, "node_modules"),
+			"dir",
+		);
+	}
 
 	return repo;
 }
@@ -80,8 +95,16 @@ function parseHookOutput(result) {
 	return result.stdout.trim() === "" ? null : JSON.parse(result.stdout);
 }
 
+function writeRepoRules(repo, content) {
+	fs.writeFileSync(
+		path.join(repo, ".github", "pre-tool-use-rules.yaml"),
+		content.trimStart(),
+		"utf8",
+	);
+}
+
 test("bundled preToolUse rules define git safety protections", () => {
-	const rulesConfig = JSON.parse(
+	const rulesConfig = jsYaml.load(
 		fs.readFileSync(bundledRulesConfigPath, "utf8"),
 	);
 	assert.equal(Array.isArray(rulesConfig), true);
@@ -95,7 +118,6 @@ test("bundled preToolUse rules define git safety protections", () => {
 	]);
 	assert.deepEqual(rulesConfig[0].patterns[2].patterns, [
 		"^git push(?: .+)? --force(?: |$)",
-		"^git push(?: .+)? --force-with-lease(?: |$)",
 		"^git push(?: .+)? -f(?: |$)",
 	]);
 });
@@ -144,7 +166,7 @@ test("hook denies git commit no-verify flags in long and short form", (t) => {
 	});
 });
 
-test("hook denies git push --no-verify and force pushes across command forms", (t) => {
+test("hook denies git push --no-verify and unsafe force pushes across command forms", (t) => {
 	const repo = setupRepo(t, "pre-tool-use-push-");
 
 	const noVerifyOutput = parseHookOutput(
@@ -179,14 +201,10 @@ test("hook denies git push --no-verify and force pushes across command forms", (
 		forceOutput.permissionDecisionReason,
 		/Force pushes are blocked/,
 	);
-	assert.equal(forceWithLeaseOutput.permissionDecision, "deny");
-	assert.match(
-		forceWithLeaseOutput.permissionDecisionReason,
-		/Force pushes are blocked/,
-	);
+	assert.equal(forceWithLeaseOutput, null);
 });
 
-test("hook allows safe git commands and non-bash tools", (t) => {
+test("hook allows safe git commands, git push -n, and non-bash tools", (t) => {
 	const repo = setupRepo(t, "pre-tool-use-allow-");
 
 	const safeGitOutput = parseHookOutput(
@@ -194,6 +212,14 @@ test("hook allows safe git commands and non-bash tools", (t) => {
 			toolName: "bash",
 			toolArgs: JSON.stringify({
 				command: "git push origin HEAD",
+			}),
+		}),
+	);
+	const dryRunOutput = parseHookOutput(
+		runHook(repo, {
+			toolName: "bash",
+			toolArgs: JSON.stringify({
+				command: "git push -n origin HEAD",
 			}),
 		}),
 	);
@@ -207,6 +233,7 @@ test("hook allows safe git commands and non-bash tools", (t) => {
 	);
 
 	assert.equal(safeGitOutput, null);
+	assert.equal(dryRunOutput, null);
 	assert.equal(nonBashOutput, null);
 });
 
@@ -249,27 +276,59 @@ test("hook does not treat commit message values as deny-rule flags", (t) => {
 	assert.equal(longFlagMessageOutput, null);
 });
 
+test("hook unwraps sh -c and bash -lc wrappers before matching deny rules", (t) => {
+	const repo = setupRepo(t, "pre-tool-use-shell-wrapper-");
+
+	const wrappedCommitOutput = parseHookOutput(
+		runHook(repo, {
+			toolName: "bash",
+			toolArgs: JSON.stringify({
+				command: 'bash -lc "git commit --no-verify -m \\"skip hooks\\""',
+			}),
+		}),
+	);
+	const wrappedForcePushOutput = parseHookOutput(
+		runHook(repo, {
+			toolName: "bash",
+			toolArgs: JSON.stringify({
+				command: "sh -c 'git push -f origin HEAD'",
+			}),
+		}),
+	);
+	const wrappedForceWithLeaseOutput = parseHookOutput(
+		runHook(repo, {
+			toolName: "bash",
+			toolArgs: JSON.stringify({
+				command: "env FOO=1 bash -lc 'git push --force-with-lease origin HEAD'",
+			}),
+		}),
+	);
+
+	assert.equal(wrappedCommitOutput.permissionDecision, "deny");
+	assert.match(
+		wrappedCommitOutput.permissionDecisionReason,
+		/git commit --no-verify/,
+	);
+	assert.equal(wrappedForcePushOutput.permissionDecision, "deny");
+	assert.match(
+		wrappedForcePushOutput.permissionDecisionReason,
+		/Force pushes are blocked/,
+	);
+	assert.equal(wrappedForceWithLeaseOutput, null);
+});
+
 test("hook merges bundled rules with repo-local additions", (t) => {
 	const repo = setupRepo(t, "pre-tool-use-override-");
-	fs.writeFileSync(
-		path.join(repo, ".github", "pre-tool-use-rules.json"),
-		JSON.stringify(
-			[
-				{
-					toolName: "bash",
-					column: "command",
-					patterns: [
-						{
-							patterns: ["^git status(?: .+)? --short(?: |$)"],
-							reason: "repo-local policy",
-						},
-					],
-				},
-			],
-			null,
-			2,
-		),
-		"utf8",
+	writeRepoRules(
+		repo,
+		`
+- toolName: bash
+  column: command
+  patterns:
+    - patterns:
+        - '^git status(?: .+)? --short(?: |$)'
+      reason: repo-local policy
+`,
 	);
 
 	const statusOutput = parseHookOutput(
@@ -302,25 +361,16 @@ test("hook merges bundled rules with repo-local additions", (t) => {
 
 test("hook rejects repo-local configs with invalid regex patterns", (t) => {
 	const repo = setupRepo(t, "pre-tool-use-invalid-regex-");
-	fs.writeFileSync(
-		path.join(repo, ".github", "pre-tool-use-rules.json"),
-		JSON.stringify(
-			[
-				{
-					toolName: "bash",
-					column: "command",
-					patterns: [
-						{
-							patterns: ["("],
-							reason: "broken regex",
-						},
-					],
-				},
-			],
-			null,
-			2,
-		),
-		"utf8",
+	writeRepoRules(
+		repo,
+		`
+- toolName: bash
+  column: command
+  patterns:
+    - patterns:
+        - '('
+      reason: broken regex
+`,
 	);
 
 	const result = runHook(repo, {

@@ -44,7 +44,7 @@ git config user.name test
 git config user.email test@example.com
 
 hook_script="${HOME}/.copilot/hooks/preToolUse/main.mjs"
-hook_config="${HOME}/.copilot/hooks/preToolUse/deny-rules.json"
+hook_config="${HOME}/.copilot/hooks/preToolUse/deny-rules.yaml"
 
 test -f "${hook_script}"
 test -f "${hook_config}"
@@ -70,26 +70,25 @@ force_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"com
 printf '%s\n' "${force_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
 printf '%s\n' "${force_deny}" | jq -e '.permissionDecisionReason | contains("Force pushes")' >/dev/null
 
-allow_output="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git push origin HEAD\"}"}')"
+force_with_lease_allow="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git push --force-with-lease origin HEAD\"}"}')"
+test -z "${force_with_lease_allow}"
+
+wrapped_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"bash -lc \\\"git commit --no-verify -m \\\\\\\"skip\\\\\\\"\\\"\"}"}')"
+printf '%s\n' "${wrapped_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
+printf '%s\n' "${wrapped_deny}" | jq -e '.permissionDecisionReason | contains("git commit --no-verify")' >/dev/null
+
+allow_output="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git push -n origin HEAD\"}"}')"
 test -z "${allow_output}"
 
 mkdir -p .github
-cat > .github/pre-tool-use-rules.json <<'JSON'
-[
-  {
-    "toolName": "bash",
-    "column": "command",
-    "patterns": [
-      {
-        "patterns": [
-          "^git status(?: .+)? --short(?: |$)"
-        ],
-        "reason": "repo-local policy"
-      }
-    ]
-  }
-]
-JSON
+cat > .github/pre-tool-use-rules.yaml <<'YAML'
+- toolName: bash
+  column: command
+  patterns:
+    - patterns:
+        - '^git status(?: .+)? --short(?: |$)'
+      reason: repo-local policy
+YAML
 
 override_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git status --short\"}"}')"
 printf '%s\n' "${override_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null

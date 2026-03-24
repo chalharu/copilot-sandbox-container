@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import jsYaml from "js-yaml";
 
 const GIT_OPTIONS_WITH_VALUE = new Set([
 	"-c",
@@ -44,7 +45,15 @@ const GIT_SUBCOMMAND_OPTIONS_WITH_VALUE = new Map([
 		},
 	],
 ]);
+const SHELL_WRAPPER_OPTIONS_WITH_VALUE = new Set([
+	"-O",
+	"-o",
+	"--init-file",
+	"--rcfile",
+]);
 const SHELL_COMMAND_SEPARATORS = new Set(["&&", "||", ";", "|", "&"]);
+const SHELL_WRAPPER_COMMANDS = new Set(["bash", "sh", "/bin/bash", "/bin/sh"]);
+const MAX_COMMAND_UNWRAP_DEPTH = 4;
 
 function readStdin() {
 	return new Promise((resolve, reject) => {
@@ -236,7 +245,7 @@ function readRulesConfigFile(configPath, { optional = false } = {}) {
 
 	let parsed;
 	try {
-		parsed = JSON.parse(raw);
+		parsed = jsYaml.load(raw);
 	} catch (error) {
 		throw new Error(
 			`Failed to parse preToolUse rules config at ${configDescription}: ${error instanceof Error ? error.message : String(error)}`,
@@ -245,7 +254,7 @@ function readRulesConfigFile(configPath, { optional = false } = {}) {
 
 	if (!Array.isArray(parsed)) {
 		throw new Error(
-			`preToolUse rules config at ${configDescription} must contain a top-level JSON array.`,
+			`preToolUse rules config at ${configDescription} must contain a top-level YAML array.`,
 		);
 	}
 
@@ -256,11 +265,11 @@ function readRulesConfigFile(configPath, { optional = false } = {}) {
 
 function loadRules(repoRoot) {
 	const bundledGroups = readRulesConfigFile(
-		new URL("./deny-rules.json", import.meta.url),
+		new URL("./deny-rules.yaml", import.meta.url),
 	);
 	const repoGroups =
 		readRulesConfigFile(
-			path.join(repoRoot, ".github", "pre-tool-use-rules.json"),
+			path.join(repoRoot, ".github", "pre-tool-use-rules.yaml"),
 			{ optional: true },
 		) ?? [];
 
@@ -393,7 +402,7 @@ function isGitCommand(token) {
 	return token === "git" || token.endsWith("/git");
 }
 
-function resolveGitInvocation(commandTokens) {
+function stripInvocationPrefixes(commandTokens) {
 	let index = 0;
 
 	while (
@@ -427,11 +436,70 @@ function resolveGitInvocation(commandTokens) {
 		}
 	}
 
-	if (!isGitCommand(commandTokens[index] ?? "")) {
+	return commandTokens.slice(index);
+}
+
+function isShellWrapperCommand(token) {
+	return (
+		SHELL_WRAPPER_COMMANDS.has(token) ||
+		token.endsWith("/bash") ||
+		token.endsWith("/sh")
+	);
+}
+
+function resolveGitInvocation(commandTokens) {
+	const invocationTokens = stripInvocationPrefixes(commandTokens);
+	if (!isGitCommand(invocationTokens[0] ?? "")) {
 		return null;
 	}
 
-	return commandTokens.slice(index);
+	return invocationTokens;
+}
+
+function extractShellCommandString(commandTokens) {
+	const invocationTokens = stripInvocationPrefixes(commandTokens);
+	if (!isShellWrapperCommand(invocationTokens[0] ?? "")) {
+		return null;
+	}
+
+	for (let index = 1; index < invocationTokens.length; index += 1) {
+		const token = invocationTokens[index];
+		if (token === "--") {
+			break;
+		}
+
+		if (token === "-c") {
+			return invocationTokens[index + 1] ?? null;
+		}
+
+		if (token === "-" || !token.startsWith("-")) {
+			break;
+		}
+
+		if (SHELL_WRAPPER_OPTIONS_WITH_VALUE.has(token)) {
+			index += 1;
+			continue;
+		}
+
+		if (
+			token.startsWith("--init-file=") ||
+			token.startsWith("--rcfile=") ||
+			(token.startsWith("-O") && token.length > 2) ||
+			(token.startsWith("-o") && token.length > 2)
+		) {
+			continue;
+		}
+
+		if (token.startsWith("--")) {
+			continue;
+		}
+
+		if (token.slice(1).includes("c")) {
+			return invocationTokens[index + 1] ?? null;
+		}
+	}
+
+	return null;
 }
 
 function extractGitSubcommand(gitTokens) {
@@ -532,7 +600,11 @@ function buildGitPatternCandidate(parsedGitCommand) {
 	);
 }
 
-function buildCommandCandidates(command) {
+function buildCommandCandidates(command, depth = 0) {
+	if (depth > MAX_COMMAND_UNWRAP_DEPTH) {
+		return [];
+	}
+
 	const candidates = [];
 	for (const commandTokens of splitShellCommands(
 		tokenizeShellCommand(command),
@@ -550,6 +622,10 @@ function buildCommandCandidates(command) {
 		}
 
 		candidates.push(commandTokens.join(" "));
+		const nestedCommand = extractShellCommandString(commandTokens);
+		if (nestedCommand !== null && nestedCommand !== command) {
+			candidates.push(...buildCommandCandidates(nestedCommand, depth + 1));
+		}
 	}
 
 	return candidates;

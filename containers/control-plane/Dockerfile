@@ -120,6 +120,12 @@ COPY --chmod=644 config/profile-control-plane-session.sh /etc/profile.d/control-
 COPY --chmod=644 config/external-skills.yaml /tmp/external-skills.yaml
 COPY skills/ /usr/local/share/control-plane/skills/
 COPY hooks/ /usr/local/share/control-plane/hooks/
+RUN npm ci --prefix /usr/local/share/control-plane/hooks/preToolUse \
+        --ignore-scripts \
+        --omit=dev \
+        --no-audit \
+        --no-fund \
+    && npm cache clean --force
 COPY --chmod=755 bin/control-plane-podman /usr/local/bin/control-plane-podman
 COPY --chmod=755 bin/control-plane-screen /usr/local/bin/control-plane-screen
 COPY --chmod=755 bin/control-plane-entrypoint /usr/local/bin/control-plane-entrypoint
