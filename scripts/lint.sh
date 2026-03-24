@@ -32,6 +32,9 @@ shellcheck_targets=(
   /workspace/containers/control-plane/bin/control-plane-podman
   /workspace/containers/control-plane/bin/control-plane-screen
   /workspace/containers/control-plane/bin/control-plane-entrypoint
+  /workspace/containers/control-plane/hooks/git/pre-commit
+  /workspace/containers/control-plane/hooks/git/pre-push
+  /workspace/containers/control-plane/hooks/git/lib/common.sh
   /workspace/containers/control-plane/bin/control-plane-job-transfer
   /workspace/containers/control-plane/bin/control-plane-run
   /workspace/containers/control-plane/bin/control-plane-session

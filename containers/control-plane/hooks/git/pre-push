@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=containers/control-plane/hooks/git/lib/common.sh
+source "${script_dir}/lib/common.sh"
+
+repo_root="$(git_hook_repo_root)"
+repo_hook_path="$(git_hook_repo_hook_path "${repo_root}" "pre-push")"
+push_input="$(cat)"
+
+if [[ -n "${push_input}" ]]; then
+  while IFS=' ' read -r _local_ref _local_oid remote_ref _remote_oid; do
+    [[ -n "${remote_ref}" ]] || continue
+    case "${remote_ref}" in
+      refs/heads/main|refs/heads/master)
+        printf 'Refusing to push directly to %s.\n' "${remote_ref#refs/heads/}" >&2
+        exit 1
+        ;;
+    esac
+  done <<< "${push_input}"
+fi
+
+if git_hook_require_executable_or_absent "${repo_hook_path}" "repository pre-push hook"; then
+  if [[ -n "${push_input}" ]]; then
+    printf '%s\n' "${push_input}" | "${repo_hook_path}" "$@"
+  else
+    "${repo_hook_path}" "$@"
+  fi
+fi

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=containers/control-plane/hooks/git/lib/common.sh
+source "${script_dir}/lib/common.sh"
+
+repo_root="$(git_hook_repo_root)"
+current_branch="$(git_hook_current_branch)"
+repo_hook_path="$(git_hook_repo_hook_path "${repo_root}" "pre-commit")"
+exit_code=0
+
+if git_hook_is_protected_branch "${current_branch}"; then
+  printf 'Refusing to commit directly to %s. Create a feature branch first.\n' "${current_branch}" >&2
+  exit 1
+fi
+
+if ! git_hook_run_post_tool_use_linter "${repo_root}"; then
+  exit_code=1
+fi
+
+if git_hook_require_executable_or_absent "${repo_hook_path}" "repository pre-commit hook"; then
+  if ! "${repo_hook_path}" "$@"; then
+    exit_code=1
+  fi
+fi
+
+exit "${exit_code}"

@@ -16,7 +16,8 @@ command -v node >/dev/null 2>&1 || {
 
 node --test \
   containers/control-plane/hooks/audit/main.test.mjs \
-  containers/control-plane/hooks/postToolUse/main.test.mjs
+  containers/control-plane/hooks/postToolUse/main.test.mjs \
+  containers/control-plane/hooks/git/main.test.mjs
 
 if [[ -z "${control_plane_image}" ]]; then
   exit 0
@@ -33,14 +34,21 @@ printf '%s\n' 'test-github-hooks.sh: verifying bundled hooks in control-plane im
   bash -lc '
     test -f /usr/local/share/control-plane/hooks/hooks.json
     test -f /usr/local/share/control-plane/hooks/audit/main.mjs
+    test -x /usr/local/share/control-plane/hooks/git/pre-commit
+    test -x /usr/local/share/control-plane/hooks/git/pre-push
+    test -f /usr/local/share/control-plane/hooks/git/lib/common.sh
     test -f /usr/local/share/control-plane/hooks/postToolUse/main.mjs
     test -f /usr/local/share/control-plane/hooks/postToolUse/linters.json
     test -f /usr/local/share/control-plane/hooks/postToolUse/lib/incremental-files.mjs
     test -f /home/copilot/.copilot/hooks/hooks.json
     test -f /home/copilot/.copilot/hooks/audit/main.mjs
+    test -x /home/copilot/.copilot/hooks/git/pre-commit
+    test -x /home/copilot/.copilot/hooks/git/pre-push
+    test -f /home/copilot/.copilot/hooks/git/lib/common.sh
     test -f /home/copilot/.copilot/hooks/postToolUse/main.mjs
     test -f /home/copilot/.copilot/hooks/postToolUse/linters.json
     test -f /home/copilot/.copilot/hooks/postToolUse/lib/incremental-files.mjs
+    git config --file /home/copilot/.gitconfig --get core.hooksPath | grep -qx /home/copilot/.copilot/hooks/git
     grep -Fq ".copilot/hooks/audit/main.mjs" /home/copilot/.copilot/hooks/hooks.json
     grep -Fq ".copilot/hooks/postToolUse/main.mjs" /home/copilot/.copilot/hooks/hooks.json
     ! grep -Fq ".github/hooks" /home/copilot/.copilot/hooks/hooks.json
