@@ -119,19 +119,28 @@ assert_resource_absent PersistentVolumeClaim control-plane-state-pvc
 assert_resource_absent PersistentVolumeClaim control-plane-session-state-pvc
 assert_resource_absent PersistentVolumeClaim control-plane-rootful-podman-pvc
 
+printf '%s\n' 'k8s-sample-storage-layout-test: checking ConfigMap-backed environment defaults' >&2
+assert_resource_present ConfigMap control-plane-config
+assert_resource_contains ConfigMap control-plane-config 'copilot-config.json: |'
+assert_resource_present ConfigMap control-plane-env
+assert_resource_contains ConfigMap control-plane-env 'SSH_PUBLIC_KEY_FILE: /var/run/control-plane-auth/ssh-public-key'
+assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS: "10000"'
+assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha'
+assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER: overlay'
+assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR: /var/tmp/control-plane/rootful-overlay'
+assert_resource_contains ConfigMap control-plane-env 'TZ: Asia/Tokyo'
+
 printf '%s\n' 'k8s-sample-storage-layout-test: checking shared session and ephemeral Podman cache' >&2
 assert_deployment_contains 'claimName: control-plane-copilot-session-pvc'
 assert_deployment_contains 'claimName: control-plane-workspace-pvc'
-assert_deployment_contains 'name: TZ'
-assert_deployment_contains 'value: Asia/Tokyo'
+assert_deployment_contains 'envFrom:'
+assert_deployment_contains 'name: control-plane-env'
 assert_deployment_contains 'subPath: state/copilot-config.json'
 assert_deployment_contains 'subPath: state/command-history-state.json'
 assert_deployment_contains 'subPath: session-state'
 assert_deployment_contains 'subPath: state/gh'
 assert_deployment_contains 'subPath: state/ssh'
 assert_deployment_contains 'subPath: state/ssh-host-keys'
-assert_deployment_contains 'name: CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS'
-assert_deployment_contains 'value: "10000"'
 assert_deployment_contains 'mountPath: /var/lib/control-plane/rootful-podman'
 assert_deployment_contains 'subPath: rootful-podman'
 assert_deployment_contains 'mountPath: /var/tmp/control-plane'
@@ -142,8 +151,6 @@ assert_deployment_contains 'rm -rf /cache/rootful-podman/*'
 assert_deployment_contains 'mkdir -p /cache/rootful-podman/rootful-overlay /cache/runtime-tmp/rootful-overlay'
 
 printf '%s\n' 'k8s-sample-storage-layout-test: checking Podman defaults and legacy PVC removal' >&2
-assert_deployment_contains 'value: overlay'
-assert_deployment_contains 'value: /var/tmp/control-plane/rootful-overlay'
 if grep -Fq '/run/control-plane/podman' "${manifest_path}"; then
   printf 'Expected sample manifest to avoid /run/control-plane/podman for Podman state\n' >&2
   exit 1
