@@ -7,6 +7,14 @@ import process from "node:process";
 
 const SKILL_NAME = "audit-log-analysis";
 const SKILL_SCRIPT_RELATIVE_PATH = path.join("scripts", "audit-analysis.mjs");
+const SUPPORTED_TRIGGER_SOURCES = new Set([
+	"agentStop",
+	"errorOccurred",
+	"manual",
+	"postToolUse",
+	"sessionEnd",
+	"subagentStop",
+]);
 
 function resolveCandidateSkillScriptPaths() {
 	const home = process.env.HOME ?? "/home/copilot";
@@ -48,11 +56,22 @@ function resolveSkillScriptPath() {
 	);
 }
 
-function main() {
+function resolveTriggerSource(argv = process.argv.slice(2)) {
+	const triggerSource = argv[0] ?? "manual";
+	if (!SUPPORTED_TRIGGER_SOURCES.has(triggerSource)) {
+		throw new Error(
+			`Unsupported audit analysis hook trigger: ${triggerSource}`,
+		);
+	}
+	return triggerSource;
+}
+
+function main(argv = process.argv.slice(2)) {
 	const skillScriptPath = resolveSkillScriptPath();
+	const triggerSource = resolveTriggerSource(argv);
 	const result = spawnSync(
 		"node",
-		[skillScriptPath, "refresh", "--trigger-source", "postToolUse", "--quiet"],
+		[skillScriptPath, "refresh", "--trigger-source", triggerSource, "--quiet"],
 		{
 			encoding: "utf8",
 			stdio: "pipe",

@@ -176,7 +176,7 @@ control-plane audit analysis: Audit analysis config at /home/copilot/.copilot/co
 
 ### 意味
 
-`control-plane-config` ConfigMap の `copilot-config.json` overlay で、`controlPlane.auditAnalysis` が JSON object ではないか、壊れた値が入っています。bundled `audit-log-analysis` skill と `postToolUse` の analysis hook は同じ設定を読むため、ここが壊れると `~/.copilot/session-state/audit/audit-analysis.db` の更新も止まります。
+`control-plane-config` ConfigMap の `copilot-config.json` overlay で、`controlPlane.auditAnalysis` が JSON object ではないか、壊れた値が入っています。bundled `audit-log-analysis` skill と lifecycle analysis hooks (`agentStop` / `subagentStop` / `sessionEnd` / `errorOccurred`) は同じ設定を読むため、ここが壊れると `~/.copilot/session-state/audit/audit-analysis.db` の更新も止まります。
 
 ### 期待する確認結果
 

@@ -79,14 +79,15 @@ emit_event postToolUse '{"timestamp":1704615200000,"cwd":"/workspace","toolName"
 emit_event preToolUse '{"timestamp":1704615300000,"cwd":"/workspace","toolName":"rg","toolArgs":"{\"pattern\":\"audit hook\",\"path\":\"/workspace\"}"}'
 emit_event postToolUse '{"timestamp":1704615400000,"cwd":"/workspace","toolName":"rg","toolArgs":"{\"pattern\":\"audit hook\",\"path\":\"/workspace\"}","toolResult":{"resultType":"success","textResultForLlm":"rg ok"}}'
 
-node "${HOME}/.copilot/hooks/auditAnalysis/main.mjs"
+node "${HOME}/.copilot/hooks/auditAnalysis/main.mjs" agentStop
 
 analysis_db="${HOME}/.copilot/session-state/audit/audit-analysis.db"
-status_json="$(node "${HOME}/.copilot/skills/audit-log-analysis/scripts/audit-analysis.mjs" status --json)"
+status_json="$(node "${HOME}/.copilot/skills/audit-log-analysis/scripts/audit-analysis.mjs" status --json --no-refresh)"
 
 test -f "${analysis_db}"
 sqlite3 "${analysis_db}" 'SELECT COUNT(*) FROM analysis_patterns;' | grep -Eq '^[1-9][0-9]*$'
 sqlite3 "${analysis_db}" 'SELECT COUNT(*) FROM automation_candidates;' | grep -Eq '^[1-9][0-9]*$'
+sqlite3 "${analysis_db}" 'SELECT trigger_source FROM analysis_runs ORDER BY id DESC LIMIT 1;' | grep -qx 'agentStop'
 
 printf '%s\n' "${status_json}" | jq -e '.config.targetRepositoryUrl == "https://example.com/chalharu/copilot-sandbox-container"' >/dev/null
 printf '%s\n' "${status_json}" | jq -e '.patternCounts["user-feedback"] >= 2' >/dev/null
