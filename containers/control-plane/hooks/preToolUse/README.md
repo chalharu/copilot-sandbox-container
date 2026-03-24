@@ -1,6 +1,6 @@
 # preToolUse policy hook
 
-Copilot CLI の `preToolUse` hook で、bundled な禁止コマンドポリシーを適用する hook です。`bash` tool で実行される Git コマンドを shell 風に分解し、宣言的な deny rule に一致したものを `permissionDecision: "deny"` で拒否します。
+Copilot CLI の `preToolUse` hook で、bundled な禁止コマンドポリシーを適用する hook です。`bash` tool で実行される Git コマンドを shell 風に分解し、宣言的な deny rule に一致したものを `permissionDecision: "deny"` で拒否します。同じ YAML rule は、Control Plane runtime に注入される Rust 製 `LD_PRELOAD` exec policy library からも再利用され、`node` や shell script が実行した実プロセスの `git` invocation も exec 時に拒否します。
 
 ## Config
 

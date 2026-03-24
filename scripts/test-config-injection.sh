@@ -135,6 +135,9 @@ test "$(stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519
 grep -Fxq 'HostKey /etc/ssh/ssh_host_ed25519_key' /etc/ssh/sshd_config
 ! grep -Fq 'HostKey /etc/ssh/ssh_host_rsa_key' /etc/ssh/sshd_config
 ! grep -Fq 'HostKey /etc/ssh/ssh_host_ecdsa_key' /etc/ssh/sshd_config
+grep -Fqx 'CONTROL_PLANE_EXEC_POLICY_LIBRARY=/usr/local/lib/libcontrol_plane_exec_policy.so' /home/copilot/.config/control-plane/runtime.env
+grep -Fqx 'CONTROL_PLANE_EXEC_POLICY_RULES_FILE=/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml' /home/copilot/.config/control-plane/runtime.env
+grep -Fqx 'LD_PRELOAD=/usr/local/lib/libcontrol_plane_exec_policy.so' /home/copilot/.config/control-plane/runtime.env
 git config --global --get core.hooksPath | grep -qx '/usr/local/share/control-plane/hooks/git'
 if su -s /bin/bash copilot -lc "printf tamper >> \"${GIT_CONFIG_GLOBAL}\"" 2>/dev/null; then
   printf '%s\n' 'Expected managed global git config to be read-only for the Copilot user' >&2
@@ -149,6 +152,17 @@ if su -s /bin/bash copilot -lc 'test -r /var/lib/control-plane/ssh-host-keys/ssh
   printf '%s\n' 'Expected Copilot user to be unable to read the private SSH host key' >&2
   exit 1
 fi
+su -s /bin/bash copilot -lc 'test "${CONTROL_PLANE_EXEC_POLICY_LIBRARY}" = /usr/local/lib/libcontrol_plane_exec_policy.so'
+su -s /bin/bash copilot -lc 'test "${CONTROL_PLANE_EXEC_POLICY_RULES_FILE}" = /usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml'
+su -s /bin/bash copilot -lc 'test "${LD_PRELOAD}" = /usr/local/lib/libcontrol_plane_exec_policy.so'
+cat > /tmp/fake-copilot <<'FAKE'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "${LD_PRELOAD:-missing}"
+FAKE
+chmod 755 /tmp/fake-copilot
+copilot_ld_preload="$(su -s /bin/bash copilot -lc 'CONTROL_PLANE_COPILOT_BIN=/tmp/fake-copilot CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT=0 control-plane-copilot')"
+grep -qx '/usr/local/lib/libcontrol_plane_exec_policy.so' <<<"${copilot_ld_preload}"
 jq -e '.chat.editor == "vim"' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.chat.theme == "light"' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.nested.keep == 1' /home/copilot/.copilot/config.json >/dev/null

@@ -52,6 +52,7 @@ test -f /usr/local/share/control-plane/hooks/audit/main.mjs
 test -f /usr/local/share/control-plane/hooks/auditAnalysis/main.mjs
 test -f /usr/local/share/control-plane/hooks/preToolUse/main.mjs
 test -f /usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml
+test -f /usr/local/lib/libcontrol_plane_exec_policy.so
 test -x /usr/local/share/control-plane/hooks/git/pre-commit
 test -x /usr/local/share/control-plane/hooks/git/pre-push
 test -f /usr/local/share/control-plane/hooks/git/lib/common.sh
@@ -72,6 +73,7 @@ test -f /home/copilot/.copilot/hooks/audit/main.mjs
 test -f /home/copilot/.copilot/hooks/auditAnalysis/main.mjs
 test -f /home/copilot/.copilot/hooks/preToolUse/main.mjs
 test -f /home/copilot/.copilot/hooks/preToolUse/deny-rules.yaml
+test -f /usr/local/lib/libcontrol_plane_exec_policy.so
 test -x /home/copilot/.copilot/hooks/git/pre-commit
 test -x /home/copilot/.copilot/hooks/git/pre-push
 test -f /home/copilot/.copilot/hooks/git/lib/common.sh

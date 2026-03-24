@@ -1,0 +1,14 @@
+[package]
+name = "control-plane-exec-policy-preload"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "control_plane_exec_policy"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+libc = "0.2.173"
+regex = "1.11.1"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_yaml = "0.9.34"

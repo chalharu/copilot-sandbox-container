@@ -29,6 +29,9 @@ bundled_skills_dir="/usr/local/share/control-plane/skills"
 copilot_skills_dir="${copilot_state_dir}/skills"
 bundled_hooks_dir="/usr/local/share/control-plane/hooks"
 bundled_git_hooks_dir="${bundled_hooks_dir}/git"
+exec_policy_library_path="${CONTROL_PLANE_EXEC_POLICY_LIBRARY:-/usr/local/lib/libcontrol_plane_exec_policy.so}"
+exec_policy_rules_path="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE:-${bundled_hooks_dir}/preToolUse/deny-rules.yaml}"
+effective_ld_preload="${LD_PRELOAD:-}"
 copilot_hooks_dir="${copilot_state_dir}/hooks"
 copilot_logs_dir="${copilot_state_dir}/logs"
 copilot_agents_dir="${copilot_state_dir}/agents"
@@ -116,6 +119,17 @@ case "${rootful_podman_storage_driver}" in
   *)
     printf 'Unsupported CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER: %s\n' "${rootful_podman_storage_driver}" >&2
     exit 1
+    ;;
+esac
+
+case ":${effective_ld_preload}:" in
+  *":${exec_policy_library_path}:"*)
+    ;;
+  "::")
+    effective_ld_preload="${exec_policy_library_path}"
+    ;;
+  *)
+    effective_ld_preload="${exec_policy_library_path}:${effective_ld_preload}"
     ;;
 esac
 
@@ -964,6 +978,8 @@ fi
   write_runtime_var CONTROL_PLANE_JOB_TRANSFER_PORT "${job_transfer_port}"
   write_runtime_var CONTROL_PLANE_JOB_TRANSFER_USER "${job_transfer_user}"
   write_runtime_var COPILOT_HOME "${managed_copilot_home}"
+  write_runtime_var CONTROL_PLANE_EXEC_POLICY_LIBRARY "${exec_policy_library_path}"
+  write_runtime_var CONTROL_PLANE_EXEC_POLICY_RULES_FILE "${exec_policy_rules_path}"
   write_runtime_var CONTROL_PLANE_TMP_ROOT "${tmp_root}"
   write_runtime_var CONTROL_PLANE_HOOK_TMP_ROOT "${hook_tmp_root}"
   write_runtime_var CONTROL_PLANE_NODE_COMPILE_CACHE_DIR "${node_compile_cache_dir}"
@@ -973,6 +989,7 @@ fi
   write_runtime_var GIT_CONFIG_GLOBAL "${git_config_path}"
   write_runtime_var XDG_RUNTIME_DIR "${runtime_dir}"
   write_runtime_var TMPDIR "${tmp_dir}"
+  write_runtime_var LD_PRELOAD "${effective_ld_preload}"
   write_runtime_var NODE_COMPILE_CACHE "${node_compile_cache_dir}"
   write_runtime_var NPM_CONFIG_CACHE "${npm_cache_dir}"
   write_runtime_var SCREENDIR "${screen_dir}"

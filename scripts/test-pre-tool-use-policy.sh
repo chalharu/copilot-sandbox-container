@@ -45,13 +45,42 @@ git config user.email test@example.com
 
 hook_script="${HOME}/.copilot/hooks/preToolUse/main.mjs"
 hook_config="${HOME}/.copilot/hooks/preToolUse/deny-rules.yaml"
+exec_policy_library="${CONTROL_PLANE_EXEC_POLICY_LIBRARY:-}"
+exec_policy_rules="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE:-}"
 
 test -f "${hook_script}"
 test -f "${hook_config}"
+test -n "${exec_policy_library}"
+test -n "${exec_policy_rules}"
+test -f "${exec_policy_library}"
+test -f "${exec_policy_rules}"
+test "${LD_PRELOAD}" = "${exec_policy_library}"
 
 run_hook() {
   local payload="$1"
   printf '%s' "${payload}" | node "${hook_script}"
+}
+
+assert_denied_exec() {
+  local expected_reason="$1"
+  shift
+
+  local stderr_file
+  local status
+  stderr_file="$(mktemp)"
+  set +e
+  "$@" > /dev/null 2>"${stderr_file}"
+  status=$?
+  set -e
+
+  if [[ "${status}" -eq 0 ]]; then
+    printf 'Expected exec-layer policy to deny: %s\n' "$*" >&2
+    exit 1
+  fi
+
+  grep -Fq 'control-plane exec policy:' "${stderr_file}"
+  grep -Fq "${expected_reason}" "${stderr_file}"
+  rm -f "${stderr_file}"
 }
 
 commit_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git commit --no-verify -m \\\"skip\\\"\"}"}')"
@@ -93,11 +122,66 @@ YAML
 override_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git status --short\"}"}')"
 printf '%s\n' "${override_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
 printf '%s\n' "${override_deny}" | jq -e '.permissionDecisionReason == "repo-local policy"' >/dev/null
+
+assert_denied_exec 'git commit --no-verify' git commit --no-verify -m skip
+assert_denied_exec 'Force pushes are blocked' git push -f origin HEAD
+assert_denied_exec 'repo-local policy' git status --short
+
+cat > /tmp/force-push-wrapper.sh <<'WRAPPER'
+#!/usr/bin/env bash
+set -euo pipefail
+git push -f origin HEAD
+WRAPPER
+chmod 755 /tmp/force-push-wrapper.sh
+assert_denied_exec 'Force pushes are blocked' /tmp/force-push-wrapper.sh
+
+node_stderr="$(mktemp)"
+set +e
+node <<'NODE' > /dev/null 2>"${node_stderr}"
+const { spawnSync } = require("node:child_process");
+
+const result = spawnSync("bash", ["-lc", "git push -f origin HEAD"], {
+  encoding: "utf8",
+  stdio: ["ignore", "ignore", "inherit"],
+});
+
+if (result.error) {
+  process.stderr.write(`${result.error.code ?? result.error.message}\n`);
+  process.exit(1);
+}
+process.exit(result.status ?? 1);
+NODE
+node_status=$?
+set -e
+if [[ "${node_status}" -eq 0 ]]; then
+  printf '%s\n' 'Expected Node child-process execution to be denied by exec policy' >&2
+  exit 1
+fi
+grep -Fq 'control-plane exec policy:' "${node_stderr}"
+grep -Fq 'Force pushes are blocked' "${node_stderr}"
+rm -f "${node_stderr}"
+
+allow_stderr="$(mktemp)"
+set +e
+git push --force-with-lease origin HEAD > /dev/null 2>"${allow_stderr}"
+allow_status=$?
+set -e
+if grep -Fq 'control-plane exec policy:' "${allow_stderr}"; then
+  printf '%s\n' 'Did not expect --force-with-lease to be denied by exec policy' >&2
+  cat "${allow_stderr}" >&2
+  exit 1
+fi
+if [[ "${allow_status}" -eq 0 ]]; then
+  printf '%s\n' 'Expected force-with-lease check to fail only because no remote exists in the test repo' >&2
+  exit 1
+fi
+rm -f "${allow_stderr}"
+
 printf '%s\n' 'pre-tool-use-policy-ok'
 EOF
 chmod 755 "${workdir}/pre-tool-use-check.sh"
 
-printf '%s\n' 'test-pre-tool-use-policy.sh: verifying bundled preToolUse deny policy hook' >&2
+printf '%s\n' 'test-pre-tool-use-policy.sh: verifying bundled preToolUse and exec policy deny paths' >&2
 set +e
 output="$("${container_bin}" run --rm \
   --name "${container_name}" \

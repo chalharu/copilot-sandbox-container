@@ -1,3 +1,11 @@
+FROM docker.io/library/rust:1.94.0-bookworm@sha256:365468470075493dc4583f47387001854321c5a8583ea9604b297e67f01c5a4f AS exec-policy-builder
+
+WORKDIR /build/control-plane-exec-policy
+COPY exec-policy-preload/Cargo.toml exec-policy-preload/Cargo.lock ./
+COPY exec-policy-preload/src ./src
+RUN cargo test --locked --release \
+    && cargo build --locked --release
+
 FROM node:24.14.0-bookworm-slim@sha256:d8e448a56fc63242f70026718378bd4b00f8c82e78d20eefb199224a4d8e33d8
 
 # renovate: datasource=npm depName=@github/copilot
@@ -120,6 +128,7 @@ COPY --chmod=644 config/profile-control-plane-session.sh /etc/profile.d/control-
 COPY --chmod=644 config/external-skills.yaml /tmp/external-skills.yaml
 COPY skills/ /usr/local/share/control-plane/skills/
 COPY hooks/ /usr/local/share/control-plane/hooks/
+COPY --from=exec-policy-builder /build/control-plane-exec-policy/target/release/libcontrol_plane_exec_policy.so /usr/local/lib/libcontrol_plane_exec_policy.so
 RUN npm ci --prefix /usr/local/share/control-plane/hooks/preToolUse \
         --ignore-scripts \
         --omit=dev \
@@ -158,6 +167,7 @@ RUN /usr/local/bin/install-git-skills-from-manifest /tmp/external-skills.yaml /u
     && for git_hook in pre-commit pre-push; do \
          if [ -f "/usr/local/share/control-plane/hooks/git/${git_hook}" ]; then chmod 755 "/usr/local/share/control-plane/hooks/git/${git_hook}"; fi; \
        done \
+    && chmod 644 /usr/local/lib/libcontrol_plane_exec_policy.so \
     && chown -R "${CONTROL_PLANE_USER}:${CONTROL_PLANE_USER}" "/home/${CONTROL_PLANE_USER}/.config"
 
 WORKDIR /workspace
