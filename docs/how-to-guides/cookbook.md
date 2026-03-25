@@ -90,7 +90,7 @@ ConfigMap / Secret / write-back の具体的な path は
 ### 永続化と storage class を合わせる
 
 1. 永続化は RWX の copilot session PVC、RWO の `/workspace` PVC、
-   そして long-running Rust Job 向けの RWO `sccache-dist` PVC（5Gi）を基本にする
+   そして long-running Rust Job 向けの RWO `sccache` object-store PVC（5Gi）を基本にする
 2. `~/.copilot/tmp` と Podman cache は emptyDir の ephemeral storage に
    逃がし、再生成可能な container cache が session PVC を食い潰さない
    ようにする
@@ -98,17 +98,18 @@ ConfigMap / Secret / write-back の具体的な path は
    `control-plane-copilot-session-pvc` は RWX を想定しているので、
    sample manifest の `replace-me-with-rwx-storage-class` を実クラスタ向けに
    置き換える
-4. `control-plane-sccache-pvc` は standalone `sccache-dist` Deployment 専用の
+4. `control-plane-sccache-pvc` は standalone Garage Deployment 専用の
    `ReadWriteOnce` claim です。sample manifest の `standard` を、
    実クラスタ向けの storage class へ置き換える
-5. `SCCACHE_DIST_TOOLCHAIN_CACHE_SIZE=4294967296` を維持し、5Gi の
-   dedicated PVC に対して 20% の headroom を残す
-6. `SCCACHE_DIST_SCHEDULER_URL` は
-   `http://sccache-dist.<namespace>.svc.cluster.local:10600` を指し、
-   Rust Job は PVC を mount せず Service 経由で接続する。builder container の
-   `public_addr` は Pod IP から組み立てる
-7. `sccache-dist` server は upstream 都合で Linux/x86_64 前提なので、
-   sample manifest では standalone `sccache-dist` Deployment を amd64 node で使う
+5. `GARAGE_CACHE_QUOTA_BYTES=4294967296` を維持し、5Gi の dedicated PVC に
+   対して 20% の headroom を残す。古い cache object は
+   `GARAGE_CACHE_EXPIRATION_DAYS` の lifecycle で自動削除する
+6. `SCCACHE_ENDPOINT` は
+   `http://garage-s3.<namespace>.svc.cluster.local:3900` を指し、
+   Rust Job は PVC を mount せず Service 経由で接続する。Garage 自身の
+   `GARAGE_RPC_PUBLIC_ADDR` は Pod IP から組み立てる
+7. Rust Job の S3 credential は `garage-sccache-auth` Secret を control-plane Pod に
+   mount し、`k8s-rust.sh` が job-local `SCCACHE_CONF` へ埋め込む
 
 永続 path、Podman graphroot、ConfigMap / Secret の注入先などの具体的な
 path は `docs/reference/control-plane-runtime.md` を参照してください。

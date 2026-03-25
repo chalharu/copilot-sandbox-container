@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 helper_path="${script_dir}/../containers/control-plane/skills/containerized-rust-ops/scripts/k8s-rust.sh"
-workdir="$(mktemp -d "${TMPDIR:-/tmp}/control-plane-k8s-rust-sccache-dist.XXXXXX")"
+workdir="$(mktemp -d "${TMPDIR:-/tmp}/control-plane-k8s-rust-s3-backend.XXXXXX")"
 
 cleanup() {
   rm -rf "${workdir}" >/dev/null 2>&1 || true
@@ -80,37 +80,54 @@ run_helper() {
     "${helper_path}" build >/dev/null
 }
 
-printf '%s\n' 'k8s-rust-sccache-dist-test: verifying local-cache fallback wiring' >&2
+printf '%s\n' 'k8s-rust-s3-backend-test: verifying local-cache fallback wiring' >&2
 local_script="${workdir}/local-job-script.sh"
 run_helper "${local_script}"
 assert_contains "${local_script}" 'branch=test-branch'
 assert_contains "${local_script}" 'repo_url=https://example.com/chalharu/copilot-sandbox-container.git'
-assert_contains "${local_script}" 'sccache_dist_enabled=0'
+assert_contains "${local_script}" 'sccache_s3_enabled=0'
 assert_contains "${local_script}" 'sccache_dir='
 assert_contains "${local_script}" "\${ephemeral_root}/sccache"
 assert_not_contains "${local_script}" "\${cache_root}/sccache"
 assert_contains "${local_script}" 'SCCACHE_CACHE_SIZE:-10G'
 
-printf '%s\n' 'k8s-rust-sccache-dist-test: verifying dist-client wiring' >&2
-client_token_path="${workdir}/client-token"
-printf '%s\n' 'dist-client-token' > "${client_token_path}"
-dist_script="${workdir}/dist-job-script.sh"
-run_helper "${dist_script}" \
-  SCCACHE_DIST_SCHEDULER_URL=http://sccache-dist.control-plane.svc.cluster.local:10600 \
-  SCCACHE_DIST_CLIENT_TOKEN_FILE="${client_token_path}"
-assert_contains "${dist_script}" 'sccache_dist_enabled=1'
-assert_contains "${dist_script}" 'sccache_dist_scheduler_url=http://sccache-dist.control-plane.svc.cluster.local:10600'
-assert_contains "${dist_script}" 'sccache_dist_client_token=dist-client-token'
-assert_contains "${dist_script}" "\${ephemeral_root}/sccache"
-assert_contains "${dist_script}" '[dist]'
-assert_contains "${dist_script}" 'scheduler_url = '
-assert_contains "${dist_script}" "\${sccache_dist_scheduler_url}"
-assert_contains "${dist_script}" 'cache_dir = '
-assert_contains "${dist_script}" "\${sccache_dist_client_cache}"
-assert_contains "${dist_script}" 'toolchain_cache_size = '
-assert_contains "${dist_script}" "\${sccache_dist_client_toolchain_cache_size}"
-assert_contains "${dist_script}" 'token = '
-assert_contains "${dist_script}" "\${sccache_dist_client_token}"
-assert_contains "${dist_script}" 'export SCCACHE_CONF='
+printf '%s\n' 'k8s-rust-s3-backend-test: verifying S3 wiring' >&2
+access_key_id_path="${workdir}/access-key-id"
+secret_access_key_path="${workdir}/secret-access-key"
+printf '%s\n' 'sample-access-key-id' > "${access_key_id_path}"
+printf '%s\n' 'sample-secret-access-key' > "${secret_access_key_path}"
+s3_script="${workdir}/s3-job-script.sh"
+run_helper "${s3_script}" \
+  SCCACHE_BUCKET=control-plane-sccache \
+  SCCACHE_ENDPOINT=http://garage-s3.control-plane.svc.cluster.local:3900 \
+  SCCACHE_REGION=garage \
+  SCCACHE_S3_USE_SSL=false \
+  SCCACHE_S3_KEY_PREFIX=sccache/ \
+  AWS_ACCESS_KEY_ID_FILE="${access_key_id_path}" \
+  AWS_SECRET_ACCESS_KEY_FILE="${secret_access_key_path}"
+assert_contains "${s3_script}" 'sccache_s3_enabled=1'
+assert_contains "${s3_script}" 'sccache_bucket=control-plane-sccache'
+assert_contains "${s3_script}" 'sccache_endpoint=http://garage-s3.control-plane.svc.cluster.local:3900'
+assert_contains "${s3_script}" 'sccache_region=garage'
+assert_contains "${s3_script}" 'sccache_s3_use_ssl=false'
+assert_contains "${s3_script}" 'sccache_s3_key_prefix=sccache/'
+assert_contains "${s3_script}" 'aws_access_key_id=sample-access-key-id'
+assert_contains "${s3_script}" 'aws_secret_access_key=sample-secret-access-key'
+assert_contains "${s3_script}" "\${ephemeral_root}/sccache"
+assert_contains "${s3_script}" '[cache]'
+assert_contains "${s3_script}" 'type = "s3"'
+assert_contains "${s3_script}" 'bucket = '
+assert_contains "${s3_script}" "\${sccache_bucket}"
+assert_contains "${s3_script}" 'endpoint = '
+assert_contains "${s3_script}" "\${sccache_endpoint}"
+assert_contains "${s3_script}" 'region = '
+assert_contains "${s3_script}" "\${sccache_region}"
+assert_contains "${s3_script}" 'use_ssl = '
+assert_contains "${s3_script}" "\${sccache_s3_use_ssl}"
+assert_contains "${s3_script}" 'key_prefix = '
+assert_contains "${s3_script}" "\${sccache_s3_key_prefix}"
+assert_contains "${s3_script}" 'export AWS_ACCESS_KEY_ID='
+assert_contains "${s3_script}" 'export AWS_SECRET_ACCESS_KEY='
+assert_contains "${s3_script}" 'export SCCACHE_CONF='
 
-printf '%s\n' 'k8s-rust-sccache-dist-test: helper wiring ok' >&2
+printf '%s\n' 'k8s-rust-s3-backend-test: helper wiring ok' >&2

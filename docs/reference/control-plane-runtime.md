@@ -14,7 +14,7 @@ entrypoint は `~/.config/control-plane/runtime.env` を生成し、login shell 
 - `TZ` で指定した IANA timezone
 - Copilot CPU cap
 - 監査ログ SQLite DB の path と record cap
-- `sccache-dist` の scheduler URL / token file / cache cap（設定時）
+- `sccache` S3 backend の endpoint / bucket / credential file path（設定時）
 - Secret / ConfigMap 由来の file path
 - Job 実行先 namespace と mode の既定値
 - exec policy 用の `LD_PRELOAD` と rule path
@@ -25,7 +25,7 @@ sample manifest の既定値では、次の 3 つを分けます。
 
 - RWX の copilot session PVC
 - RWO の `/workspace` PVC
-- RWO の dedicated `sccache-dist` PVC（standalone Deployment 用）
+- RWO の dedicated `sccache` object-store PVC（standalone Garage Deployment 用）
 
 copilot session PVC へまとめるもの:
 
@@ -45,18 +45,17 @@ copilot session PVC へまとめるもの:
 同じ永続 state を参照します。
 
 dedicated sccache PVC は current-cluster の long-running Rust Job 向け
-standalone `sccache-dist` Deployment 用です。sample manifest では
-`ReadWriteOnce` の 5Gi claim を `/var/cache/sccache-dist` へ mount し、
-`SCCACHE_DIST_TOOLCHAIN_CACHE_SIZE=4294967296` で 4GiB までに制限します。
-Rust Job 自体は PVC を mount せず、`SCCACHE_DIST_SCHEDULER_URL` と
-`SCCACHE_DIST_CLIENT_TOKEN_FILE` を受け取って cluster 内の
-`sccache-dist` Service へ接続します。builder container 自身は downward API で得た
-Pod IP を `public_addr` に広告し、scheduler からその socket address を配ります。
-dist mode を無効化した場合も、`sccache` 自体は
+standalone Garage Deployment 用です。sample manifest では
+`ReadWriteOnce` の 5Gi claim を `/var/lib/garage` へ mount し、
+Garage bucket quota を `4294967296` bytes に抑えて 4GiB までに制限します。
+Rust Job 自体は PVC を mount せず、`SCCACHE_BUCKET`、`SCCACHE_ENDPOINT`、
+`AWS_ACCESS_KEY_ID_FILE`、`AWS_SECRET_ACCESS_KEY_FILE` を受け取って cluster 内の
+`garage-s3` Service へ接続します。Garage container 自身は downward API で得た
+Pod IP を `GARAGE_RPC_PUBLIC_ADDR` に広告し、single-node layout を bootstrap します。
+古い cache object は S3 lifecycle expiration で自動削除します。object-store mode
+を無効化した場合も、`sccache` 自体は
 `/var/tmp/containerized-rust/<repo>/<branch>/sccache` の ephemeral path を使い、
 `/workspace` PVC には `cargo` / `rustup` cache だけを残します。
-上流の `sccache-dist` server バイナリは Linux/x86_64 前提なので、この sample
-manifest では `sccache-dist` Deployment 側だけ amd64 node を前提にしています。
 
 監査ログの保持件数は `control-plane-env` ConfigMap の
 `CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）で調整し、
@@ -90,7 +89,7 @@ driver を `overlay` にし、`/dev/fuse` がある場合だけ `fuse-overlayfs`
 ### ConfigMap
 
 - `control-plane-config`: `copilot-config.json` の JSON object overlay
-- `control-plane-env`: namespace / PVC / Job 既定値 / file path / sccache-dist scheduler endpoint のような
+- `control-plane-env`: namespace / PVC / Job 既定値 / file path / sccache S3 endpoint のような
   非機密 env
 
 `COPILOT_CONFIG_JSON_FILE` で渡した JSON object は、PVC 上の既存
@@ -99,7 +98,8 @@ driver を `overlay` にし、`/dev/fuse` がある場合だけ `fuse-overlayfs`
 ### Secret
 
 - `control-plane-auth`: `ssh-public-key` と認証系の Secret 値
-- `sccache-dist-auth`: `client-token` と `server-token`
+- `garage-admin-auth`: Garage bootstrap 用の admin token / rpc secret
+- `garage-sccache-auth`: `sccache` S3 access key / secret key
 - `gh` 認証は `gh-github-token` または `gh-hosts.yml`
 - 必要に応じて `copilot-github-token`、DockerHub 認証情報も保持
 

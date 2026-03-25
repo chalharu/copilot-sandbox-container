@@ -47,7 +47,7 @@ shellcheck_targets=(
   /workspace/containers/control-plane/bin/k8s-job-logs
   /workspace/containers/control-plane/bin/k8s-job-run
   /workspace/containers/control-plane/config/profile-control-plane-env.sh
-  /workspace/containers/sccache-dist/entrypoint-dist.sh
+  /workspace/containers/garage/entrypoint.sh
   /workspace/containers/execution-plane-smoke/execution-plane-smoke
 )
 lint_log_dir="$(mktemp -d)"
