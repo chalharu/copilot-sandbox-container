@@ -36,11 +36,18 @@ Control Plane 固有の運用知識は repo-local docs だけでは足りず、i
 
 ## フェーズ 5: ドキュメントの Diátaxis 再編
 
-README に背景説明、手順、トラブルシュート、設計意図が混在すると、人間にも AI にも読みづらくなります。そこで今回、ドキュメントを次の役割へ分離しました。
+README に背景説明、手順、トラブルシュート、設計意図が混在すると、
+人間にも AI にも読みづらくなります。そこでドキュメントを
+「最短導線」「目的別手順」「背景説明」「事実関係の reference」へ
+分け、`docs/README.md` を入口として追加しました。
 
-- Tutorial: `README.md`
+- Tutorial / quickstart: `README.md`
+- Documentation map: `docs/README.md`
 - How-to guides: `docs/how-to-guides/cookbook.md`
 - Explanation: `docs/explanation/knowledge.md`, `docs/explanation/history.md`
-- Reference: `docs/reference/debug-log.md`
+- Reference: `docs/reference/control-plane-runtime.md`,
+  `docs/reference/debug-log.md`
 
-この分離により、「最初にやること」「なぜそうなっているか」「失敗ログの意味」が別々に引けるようになりました。
+この分離により、「最初にやること」「なぜそうなっているか」
+「path や hook の事実関係」「失敗ログの意味」が別々に引けるように
+なりました。

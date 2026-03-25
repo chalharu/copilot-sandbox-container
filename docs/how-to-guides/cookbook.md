@@ -1,6 +1,10 @@
 # Cookbook
 
-このページは、目的別に「何をすればよいか」だけを並べる How-to guide 集です。背景説明は `docs/explanation/knowledge.md`、代表ログは `docs/reference/debug-log.md` に分離しています。
+このページは、目的別に「何をすればよいか」だけを並べる How-to guide 集です。
+どこから読むべきか迷ったら `docs/README.md`、背景説明は
+`docs/explanation/knowledge.md`、runtime / path の事実関係は
+`docs/reference/control-plane-runtime.md`、代表ログは
+`docs/reference/debug-log.md` を参照してください。
 
 ## 1. 標準の lint / build / test を回す
 
@@ -22,6 +26,9 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 - rootful-service image store は `/var/lib/control-plane/rootful-podman/rootful-overlay` の disposable emptyDir cache へ置き、runtime dir は `/var/tmp/control-plane/rootful-overlay` の disk-backed emptyDir へ逃がす
 - `yamllint` image の DHI base image は `scripts/prepare-dhi-images.sh` で事前 pull する
 - `hadolint` と `shellcheck` は fully-qualified image 名で pull する
+
+runtime / cache / hook の具体的な path は
+`docs/reference/control-plane-runtime.md` を参照してください。
 
 ## 2. current-cluster の smoke を取る
 
@@ -46,17 +53,54 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 - rootful-service 下の `podman build` と `podman run` が通る
 - `--mount-file` が SSH/SFTP + `rclone` で大きめのファイルも運べ、競合時は安全に write-back を止める
 
+ConfigMap / Secret / write-back の具体的な path は
+`docs/reference/control-plane-runtime.md` を参照してください。
+
 ## 3. sample manifest を current-cluster 向けに更新する
 
-1. `deploy/kubernetes/control-plane.example.yaml` の `image` は `replace-me-with-commit-sha` の placeholder なので、使いたい published commit SHA tag に更新する
+### image と tag を決める
+
+1. `deploy/kubernetes/control-plane.example.yaml` の `image` は
+   `replace-me-with-commit-sha` の placeholder なので、使いたい
+   published commit SHA tag に更新する
 2. 再現性を重視するなら `latest` ではなく commit SHA tag を使う
-3. `control-plane-auth` Secret の `ssh-public-key` を自分の公開鍵へ差し替える
-4. `gh` 認証は Secret 側で管理し、簡単な GitHub.com 用なら `gh-github-token`、複数 host や `git_protocol: ssh` を含めたいなら `gh-hosts.yml` を使う
-5. 永続化は RWX の copilot session PVC と RWO の `/workspace` PVC を基本にし、前者へ `~/.copilot/config.json`、`~/.copilot/command-history-state.json`、`~/.copilot/session-state`、`~/.copilot/session-state/audit/audit-log.db`、`~/.copilot/session-state/audit/audit-analysis.db`、`~/.config/gh`、`~/.ssh`、SSH host key をまとめる。`~/.copilot/tmp` は emptyDir の ephemeral storage に置き、rootless Podman の graphroot は `/var/tmp/control-plane/rootless-podman/<driver>/storage` へ、rootful-service の graphroot は `/var/lib/control-plane/rootful-podman` へ逃がして、再生成可能な container cache が session PVC を食い潰さないようにする
-6. Copilot CLI の追加設定は `control-plane-config` ConfigMap の `copilot-config.json` へ書き、PVC 上の既存 `~/.copilot/config.json` へ merge させる。namespace / PVC / Job 既定値や file path などの非機密 env は `control-plane-env` ConfigMap にまとめ、Deployment の `envFrom` で読む。監査ログ DB の保持件数は `control-plane-env` ConfigMap の `CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）で調整し、超過時は次の tool hook 実行で古いレコードから削除される。`controlPlane.auditAnalysis.targetRepository.url` には skill / agent / command の作成先 repo を置き、sample manifest では `example.com` の URL を使う
-7. 必要なら `dockerhub-username` / `dockerhub-token` と `copilot-github-token` も入れる
-8. `CONTROL_PLANE_JOB_TRANSFER_IMAGE` は Control Plane image と同じ published tag に合わせる
-9. `storageClassName` と PVC サイズをクラスタに合わせる。`control-plane-copilot-session-pvc` は RWX を想定しているので、sample manifest の `replace-me-with-rwx-storage-class` を実クラスタ向けに置き換える
+3. `CONTROL_PLANE_JOB_TRANSFER_IMAGE` は Control Plane image と同じ
+   published tag に合わせる
+
+### Secret と ConfigMap をそろえる
+
+1. `control-plane-auth` Secret の `ssh-public-key` を自分の公開鍵へ
+   差し替える
+2. `gh` 認証は Secret 側で管理し、簡単な GitHub.com 用なら
+   `gh-github-token`、複数 host や `git_protocol: ssh` を含めたいなら
+   `gh-hosts.yml` を使う
+3. 必要なら `dockerhub-username` / `dockerhub-token` と
+   `copilot-github-token` も入れる
+4. Copilot CLI の追加設定は `control-plane-config` ConfigMap の
+   `copilot-config.json` へ書き、PVC 上の既存 `~/.copilot/config.json`
+   へ merge させる
+5. namespace / PVC / Job 既定値や file path などの非機密 env は
+   `control-plane-env` ConfigMap にまとめ、Deployment の `envFrom` で読む
+6. `controlPlane.auditAnalysis.targetRepository.url` には skill / agent /
+   command の作成先 repo を置き、sample manifest では `example.com`
+   の URL を使う
+7. 監査ログ DB の保持件数は `control-plane-env` ConfigMap の
+   `CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）で調整する
+
+### 永続化と storage class を合わせる
+
+1. 永続化は RWX の copilot session PVC と RWO の `/workspace` PVC を
+   基本にする
+2. `~/.copilot/tmp` と Podman cache は emptyDir の ephemeral storage に
+   逃がし、再生成可能な container cache が session PVC を食い潰さない
+   ようにする
+3. `storageClassName` と PVC サイズをクラスタに合わせる。
+   `control-plane-copilot-session-pvc` は RWX を想定しているので、
+   sample manifest の `replace-me-with-rwx-storage-class` を実クラスタ向けに
+   置き換える
+
+永続 path、Podman graphroot、ConfigMap / Secret の注入先などの具体的な
+path は `docs/reference/control-plane-runtime.md` を参照してください。
 
 反映:
 
@@ -81,6 +125,10 @@ kubectl get pod <pod-name> -n copilot-sandbox -o jsonpath='{.spec.containers[*].
 ```
 
 ## 5. `control-plane-run` の経路を選ぶ
+
+current-cluster では local Podman ではなく Kubernetes Job path が既定です。
+対話性や速度を優先したい短い処理だけ `--execution-hint short` を使い、
+既定運用は Job 側へ寄せてください。
 
 短い処理を local Podman へ寄せる:
 

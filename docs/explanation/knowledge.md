@@ -1,6 +1,10 @@
 # Knowledge
 
-このページは、Control Plane / Execution Plane 構成の「なぜ」を説明する Explanation です。具体的な手順は `docs/how-to-guides/cookbook.md`、失敗時のログ引きは `docs/reference/debug-log.md` を見てください。
+このページは、Control Plane / Execution Plane 構成の「なぜ」を説明する
+Explanation です。具体的な手順は `docs/how-to-guides/cookbook.md`、
+runtime / path / hook の事実関係は
+`docs/reference/control-plane-runtime.md`、失敗時のログ引きは
+`docs/reference/debug-log.md` を見てください。
 
 ## 1. 2 層構成を採る理由
 

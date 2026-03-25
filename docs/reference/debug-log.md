@@ -1,8 +1,29 @@
 # Debug log reference
 
-このページは、current-cluster と Control Plane 周辺で実際に重要になるログ断片を引くための Reference です。手順は `docs/how-to-guides/cookbook.md`、背景説明は `docs/explanation/knowledge.md` を参照してください。
+このページは、current-cluster と Control Plane 周辺で実際に重要になる
+ログ断片を引くための Reference です。手順は
+`docs/how-to-guides/cookbook.md`、背景説明は
+`docs/explanation/knowledge.md`、runtime / path の事実関係は
+`docs/reference/control-plane-runtime.md` を参照してください。
 
 このリポジトリの rootful-service sample では、local Podman の graphroot を既定で `/var/lib/control-plane/rootful-podman/rootful-overlay/storage` に置き、runtime dir は `/var/tmp/control-plane/rootful-overlay` へ寄せます。graphroot の背後は disposable な `emptyDir` cache、runtime dir も disk-backed `emptyDir` を想定し、Pod 再作成時に再生成できる local image store を persistent volume から切り離しています。
+
+## Quick index by symptom
+
+| Symptom | Section |
+| --- | --- |
+| `Permission denied` で bundled skill が読めない | [§1](#1-bundled-skill-が読めない) |
+| capability 不足で起動時に止まる | [§2](#2-capability-が足りず起動時に止まる) |
+| SSH が切れる / `cleanup_exit` が出る | [§3](#3-interactive-ssh-で切れる--sshd-cleanup-警告が出る) |
+| rootless Podman の user namespace error | [§4](#4-rootless-podman-が-outer-runtime-に止められている) |
+| `podman system migrate` の自己修復ログ | [§5](#5-stale-state-は-podman-system-migrate-で直る) |
+| `cgroup.subtree_control` で止まる | [§6](#6-rootful-service-build-が-cgroup-で止まる) |
+| session picker が使えず shell へ落ちる | [§7](#7-session-picker-が使えず-shell-へ落ちる) |
+| DHI base image pull が unauthorized | [§8](#8-dhi-base-image-を-pull-できない) |
+| Service の `EXTERNAL-IP` が `pending` | [§9](#9-service-の-external-ip-が未割当て) |
+| injected Copilot config が壊れている | [§10](#10-injected-copilot-config-が壊れている) |
+| gh Secret の指定が足りない | [§11](#11-gh-secret-の指定が足りない) |
+| 監査分析 hook の設定が壊れている | [§12](#12-監査分析-hook-の設定が壊れている) |
 
 ## 1. bundled skill が読めない
 
