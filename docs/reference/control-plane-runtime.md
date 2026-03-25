@@ -14,16 +14,18 @@ entrypoint は `~/.config/control-plane/runtime.env` を生成し、login shell 
 - `TZ` で指定した IANA timezone
 - Copilot CPU cap
 - 監査ログ SQLite DB の path と record cap
+- dedicated sccache PVC の mount path と cache cap（設定時）
 - Secret / ConfigMap 由来の file path
 - Job 実行先 namespace と mode の既定値
 - exec policy 用の `LD_PRELOAD` と rule path
 
 ## 2. 永続化する state
 
-sample manifest の既定値では、次の 2 つを分けます。
+sample manifest の既定値では、次の 3 つを分けます。
 
 - RWX の copilot session PVC
 - RWO の `/workspace` PVC
+- RWO の dedicated sccache PVC（`/workspace/cache/sccache`）
 
 copilot session PVC へまとめるもの:
 
@@ -41,6 +43,11 @@ copilot session PVC へまとめるもの:
 `audit-log-analysis` skill と lifecycle analysis hooks
 (`agentStop` / `subagentStop` / `sessionEnd` / `errorOccurred`) が
 同じ永続 state を参照します。
+
+dedicated sccache PVC は current-cluster の long-running Rust Job 向けです。
+sample manifest では local-storage 前提の 5Gi claim を
+`/workspace/cache/sccache` へ mount し、`SCCACHE_CACHE_SIZE=4G` で 80%
+までに制限します。
 
 監査ログの保持件数は `control-plane-env` ConfigMap の
 `CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）で調整し、
@@ -74,7 +81,7 @@ driver を `overlay` にし、`/dev/fuse` がある場合だけ `fuse-overlayfs`
 ### ConfigMap
 
 - `control-plane-config`: `copilot-config.json` の JSON object overlay
-- `control-plane-env`: namespace / PVC / Job 既定値 / file path のような
+- `control-plane-env`: namespace / PVC / Job 既定値 / file path / sccache cap のような
   非機密 env
 
 `COPILOT_CONFIG_JSON_FILE` で渡した JSON object は、PVC 上の既存

@@ -105,6 +105,29 @@ spec:
       storage: 5Gi
   storageClassName: standard
 ---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: control-plane-local-storage
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: control-plane-sccache-pvc
+  namespace: copilot-sandbox
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  # Back this with a local PersistentVolume, or replace this storage class
+  # with the local-storage class your cluster already provisions dynamically.
+  storageClassName: control-plane-local-storage
+---
 apiVersion: v1
 kind: Secret
 metadata:
@@ -187,6 +210,10 @@ data:
   CONTROL_PLANE_JOB_NAMESPACE: copilot-sandbox-jobs
   CONTROL_PLANE_WORKSPACE_PVC: control-plane-workspace-pvc
   CONTROL_PLANE_WORKSPACE_SUBPATH: workspace
+  # Keep sccache on a dedicated same-node local-storage PVC so long-running Rust
+  # jobs do not grow the shared /workspace PVC with compiler artifacts.
+  CONTROL_PLANE_SCCACHE_PVC: control-plane-sccache-pvc
+  CONTROL_PLANE_SCCACHE_MOUNT_PATH: /workspace/cache/sccache
   # Optional: when the job namespace has its own shared workspace PVC
   # that exposes the same repository contents, mount it into Jobs too.
   # Otherwise keep Jobs stateless and use `--mount-file`, which stages
@@ -230,6 +257,8 @@ data:
   CONTROL_PLANE_JOB_CPU_LIMIT: "2"
   CONTROL_PLANE_JOB_MEMORY_REQUEST: 256Mi
   CONTROL_PLANE_JOB_MEMORY_LIMIT: 2Gi
+  # Leave roughly 20% headroom on the dedicated 5Gi sccache PVC.
+  SCCACHE_CACHE_SIZE: "4G"
 ---
 apiVersion: v1
 kind: Service
@@ -289,6 +318,7 @@ spec:
                 /copilot-session/state/ssh-host-keys \
                 /copilot-session/session-state \
                 /workspace-state/workspace \
+                /workspace-state/workspace/cache \
                 /cache/rootful-podman \
                 /cache/runtime-tmp
               touch /copilot-session/state/copilot-config.json /copilot-session/state/command-history-state.json
@@ -448,6 +478,8 @@ spec:
             - name: workspace
               mountPath: /workspace
               subPath: workspace
+            - name: sccache
+              mountPath: /workspace/cache/sccache
             - name: cache
               mountPath: /var/lib/control-plane/rootful-podman
               subPath: rootful-podman
@@ -478,6 +510,9 @@ spec:
         - name: workspace
           persistentVolumeClaim:
             claimName: control-plane-workspace-pvc
+        - name: sccache
+          persistentVolumeClaim:
+            claimName: control-plane-sccache-pvc
         - name: cache
           emptyDir: {}
         # Optional advanced rootless profile: if your cluster policy allows

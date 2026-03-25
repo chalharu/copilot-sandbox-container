@@ -42,7 +42,7 @@ Examples:
 - `bash ~/.copilot/skills/containerized-rust-ops/scripts/k8s-rust.sh -- cargo test --workspace --all-targets -- --nocapture`
 - `bash ~/.copilot/skills/containerized-rust-ops/scripts/k8s-rust.sh -- cargo llvm-cov --workspace --all-targets --summary-only`
 
-The Kubernetes helper keeps the clone, temp files, and `target` under `/var/tmp/containerized-rust/...`, while `cargo`, `rustup`, and `sccache` stay under `/workspace/cache/...` so the reusable caches survive across jobs without filling the PVC with `.git` metadata or transient build artifacts.
+The Kubernetes helper keeps the clone, temp files, and `target` under `/var/tmp/containerized-rust/...`, while `cargo` and `rustup` stay under `/workspace/cache/...`. When the runtime exposes `CONTROL_PLANE_SCCACHE_MOUNT_PATH`, `sccache` moves to that dedicated cache root (for example `/workspace/cache/sccache/...`) so reusable compiler artifacts can live on a same-node PVC without filling the workspace PVC with `.git` metadata or transient build artifacts.
 
 ## Keep cache-aware workflows aligned
 

@@ -44,12 +44,20 @@ current-cluster では `CONTROL_PLANE_RUN_MODE=k8s-job` を既定にし、local 
 
 ## 5. sample manifest の state をどう分けるか
 
-sample manifest の既定値では、永続化を 2 つの PVC に絞ります。
+sample manifest の既定値では、永続化を 3 つの PVC に分けます。
 
 - RWX の copilot session PVC
 - RWO の `/workspace` PVC
+- RWO の dedicated sccache PVC（5Gi）
 
 copilot session PVC には `~/.copilot/config.json`、`~/.copilot/command-history-state.json`、`~/.copilot/session-state`、`~/.copilot/session-state/audit/audit-log.db`、`~/.copilot/session-state/audit/audit-analysis.db`、`~/.config/gh`、`~/.ssh`、`/var/lib/control-plane/ssh-host-keys` をまとめます。これで session picker、GitHub 認証、SSH 鍵、Copilot の設定、監査ログ、監査分析結果は Pod 再作成後も残せます。
+
+一方で long-running Rust Job の `sccache` は `/workspace/cache/sccache` 配下の
+dedicated PVC へ逃がします。`ReadWriteOnce` + local storage にすることで、
+compiler cache を 1 ノードへ寄せたまま複数 Job で再利用しやすくし、
+shared `/workspace` PVC を巨大な object cache で埋めないようにします。
+sample manifest では 5Gi claim に対して `SCCACHE_CACHE_SIZE=4G` を与え、
+メタデータや一時ファイル向けの headroom を残します。
 
 一方、`~/.copilot/tmp`、Screen socket、rootless Podman の graphroot / runtime dir / runroot、rootful-service の graphroot cache は PVC ではなく ephemeral path に置きます。rootless Podman の graphroot は `/var/tmp/control-plane/rootless-podman/<driver>/storage` へ寄せ、`~/.copilot/containers` には互換用 symlink だけを残します。特に rootful-service の graphroot は `/var/lib/control-plane/rootful-podman/rootful-<driver>/storage` を使いつつ、sample manifest ではその背後を disposable な `emptyDir` にしているため、再作成可能な Podman cache が persistent volume を食い潰しません。runtime dir / runroot は引き続き `/var/tmp/control-plane/rootful-<driver>` へ寄せ、disposable な runtime cache 側へまとめます。監査ログだけは追跡対象なので `~/.copilot/session-state/audit/audit-log.db` に固定し、`CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）を超えた tool hook のタイミングで古いレコードから削除して、おおむね上限の 3/4 件まで戻します。
 

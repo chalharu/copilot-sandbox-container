@@ -100,8 +100,8 @@ pvc_count="$(awk '
     print count + 0
   }
 ' "${manifest_path}")"
-[[ "${pvc_count}" == "2" ]] || {
-  printf 'Expected exactly 2 PersistentVolumeClaims, found %s\n' "${pvc_count}" >&2
+[[ "${pvc_count}" == "3" ]] || {
+  printf 'Expected exactly 3 PersistentVolumeClaims, found %s\n' "${pvc_count}" >&2
   exit 1
 }
 
@@ -114,6 +114,15 @@ assert_resource_present PersistentVolumeClaim control-plane-workspace-pvc
 assert_resource_contains PersistentVolumeClaim control-plane-workspace-pvc 'ReadWriteOnce'
 assert_resource_contains PersistentVolumeClaim control-plane-workspace-pvc 'storage: 5Gi'
 assert_resource_contains PersistentVolumeClaim control-plane-workspace-pvc 'storageClassName: standard'
+
+assert_resource_present StorageClass control-plane-local-storage
+assert_resource_contains StorageClass control-plane-local-storage 'provisioner: kubernetes.io/no-provisioner'
+assert_resource_contains StorageClass control-plane-local-storage 'volumeBindingMode: WaitForFirstConsumer'
+
+assert_resource_present PersistentVolumeClaim control-plane-sccache-pvc
+assert_resource_contains PersistentVolumeClaim control-plane-sccache-pvc 'ReadWriteOnce'
+assert_resource_contains PersistentVolumeClaim control-plane-sccache-pvc 'storage: 5Gi'
+assert_resource_contains PersistentVolumeClaim control-plane-sccache-pvc 'storageClassName: control-plane-local-storage'
 
 assert_resource_absent PersistentVolumeClaim control-plane-state-pvc
 assert_resource_absent PersistentVolumeClaim control-plane-session-state-pvc
@@ -128,11 +137,15 @@ assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_AUDIT_LOG_MA
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER: overlay'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR: /var/tmp/control-plane/rootful-overlay'
+assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_SCCACHE_PVC: control-plane-sccache-pvc'
+assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_SCCACHE_MOUNT_PATH: /workspace/cache/sccache'
+assert_resource_contains ConfigMap control-plane-env 'SCCACHE_CACHE_SIZE: "4G"'
 assert_resource_contains ConfigMap control-plane-env 'TZ: Asia/Tokyo'
 
 printf '%s\n' 'k8s-sample-storage-layout-test: checking shared session and ephemeral Podman cache' >&2
 assert_deployment_contains 'claimName: control-plane-copilot-session-pvc'
 assert_deployment_contains 'claimName: control-plane-workspace-pvc'
+assert_deployment_contains 'claimName: control-plane-sccache-pvc'
 assert_deployment_contains 'envFrom:'
 assert_deployment_contains 'name: control-plane-env'
 assert_deployment_contains 'subPath: state/copilot-config.json'
@@ -141,6 +154,7 @@ assert_deployment_contains 'subPath: session-state'
 assert_deployment_contains 'subPath: state/gh'
 assert_deployment_contains 'subPath: state/ssh'
 assert_deployment_contains 'subPath: state/ssh-host-keys'
+assert_deployment_contains 'mountPath: /workspace/cache/sccache'
 assert_deployment_contains 'mountPath: /var/lib/control-plane/rootful-podman'
 assert_deployment_contains 'subPath: rootful-podman'
 assert_deployment_contains 'mountPath: /var/tmp/control-plane'

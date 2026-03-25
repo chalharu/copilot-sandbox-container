@@ -152,6 +152,8 @@ job_name=""
 workspace_pvc="${CONTROL_PLANE_JOB_WORKSPACE_PVC:-}"
 workspace_mount_path="${CONTROL_PLANE_JOB_WORKSPACE_MOUNT_PATH:-${CONTROL_PLANE_WORKSPACE_MOUNT_PATH:-/workspace}}"
 workspace_subpath="${CONTROL_PLANE_JOB_WORKSPACE_SUBPATH:-${CONTROL_PLANE_WORKSPACE_SUBPATH:-workspace}}"
+sccache_pvc="${CONTROL_PLANE_JOB_SCCACHE_PVC:-}"
+sccache_mount_path="${CONTROL_PLANE_JOB_SCCACHE_MOUNT_PATH:-${CONTROL_PLANE_SCCACHE_MOUNT_PATH:-/workspace/cache/sccache}}"
 job_service_account="${CONTROL_PLANE_JOB_SERVICE_ACCOUNT:-}"
 job_image_pull_policy="${CONTROL_PLANE_JOB_IMAGE_PULL_POLICY:-IfNotPresent}"
 job_cpu_request="${CONTROL_PLANE_JOB_CPU_REQUEST:-100m}"
@@ -241,6 +243,10 @@ if [[ -z "${workspace_pvc}" ]] && [[ "${namespace}" == "${CONTROL_PLANE_K8S_NAME
   workspace_pvc="${CONTROL_PLANE_WORKSPACE_PVC:-}"
 fi
 
+if [[ -z "${sccache_pvc}" ]] && [[ "${namespace}" == "${CONTROL_PLANE_K8S_NAMESPACE:-default}" ]]; then
+  sccache_pvc="${CONTROL_PLANE_SCCACHE_PVC:-}"
+fi
+
 command_block="$(render_yaml_list '            ' "$@")"
 volume_mount_entries=""
 volume_entries=""
@@ -273,6 +279,20 @@ EOF
         - name: workspace
           persistentVolumeClaim:
             claimName: $(yaml_quote "${workspace_pvc}")
+EOF
+  )")"
+fi
+
+if [[ -n "${sccache_pvc}" ]]; then
+  volume_mount_entries="$(append_yaml_block "${volume_mount_entries}" "$(cat <<EOF
+            - name: sccache
+              mountPath: $(yaml_quote "${sccache_mount_path}")
+EOF
+  )")"
+  volume_entries="$(append_yaml_block "${volume_entries}" "$(cat <<EOF
+        - name: sccache
+          persistentVolumeClaim:
+            claimName: $(yaml_quote "${sccache_pvc}")
 EOF
   )")"
 fi

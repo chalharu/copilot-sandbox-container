@@ -7,9 +7,10 @@ Usage:
   k8s-rust.sh <fmt-check|check|clippy|build|test>
   k8s-rust.sh -- <command> [args...]
 
-Run Rust commands in a control-plane Kubernetes job with persistent cargo,
-rustup, and sccache caches under /workspace/cache, while keeping the clone,
-target directory, and temp files on ephemeral /var/tmp storage.
+Run Rust commands in a control-plane Kubernetes job with persistent cargo and
+rustup caches under /workspace/cache, a dedicated sccache cache root under
+/workspace/cache/sccache when configured, and the clone, target directory, and
+temp files on ephemeral /var/tmp storage.
 USAGE
 }
 
@@ -99,6 +100,7 @@ namespace="${CONTROL_PLANE_K8S_NAMESPACE:-}"
 sccache_version="${SCCACHE_VERSION:-0.14.0}"
 sccache_release_base_url="${SCCACHE_RELEASE_BASE_URL:-https://github.com/mozilla/sccache/releases/download}"
 sccache_bootstrap_jobs="${SCCACHE_BOOTSTRAP_JOBS:-1}"
+sccache_root="${K8S_RUST_SCCACHE_ROOT:-${CONTROL_PLANE_SCCACHE_MOUNT_PATH:-/workspace/cache/sccache}}"
 cargo_llvm_cov_version="${CARGO_LLVM_COV_VERSION:-0.8.5}"
 cargo_llvm_cov_release_base_url="${CARGO_LLVM_COV_RELEASE_BASE_URL:-https://github.com/taiki-e/cargo-llvm-cov/releases}"
 enable_cargo_llvm_cov=0
@@ -133,6 +135,7 @@ branch_key_q="$(printf '%q' "${branch_key}")"
 sccache_version_q="$(printf '%q' "${sccache_version}")"
 sccache_release_base_url_q="$(printf '%q' "${sccache_release_base_url}")"
 sccache_bootstrap_jobs_q="$(printf '%q' "${sccache_bootstrap_jobs}")"
+sccache_root_q="$(printf '%q' "${sccache_root}")"
 cargo_llvm_cov_version_q="$(printf '%q' "${cargo_llvm_cov_version}")"
 cargo_llvm_cov_release_base_url_q="$(printf '%q' "${cargo_llvm_cov_release_base_url}")"
 enable_cargo_llvm_cov_q="$(printf '%q' "${enable_cargo_llvm_cov}")"
@@ -146,6 +149,7 @@ branch_key=${branch_key_q}
 sccache_version=${sccache_version_q}
 sccache_release_base_url=${sccache_release_base_url_q}
 sccache_bootstrap_jobs=${sccache_bootstrap_jobs_q}
+sccache_root=${sccache_root_q}
 cargo_llvm_cov_version=${cargo_llvm_cov_version_q}
 cargo_llvm_cov_release_base_url=${cargo_llvm_cov_release_base_url_q}
 enable_cargo_llvm_cov=${enable_cargo_llvm_cov_q}
@@ -155,7 +159,7 @@ src_root=\"\${ephemeral_root}/src\"
 tmp_dir=\"\${ephemeral_root}/tmp\"
 cargo_home=\"\${cache_root}/cargo\"
 rustup_home=\"\${cache_root}/rustup\"
-sccache_dir=\"\${cache_root}/sccache\"
+sccache_dir=\"\${sccache_root}/\${repo_key}/\${branch_key}\"
 target_dir=\"\${ephemeral_root}/target\"
 mkdir -p \"\${tmp_dir}\" \"\${cargo_home}\" \"\${rustup_home}\" \"\${sccache_dir}\" \"\${target_dir}\"
 export TMPDIR=\"\${tmp_dir}\"
@@ -170,7 +174,7 @@ export RUSTUP_HOME=\"\${rustup_home}\"
 export PATH=\"\${CARGO_HOME}/bin:\${PATH}\"
 export CARGO_TARGET_DIR=\"\${target_dir}\"
 export SCCACHE_DIR=\"\${sccache_dir}\"
-export SCCACHE_CACHE_SIZE=\"\${SCCACHE_CACHE_SIZE:-10G}\"
+export SCCACHE_CACHE_SIZE=\"\${SCCACHE_CACHE_SIZE:-4G}\"
 export CARGO_INCREMENTAL=0
 export CARGO_TERM_PROGRESS_WHEN=never
 rm -rf \"\${src_root}\"

@@ -89,8 +89,8 @@ ConfigMap / Secret / write-back の具体的な path は
 
 ### 永続化と storage class を合わせる
 
-1. 永続化は RWX の copilot session PVC と RWO の `/workspace` PVC を
-   基本にする
+1. 永続化は RWX の copilot session PVC、RWO の `/workspace` PVC、
+   そして long-running Rust Job 向けの RWO sccache PVC（5Gi）を基本にする
 2. `~/.copilot/tmp` と Podman cache は emptyDir の ephemeral storage に
    逃がし、再生成可能な container cache が session PVC を食い潰さない
    ようにする
@@ -98,6 +98,13 @@ ConfigMap / Secret / write-back の具体的な path は
    `control-plane-copilot-session-pvc` は RWX を想定しているので、
    sample manifest の `replace-me-with-rwx-storage-class` を実クラスタ向けに
    置き換える
+4. `control-plane-sccache-pvc` は same-node 共有を前提にした local-storage
+   向けの RWO claim です。sample manifest の
+   `control-plane-local-storage` StorageClass には、実クラスタ側で local
+   PersistentVolume を用意するか、既存の local-storage class へ置き換えて
+   ください
+5. `SCCACHE_CACHE_SIZE=4G` を維持し、5Gi の dedicated PVC に対して 20%
+   の headroom を残す
 
 永続 path、Podman graphroot、ConfigMap / Secret の注入先などの具体的な
 path は `docs/reference/control-plane-runtime.md` を参照してください。

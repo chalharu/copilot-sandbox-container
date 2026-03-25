@@ -36,7 +36,7 @@
 current-cluster 上の Control Plane コンテナ内で作業する場合は、先に次の
 3 本を押さえると迷いにくくなります。
 
-- runtime.env、永続 state、Podman cache、hook / Git policy:
+- runtime.env、永続 state、Podman cache、hook / Git policy、Rust の sccache PVC:
   `docs/reference/control-plane-runtime.md`
 - sample manifest の更新手順:
   `docs/how-to-guides/cookbook.md#3-sample-manifest-を-current-cluster-向けに更新する`

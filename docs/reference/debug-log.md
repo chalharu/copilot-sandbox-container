@@ -24,6 +24,7 @@
 | injected Copilot config が壊れている | [§10](#10-injected-copilot-config-が壊れている) |
 | gh Secret の指定が足りない | [§11](#11-gh-secret-の指定が足りない) |
 | 監査分析 hook の設定が壊れている | [§12](#12-監査分析-hook-の設定が壊れている) |
+| `control-plane-sccache-pvc` が `Pending` のまま | [§13](#13-dedicated-sccache-pvc-が-bound-しない) |
 
 ## 1. bundled skill が読めない
 
@@ -200,6 +201,22 @@ control-plane audit analysis: Audit analysis config at /home/copilot/.copilot/co
 `control-plane-config` ConfigMap の `copilot-config.json` overlay で、`controlPlane.auditAnalysis` が JSON object ではないか、壊れた値が入っています。bundled `audit-log-analysis` skill と lifecycle analysis hooks (`agentStop` / `subagentStop` / `sessionEnd` / `errorOccurred`) は同じ設定を読むため、ここが壊れると `~/.copilot/session-state/audit/audit-analysis.db` の更新も止まります。
 
 ### 期待する確認結果
+
+## 13. dedicated sccache PVC が Bound しない
+
+### 代表ログ
+
+```text
+Warning  ProvisioningFailed  persistentvolume-controller  storageclass.storage.k8s.io "control-plane-local-storage" not found
+Warning  FailedScheduling    default-scheduler           0/1 nodes are available: 1 node(s) had volume node affinity conflict.
+```
+
+### 意味
+
+sample manifest の `control-plane-sccache-pvc` は same-node 共有を前提にした
+local-storage 向け claim です。`control-plane-local-storage` に対応する local
+PersistentVolume を作るか、クラスタ既存の local-storage class へ置き換えて
+ください。
 
 - `~/.copilot/config.json` の `controlPlane.auditAnalysis` が JSON object
 - `~/.copilot/session-state/audit/audit-analysis.db` が存在する
