@@ -17,7 +17,7 @@ biome_image="${CONTROL_PLANE_BIOME_IMAGE:-ghcr.io/biomejs/biome:2.4.8@sha256:b38
 # renovate: datasource=docker depName=docker.io/library/node versioning=docker
 markdownlint_node_image="${CONTROL_PLANE_MARKDOWNLINT_NODE_IMAGE:-docker.io/library/node:24.14.0-bookworm-slim@sha256:d8e448a56fc63242f70026718378bd4b00f8c82e78d20eefb199224a4d8e33d8}"
 # renovate: datasource=npm depName=markdownlint-cli2
-markdownlint_version="${CONTROL_PLANE_MARKDOWNLINT_VERSION:-0.21.0}"
+markdownlint_version="${CONTROL_PLANE_MARKDOWNLINT_VERSION:-0.22.0}"
 markdownlint_cache_volume="${CONTROL_PLANE_MARKDOWNLINT_CACHE_VOLUME:-control-plane-markdownlint-cache}"
 yamllint_image="${CONTROL_PLANE_YAMLLINT_IMAGE_TAG:-localhost/yamllint:test}"
 yamllint_config="${CONTROL_PLANE_YAMLLINT_CONFIG:-/workspace/.yamllint}"
