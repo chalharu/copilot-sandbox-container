@@ -327,8 +327,8 @@ spec:
               find /copilot-session/state /copilot-session/session-state -type f -exec chmod 600 {} +
               # Preserve user workspace file modes; only hand the shared mount root
               # back to UID/GID 1000 so the control-plane session can use it.
-              chown 1000:1000 /workspace-state/workspace
-              chmod 700 /workspace-state/workspace
+              chown 1000:1000 /workspace-state/workspace /workspace-state/workspace/cache
+              chmod 700 /workspace-state/workspace /workspace-state/workspace/cache
               # Keep graphroot root-only, but leave the runtime tmp path traversable
               # so the copilot user can reach the rootful Podman socket later.
               chown 0:0 /cache/rootful-podman
