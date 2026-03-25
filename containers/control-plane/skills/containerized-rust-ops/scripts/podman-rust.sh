@@ -75,7 +75,18 @@ build_context_hash() {
 }
 
 image="${RUST_CONTAINER_IMAGE:-docker.io/rust:1.94.0-bookworm}"
-podman_cmd=(env -u CONTAINER_HOST -u DOCKER_HOST podman)
+container_bin="${CONTAINERIZED_RUST_CONTAINER_BIN:-podman}"
+case "${container_bin}" in
+  podman)
+    container_cmd=(env -u CONTAINER_HOST -u DOCKER_HOST podman)
+    ;;
+  docker)
+    container_cmd=(docker)
+    ;;
+  *)
+    container_cmd=("${container_bin}")
+    ;;
+esac
 case "$1" in
   fmt)
     shift
@@ -130,6 +141,15 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill_root="$(cd "${script_dir}/.." && pwd)"
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 [[ -n "${repo_root}" ]] || die "run this script from inside a Git repository"
+repo_root="$(canonicalize_path "${repo_root}")"
+workdir_host="${CONTAINERIZED_RUST_WORKDIR:-${PWD}}"
+workdir_host="$(canonicalize_path "${workdir_host}")"
+path_is_within "${workdir_host}" "${repo_root}" || die "CONTAINERIZED_RUST_WORKDIR must live under ${repo_root}"
+if [[ "${workdir_host}" == "${repo_root}" ]]; then
+  workdir_container="/workspace"
+else
+  workdir_container="/workspace/${workdir_host#"${repo_root}/"}"
+fi
 repo_key="$(slugify "$(basename "${repo_root}")")"
 repo_key="${repo_key#-}"
 repo_key="${repo_key%-}"
@@ -176,7 +196,7 @@ bootstrap_toolchain() {
     return
   fi
 
-  "${podman_cmd[@]}" run --rm -i \
+  "${container_cmd[@]}" run --rm -i \
     -v "${rustup_cache}:/host-rustup" \
     -v "${cargo_cache}:/host-cargo" \
     "${image}" \
@@ -189,12 +209,12 @@ ensure_sccache_image() {
 
   [[ -d "${sccache_image_context}" ]] || die "missing sccache image context: ${sccache_image_context}"
   context_hash="$(build_context_hash "${sccache_image_context}")"
-  existing_hash="$("${podman_cmd[@]}" image inspect --format "{{ index .Config.Labels \"${sccache_image_label}\" }}" "${sccache_image}" 2>/dev/null || true)"
+  existing_hash="$("${container_cmd[@]}" image inspect --format "{{ index .Config.Labels \"${sccache_image_label}\" }}" "${sccache_image}" 2>/dev/null || true)"
   if [[ -n "${existing_hash}" ]] && [[ "${existing_hash}" == "${context_hash}" ]]; then
     return
   fi
 
-  "${podman_cmd[@]}" build \
+  "${container_cmd[@]}" build \
     --label "${sccache_image_label}=${context_hash}" \
     --build-arg "SCCACHE_VERSION=${sccache_version}" \
     --tag "${sccache_image}" \
@@ -213,22 +233,22 @@ install_sccache_from_image() {
 
   ensure_sccache_image
   mkdir -p "${cargo_cache}/bin"
-  # The helper image is intentionally shell-less, so extract the binary with podman cp.
+  # The helper image is intentionally shell-less, so extract the binary with container cp.
   (
     set -euo pipefail
-    container_id="$("${podman_cmd[@]}" create "${sccache_image}")"
+    container_id="$("${container_cmd[@]}" create "${sccache_image}")"
     cleanup() {
-      "${podman_cmd[@]}" rm "${container_id}" >/dev/null
+      "${container_cmd[@]}" rm "${container_id}" >/dev/null
     }
     trap cleanup EXIT
-    "${podman_cmd[@]}" cp "${container_id}:/usr/local/bin/sccache" "${sccache_binary}"
+    "${container_cmd[@]}" cp "${container_id}:/usr/local/bin/sccache" "${sccache_binary}"
   )
   chmod 0755 "${sccache_binary}"
   printf '%s\n' "${context_hash}" > "${sccache_binary_context_hash_path}"
 }
 
 ensure_tools() {
-  "${podman_cmd[@]}" run --rm -i \
+  "${container_cmd[@]}" run --rm -i \
     -e CARGO_LLVM_COV_VERSION="${cargo_llvm_cov_version}" \
     -e CARGO_LLVM_COV_RELEASE_BASE_URL="${cargo_llvm_cov_release_base_url}" \
     -e ENABLE_CARGO_LLVM_COV="${enable_cargo_llvm_cov}" \
@@ -260,10 +280,10 @@ bootstrap_toolchain
 install_sccache_from_image
 ensure_tools
 
-"${podman_cmd[@]}" run --rm -i \
+"${container_cmd[@]}" run --rm -i \
   -e CARGO_TERM_PROGRESS_WHEN=never \
   -v "${repo_root}:/workspace" \
-  -w /workspace \
+  -w "${workdir_container}" \
   -v "${rustup_cache}:/usr/local/rustup" \
   -v "${cargo_cache}:/usr/local/cargo" \
   -v "${target_cache}:/workspace/target" \

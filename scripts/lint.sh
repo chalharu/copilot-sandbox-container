@@ -2,6 +2,7 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/.." && pwd)"
 # shellcheck source=scripts/lib-container-toolchain.sh
 source "${script_dir}/lib-container-toolchain.sh"
 
@@ -24,9 +25,11 @@ yamllint_config="${CONTROL_PLANE_YAMLLINT_CONFIG:-/workspace/.yamllint}"
 # Use container root so restrictive workspace mounts remain readable across
 # Docker, rootful Podman, and rootless Podman.
 workspace_access_user="0:0"
+rust_lint_script="${script_dir}/../containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh"
 dockerfiles=()
 yaml_files=()
 markdown_files=()
+rust_workspace_dirs=()
 shellcheck_targets=(
   /workspace/containers/control-plane/bin/control-plane-copilot
   /workspace/containers/control-plane/bin/control-plane-podman
@@ -54,6 +57,21 @@ cleanup() {
   rm -rf "${lint_log_dir}"
 }
 trap cleanup EXIT
+
+run_rust_lint() {
+  local runtime="$1"
+  local workspace_dir
+
+  shift
+
+  for workspace_dir in "$@"; do
+    (
+      cd "${workspace_dir}"
+      CONTAINERIZED_RUST_CONTAINER_BIN="${runtime}" bash "${rust_lint_script}" fmt-check
+      CONTAINERIZED_RUST_CONTAINER_BIN="${runtime}" bash "${rust_lint_script}" clippy
+    )
+  done
+}
 
 run_lint_job() {
   local name="$1"
@@ -102,6 +120,10 @@ while IFS= read -r script_file; do
   shellcheck_targets+=("/workspace/${script_file}")
 done < <(find scripts -name '*.sh' -print | LC_ALL=C sort)
 
+while IFS= read -r cargo_manifest; do
+  rust_workspace_dirs+=("$(dirname "${cargo_manifest}")")
+done < <(find "${repo_root}/containers" -name Cargo.toml -print | LC_ALL=C sort)
+
 if [[ "${#dockerfiles[@]}" -eq 0 ]]; then
   printf 'No Dockerfiles found under containers/\n' >&2
   exit 1
@@ -126,7 +148,11 @@ if [[ "${toolchain}" == "podman" ]]; then
   "${script_dir}/prepare-dhi-images.sh"
 fi
 build_image_for_toolchain "${toolchain}" "${yamllint_image}" containers/yamllint
-printf '%s\n' 'Running hadolint, shellcheck, yamllint, and markdownlint in parallel' >&2
+if [[ "${#rust_workspace_dirs[@]}" -gt 0 ]]; then
+  printf '%s\n' 'Running hadolint, shellcheck, yamllint, markdownlint, and Rust fmt/clippy in parallel' >&2
+else
+  printf '%s\n' 'Running hadolint, shellcheck, yamllint, and markdownlint in parallel' >&2
+fi
 
 run_lint_job hadolint \
   "${container_bin}" run --rm --user "${workspace_access_user}" -v "${PWD}:/workspace:ro" "${hadolint_image}" hadolint "${dockerfiles[@]}"
@@ -146,5 +172,10 @@ run_lint_job markdownlint \
     -w /workspace \
     "${markdownlint_node_image}" \
     npx --yes "markdownlint-cli2@${markdownlint_version}" "${markdown_files[@]}"
+
+if [[ "${#rust_workspace_dirs[@]}" -gt 0 ]]; then
+  run_lint_job rust \
+    run_rust_lint "${container_bin}" "${rust_workspace_dirs[@]}"
+fi
 
 wait_for_lint_jobs
