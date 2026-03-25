@@ -120,7 +120,7 @@ fn load_rule_file(path: &Path, optional: bool) -> Result<CompiledConfig, String>
 }
 
 fn parse_config(raw: &str, path: &Path) -> Result<CompiledConfig, String> {
-    let config: RawConfig = serde_yml::from_str(raw).map_err(|error| {
+    let config: RawConfig = serde_norway::from_str(raw).map_err(|error| {
         format!(
             "failed to parse exec policy rules at {}: {}",
             path.display(),
