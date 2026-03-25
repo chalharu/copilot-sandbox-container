@@ -42,7 +42,7 @@ Examples:
 - `bash ~/.copilot/skills/containerized-rust-ops/scripts/k8s-rust.sh -- cargo test --workspace --all-targets -- --nocapture`
 - `bash ~/.copilot/skills/containerized-rust-ops/scripts/k8s-rust.sh -- cargo llvm-cov --workspace --all-targets --summary-only`
 
-The Kubernetes helper keeps the clone, temp files, and `target` under `/var/tmp/containerized-rust/...`, while `cargo` and `rustup` stay under `/workspace/cache/...`. When the runtime exposes `CONTROL_PLANE_SCCACHE_MOUNT_PATH`, `sccache` moves to that dedicated cache root (for example `/workspace/cache/sccache/...`) so reusable compiler artifacts can live on a same-node PVC without filling the workspace PVC with `.git` metadata or transient build artifacts.
+The Kubernetes helper keeps the clone, temp files, and `target` under `/var/tmp/containerized-rust/...`, while `cargo` and `rustup` stay under `/workspace/cache/...`. When the runtime exposes `SCCACHE_DIST_SCHEDULER_URL` plus `SCCACHE_DIST_CLIENT_TOKEN_FILE`, `k8s-rust.sh` writes an `SCCACHE_CONF` for `sccache-dist` and keeps only ephemeral client state under `/var/tmp/containerized-rust/.../sccache`. The sample manifest serves those requests from the dedicated `containers/sccache-dist/` helper image. Without dist mode, it falls back to `/workspace/cache/<repo>/<branch>/sccache`.
 
 ## Keep cache-aware workflows aligned
 
@@ -51,6 +51,7 @@ When containerized Rust performance or correctness regresses, keep these surface
 - `scripts/podman-rust.sh` for local containerized runs
 - `scripts/k8s-rust.sh` for long control-plane jobs
 - `scripts/install-cargo-llvm-cov.sh` for release-based `cargo-llvm-cov` bootstrap
-- `containers/sccache/Dockerfile` for the cached `sccache` container image
+- `containers/sccache/Dockerfile` for the cached `sccache` client image
+- `containers/sccache-dist/Dockerfile` for the distributed scheduler/builder image
 
 Do not reintroduce `.git`-backed caches, memory-backed `/tmp` defaults, or repo-specific `.github/skills/...` paths into these helpers. Those are known-bad in this environment.

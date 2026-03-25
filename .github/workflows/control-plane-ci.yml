@@ -319,6 +319,7 @@ jobs:
     outputs:
       yamllint_changed: ${{ steps.detect.outputs.yamllint_changed }}
       sccache_changed: ${{ steps.detect.outputs.sccache_changed }}
+      sccache_dist_changed: ${{ steps.detect.outputs.sccache_dist_changed }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6.0.2
@@ -344,13 +345,16 @@ jobs:
           if [[ -z "${before_sha}" ]] || [[ "${before_sha}" == '0000000000000000000000000000000000000000' ]]; then
             yamllint_changed=true
             sccache_changed=true
+            sccache_dist_changed=true
           else
             yamllint_changed="$(changed_in_range containers/yamllint)"
             sccache_changed="$(changed_in_range containers/sccache)"
+            sccache_dist_changed="$(changed_in_range containers/sccache-dist)"
           fi
 
           printf 'yamllint_changed=%s\n' "${yamllint_changed}" >> "${GITHUB_OUTPUT}"
           printf 'sccache_changed=%s\n' "${sccache_changed}" >> "${GITHUB_OUTPUT}"
+          printf 'sccache_dist_changed=%s\n' "${sccache_dist_changed}" >> "${GITHUB_OUTPUT}"
 
   publish-architecture-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -413,28 +417,37 @@ jobs:
         if: needs.helper-image-changes.outputs.sccache_changed == 'true'
         run: podman build --tag localhost/sccache:test containers/sccache
 
+      - name: Build sccache-dist image for publishing
+        if: needs.helper-image-changes.outputs.sccache_dist_changed == 'true' && matrix.image_arch == 'amd64'
+        run: podman build --tag localhost/sccache-dist:test containers/sccache-dist
+
       - name: Read published image versions
         id: image_versions
         run: |
           control_plane_version="$(sed -n 's/^ARG COPILOT_CLI_VERSION=//p' containers/control-plane/Dockerfile)"
           yamllint_version="$(sed -n 's/^ARG YAMLLINT_VERSION=//p' containers/yamllint/Dockerfile)"
           sccache_version="$(sed -n 's/^ARG SCCACHE_VERSION=//p' containers/sccache/Dockerfile)"
+          sccache_dist_version="$(sed -n 's/^ARG SCCACHE_VERSION=//p' containers/sccache-dist/Dockerfile)"
           test -n "${control_plane_version}"
           test -n "${yamllint_version}"
           test -n "${sccache_version}"
+          test -n "${sccache_dist_version}"
           printf 'control_plane_component_tag=copilot-%s\n' "${control_plane_version}" >> "${GITHUB_OUTPUT}"
           printf 'yamllint_component_tag=%s\n' "${yamllint_version}" >> "${GITHUB_OUTPUT}"
           printf 'sccache_component_tag=%s\n' "${sccache_version}" >> "${GITHUB_OUTPUT}"
+          printf 'sccache_dist_component_tag=%s\n' "${sccache_dist_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Publish architecture image tags
         env:
           GHCR_CONTROL_PLANE_IMAGE: ghcr.io/${{ github.repository }}/control-plane
           GHCR_YAMLLINT_IMAGE: ghcr.io/${{ github.repository }}/yamllint
           GHCR_SCCACHE_IMAGE: ghcr.io/${{ github.repository }}/sccache
+          GHCR_SCCACHE_DIST_IMAGE: ghcr.io/${{ github.repository }}/sccache-dist
           GITHUB_SHA: ${{ github.sha }}
           IMAGE_ARCH: ${{ matrix.image_arch }}
           PUBLISH_YAMLLINT: ${{ needs.helper-image-changes.outputs.yamllint_changed }}
           PUBLISH_SCCACHE: ${{ needs.helper-image-changes.outputs.sccache_changed }}
+          PUBLISH_SCCACHE_DIST: ${{ needs.helper-image-changes.outputs.sccache_dist_changed }}
         run: |
           podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
           podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${{ steps.image_versions.outputs.control_plane_component_tag }}-${IMAGE_ARCH}"
@@ -451,6 +464,12 @@ jobs:
             podman tag localhost/sccache:test "${GHCR_SCCACHE_IMAGE}:${{ steps.image_versions.outputs.sccache_component_tag }}-${IMAGE_ARCH}"
             podman push "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
             podman push "${GHCR_SCCACHE_IMAGE}:${{ steps.image_versions.outputs.sccache_component_tag }}-${IMAGE_ARCH}"
+          fi
+          if [[ "${PUBLISH_SCCACHE_DIST}" == "true" ]] && [[ "${IMAGE_ARCH}" == "amd64" ]]; then
+            podman tag localhost/sccache-dist:test "${GHCR_SCCACHE_DIST_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
+            podman tag localhost/sccache-dist:test "${GHCR_SCCACHE_DIST_IMAGE}:${{ steps.image_versions.outputs.sccache_dist_component_tag }}-${IMAGE_ARCH}"
+            podman push "${GHCR_SCCACHE_DIST_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
+            podman push "${GHCR_SCCACHE_DIST_IMAGE}:${{ steps.image_versions.outputs.sccache_dist_component_tag }}-${IMAGE_ARCH}"
           fi
 
   publish-manifests:
@@ -477,12 +496,15 @@ jobs:
           control_plane_version="$(sed -n 's/^ARG COPILOT_CLI_VERSION=//p' containers/control-plane/Dockerfile)"
           yamllint_version="$(sed -n 's/^ARG YAMLLINT_VERSION=//p' containers/yamllint/Dockerfile)"
           sccache_version="$(sed -n 's/^ARG SCCACHE_VERSION=//p' containers/sccache/Dockerfile)"
+          sccache_dist_version="$(sed -n 's/^ARG SCCACHE_VERSION=//p' containers/sccache-dist/Dockerfile)"
           test -n "${control_plane_version}"
           test -n "${yamllint_version}"
           test -n "${sccache_version}"
+          test -n "${sccache_dist_version}"
           printf 'control_plane_component_tag=copilot-%s\n' "${control_plane_version}" >> "${GITHUB_OUTPUT}"
           printf 'yamllint_component_tag=%s\n' "${yamllint_version}" >> "${GITHUB_OUTPUT}"
           printf 'sccache_component_tag=%s\n' "${sccache_version}" >> "${GITHUB_OUTPUT}"
+          printf 'sccache_dist_component_tag=%s\n' "${sccache_dist_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Log in to GHCR
         run: printf '%s' "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
@@ -492,9 +514,11 @@ jobs:
           GHCR_CONTROL_PLANE_IMAGE: ghcr.io/${{ github.repository }}/control-plane
           GHCR_YAMLLINT_IMAGE: ghcr.io/${{ github.repository }}/yamllint
           GHCR_SCCACHE_IMAGE: ghcr.io/${{ github.repository }}/sccache
+          GHCR_SCCACHE_DIST_IMAGE: ghcr.io/${{ github.repository }}/sccache-dist
           GITHUB_SHA: ${{ github.sha }}
           PUBLISH_YAMLLINT: ${{ needs.helper-image-changes.outputs.yamllint_changed }}
           PUBLISH_SCCACHE: ${{ needs.helper-image-changes.outputs.sccache_changed }}
+          PUBLISH_SCCACHE_DIST: ${{ needs.helper-image-changes.outputs.sccache_dist_changed }}
         run: |
           create_manifest() {
             local manifest_name="$1"
@@ -541,6 +565,14 @@ jobs:
               "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-amd64" \
               "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-arm64"
           fi
+          if [[ "${PUBLISH_SCCACHE_DIST}" == "true" ]]; then
+            create_manifest "localhost/sccache-dist:manifest-sha" "${GHCR_SCCACHE_DIST_IMAGE}:${GITHUB_SHA}" \
+              "${GHCR_SCCACHE_DIST_IMAGE}:${GITHUB_SHA}-amd64"
+            create_manifest "localhost/sccache-dist:manifest-latest" "${GHCR_SCCACHE_DIST_IMAGE}:latest" \
+              "${GHCR_SCCACHE_DIST_IMAGE}:${GITHUB_SHA}-amd64"
+            create_manifest "localhost/sccache-dist:manifest-version" "${GHCR_SCCACHE_DIST_IMAGE}:${{ steps.image_versions.outputs.sccache_dist_component_tag }}" \
+              "${GHCR_SCCACHE_DIST_IMAGE}:${GITHUB_SHA}-amd64"
+          fi
 
   cleanup-packages:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -558,6 +590,7 @@ jobs:
           - control-plane
           - yamllint
           - sccache
+          - sccache-dist
     steps:
       - name: Delete old GHCR package versions
         uses: actions/delete-package-versions@v5.0.0

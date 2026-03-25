@@ -8,9 +8,11 @@ Usage:
   k8s-rust.sh -- <command> [args...]
 
 Run Rust commands in a control-plane Kubernetes job with persistent cargo and
-rustup caches under /workspace/cache, a dedicated sccache cache root under
-/workspace/cache/sccache when configured, and the clone, target directory, and
-temp files on ephemeral /var/tmp storage.
+rustup caches under /workspace/cache. Local-only runs keep the sccache object
+cache under /workspace/cache/<repo>/<branch>/sccache, while distributed runs
+connect to SCCACHE_DIST_SCHEDULER_URL and keep only ephemeral client state under
+/var/tmp. The clone, target directory, and temp files always live on ephemeral
+storage.
 USAGE
 }
 
@@ -100,12 +102,24 @@ namespace="${CONTROL_PLANE_K8S_NAMESPACE:-}"
 sccache_version="${SCCACHE_VERSION:-0.14.0}"
 sccache_release_base_url="${SCCACHE_RELEASE_BASE_URL:-https://github.com/mozilla/sccache/releases/download}"
 sccache_bootstrap_jobs="${SCCACHE_BOOTSTRAP_JOBS:-1}"
-sccache_root="${K8S_RUST_SCCACHE_ROOT:-${CONTROL_PLANE_SCCACHE_MOUNT_PATH:-/workspace/cache/sccache}}"
+sccache_dist_scheduler_url="${SCCACHE_DIST_SCHEDULER_URL:-}"
+sccache_dist_client_token_file="${SCCACHE_DIST_CLIENT_TOKEN_FILE:-}"
+sccache_dist_client_token=""
+sccache_dist_client_toolchain_cache_size="${SCCACHE_DIST_CLIENT_TOOLCHAIN_CACHE_SIZE:-1073741824}"
+sccache_dist_enabled=0
 cargo_llvm_cov_version="${CARGO_LLVM_COV_VERSION:-0.8.5}"
 cargo_llvm_cov_release_base_url="${CARGO_LLVM_COV_RELEASE_BASE_URL:-https://github.com/taiki-e/cargo-llvm-cov/releases}"
 enable_cargo_llvm_cov=0
 if [[ "${#cmd[@]}" -ge 2 && "${cmd[0]}" == "cargo" && "${cmd[1]}" == "llvm-cov" ]]; then
   enable_cargo_llvm_cov=1
+fi
+
+if [[ -n "${sccache_dist_scheduler_url}" ]]; then
+  [[ -n "${sccache_dist_client_token_file}" ]] || die "SCCACHE_DIST_CLIENT_TOKEN_FILE is required when SCCACHE_DIST_SCHEDULER_URL is set"
+  [[ -f "${sccache_dist_client_token_file}" ]] || die "SCCACHE_DIST_CLIENT_TOKEN_FILE not found: ${sccache_dist_client_token_file}"
+  sccache_dist_client_token="$(tr -d '\r\n' < "${sccache_dist_client_token_file}")"
+  [[ -n "${sccache_dist_client_token}" ]] || die "SCCACHE_DIST_CLIENT_TOKEN_FILE must not be empty"
+  sccache_dist_enabled=1
 fi
 
 branch_key="$(slugify "${branch}")"
@@ -135,7 +149,10 @@ branch_key_q="$(printf '%q' "${branch_key}")"
 sccache_version_q="$(printf '%q' "${sccache_version}")"
 sccache_release_base_url_q="$(printf '%q' "${sccache_release_base_url}")"
 sccache_bootstrap_jobs_q="$(printf '%q' "${sccache_bootstrap_jobs}")"
-sccache_root_q="$(printf '%q' "${sccache_root}")"
+sccache_dist_scheduler_url_q="$(printf '%q' "${sccache_dist_scheduler_url}")"
+sccache_dist_client_token_q="$(printf '%q' "${sccache_dist_client_token}")"
+sccache_dist_client_toolchain_cache_size_q="$(printf '%q' "${sccache_dist_client_toolchain_cache_size}")"
+sccache_dist_enabled_q="$(printf '%q' "${sccache_dist_enabled}")"
 cargo_llvm_cov_version_q="$(printf '%q' "${cargo_llvm_cov_version}")"
 cargo_llvm_cov_release_base_url_q="$(printf '%q' "${cargo_llvm_cov_release_base_url}")"
 enable_cargo_llvm_cov_q="$(printf '%q' "${enable_cargo_llvm_cov}")"
@@ -149,7 +166,10 @@ branch_key=${branch_key_q}
 sccache_version=${sccache_version_q}
 sccache_release_base_url=${sccache_release_base_url_q}
 sccache_bootstrap_jobs=${sccache_bootstrap_jobs_q}
-sccache_root=${sccache_root_q}
+sccache_dist_scheduler_url=${sccache_dist_scheduler_url_q}
+sccache_dist_client_token=${sccache_dist_client_token_q}
+sccache_dist_client_toolchain_cache_size=${sccache_dist_client_toolchain_cache_size_q}
+sccache_dist_enabled=${sccache_dist_enabled_q}
 cargo_llvm_cov_version=${cargo_llvm_cov_version_q}
 cargo_llvm_cov_release_base_url=${cargo_llvm_cov_release_base_url_q}
 enable_cargo_llvm_cov=${enable_cargo_llvm_cov_q}
@@ -159,9 +179,14 @@ src_root=\"\${ephemeral_root}/src\"
 tmp_dir=\"\${ephemeral_root}/tmp\"
 cargo_home=\"\${cache_root}/cargo\"
 rustup_home=\"\${cache_root}/rustup\"
-sccache_dir=\"\${sccache_root}/\${repo_key}/\${branch_key}\"
+sccache_dir=\"\${cache_root}/sccache\"
+sccache_conf=\"\${tmp_dir}/sccache-client.toml\"
+sccache_dist_client_cache=\"\${ephemeral_root}/dist-client\"
 target_dir=\"\${ephemeral_root}/target\"
-mkdir -p \"\${tmp_dir}\" \"\${cargo_home}\" \"\${rustup_home}\" \"\${sccache_dir}\" \"\${target_dir}\"
+if [ \"\${sccache_dist_enabled}\" = \"1\" ]; then
+  sccache_dir=\"\${ephemeral_root}/sccache\"
+fi
+mkdir -p \"\${tmp_dir}\" \"\${cargo_home}\" \"\${rustup_home}\" \"\${sccache_dir}\" \"\${target_dir}\" \"\${sccache_dist_client_cache}\"
 export TMPDIR=\"\${tmp_dir}\"
 if [ ! -x \"\${cargo_home}/bin/cargo\" ]; then
   cp -a /usr/local/cargo/. \"\${cargo_home}/\"
@@ -174,7 +199,22 @@ export RUSTUP_HOME=\"\${rustup_home}\"
 export PATH=\"\${CARGO_HOME}/bin:\${PATH}\"
 export CARGO_TARGET_DIR=\"\${target_dir}\"
 export SCCACHE_DIR=\"\${sccache_dir}\"
-export SCCACHE_CACHE_SIZE=\"\${SCCACHE_CACHE_SIZE:-4G}\"
+if [ \"\${sccache_dist_enabled}\" = \"1\" ]; then
+  cat > \"\${sccache_conf}\" <<EOF3
+[dist]
+scheduler_url = \"\${sccache_dist_scheduler_url}\"
+cache_dir = \"\${sccache_dist_client_cache}\"
+toolchains = []
+toolchain_cache_size = \"\${sccache_dist_client_toolchain_cache_size}\"
+
+[dist.auth]
+type = \"token\"
+token = \"\${sccache_dist_client_token}\"
+EOF3
+  export SCCACHE_CONF=\"\${sccache_conf}\"
+else
+  export SCCACHE_CACHE_SIZE=\"\${SCCACHE_CACHE_SIZE:-10G}\"
+fi
 export CARGO_INCREMENTAL=0
 export CARGO_TERM_PROGRESS_WHEN=never
 rm -rf \"\${src_root}\"

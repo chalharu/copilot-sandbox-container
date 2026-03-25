@@ -24,7 +24,7 @@
 | injected Copilot config が壊れている | [§10](#10-injected-copilot-config-が壊れている) |
 | gh Secret の指定が足りない | [§11](#11-gh-secret-の指定が足りない) |
 | 監査分析 hook の設定が壊れている | [§12](#12-監査分析-hook-の設定が壊れている) |
-| `control-plane-sccache-pvc` が `Pending` のまま | [§13](#13-dedicated-sccache-pvc-が-bound-しない) |
+| `control-plane-sccache-pvc` が `Pending` のまま | [§13](#13-sccache-dist-rwop-pvc-が-bound-しない) |
 
 ## 1. bundled skill が読めない
 
@@ -206,24 +206,25 @@ control-plane audit analysis: Audit analysis config at /home/copilot/.copilot/co
 - `~/.copilot/session-state/audit/audit-analysis.db` が存在する
 - `node ~/.copilot/skills/audit-log-analysis/scripts/audit-analysis.mjs status --json` が成功する
 
-## 13. dedicated sccache PVC が Bound しない
+## 13. sccache-dist RWOP PVC が Bound しない
 
 ### 代表ログ
 
 ```text
-Warning  ProvisioningFailed  persistentvolume-controller  storageclass.storage.k8s.io "control-plane-local-storage" not found
-Warning  FailedScheduling    default-scheduler           0/1 nodes are available: 1 node(s) had volume node affinity conflict.
+Warning  ProvisioningFailed  persistentvolume-controller  failed to provision volume with StorageClass "standard": claim uses unsupported access mode: ReadWriteOncePod
+Warning  FailedScheduling    default-scheduler           0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims.
 ```
 
 ### 意味
 
-sample manifest の `control-plane-sccache-pvc` は same-node 共有を前提にした
-local-storage 向け claim です。`control-plane-local-storage` に対応する local
-PersistentVolume を作るか、クラスタ既存の local-storage class へ置き換えて
-ください。
+sample manifest の `control-plane-sccache-pvc` は `sccache-dist-builder`
+sidecar 専用の `ReadWriteOncePod` claim です。storage class / CSI driver が
+RWOP をサポートしている必要があります。Job 側へ PVC を mount するのではなく、
+claim を 1 Pod に固定したまま `sccache-dist` Service 経由で各クライアントを
+接続させる前提です。
 
 ### 期待する確認結果
 
 - `kubectl get pvc control-plane-sccache-pvc -n copilot-sandbox` が `Bound`
-- `kubectl get pv` で対応する local PersistentVolume が確認できる
-- `kubectl describe pod -n copilot-sandbox control-plane` に `FailedScheduling` が出ない
+- `kubectl get pod -n copilot-sandbox control-plane-*` が `3/3 Ready`
+- `kubectl get svc sccache-dist -n copilot-sandbox` で `10600/TCP` が見える

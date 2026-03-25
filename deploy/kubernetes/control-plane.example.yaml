@@ -105,14 +105,6 @@ spec:
       storage: 5Gi
   storageClassName: standard
 ---
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: control-plane-local-storage
-provisioner: kubernetes.io/no-provisioner
-volumeBindingMode: WaitForFirstConsumer
-reclaimPolicy: Retain
----
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -120,13 +112,14 @@ metadata:
   namespace: copilot-sandbox
 spec:
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteOncePod
   resources:
     requests:
       storage: 5Gi
-  # Back this with a local PersistentVolume, or replace this storage class
-  # with the local-storage class your cluster already provisions dynamically.
-  storageClassName: control-plane-local-storage
+  # Use a storage class whose CSI driver supports ReadWriteOncePod. The
+  # sample sidecar builder keeps roughly 20% headroom by capping the cached
+  # toolchain artifacts at 4 GiB inside this 5 GiB PVC.
+  storageClassName: standard
 ---
 apiVersion: v1
 kind: Secret
@@ -158,6 +151,16 @@ stringData:
   # the file paths without exporting the raw secret values into the login shell.
   # dockerhub-username: your-dockerhub-user
   # dockerhub-token: dckr_pat_... replace-me
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sccache-dist-auth
+  namespace: copilot-sandbox
+type: Opaque
+stringData:
+  client-token: replace-me-sccache-dist-client-token
+  server-token: replace-me-sccache-dist-server-token
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -210,10 +213,14 @@ data:
   CONTROL_PLANE_JOB_NAMESPACE: copilot-sandbox-jobs
   CONTROL_PLANE_WORKSPACE_PVC: control-plane-workspace-pvc
   CONTROL_PLANE_WORKSPACE_SUBPATH: workspace
-  # Keep sccache on a dedicated same-node local-storage PVC so long-running Rust
-  # jobs do not grow the shared /workspace PVC with compiler artifacts.
-  CONTROL_PLANE_SCCACHE_PVC: control-plane-sccache-pvc
-  CONTROL_PLANE_SCCACHE_MOUNT_PATH: /workspace/cache/sccache
+  # Rust Kubernetes jobs use sccache-dist over the cluster network. The client
+  # token stays in a dedicated Secret mount, while the sidecar builder keeps the
+  # shared toolchain cache on its own RWOP PVC.
+  SCCACHE_DIST_SCHEDULER_URL: http://sccache-dist.copilot-sandbox.svc.cluster.local:10600
+  SCCACHE_DIST_CLIENT_TOKEN_FILE: /var/run/sccache-dist-auth-client/client-token
+  SCCACHE_DIST_SCHEDULER_BIND_ADDR: 0.0.0.0:10600
+  SCCACHE_DIST_SERVER_BIND_ADDR: 0.0.0.0:10501
+  SCCACHE_DIST_TOOLCHAIN_CACHE_SIZE: "4294967296"
   # Optional: when the job namespace has its own shared workspace PVC
   # that exposes the same repository contents, mount it into Jobs too.
   # Otherwise keep Jobs stateless and use `--mount-file`, which stages
@@ -257,7 +264,7 @@ data:
   CONTROL_PLANE_JOB_CPU_LIMIT: "2"
   CONTROL_PLANE_JOB_MEMORY_REQUEST: 256Mi
   CONTROL_PLANE_JOB_MEMORY_LIMIT: 2Gi
-  # Leave roughly 20% headroom on the dedicated 5Gi sccache PVC.
+  # Optional local-only fallback for Rust helpers when dist mode is disabled.
   SCCACHE_CACHE_SIZE: "4G"
 ---
 apiVersion: v1
@@ -275,6 +282,21 @@ spec:
     - name: ssh
       port: 2222
       targetPort: ssh
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sccache-dist
+  namespace: copilot-sandbox
+  labels:
+    app.kubernetes.io/name: control-plane
+spec:
+  selector:
+    app.kubernetes.io/name: control-plane
+  ports:
+    - name: scheduler
+      port: 10600
+      targetPort: dist-sch
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -302,6 +324,11 @@ spec:
       securityContext:
         fsGroup: 1000
       serviceAccountName: control-plane
+      # Upstream sccache-dist scheduler/server binaries only support Linux/x86_64.
+      # If you need an arm64-only cluster, remove the dist sidecars/env and let
+      # Rust jobs fall back to local /workspace/cache/<repo>/<branch>/sccache.
+      nodeSelector:
+        kubernetes.io/arch: amd64
       initContainers:
         - name: init-state-dirs
           # renovate: datasource=docker depName=busybox versioning=docker
@@ -478,8 +505,6 @@ spec:
             - name: workspace
               mountPath: /workspace
               subPath: workspace
-            - name: sccache
-              mountPath: /workspace/cache/sccache
             - name: cache
               mountPath: /var/lib/control-plane/rootful-podman
               subPath: rootful-podman
@@ -503,6 +528,114 @@ spec:
             - name: control-plane-config
               mountPath: /var/run/control-plane-config
               readOnly: true
+            - name: sccache-dist-auth-client
+              mountPath: /var/run/sccache-dist-auth-client
+              readOnly: true
+        - name: sccache-dist-scheduler
+          # Upstream sccache-dist scheduler/server binaries are Linux/x86_64 only.
+          image: ghcr.io/chalharu/copilot-sandbox-container/sccache-dist:0.14.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /usr/local/bin/sccache-dist-entrypoint
+            - scheduler
+          envFrom:
+            - configMapRef:
+                name: control-plane-env
+          env:
+            - name: SCCACHE_DIST_SERVER_TOKEN_FILE
+              value: /var/run/sccache-dist-auth-server/server-token
+          ports:
+            - containerPort: 10600
+              name: dist-sch
+          readinessProbe:
+            tcpSocket:
+              port: dist-sch
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: dist-sch
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: sccache-dist-auth-client
+              mountPath: /var/run/sccache-dist-auth-client
+              readOnly: true
+            - name: sccache-dist-auth-server
+              mountPath: /var/run/sccache-dist-auth-server
+              readOnly: true
+        - name: sccache-dist-builder
+          image: ghcr.io/chalharu/copilot-sandbox-container/sccache-dist:0.14.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /usr/local/bin/sccache-dist-entrypoint
+            - server
+          envFrom:
+            - configMapRef:
+                name: control-plane-env
+          env:
+            - name: SCCACHE_DIST_SERVER_TOKEN_FILE
+              value: /var/run/sccache-dist-auth-server/server-token
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.podIP
+            - name: SCCACHE_DIST_SERVER_PUBLIC_ADDR
+              value: $(POD_IP):10501
+          securityContext:
+            privileged: false
+            runAsUser: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: true
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+                - SETGID
+                - SETUID
+                - SYS_ADMIN
+                - SYS_CHROOT
+            seccompProfile:
+              type: Unconfined
+          ports:
+            - containerPort: 10501
+              name: dist-bld
+          readinessProbe:
+            tcpSocket:
+              port: dist-bld
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: dist-bld
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: sccache-dist
+              mountPath: /var/cache/sccache-dist
+            - name: sccache-dist-auth-server
+              mountPath: /var/run/sccache-dist-auth-server
+              readOnly: true
       volumes:
         - name: copilot-session
           persistentVolumeClaim:
@@ -510,7 +643,7 @@ spec:
         - name: workspace
           persistentVolumeClaim:
             claimName: control-plane-workspace-pvc
-        - name: sccache
+        - name: sccache-dist
           persistentVolumeClaim:
             claimName: control-plane-sccache-pvc
         - name: cache
@@ -532,6 +665,18 @@ spec:
         - name: control-plane-auth
           secret:
             secretName: control-plane-auth
+        - name: sccache-dist-auth-client
+          secret:
+            secretName: sccache-dist-auth
+            items:
+              - key: client-token
+                path: client-token
+        - name: sccache-dist-auth-server
+          secret:
+            secretName: sccache-dist-auth
+            items:
+              - key: server-token
+                path: server-token
         - name: control-plane-config
           configMap:
             name: control-plane-config

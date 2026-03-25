@@ -80,6 +80,17 @@ assert_deployment_contains() {
   }
 }
 
+assert_deployment_absent() {
+  local unexpected="$1"
+  local block
+
+  block="$(deployment_block)"
+  if grep -Fq "${unexpected}" <<<"${block}"; then
+    printf 'Did not expect Deployment/control-plane to contain: %s\n' "${unexpected}" >&2
+    exit 1
+  fi
+}
+
 printf '%s\n' 'k8s-sample-storage-layout-test: validating sample manifest syntax' >&2
 grep -Eq '^apiVersion:' "${manifest_path}" || {
   printf 'Expected sample manifest to contain Kubernetes resources\n' >&2
@@ -115,14 +126,11 @@ assert_resource_contains PersistentVolumeClaim control-plane-workspace-pvc 'Read
 assert_resource_contains PersistentVolumeClaim control-plane-workspace-pvc 'storage: 5Gi'
 assert_resource_contains PersistentVolumeClaim control-plane-workspace-pvc 'storageClassName: standard'
 
-assert_resource_present StorageClass control-plane-local-storage
-assert_resource_contains StorageClass control-plane-local-storage 'provisioner: kubernetes.io/no-provisioner'
-assert_resource_contains StorageClass control-plane-local-storage 'volumeBindingMode: WaitForFirstConsumer'
-
 assert_resource_present PersistentVolumeClaim control-plane-sccache-pvc
-assert_resource_contains PersistentVolumeClaim control-plane-sccache-pvc 'ReadWriteOnce'
+assert_resource_contains PersistentVolumeClaim control-plane-sccache-pvc 'ReadWriteOncePod'
 assert_resource_contains PersistentVolumeClaim control-plane-sccache-pvc 'storage: 5Gi'
-assert_resource_contains PersistentVolumeClaim control-plane-sccache-pvc 'storageClassName: control-plane-local-storage'
+assert_resource_contains PersistentVolumeClaim control-plane-sccache-pvc 'storageClassName: standard'
+assert_resource_absent StorageClass control-plane-local-storage
 
 assert_resource_absent PersistentVolumeClaim control-plane-state-pvc
 assert_resource_absent PersistentVolumeClaim control-plane-session-state-pvc
@@ -132,29 +140,44 @@ printf '%s\n' 'k8s-sample-storage-layout-test: checking ConfigMap-backed environ
 assert_resource_present ConfigMap control-plane-config
 assert_resource_contains ConfigMap control-plane-config 'copilot-config.json: |'
 assert_resource_present ConfigMap control-plane-env
+assert_resource_present Secret sccache-dist-auth
 assert_resource_contains ConfigMap control-plane-env 'SSH_PUBLIC_KEY_FILE: /var/run/control-plane-auth/ssh-public-key'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS: "10000"'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER: overlay'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR: /var/tmp/control-plane/rootful-overlay'
-assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_SCCACHE_PVC: control-plane-sccache-pvc'
-assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_SCCACHE_MOUNT_PATH: /workspace/cache/sccache'
+assert_resource_contains ConfigMap control-plane-env 'SCCACHE_DIST_SCHEDULER_URL: http://sccache-dist.copilot-sandbox.svc.cluster.local:10600'
+assert_resource_contains ConfigMap control-plane-env 'SCCACHE_DIST_CLIENT_TOKEN_FILE: /var/run/sccache-dist-auth-client/client-token'
+assert_resource_contains ConfigMap control-plane-env 'SCCACHE_DIST_TOOLCHAIN_CACHE_SIZE: "4294967296"'
 assert_resource_contains ConfigMap control-plane-env 'SCCACHE_CACHE_SIZE: "4G"'
 assert_resource_contains ConfigMap control-plane-env 'TZ: Asia/Tokyo'
 
-printf '%s\n' 'k8s-sample-storage-layout-test: checking shared session and ephemeral Podman cache' >&2
+printf '%s\n' 'k8s-sample-storage-layout-test: checking services, sidecars, and cache mounts' >&2
+assert_resource_present Service control-plane
+assert_resource_present Service sccache-dist
+assert_resource_contains Service sccache-dist 'port: 10600'
+assert_resource_contains Service sccache-dist 'targetPort: dist-sch'
 assert_deployment_contains 'claimName: control-plane-copilot-session-pvc'
 assert_deployment_contains 'claimName: control-plane-workspace-pvc'
 assert_deployment_contains 'claimName: control-plane-sccache-pvc'
 assert_deployment_contains 'envFrom:'
 assert_deployment_contains 'name: control-plane-env'
+assert_deployment_contains 'kubernetes.io/arch: amd64'
 assert_deployment_contains 'subPath: state/copilot-config.json'
 assert_deployment_contains 'subPath: state/command-history-state.json'
 assert_deployment_contains 'subPath: session-state'
 assert_deployment_contains 'subPath: state/gh'
 assert_deployment_contains 'subPath: state/ssh'
 assert_deployment_contains 'subPath: state/ssh-host-keys'
-assert_deployment_contains 'mountPath: /workspace/cache/sccache'
+assert_deployment_contains 'name: sccache-dist-scheduler'
+assert_deployment_contains 'name: sccache-dist-builder'
+assert_deployment_contains 'image: ghcr.io/chalharu/copilot-sandbox-container/sccache-dist:0.14.0'
+assert_deployment_contains '/usr/local/bin/sccache-dist-entrypoint'
+assert_deployment_contains 'mountPath: /var/cache/sccache-dist'
+assert_deployment_contains 'mountPath: /var/run/sccache-dist-auth-client'
+assert_deployment_contains 'mountPath: /var/run/sccache-dist-auth-server'
+assert_deployment_contains 'fieldPath: status.podIP'
+assert_deployment_contains "value: \$(POD_IP):10501"
 assert_deployment_contains 'chown 1000:1000 /workspace-state/workspace /workspace-state/workspace/cache'
 assert_deployment_contains 'chmod 700 /workspace-state/workspace /workspace-state/workspace/cache'
 assert_deployment_contains 'mountPath: /var/lib/control-plane/rootful-podman'
@@ -165,6 +188,8 @@ assert_deployment_contains 'name: cache'
 assert_deployment_contains 'emptyDir: {}'
 assert_deployment_contains 'rm -rf /cache/rootful-podman/*'
 assert_deployment_contains 'mkdir -p /cache/rootful-podman/rootful-overlay /cache/runtime-tmp/rootful-overlay'
+assert_deployment_absent 'mountPath: /workspace/cache/sccache'
+assert_deployment_absent 'image: ghcr.io/chalharu/copilot-sandbox-container/sccache:0.14.0'
 
 printf '%s\n' 'k8s-sample-storage-layout-test: checking Podman defaults and legacy PVC removal' >&2
 if grep -Fq '/run/control-plane/podman' "${manifest_path}"; then
@@ -173,6 +198,14 @@ if grep -Fq '/run/control-plane/podman' "${manifest_path}"; then
 fi
 if grep -Fq 'rootful-vfs' "${manifest_path}"; then
   printf 'Expected sample manifest to stop defaulting rootful Podman to vfs\n' >&2
+  exit 1
+fi
+if grep -Fq 'CONTROL_PLANE_SCCACHE_PVC' "${manifest_path}"; then
+  printf 'Expected sample manifest to stop wiring direct sccache PVC mounts into jobs\n' >&2
+  exit 1
+fi
+if grep -Fq 'control-plane-local-storage' "${manifest_path}"; then
+  printf 'Expected sample manifest to stop depending on the bespoke local-storage class\n' >&2
   exit 1
 fi
 

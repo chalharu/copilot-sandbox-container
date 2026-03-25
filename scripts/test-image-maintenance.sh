@@ -68,6 +68,7 @@ label_store="${workdir}/podman-label"
 workflow_path="${repo_root}/.github/workflows/control-plane-ci.yml"
 renovate_config_path="${repo_root}/renovate.json5"
 sccache_dockerfile_path="${repo_root}/containers/sccache/Dockerfile"
+sccache_dist_dockerfile_path="${repo_root}/containers/sccache-dist/Dockerfile"
 mkdir -p "${context_dir}" "${fake_bin_dir}"
 cat > "${context_dir}/Dockerfile" <<'EOF'
 FROM docker.io/library/busybox:1.37.0
@@ -138,6 +139,13 @@ assert_file_contains "${sccache_dockerfile_path}" 'FROM docker.io/library/alpine
 assert_file_contains "${sccache_dockerfile_path}" 'FROM scratch'
 assert_file_contains "${sccache_dockerfile_path}" 'COPY --from=fetcher /out/ /'
 assert_file_contains "${sccache_dockerfile_path}" 'USER 65532:65532'
+assert_file_contains "${sccache_dockerfile_path}" 'ENTRYPOINT ["/usr/local/bin/sccache"]'
+assert_file_contains "${sccache_dist_dockerfile_path}" 'FROM docker.io/library/rust:1.94.0-bookworm@sha256:365468470075493dc4583f47387001854321c5a8583ea9604b297e67f01c5a4f AS builder'
+assert_file_contains "${sccache_dist_dockerfile_path}" 'FROM docker.io/library/debian:bookworm-slim@sha256:f06537653ac770703bc45b4b113475bd402f451e85223f0f2837acbf89ab020a'
+assert_file_contains "${sccache_dist_dockerfile_path}" "cargo install --locked --version \"\${SCCACHE_VERSION}\" --features \"dist-server\" --bin sccache-dist --root /out/usr/local sccache"
+assert_file_contains "${sccache_dist_dockerfile_path}" 'bubblewrap'
+assert_file_contains "${sccache_dist_dockerfile_path}" 'COPY --chmod=755 entrypoint-dist.sh /usr/local/bin/sccache-dist-entrypoint'
+assert_file_contains "${sccache_dist_dockerfile_path}" 'ENTRYPOINT ["/usr/local/bin/sccache-dist-entrypoint"]'
 
 helper_image_changes_block="$(job_block helper-image-changes)"
 publish_block="$(job_block publish-architecture-images)"
@@ -159,31 +167,45 @@ manifest_block="$(job_block publish-manifests)"
 assert_block_contains "${helper_image_changes_block}" 'fetch-depth: 0' 'helper-image-changes job block'
 assert_block_contains "${helper_image_changes_block}" "yamllint_changed=\"\$(changed_in_range containers/yamllint)\"" 'helper-image-changes job block'
 assert_block_contains "${helper_image_changes_block}" "sccache_changed=\"\$(changed_in_range containers/sccache)\"" 'helper-image-changes job block'
+assert_block_contains "${helper_image_changes_block}" "sccache_dist_changed=\"\$(changed_in_range containers/sccache-dist)\"" 'helper-image-changes job block'
 assert_block_contains "${helper_image_changes_block}" "printf 'yamllint_changed=%s\\n' \"\${yamllint_changed}\" >> \"\${GITHUB_OUTPUT}\"" 'helper-image-changes job block'
 assert_block_contains "${helper_image_changes_block}" "printf 'sccache_changed=%s\\n' \"\${sccache_changed}\" >> \"\${GITHUB_OUTPUT}\"" 'helper-image-changes job block'
+assert_block_contains "${helper_image_changes_block}" "printf 'sccache_dist_changed=%s\\n' \"\${sccache_dist_changed}\" >> \"\${GITHUB_OUTPUT}\"" 'helper-image-changes job block'
 
 assert_block_contains "${publish_block}" '- helper-image-changes' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "if: needs.helper-image-changes.outputs.yamllint_changed == 'true'" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "if: needs.helper-image-changes.outputs.sccache_changed == 'true'" 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" "if: needs.helper-image-changes.outputs.sccache_dist_changed == 'true' && matrix.image_arch == 'amd64'" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "PUBLISH_YAMLLINT: \${{ needs.helper-image-changes.outputs.yamllint_changed }}" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "PUBLISH_SCCACHE: \${{ needs.helper-image-changes.outputs.sccache_changed }}" 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" "PUBLISH_SCCACHE_DIST: \${{ needs.helper-image-changes.outputs.sccache_dist_changed }}" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "if [[ \"\${PUBLISH_YAMLLINT}\" == \"true\" ]]; then" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "if [[ \"\${PUBLISH_SCCACHE}\" == \"true\" ]]; then" 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" "if [[ \"\${PUBLISH_SCCACHE_DIST}\" == \"true\" ]] && [[ \"\${IMAGE_ARCH}\" == \"amd64\" ]]; then" 'publish-architecture-images job block'
 
 assert_block_contains "${manifest_block}" '- helper-image-changes' 'publish-manifests job block'
 assert_block_contains "${manifest_block}" "PUBLISH_YAMLLINT: \${{ needs.helper-image-changes.outputs.yamllint_changed }}" 'publish-manifests job block'
 assert_block_contains "${manifest_block}" "PUBLISH_SCCACHE: \${{ needs.helper-image-changes.outputs.sccache_changed }}" 'publish-manifests job block'
+assert_block_contains "${manifest_block}" "PUBLISH_SCCACHE_DIST: \${{ needs.helper-image-changes.outputs.sccache_dist_changed }}" 'publish-manifests job block'
 assert_block_contains "${manifest_block}" "if [[ \"\${PUBLISH_YAMLLINT}\" == \"true\" ]]; then" 'publish-manifests job block'
 assert_block_contains "${manifest_block}" "if [[ \"\${PUBLISH_SCCACHE}\" == \"true\" ]]; then" 'publish-manifests job block'
+assert_block_contains "${manifest_block}" "if [[ \"\${PUBLISH_SCCACHE_DIST}\" == \"true\" ]]; then" 'publish-manifests job block'
 
 assert_file_contains "${workflow_path}" 'podman build --tag localhost/sccache:test containers/sccache'
+assert_file_contains "${workflow_path}" 'podman build --tag localhost/sccache-dist:test containers/sccache-dist'
 assert_file_contains "${workflow_path}" "GHCR_SCCACHE_IMAGE: ghcr.io/\${{ github.repository }}/sccache"
+assert_file_contains "${workflow_path}" "GHCR_SCCACHE_DIST_IMAGE: ghcr.io/\${{ github.repository }}/sccache-dist"
 assert_file_contains "${workflow_path}" "podman tag localhost/sccache:test \"\${GHCR_SCCACHE_IMAGE}:\${GITHUB_SHA}-\${IMAGE_ARCH}\""
 assert_file_contains "${workflow_path}" "podman push \"\${GHCR_SCCACHE_IMAGE}:\${{ steps.image_versions.outputs.sccache_component_tag }}-\${IMAGE_ARCH}\""
 assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache:manifest-latest\" \"\${GHCR_SCCACHE_IMAGE}:latest\""
 assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache:manifest-version\" \"\${GHCR_SCCACHE_IMAGE}:\${{ steps.image_versions.outputs.sccache_component_tag }}\""
+assert_file_contains "${workflow_path}" "podman tag localhost/sccache-dist:test \"\${GHCR_SCCACHE_DIST_IMAGE}:\${GITHUB_SHA}-\${IMAGE_ARCH}\""
+assert_file_contains "${workflow_path}" "podman push \"\${GHCR_SCCACHE_DIST_IMAGE}:\${{ steps.image_versions.outputs.sccache_dist_component_tag }}-\${IMAGE_ARCH}\""
+assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache-dist:manifest-latest\" \"\${GHCR_SCCACHE_DIST_IMAGE}:latest\""
+assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache-dist:manifest-version\" \"\${GHCR_SCCACHE_DIST_IMAGE}:\${{ steps.image_versions.outputs.sccache_dist_component_tag }}\""
 assert_file_matches "${workflow_path}" '^[[:space:]]+- sccache$'
-assert_file_contains "${renovate_config_path}" '/^containers\\/(control-plane|yamllint|sccache)\\/Dockerfile$/'
+assert_file_matches "${workflow_path}" '^[[:space:]]+- sccache-dist$'
+assert_file_contains "${renovate_config_path}" '/^containers\\/(control-plane|yamllint|sccache|sccache-dist)\\/Dockerfile$/'
 
 printf '%s\n' 'image-maintenance-test: verifying GHCR cleanup keeps tagged images' >&2
 assert_file_contains "${workflow_path}" 'delete-only-untagged-versions: '\''true'\'''
