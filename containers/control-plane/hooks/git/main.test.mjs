@@ -261,12 +261,6 @@ test("global pre-push blocks protected branches and passes through repository ho
 	assert.equal(result.status, 0);
 	assert.match(fs.readFileSync(repoHookLog, "utf8"), /args:origin /);
 
-	fs.appendFileSync(path.join(repo, "README.md"), "\npush update\n", "utf8");
-	run("git", ["add", "README.md"], { cwd: repo });
-	run("git", ["commit", "--no-verify", "-m", "push update"], {
-		cwd: repo,
-		env: hookEnv,
-	});
 	result = run(path.join(bundledGitDir, "pre-push"), ["origin", remote], {
 		cwd: repo,
 		env: {

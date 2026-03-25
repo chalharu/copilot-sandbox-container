@@ -1,18 +1,11 @@
 commandRules:
-  - rule:
-      - git
-      - commit
-      - --no-verify|-n|-[^-]*n[^-]*
+  - rule: 'git(?:\x00[^\x00]+)*\x00(?:-c\x00(?i:core\.hookspath=.*)|-c(?i:core\.hookspath=.*)|--config-env\x00(?i:core\.hookspath=.*)|--config-env=(?i:core\.hookspath=.*))(?:\x00[^\x00]+)*'
+    reason: git core.hooksPath overrides are blocked by control-plane policy. Use the managed hooks path provided by the control plane so hooks stay enforced.
+  - rule: 'git(?:\x00[^\x00]+)*\x00commit(?:\x00[^\x00]+)*\x00(?:--no-verify|-[A-Za-z0-9]*n[A-Za-z0-9]*)(?:\x00[^\x00]+)*'
     reason: git commit --no-verify is blocked by control-plane policy. Run git commit without --no-verify so hooks stay enforced.
-  - rule:
-      - git
-      - push
-      - --no-verify
+  - rule: 'git(?:\x00[^\x00]+)*\x00push(?:\x00[^\x00]+)*\x00--no-verify(?:\x00[^\x00]+)*'
     reason: git push --no-verify is blocked by control-plane policy. Run git push without --no-verify so push hooks still run.
-  - rule:
-      - git
-      - push
-      - --force|-f|-[^-]*f[^-]*
+  - rule: 'git(?:\x00[^\x00]+)*\x00push(?:\x00[^\x00]+)*\x00(?:--force|-[A-Za-z0-9]*f[A-Za-z0-9]*)(?:\x00[^\x00]+)*'
     reason: Force pushes are blocked by control-plane policy. Push without --force. Use --force-with-lease when you need a guarded overwrite.
 protectedEnvironments:
   - GIT_CONFIG_GLOBAL

@@ -48,11 +48,23 @@ impl CommandInvocation {
         })
     }
 
-    pub fn match_tokens(&self) -> Vec<String> {
+    pub fn normalized_tokens(&self) -> Vec<String> {
         let mut tokens = Vec::with_capacity(self.args.len() + 1);
         tokens.push(self.executable_basename.clone());
-        tokens.extend(matchable_args(&self.args));
+        tokens.extend(self.args.iter().cloned());
         tokens
+    }
+
+    pub fn normalized_stream(&self) -> Vec<u8> {
+        let tokens = self.normalized_tokens();
+        let mut stream = Vec::new();
+        for token in tokens {
+            if !stream.is_empty() {
+                stream.push(0);
+            }
+            stream.extend_from_slice(token.as_bytes());
+        }
+        stream
     }
 
     pub fn unwrap_env_wrapper(&self) -> Option<Self> {
@@ -81,107 +93,6 @@ pub fn merge_env_bindings(parent: &[EnvBinding], child: &[EnvBinding]) -> Vec<En
         }
     }
     merged
-}
-
-// Keep value-taking option handling inside the parser so the YAML stays focused on policy.
-const OPTIONS_WITH_VALUE: &[&str] = &[
-    "-c",
-    "-C",
-    "-F",
-    "-m",
-    "-o",
-    "-t",
-    "--author",
-    "--cleanup",
-    "--config-env",
-    "--date",
-    "--exec",
-    "--exec-path",
-    "--file",
-    "--fixup",
-    "--git-dir",
-    "--literal-pathspecs-from-file",
-    "--message",
-    "--namespace",
-    "--pathspec-from-file",
-    "--push-option",
-    "--reedit-message",
-    "--receive-pack",
-    "--repo",
-    "--reuse-message",
-    "--squash",
-    "--super-prefix",
-    "--template",
-    "--trailer",
-    "--work-tree",
-];
-
-fn matchable_args(args: &[String]) -> Vec<String> {
-    let mut matchable = Vec::new();
-    let mut index = 0;
-
-    while index < args.len() {
-        let token = &args[index];
-        if token == "--" {
-            break;
-        }
-
-        if token == "-" || !token.starts_with('-') {
-            matchable.push(token.clone());
-            index += 1;
-            continue;
-        }
-
-        if token.starts_with("--") {
-            let option_name = token
-                .split_once('=')
-                .map(|(name, _)| name)
-                .unwrap_or(token.as_str());
-            let consumes_next = !token.contains('=') && option_takes_value(option_name);
-            if token.contains('=') && option_takes_value(option_name) {
-                matchable.push(option_name.to_string());
-            } else {
-                matchable.push(token.clone());
-            }
-            index += if consumes_next { 2 } else { 1 };
-            continue;
-        }
-
-        let (sanitized_token, consumes_next) = sanitize_short_token(token);
-        matchable.push(sanitized_token);
-
-        index += 1;
-        if consumes_next {
-            index += 1;
-        }
-    }
-
-    matchable
-}
-
-fn sanitize_short_token(token: &str) -> (String, bool) {
-    let chars: Vec<char> = token.chars().collect();
-    if chars.len() <= 1 {
-        return (token.to_string(), false);
-    }
-
-    let mut sanitized = String::from("-");
-    let mut consumes_next = false;
-    for short_index in 1..chars.len() {
-        let short_flag = chars[short_index];
-        sanitized.push(short_flag);
-        let option_name = format!("-{short_flag}");
-        if option_takes_value(&option_name) {
-            consumes_next = short_index == chars.len() - 1;
-            break;
-        }
-    }
-
-    (sanitized, consumes_next)
-}
-
-fn option_takes_value(token: &str) -> bool {
-    OPTIONS_WITH_VALUE.contains(&token)
 }
 
 struct EnvWrapperPrefix {
@@ -265,7 +176,7 @@ mod tests {
     use super::{CommandInvocation, EnvBinding};
 
     #[test]
-    fn skips_option_values_and_keeps_flags() {
+    fn emits_normalized_tokens_in_order() {
         let invocation = CommandInvocation::from_exec(
             "git",
             &[
@@ -279,58 +190,63 @@ mod tests {
         )
         .unwrap();
 
-        let tokens = invocation.match_tokens();
+        let tokens = invocation.normalized_tokens();
 
-        assert_eq!(tokens[0], "git");
-        assert!(tokens.contains(&"commit".to_string()));
-        assert!(tokens.contains(&"-m".to_string()));
-        assert!(tokens.contains(&"--no-verify".to_string()));
-        assert!(!tokens.contains(&"-n".to_string()));
+        assert_eq!(
+            tokens,
+            vec![
+                "git".to_string(),
+                "commit".to_string(),
+                "-m".to_string(),
+                "-n".to_string(),
+                "--no-verify".to_string(),
+            ]
+        );
     }
 
     #[test]
-    fn handles_clustered_short_flags_with_value_taking_option() {
+    fn keeps_clustered_short_options_intact() {
         let invocation = CommandInvocation::from_exec(
             "git",
             &[
                 "git".to_string(),
                 "commit".to_string(),
                 "-nm".to_string(),
+                "-mn".to_string(),
                 "message".to_string(),
             ],
             Vec::new(),
         )
         .unwrap();
 
-        let tokens = invocation.match_tokens();
+        let tokens = invocation.normalized_tokens();
 
         assert!(tokens.contains(&"-nm".to_string()));
-        assert!(!tokens.contains(&"message".to_string()));
+        assert!(tokens.contains(&"-mn".to_string()));
     }
 
     #[test]
-    fn trims_attached_values_from_clustered_short_options() {
+    fn joins_tokens_with_nul_bytes() {
         let invocation = CommandInvocation::from_exec(
             "git",
             &[
                 "git".to_string(),
-                "commit".to_string(),
-                "-mn".to_string(),
-                "--no-verify".to_string(),
+                "-c".to_string(),
+                "core.hooksPath=/tmp/evil".to_string(),
+                "status".to_string(),
             ],
             Vec::new(),
         )
         .unwrap();
 
-        let tokens = invocation.match_tokens();
-
-        assert!(tokens.contains(&"-m".to_string()));
-        assert!(!tokens.contains(&"-mn".to_string()));
-        assert!(tokens.contains(&"--no-verify".to_string()));
+        assert_eq!(
+            invocation.normalized_stream(),
+            b"git\0-c\0core.hooksPath=/tmp/evil\0status".to_vec()
+        );
     }
 
     #[test]
-    fn stops_emitting_tokens_after_double_dash() {
+    fn keeps_tokens_after_double_dash() {
         let invocation = CommandInvocation::from_exec(
             "git",
             &[
@@ -344,10 +260,18 @@ mod tests {
         )
         .unwrap();
 
-        let tokens = invocation.match_tokens();
+        let tokens = invocation.normalized_tokens();
 
-        assert!(tokens.contains(&"--no-verify".to_string()));
-        assert!(!tokens.contains(&"--force".to_string()));
+        assert_eq!(
+            tokens,
+            vec![
+                "git".to_string(),
+                "commit".to_string(),
+                "--no-verify".to_string(),
+                "--".to_string(),
+                "--force".to_string(),
+            ]
+        );
     }
 
     #[test]

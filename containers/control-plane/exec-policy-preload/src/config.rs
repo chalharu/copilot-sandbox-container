@@ -1,4 +1,4 @@
-use regex::Regex;
+use regex::{Regex, bytes::Regex as BytesRegex};
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,9 +19,7 @@ pub struct CompiledConfig {
 #[derive(Clone, Debug)]
 pub struct CompiledRule {
     pub reason: String,
-    pub basename_pattern: Regex,
-    pub command_patterns: Vec<Regex>,
-    pub option_patterns: Vec<Regex>,
+    pub pattern: BytesRegex,
 }
 
 #[derive(Debug, Deserialize)]
@@ -36,7 +34,7 @@ struct RawConfig {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawRule {
-    rule: Vec<String>,
+    rule: String,
     reason: String,
 }
 
@@ -116,10 +114,10 @@ fn load_rule_file(path: &Path, optional: bool) -> Result<CompiledConfig, String>
         }
     };
 
-    parse_config(&raw, path)
+    parse_config(&raw, path, optional)
 }
 
-fn parse_config(raw: &str, path: &Path) -> Result<CompiledConfig, String> {
+fn parse_config(raw: &str, path: &Path, optional: bool) -> Result<CompiledConfig, String> {
     let config: RawConfig = serde_norway::from_str(raw).map_err(|error| {
         format!(
             "failed to parse exec policy rules at {}: {}",
@@ -128,10 +126,14 @@ fn parse_config(raw: &str, path: &Path) -> Result<CompiledConfig, String> {
         )
     })?;
 
-    compile_config(config, path)
+    compile_config(config, path, optional)
 }
 
-fn compile_config(config: RawConfig, path: &Path) -> Result<CompiledConfig, String> {
+fn compile_config(
+    config: RawConfig,
+    path: &Path,
+    optional: bool,
+) -> Result<CompiledConfig, String> {
     let command_rules = config
         .command_rules
         .into_iter()
@@ -144,7 +146,7 @@ fn compile_config(config: RawConfig, path: &Path) -> Result<CompiledConfig, Stri
         &format!("protectedEnvironments in {}", path.display()),
     )?;
 
-    if command_rules.is_empty() && protected_environments.is_empty() {
+    if !optional && command_rules.is_empty() && protected_environments.is_empty() {
         return Err(format!(
             "{} must define at least one commandRules entry or protectedEnvironments pattern.",
             path.display()
@@ -164,43 +166,26 @@ fn compile_rule(rule: RawRule, path: &Path, rule_index: usize) -> Result<Compile
     }
     if rule.rule.is_empty() {
         return Err(format!(
-            "{description} must define rule as a non-empty array."
+            "{description} must define rule as a non-empty string."
         ));
     }
-    let mut raw_patterns = rule.rule.into_iter();
-    let basename = raw_patterns
-        .next()
-        .expect("rule must contain at least one pattern after validation");
-    let remaining_patterns: Vec<String> = raw_patterns.collect();
 
     Ok(CompiledRule {
         reason: rule.reason,
-        basename_pattern: compile_pattern(basename, &format!("basename in {description}"), 1)?,
-        command_patterns: remaining_patterns
-            .iter()
-            .enumerate()
-            .filter(|(_, entry)| !entry.starts_with('-'))
-            .map(|(index, entry)| {
-                compile_pattern(
-                    entry.clone(),
-                    &format!("command patterns in {description}"),
-                    index + 2,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-        option_patterns: remaining_patterns
-            .into_iter()
-            .enumerate()
-            .filter(|(_, entry)| entry.starts_with('-'))
-            .map(|(index, entry)| {
-                compile_pattern(
-                    entry,
-                    &format!("option patterns in {description}"),
-                    index + 2,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?,
+        pattern: compile_rule_pattern(rule.rule, &description)?,
     })
+}
+
+fn compile_rule_pattern(entry: String, description: &str) -> Result<BytesRegex, String> {
+    if entry.is_empty() {
+        return Err(format!(
+            "{description} must define rule as a non-empty string."
+        ));
+    }
+    let expanded = expand_env_placeholders(&entry);
+    let anchored = format!("^(?:{expanded})$");
+    BytesRegex::new(&anchored)
+        .map_err(|error| format!("invalid regex pattern in {description}: {error}"))
 }
 
 fn compile_patterns(entries: Vec<String>, description: &str) -> Result<Vec<Regex>, String> {
@@ -262,19 +247,21 @@ mod tests {
     fn parse_config_keeps_command_rules_and_protected_environments() {
         let yaml = r#"
 commandRules:
-  - rule:
-      - git
-      - commit
-      - --no-verify|-n
+  - rule: 'git(?:\x00[^\x00]+)*\x00commit(?:\x00[^\x00]+)*\x00(?:--no-verify|-[A-Za-z0-9]*n[A-Za-z0-9]*)(?:\x00[^\x00]+)*'
     reason: commit blocked
 protectedEnvironments:
   - GIT_CONFIG_GLOBAL
 "#;
 
-        let config = parse_config(yaml, Path::new("/tmp/rules.yaml")).unwrap();
+        let config = parse_config(yaml, Path::new("/tmp/rules.yaml"), false).unwrap();
 
         assert_eq!(config.command_rules.len(), 1);
         assert_eq!(config.protected_environments.len(), 1);
+        assert!(
+            config.command_rules[0]
+                .pattern
+                .is_match(b"git\0commit\0--no-verify")
+        );
     }
 
     #[test]
@@ -287,7 +274,7 @@ protectedEnvironments:
   - ${CONTROL_PLANE_TEST_ALLOWED_PATH}
 "#;
 
-        let config = parse_config(yaml, Path::new("/tmp/rules.yaml")).unwrap();
+        let config = parse_config(yaml, Path::new("/tmp/rules.yaml"), false).unwrap();
 
         assert!(config.protected_environments[0].is_match("/tmp/allowed"));
     }
@@ -304,10 +291,18 @@ commandRules:
         reason: blocked
 "#;
 
-        let error = parse_config(yaml, Path::new("/tmp/rules.yaml")).unwrap_err();
+        let error = parse_config(yaml, Path::new("/tmp/rules.yaml"), false).unwrap_err();
 
         assert!(error.contains("unknown field"));
         assert!(error.contains("toolName"));
+    }
+
+    #[test]
+    fn parse_config_allows_empty_optional_repo_config() {
+        let config = parse_config("", Path::new("/tmp/repo-rules.yaml"), true).unwrap();
+
+        assert!(config.command_rules.is_empty());
+        assert!(config.protected_environments.is_empty());
     }
 
     #[test]

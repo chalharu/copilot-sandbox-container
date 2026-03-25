@@ -125,9 +125,17 @@ mod tests {
             "bash",
         ))
         .unwrap();
+        let stacked_short_form = evaluate_pre_tool_use(&hook_input(
+            &repo,
+            "git commit -a -n -m \"skip hooks\"",
+            "bash",
+        ))
+        .unwrap();
         let clustered_short_form =
             evaluate_pre_tool_use(&hook_input(&repo, "git commit -nm \"skip hooks\"", "bash"))
                 .unwrap();
+        let attached_cluster_form =
+            evaluate_pre_tool_use(&hook_input(&repo, "git commit -mn", "bash")).unwrap();
 
         assert_eq!(
             long_form,
@@ -137,7 +145,9 @@ mod tests {
             })
         );
         assert_eq!(short_form, long_form);
+        assert_eq!(stacked_short_form, long_form);
         assert_eq!(clustered_short_form, long_form);
+        assert_eq!(attached_cluster_form, long_form);
     }
 
     #[test]
@@ -198,6 +208,36 @@ mod tests {
     }
 
     #[test]
+    fn denies_git_hooks_path_config_overrides() {
+        let repo = setup_repo("pre-tool-use-hooks-path");
+
+        let dash_c = evaluate_pre_tool_use(&hook_input(
+            &repo,
+            "git -c core.hooksPath=/tmp/evil commit -m \"skip hooks\"",
+            "bash",
+        ))
+        .unwrap()
+        .unwrap();
+        let config_env = evaluate_pre_tool_use(&hook_input(
+            &repo,
+            "HOOKS=/tmp/evil git --config-env=core.hooksPath=HOOKS status --short",
+            "bash",
+        ))
+        .unwrap()
+        .unwrap();
+
+        assert!(
+            dash_c
+                .permission_decision_reason
+                .contains("core.hooksPath overrides")
+        );
+        assert_eq!(
+            config_env.permission_decision_reason,
+            dash_c.permission_decision_reason
+        );
+    }
+
+    #[test]
     fn allows_safe_git_commands_and_non_bash_tools() {
         let repo = setup_repo("pre-tool-use-allow");
 
@@ -211,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn ignores_tokens_after_double_dash_and_message_values() {
+    fn matches_tokens_after_double_dash() {
         let repo = setup_repo("pre-tool-use-double-dash");
 
         let double_dash = evaluate_pre_tool_use(&hook_input(
@@ -219,12 +259,14 @@ mod tests {
             "git commit --amend -- --no-verify",
             "bash",
         ))
+        .unwrap()
         .unwrap();
-        let message_value =
-            evaluate_pre_tool_use(&hook_input(&repo, "git commit -m \"-n\"", "bash")).unwrap();
 
-        assert_eq!(double_dash, None);
-        assert_eq!(message_value, None);
+        assert!(
+            double_dash
+                .permission_decision_reason
+                .contains("git commit --no-verify")
+        );
     }
 
     #[test]
@@ -253,10 +295,7 @@ mod tests {
             repo.join(".github/pre-tool-use-rules.yaml"),
             r#"
 commandRules:
-  - rule:
-      - git
-      - status
-      - --short
+  - rule: 'git(?:\x00[^\x00]+)*\x00status(?:\x00[^\x00]+)*\x00--short(?:\x00[^\x00]+)*'
     reason: repo-local policy
 "#,
         )
@@ -276,8 +315,7 @@ commandRules:
             repo.join(".github/pre-tool-use-rules.yaml"),
             r#"
 commandRules:
-  - rule:
-      - '['
+  - rule: '['
     reason: invalid
 "#,
         )
@@ -297,7 +335,7 @@ commandRules:
 commandRules:
   - toolName: bash
     rule:
-      - git
+      git
     reason: invalid
 "#,
         )

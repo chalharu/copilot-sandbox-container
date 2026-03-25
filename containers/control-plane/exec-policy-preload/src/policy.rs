@@ -32,39 +32,15 @@ pub fn match_exec_rule(config: &CompiledConfig, invocation: &CommandInvocation) 
 
 fn match_rule(rule: &CompiledRule, invocations: &[CommandInvocation]) -> Option<String> {
     for invocation in invocations {
-        let tokens = invocation.match_tokens();
-        if rule_matches(rule, &tokens) {
+        if rule_matches(rule, invocation) {
             return Some(rule.reason.clone());
         }
     }
     None
 }
 
-fn rule_matches(rule: &CompiledRule, tokens: &[String]) -> bool {
-    let Some(first_token) = tokens.first() else {
-        return false;
-    };
-    if !rule.basename_pattern.is_match(first_token) {
-        return false;
-    }
-
-    let (command_tokens, option_tokens): (Vec<_>, Vec<_>) = tokens
-        .iter()
-        .skip(1)
-        .partition(|token| !token.starts_with('-'));
-
-    if command_tokens.len() < rule.command_patterns.len() {
-        return false;
-    }
-    for (pattern, token) in rule.command_patterns.iter().zip(command_tokens.iter()) {
-        if !pattern.is_match(token) {
-            return false;
-        }
-    }
-
-    rule.option_patterns
-        .iter()
-        .all(|pattern| option_tokens.iter().any(|token| pattern.is_match(token)))
+fn rule_matches(rule: &CompiledRule, invocation: &CommandInvocation) -> bool {
+    rule.pattern.is_match(&invocation.normalized_stream())
 }
 
 fn protected_environment_overridden(
@@ -99,7 +75,7 @@ mod tests {
     use super::match_exec_rule;
     use crate::command::{CommandInvocation, EnvBinding};
     use crate::config::{CompiledConfig, CompiledRule};
-    use regex::Regex;
+    use regex::{Regex, bytes::Regex as BytesRegex};
 
     #[test]
     fn matches_command_rules_and_protected_environments() {
@@ -107,12 +83,22 @@ mod tests {
             std::env::set_var("GIT_CONFIG_GLOBAL", "/managed");
         }
         let config = CompiledConfig {
-            command_rules: vec![CompiledRule {
-                reason: "blocked".to_string(),
-                basename_pattern: Regex::new("^(?:git)$").unwrap(),
-                command_patterns: vec![Regex::new("^(?:commit)$").unwrap()],
-                option_patterns: vec![Regex::new("^(?:--no-verify|-n|-[^-]*n[^-]*)$").unwrap()],
-            }],
+            command_rules: vec![
+                CompiledRule {
+                    reason: "blocked".to_string(),
+                    pattern: BytesRegex::new(
+                        r"git(?:\x00[^\x00]+)*\x00commit(?:\x00[^\x00]+)*\x00(?:--no-verify|-[A-Za-z0-9]*n[A-Za-z0-9]*)(?:\x00[^\x00]+)*",
+                    )
+                    .unwrap(),
+                },
+                CompiledRule {
+                    reason: "hooks path blocked".to_string(),
+                    pattern: BytesRegex::new(
+                        r"git(?:\x00[^\x00]+)*\x00(?:-c\x00(?i:core\.hookspath=.*)|-c(?i:core\.hookspath=.*))(?:\x00[^\x00]+)*",
+                    )
+                    .unwrap(),
+                },
+            ],
             protected_environments: vec![Regex::new("^(?:GIT_CONFIG_GLOBAL)$").unwrap()],
         };
         let rule_invocation = CommandInvocation::from_exec(
@@ -154,6 +140,28 @@ mod tests {
             }],
         )
         .unwrap();
+        let attached_value_like_cluster_invocation = CommandInvocation::from_exec(
+            "git",
+            &[
+                "git".to_string(),
+                "commit".to_string(),
+                "-mn".to_string(),
+                "skip hooks".to_string(),
+            ],
+            Vec::new(),
+        )
+        .unwrap();
+        let hooks_path_invocation = CommandInvocation::from_exec(
+            "git",
+            &[
+                "git".to_string(),
+                "-c".to_string(),
+                "core.hooksPath=/tmp/evil".to_string(),
+                "status".to_string(),
+            ],
+            Vec::new(),
+        )
+        .unwrap();
 
         assert_eq!(
             match_exec_rule(&config, &rule_invocation).as_deref(),
@@ -170,5 +178,13 @@ mod tests {
                 .contains("Protected environment overrides are blocked")
         );
         assert_eq!(match_exec_rule(&config, &managed_env_invocation), None);
+        assert_eq!(
+            match_exec_rule(&config, &attached_value_like_cluster_invocation).as_deref(),
+            Some("blocked")
+        );
+        assert_eq!(
+            match_exec_rule(&config, &hooks_path_invocation).as_deref(),
+            Some("hooks path blocked")
+        );
     }
 }
