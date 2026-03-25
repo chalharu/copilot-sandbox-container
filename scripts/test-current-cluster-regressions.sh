@@ -8,7 +8,6 @@ source "${script_dir}/lib-container-toolchain.sh"
 runtime_config_file="${CONTROL_PLANE_RUNTIME_ENV_FILE:-${HOME:-/home/${USER:-copilot}}/.config/control-plane/runtime.env}"
 namespace_file="/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 ssh_port="${CONTROL_PLANE_SSH_PORT:-2222}"
-build_probe_image="${CONTROL_PLANE_BUILD_PROBE_IMAGE:-localhost/current-cluster-build-probe:test}"
 session_name="current-cluster-regression-$$"
 workdir="$(mktemp -d)"
 runtime_backup="${workdir}/runtime.env.bak"
@@ -23,13 +22,11 @@ cleanup() {
     cp "${authorized_keys_backup}" "${HOME}/.ssh/authorized_keys" >/dev/null 2>&1 || true
     chmod 600 "${HOME}/.ssh/authorized_keys" >/dev/null 2>&1 || true
   fi
-  podman rmi -f "${build_probe_image}" >/dev/null 2>&1 || true
   rm -rf "${workdir}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
 require_command kubectl
-require_command podman
 require_command screen
 require_command ssh
 require_command ssh-keygen
@@ -67,54 +64,9 @@ fi
 
 printf 'current-cluster-test: pod=%s/%s image=%s\n' "${namespace}" "${pod_name}" "${pod_image}" >&2
 
-load_control_plane_runtime_env
-
-printf '%s\n' 'current-cluster-test: verifying bundled skill readability' >&2
-skill_root="${HOME}/.copilot/skills/control-plane-operations"
-test ! -L "${skill_root}"
-test -r "${skill_root}/SKILL.md"
-test -x "${skill_root}/references"
-test -r "${skill_root}/references/control-plane-run.md"
-test -r "${skill_root}/references/skills.md"
-yamllint_skill_root="${HOME}/.copilot/skills/containerized-yamllint-ops"
-doc_coauthor_skill_root="${HOME}/.copilot/skills/doc-coauthoring"
-test ! -L "${yamllint_skill_root}"
-test -r "${yamllint_skill_root}/SKILL.md"
-grep -Fqx 'name: containerized-yamllint-ops' "${yamllint_skill_root}/SKILL.md"
-test ! -L "${doc_coauthor_skill_root}"
-test -r "${doc_coauthor_skill_root}/SKILL.md"
-grep -Fqx 'name: doc-coauthoring' "${doc_coauthor_skill_root}/SKILL.md"
-delivery_skill_root="${HOME}/.copilot/skills/repo-change-delivery"
-test ! -L "${delivery_skill_root}"
-test -r "${delivery_skill_root}/SKILL.md"
-grep -Fqx 'name: repo-change-delivery' "${delivery_skill_root}/SKILL.md"
-commit_skill_root="${HOME}/.copilot/skills/git-commit"
-test ! -L "${commit_skill_root}"
-test -r "${commit_skill_root}/SKILL.md"
-grep -Fqx 'name: git-commit' "${commit_skill_root}/SKILL.md"
-pull_request_skill_root="${HOME}/.copilot/skills/pull-request-workflow"
-skill_creator_skill_root="${HOME}/.copilot/skills/skill-creator"
-test ! -L "${pull_request_skill_root}"
-test -r "${pull_request_skill_root}/SKILL.md"
-grep -Fqx 'name: pull-request-workflow' "${pull_request_skill_root}/SKILL.md"
-test ! -L "${skill_creator_skill_root}"
-test -r "${skill_creator_skill_root}/SKILL.md"
-test -r "${skill_creator_skill_root}/LICENSE.txt"
-grep -Fqx 'name: skill-creator' "${skill_creator_skill_root}/SKILL.md"
-printf '%s\n' 'current-cluster-test: skill-read=ok'
-
-printf '%s\n' 'current-cluster-test: verifying local podman build defaults' >&2
-build_context="${workdir}/build-context"
-mkdir -p "${build_context}"
-cat > "${build_context}/Dockerfile" <<'EOF'
-FROM docker.io/library/busybox:1.37.0
-RUN printf '%s\n' build-ok > /build-ok.txt
-EOF
-build_image_for_toolchain podman "${build_probe_image}" "${build_context}"
-build_probe_output="$(podman run --rm "${build_probe_image}" cat /build-ok.txt)"
-grep -qx 'build-ok' <<<"${build_probe_output}"
-printf '%s\n' 'current-cluster-test: podman-build=ok'
-
+# Keep this live-cluster path focused on behavior that only a running control-plane
+# Pod can validate. Static skill packaging and local Podman flows already have
+# coverage in the standard regression suite.
 printf '%s\n' 'current-cluster-test: verifying interactive SSH auto-login' >&2
 cp "${runtime_config_file}" "${runtime_backup}"
 cp "${HOME}/.ssh/authorized_keys" "${authorized_keys_backup}"
