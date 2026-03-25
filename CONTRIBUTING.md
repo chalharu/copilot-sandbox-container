@@ -63,5 +63,6 @@ Types:
   build stays local), together with
   `kind`, `kubectl`, `ssh`, and `ssh-keygen`.
 - When behavior or operator guidance changes, keep `README.md`,
-  `docs/how-to-guides/cookbook.md`, `docs/explanation/knowledge.md`, and
-  `docs/reference/debug-log.md` aligned in the same PR.
+  `docs/README.md`, `docs/how-to-guides/cookbook.md`,
+  `docs/explanation/knowledge.md`, `docs/reference/control-plane-runtime.md`,
+  and `docs/reference/debug-log.md` aligned in the same PR.
