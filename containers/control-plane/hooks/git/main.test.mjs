@@ -38,19 +38,6 @@ function run(command, args, options = {}) {
 	return result;
 }
 
-function commitWithoutHooks(cwd, env, message) {
-	const disabledHooksPath = path.join(cwd, ".git", "hooks-disabled");
-	fs.mkdirSync(disabledHooksPath, { recursive: true });
-
-	// The host test runner blocks `--no-verify`, so setup commits that should not
-	// hit the global pre-commit hook under test use an explicit empty hooks path.
-	return run(
-		"git",
-		["-c", `core.hooksPath=${disabledHooksPath}`, "commit", "-m", message],
-		{ cwd, env },
-	);
-}
-
 function writeExecutable(filePath, content) {
 	fs.mkdirSync(path.dirname(filePath), { recursive: true });
 	fs.writeFileSync(filePath, content, { mode: 0o755 });
@@ -274,9 +261,6 @@ test("global pre-push blocks protected branches and passes through repository ho
 	assert.equal(result.status, 0);
 	assert.match(fs.readFileSync(repoHookLog, "utf8"), /args:origin /);
 
-	fs.appendFileSync(path.join(repo, "README.md"), "\npush update\n", "utf8");
-	run("git", ["add", "README.md"], { cwd: repo });
-	commitWithoutHooks(repo, hookEnv, "push update");
 	result = run(path.join(bundledGitDir, "pre-push"), ["origin", remote], {
 		cwd: repo,
 		env: {
