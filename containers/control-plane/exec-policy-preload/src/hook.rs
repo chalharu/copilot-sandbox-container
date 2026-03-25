@@ -290,10 +290,7 @@ mod tests {
             repo.join(".github/pre-tool-use-rules.yaml"),
             r#"
 commandRules:
-  - rule:
-      - git
-      - status
-      - --short
+  - rule: 'git(?:\x00[^\x00]+)*\x00status(?:\x00[^\x00]+)*\x00--short(?:\x00[^\x00]+)*'
     reason: repo-local policy
 "#,
         )
@@ -313,8 +310,7 @@ commandRules:
             repo.join(".github/pre-tool-use-rules.yaml"),
             r#"
 commandRules:
-  - rule:
-      - '['
+  - rule: '['
     reason: invalid
 "#,
         )
@@ -334,7 +330,7 @@ commandRules:
 commandRules:
   - toolName: bash
     rule:
-      - git
+      git
     reason: invalid
 "#,
         )

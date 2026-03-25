@@ -147,10 +147,7 @@ printf '%s\n' "${env_override_deny}" | jq -e '.permissionDecisionReason | contai
 mkdir -p .github
 cat > .github/pre-tool-use-rules.yaml <<'YAML'
 commandRules:
-  - rule:
-      - git
-      - status
-      - --short
+  - rule: 'git(?:\x00[^\x00]+)*\x00status(?:\x00[^\x00]+)*\x00--short(?:\x00[^\x00]+)*'
     reason: repo-local policy
 YAML
 

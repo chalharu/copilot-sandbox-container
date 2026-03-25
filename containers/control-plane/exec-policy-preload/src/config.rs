@@ -1,4 +1,4 @@
-use regex::Regex;
+use regex::{Regex, bytes::Regex as BytesRegex};
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,20 +19,7 @@ pub struct CompiledConfig {
 #[derive(Clone, Debug)]
 pub struct CompiledRule {
     pub reason: String,
-    pub basename_pattern: Regex,
-    pub command_patterns: Vec<Regex>,
-    pub option_patterns: Vec<Regex>,
-    pub matcher_groups: Vec<CompiledMatcher>,
-    pub argv_sequence_patterns: Vec<Regex>,
-}
-
-#[derive(Clone, Debug)]
-pub enum CompiledMatcher {
-    Command(Regex),
-    Option(Regex),
-    AllOf(Vec<CompiledMatcher>),
-    AnyOf(Vec<CompiledMatcher>),
-    SeqOf(Vec<Regex>),
+    pub pattern: BytesRegex,
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,28 +34,8 @@ struct RawConfig {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawRule {
-    rule: Vec<RawMatcher>,
+    rule: String,
     reason: String,
-    #[serde(default, rename = "argvSequence")]
-    argv_sequence: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum RawMatcher {
-    Pattern(String),
-    Group(RawMatcherGroup),
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawMatcherGroup {
-    #[serde(default, rename = "allOf")]
-    all_of: Option<Vec<RawMatcher>>,
-    #[serde(default, rename = "anyOf")]
-    any_of: Option<Vec<RawMatcher>>,
-    #[serde(default, rename = "seqOf")]
-    seq_of: Option<Vec<String>>,
 }
 
 static BUNDLED_RULES: OnceLock<Result<CompiledConfig, String>> = OnceLock::new();
@@ -199,150 +166,26 @@ fn compile_rule(rule: RawRule, path: &Path, rule_index: usize) -> Result<Compile
     }
     if rule.rule.is_empty() {
         return Err(format!(
-            "{description} must define rule as a non-empty array."
+            "{description} must define rule as a non-empty string."
         ));
-    }
-    let mut raw_patterns = rule.rule.into_iter();
-    let basename = match raw_patterns
-        .next()
-        .expect("rule must contain at least one pattern after validation")
-    {
-        RawMatcher::Pattern(pattern) => pattern,
-        RawMatcher::Group(_) => {
-            return Err(format!(
-                "basename in {description} must be a string pattern, not a matcher group."
-            ));
-        }
-    };
-
-    let mut command_patterns = Vec::new();
-    let mut option_patterns = Vec::new();
-    let mut matcher_groups = Vec::new();
-    for (index, matcher) in raw_patterns.enumerate() {
-        match matcher {
-            RawMatcher::Pattern(entry) => {
-                let regex = compile_pattern(
-                    entry.clone(),
-                    &format!("rule patterns in {description}"),
-                    index + 2,
-                )?;
-                if entry.starts_with('-') {
-                    option_patterns.push(regex);
-                } else {
-                    command_patterns.push(regex);
-                }
-            }
-            RawMatcher::Group(group) => matcher_groups.push(compile_matcher_group(
-                group,
-                &description,
-                format!("{}", index + 2),
-            )?),
-        }
     }
 
     Ok(CompiledRule {
         reason: rule.reason,
-        basename_pattern: compile_pattern(basename, &format!("basename in {description}"), 1)?,
-        command_patterns,
-        option_patterns,
-        matcher_groups,
-        argv_sequence_patterns: compile_patterns(
-            rule.argv_sequence,
-            &format!("argvSequence in {description}"),
-        )?,
+        pattern: compile_rule_pattern(rule.rule, &description)?,
     })
 }
 
-fn compile_matcher(
-    matcher: RawMatcher,
-    description: &str,
-    index_path: String,
-) -> Result<CompiledMatcher, String> {
-    match matcher {
-        RawMatcher::Pattern(entry) => {
-            let regex = compile_pattern(
-                entry.clone(),
-                &format!("matcher group {index_path} in {description}"),
-                1,
-            )?;
-            Ok(if entry.starts_with('-') {
-                CompiledMatcher::Option(regex)
-            } else {
-                CompiledMatcher::Command(regex)
-            })
-        }
-        RawMatcher::Group(group) => compile_matcher_group(group, description, index_path),
-    }
-}
-
-fn compile_matcher_group(
-    group: RawMatcherGroup,
-    description: &str,
-    index_path: String,
-) -> Result<CompiledMatcher, String> {
-    let kind_count = usize::from(group.all_of.is_some())
-        + usize::from(group.any_of.is_some())
-        + usize::from(group.seq_of.is_some());
-    if kind_count != 1 {
+fn compile_rule_pattern(entry: String, description: &str) -> Result<BytesRegex, String> {
+    if entry.is_empty() {
         return Err(format!(
-            "matcher group {index_path} in {description} must define exactly one of allOf, anyOf, or seqOf."
+            "{description} must define rule as a non-empty string."
         ));
     }
-
-    if let Some(entries) = group.all_of {
-        if entries.is_empty() {
-            return Err(format!(
-                "allOf matcher group {index_path} in {description} must be non-empty."
-            ));
-        }
-        return Ok(CompiledMatcher::AllOf(
-            entries
-                .into_iter()
-                .enumerate()
-                .map(|(index, entry)| {
-                    compile_matcher(
-                        entry,
-                        description,
-                        format!("{index_path}.allOf.{}", index + 1),
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-        ));
-    }
-
-    if let Some(entries) = group.any_of {
-        if entries.is_empty() {
-            return Err(format!(
-                "anyOf matcher group {index_path} in {description} must be non-empty."
-            ));
-        }
-        return Ok(CompiledMatcher::AnyOf(
-            entries
-                .into_iter()
-                .enumerate()
-                .map(|(index, entry)| {
-                    compile_matcher(
-                        entry,
-                        description,
-                        format!("{index_path}.anyOf.{}", index + 1),
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-        ));
-    }
-
-    let seq_entries = group
-        .seq_of
-        .expect("validated matcher group should define seqOf");
-    if seq_entries.is_empty() {
-        return Err(format!(
-            "seqOf matcher group {index_path} in {description} must be non-empty."
-        ));
-    }
-    Ok(CompiledMatcher::SeqOf(compile_patterns(
-        seq_entries,
-        &format!("seqOf matcher group {index_path} in {description}"),
-    )?))
+    let expanded = expand_env_placeholders(&entry);
+    let anchored = format!("^(?:{expanded})$");
+    BytesRegex::new(&anchored)
+        .map_err(|error| format!("invalid regex pattern in {description}: {error}"))
 }
 
 fn compile_patterns(entries: Vec<String>, description: &str) -> Result<Vec<Regex>, String> {
@@ -404,18 +247,7 @@ mod tests {
     fn parse_config_keeps_command_rules_and_protected_environments() {
         let yaml = r#"
 commandRules:
-  - rule:
-      - git
-      - allOf:
-          - commit
-          - anyOf:
-              - --no-verify
-              - -[A-Za-z0-9]*n[A-Za-z0-9]*
-      - anyOf:
-          - --config-env=(?i:core\.hookspath=.*)
-          - seqOf:
-              - --config-env
-              - (?i:core\.hookspath=.*)
+  - rule: 'git(?:\x00[^\x00]+)*\x00commit(?:\x00[^\x00]+)*\x00(?:--no-verify|-[A-Za-z0-9]*n[A-Za-z0-9]*)(?:\x00[^\x00]+)*'
     reason: commit blocked
 protectedEnvironments:
   - GIT_CONFIG_GLOBAL
@@ -425,7 +257,11 @@ protectedEnvironments:
 
         assert_eq!(config.command_rules.len(), 1);
         assert_eq!(config.protected_environments.len(), 1);
-        assert_eq!(config.command_rules[0].matcher_groups.len(), 2);
+        assert!(
+            config.command_rules[0]
+                .pattern
+                .is_match(b"git\0commit\0--no-verify")
+        );
     }
 
     #[test]

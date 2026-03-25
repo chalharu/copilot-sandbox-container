@@ -48,12 +48,23 @@ impl CommandInvocation {
         })
     }
 
-    pub fn command_tokens(&self) -> Vec<String> {
-        command_tokens(&self.args)
+    pub fn normalized_tokens(&self) -> Vec<String> {
+        let mut tokens = Vec::with_capacity(self.args.len() + 1);
+        tokens.push(self.executable_basename.clone());
+        tokens.extend(normalized_args(&self.args));
+        tokens
     }
 
-    pub fn option_tokens(&self) -> Vec<String> {
-        option_tokens(&self.args)
+    pub fn normalized_stream(&self) -> Vec<u8> {
+        let tokens = self.normalized_tokens();
+        let mut stream = Vec::new();
+        for token in tokens {
+            if !stream.is_empty() {
+                stream.push(0);
+            }
+            stream.extend_from_slice(token.as_bytes());
+        }
+        stream
     }
 
     pub fn unwrap_env_wrapper(&self) -> Option<Self> {
@@ -84,51 +95,11 @@ pub fn merge_env_bindings(parent: &[EnvBinding], child: &[EnvBinding]) -> Vec<En
     merged
 }
 
-fn command_tokens(args: &[String]) -> Vec<String> {
-    let mut commands = Vec::new();
-
-    for (index, token) in args.iter().enumerate() {
-        if token == "--" {
-            break;
-        }
-        if token == "-" || token.starts_with('-') {
-            continue;
-        }
-        if index > 0 && previous_token_may_supply_value_to_command(&args[index - 1]) {
-            continue;
-        }
-        commands.push(token.clone());
-    }
-
-    commands
-}
-
-fn option_tokens(args: &[String]) -> Vec<String> {
-    let mut options = Vec::new();
-
-    for token in args {
-        if token == "--" {
-            break;
-        }
-        if token == "-" || !token.starts_with('-') {
-            continue;
-        }
-        push_unique(&mut options, token.clone());
-    }
-
-    options
-}
-
-fn previous_token_may_supply_value_to_command(token: &str) -> bool {
-    is_standalone_short_option(token) || is_long_option_without_equals(token)
-}
-
-fn is_standalone_short_option(token: &str) -> bool {
-    token.starts_with('-') && !token.starts_with("--") && token.chars().count() == 2
-}
-
-fn is_long_option_without_equals(token: &str) -> bool {
-    token.starts_with("--") && token != "--" && !token.contains('=')
+fn normalized_args(args: &[String]) -> Vec<String> {
+    args.iter()
+        .take_while(|token| token.as_str() != "--")
+        .cloned()
+        .collect()
 }
 
 struct EnvWrapperPrefix {
@@ -207,18 +178,12 @@ fn basename(value: &str) -> &str {
         .unwrap_or(value)
 }
 
-fn push_unique(tokens: &mut Vec<String>, token: String) {
-    if !tokens.contains(&token) {
-        tokens.push(token);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{CommandInvocation, EnvBinding};
 
     #[test]
-    fn keeps_raw_option_tokens_visible() {
+    fn emits_normalized_tokens_before_double_dash() {
         let invocation = CommandInvocation::from_exec(
             "git",
             &[
@@ -232,12 +197,18 @@ mod tests {
         )
         .unwrap();
 
-        let options = invocation.option_tokens();
+        let tokens = invocation.normalized_tokens();
 
-        assert!(invocation.command_tokens().contains(&"commit".to_string()));
-        assert!(options.contains(&"-m".to_string()));
-        assert!(options.contains(&"-n".to_string()));
-        assert!(options.contains(&"--no-verify".to_string()));
+        assert_eq!(
+            tokens,
+            vec![
+                "git".to_string(),
+                "commit".to_string(),
+                "-m".to_string(),
+                "-n".to_string(),
+                "--no-verify".to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -255,33 +226,30 @@ mod tests {
         )
         .unwrap();
 
-        let options = invocation.option_tokens();
+        let tokens = invocation.normalized_tokens();
 
-        assert!(options.contains(&"-nm".to_string()));
-        assert!(options.contains(&"-mn".to_string()));
+        assert!(tokens.contains(&"-nm".to_string()));
+        assert!(tokens.contains(&"-mn".to_string()));
     }
 
     #[test]
-    fn filters_likely_option_values_out_of_command_tokens() {
+    fn joins_tokens_with_nul_bytes() {
         let invocation = CommandInvocation::from_exec(
             "git",
             &[
                 "git".to_string(),
                 "-c".to_string(),
                 "core.hooksPath=/tmp/evil".to_string(),
-                "--config-env".to_string(),
-                "alias.status=foo".to_string(),
                 "status".to_string(),
-                "-m".to_string(),
-                "message".to_string(),
             ],
             Vec::new(),
         )
         .unwrap();
 
-        let commands = invocation.command_tokens();
-
-        assert_eq!(commands, vec!["status".to_string()]);
+        assert_eq!(
+            invocation.normalized_stream(),
+            b"git\0-c\0core.hooksPath=/tmp/evil\0status".to_vec()
+        );
     }
 
     #[test]
@@ -299,10 +267,10 @@ mod tests {
         )
         .unwrap();
 
-        let options = invocation.option_tokens();
+        let tokens = invocation.normalized_tokens();
 
-        assert!(options.contains(&"--no-verify".to_string()));
-        assert!(!options.contains(&"--force".to_string()));
+        assert!(tokens.contains(&"--no-verify".to_string()));
+        assert!(!tokens.contains(&"--force".to_string()));
     }
 
     #[test]

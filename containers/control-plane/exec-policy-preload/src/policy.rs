@@ -1,5 +1,5 @@
 use crate::command::{CommandInvocation, EnvBinding};
-use crate::config::{CompiledConfig, CompiledMatcher, CompiledRule, PROTECTED_ENVIRONMENT_REASON};
+use crate::config::{CompiledConfig, CompiledRule, PROTECTED_ENVIRONMENT_REASON};
 use std::ffi::OsStr;
 
 pub fn match_hook_rule(
@@ -32,97 +32,15 @@ pub fn match_exec_rule(config: &CompiledConfig, invocation: &CommandInvocation) 
 
 fn match_rule(rule: &CompiledRule, invocations: &[CommandInvocation]) -> Option<String> {
     for invocation in invocations {
-        let command_tokens = invocation.command_tokens();
-        let option_tokens = invocation.option_tokens();
-        if rule_matches(
-            rule,
-            &invocation.executable_basename,
-            &command_tokens,
-            &option_tokens,
-            &invocation.args,
-        ) {
+        if rule_matches(rule, invocation) {
             return Some(rule.reason.clone());
         }
     }
     None
 }
 
-fn rule_matches(
-    rule: &CompiledRule,
-    executable_basename: &str,
-    command_tokens: &[String],
-    option_tokens: &[String],
-    raw_args: &[String],
-) -> bool {
-    if !rule.basename_pattern.is_match(executable_basename) {
-        return false;
-    }
-
-    if command_tokens.len() < rule.command_patterns.len() {
-        return false;
-    }
-    for (pattern, token) in rule.command_patterns.iter().zip(command_tokens.iter()) {
-        if !pattern.is_match(token) {
-            return false;
-        }
-    }
-
-    if !rule
-        .option_patterns
-        .iter()
-        .all(|pattern| option_tokens.iter().any(|token| pattern.is_match(token)))
-    {
-        return false;
-    }
-
-    if !rule
-        .matcher_groups
-        .iter()
-        .all(|matcher| matcher_matches(matcher, command_tokens, option_tokens, raw_args))
-    {
-        return false;
-    }
-
-    argv_sequence_matches(&rule.argv_sequence_patterns, raw_args)
-}
-
-fn matcher_matches(
-    matcher: &CompiledMatcher,
-    command_tokens: &[String],
-    option_tokens: &[String],
-    raw_args: &[String],
-) -> bool {
-    match matcher {
-        CompiledMatcher::Command(pattern) => command_tokens
-            .first()
-            .is_some_and(|token| pattern.is_match(token)),
-        CompiledMatcher::Option(pattern) => {
-            option_tokens.iter().any(|token| pattern.is_match(token))
-        }
-        CompiledMatcher::AllOf(matchers) => matchers
-            .iter()
-            .all(|matcher| matcher_matches(matcher, command_tokens, option_tokens, raw_args)),
-        CompiledMatcher::AnyOf(matchers) => matchers
-            .iter()
-            .any(|matcher| matcher_matches(matcher, command_tokens, option_tokens, raw_args)),
-        CompiledMatcher::SeqOf(patterns) => argv_sequence_matches(patterns, raw_args),
-    }
-}
-
-fn argv_sequence_matches(patterns: &[regex::Regex], raw_args: &[String]) -> bool {
-    if patterns.is_empty() {
-        return true;
-    }
-    if patterns.len() > raw_args.len() {
-        return false;
-    }
-
-    raw_args.windows(patterns.len()).any(|window| {
-        patterns
-            .iter()
-            .zip(window.iter())
-            .all(|(pattern, token)| pattern.is_match(token))
-    })
+fn rule_matches(rule: &CompiledRule, invocation: &CommandInvocation) -> bool {
+    rule.pattern.is_match(&invocation.normalized_stream())
 }
 
 fn protected_environment_overridden(
@@ -156,8 +74,8 @@ fn binding_differs_from_parent(binding: &EnvBinding) -> bool {
 mod tests {
     use super::match_exec_rule;
     use crate::command::{CommandInvocation, EnvBinding};
-    use crate::config::{CompiledConfig, CompiledMatcher, CompiledRule};
-    use regex::Regex;
+    use crate::config::{CompiledConfig, CompiledRule};
+    use regex::{Regex, bytes::Regex as BytesRegex};
 
     #[test]
     fn matches_command_rules_and_protected_environments() {
@@ -168,30 +86,17 @@ mod tests {
             command_rules: vec![
                 CompiledRule {
                     reason: "blocked".to_string(),
-                    basename_pattern: Regex::new("^(?:git)$").unwrap(),
-                    command_patterns: Vec::new(),
-                    option_patterns: Vec::new(),
-                    matcher_groups: vec![CompiledMatcher::AllOf(vec![
-                        CompiledMatcher::Command(Regex::new("^(?:commit)$").unwrap()),
-                        CompiledMatcher::AnyOf(vec![
-                            CompiledMatcher::Option(Regex::new("^(?:--no-verify)$").unwrap()),
-                            CompiledMatcher::Option(
-                                Regex::new("^(?:-[A-Za-z0-9]*n[A-Za-z0-9]*)$").unwrap(),
-                            ),
-                        ]),
-                    ])],
-                    argv_sequence_patterns: Vec::new(),
+                    pattern: BytesRegex::new(
+                        r"git(?:\x00[^\x00]+)*\x00commit(?:\x00[^\x00]+)*\x00(?:--no-verify|-[A-Za-z0-9]*n[A-Za-z0-9]*)(?:\x00[^\x00]+)*",
+                    )
+                    .unwrap(),
                 },
                 CompiledRule {
                     reason: "hooks path blocked".to_string(),
-                    basename_pattern: Regex::new("^(?:git)$").unwrap(),
-                    command_patterns: Vec::new(),
-                    option_patterns: Vec::new(),
-                    matcher_groups: Vec::new(),
-                    argv_sequence_patterns: vec![
-                        Regex::new("^(?:-c)$").unwrap(),
-                        Regex::new("^(?i:core\\.hookspath=.*)$").unwrap(),
-                    ],
+                    pattern: BytesRegex::new(
+                        r"git(?:\x00[^\x00]+)*\x00(?:-c\x00(?i:core\.hookspath=.*)|-c(?i:core\.hookspath=.*))(?:\x00[^\x00]+)*",
+                    )
+                    .unwrap(),
                 },
             ],
             protected_environments: vec![Regex::new("^(?:GIT_CONFIG_GLOBAL)$").unwrap()],

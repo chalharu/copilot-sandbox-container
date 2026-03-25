@@ -343,18 +343,17 @@ mod tests {
     use crate::command::CommandInvocation;
     use crate::config::{CompiledConfig, CompiledRule};
     use crate::policy::match_exec_rule;
-    use regex::Regex;
+    use regex::{Regex, bytes::Regex as BytesRegex};
 
     #[test]
     fn exec_rule_matching_uses_token_sequences() {
         let config = CompiledConfig {
             command_rules: vec![CompiledRule {
                 reason: "blocked".to_string(),
-                basename_pattern: Regex::new("^(?:git)$").unwrap(),
-                command_patterns: vec![Regex::new("^(?:push)$").unwrap()],
-                option_patterns: vec![Regex::new("^(?:-f)$").unwrap()],
-                matcher_groups: Vec::new(),
-                argv_sequence_patterns: Vec::new(),
+                pattern: BytesRegex::new(
+                    r"git(?:\x00[^\x00]+)*\x00push(?:\x00[^\x00]+)*\x00-f(?:\x00[^\x00]+)*",
+                )
+                .unwrap(),
             }],
             protected_environments: vec![Regex::new("^(?:GIT_CONFIG_GLOBAL)$").unwrap()],
         };
