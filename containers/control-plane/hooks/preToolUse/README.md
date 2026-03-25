@@ -16,6 +16,6 @@ commandRules:
 
 ## Matching model
 
-`bash.command` は生文字列 grep ではなく、shell 風 token 化と command chain 分割、`sh -c` / `bash -lc` unwrap、環境変数 prefix 解析を行ったうえで評価します。評価対象は `basename` と `--` より前の argv token をそのまま並べた normalized token stream で、各 token は `\0` で結合されます。`rule` は内部で `^(?:<pattern>)$` に包まれて full match されるため、`git(?:\x00[^\x00]+)*\x00commit...` のように basename・順序・隣接を 1 本の regex で書けます。engine 側は option ごとの value 知識を持たないので、`-[A-Za-z0-9]*n[A-Za-z0-9]*` のような pattern を置けば short option cluster もまとめて deny できます。
+`bash.command` は生文字列 grep ではなく、shell 風 token 化と command chain 分割、`sh -c` / `bash -lc` unwrap、環境変数 prefix 解析を行ったうえで評価します。評価対象は `basename` と argv token 全体をそのまま並べた normalized token stream で、各 token は `\0` で結合されます。`rule` は内部で `^(?:<pattern>)$` に包まれて full match されるため、`git(?:\x00[^\x00]+)*\x00commit...` のように basename・順序・隣接を 1 本の regex で書けます。engine 側は option ごとの value 知識を持たないので、`-[A-Za-z0-9]*n[A-Za-z0-9]*` のような pattern を置けば short option cluster もまとめて deny できます。
 
 `protectedEnvironments` は command rule とは独立した global deny list です。exec 側では親プロセス環境との差分だけを override とみなすため、control plane が管理する既定の `GIT_CONFIG_GLOBAL` はそのまま通しつつ、上書き・追加・unset は拒否できます。`git push --force-with-lease` は引き続き許可します。

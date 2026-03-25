@@ -156,6 +156,7 @@ printf '%s\n' "${override_deny}" | jq -e '.permissionDecision == "deny"' >/dev/n
 printf '%s\n' "${override_deny}" | jq -e '.permissionDecisionReason == "repo-local policy"' >/dev/null
 
 assert_denied_exec 'git commit --no-verify' git commit --no-verify -m skip
+assert_denied_exec 'git commit --no-verify' git commit -- --no-verify
 assert_denied_exec 'core.hooksPath overrides are blocked' git -c core.hooksPath=/tmp/evil commit -m skip
 assert_denied_exec 'core.hooksPath overrides are blocked' env HOOKS=/tmp/evil git --config-env=core.hooksPath=HOOKS status --short
 assert_denied_exec 'Force pushes are blocked' git push -f origin HEAD

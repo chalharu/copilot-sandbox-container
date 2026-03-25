@@ -51,7 +51,7 @@ impl CommandInvocation {
     pub fn normalized_tokens(&self) -> Vec<String> {
         let mut tokens = Vec::with_capacity(self.args.len() + 1);
         tokens.push(self.executable_basename.clone());
-        tokens.extend(normalized_args(&self.args));
+        tokens.extend(self.args.iter().cloned());
         tokens
     }
 
@@ -93,13 +93,6 @@ pub fn merge_env_bindings(parent: &[EnvBinding], child: &[EnvBinding]) -> Vec<En
         }
     }
     merged
-}
-
-fn normalized_args(args: &[String]) -> Vec<String> {
-    args.iter()
-        .take_while(|token| token.as_str() != "--")
-        .cloned()
-        .collect()
 }
 
 struct EnvWrapperPrefix {
@@ -183,7 +176,7 @@ mod tests {
     use super::{CommandInvocation, EnvBinding};
 
     #[test]
-    fn emits_normalized_tokens_before_double_dash() {
+    fn emits_normalized_tokens_in_order() {
         let invocation = CommandInvocation::from_exec(
             "git",
             &[
@@ -253,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn stops_emitting_tokens_after_double_dash() {
+    fn keeps_tokens_after_double_dash() {
         let invocation = CommandInvocation::from_exec(
             "git",
             &[
@@ -269,8 +262,16 @@ mod tests {
 
         let tokens = invocation.normalized_tokens();
 
-        assert!(tokens.contains(&"--no-verify".to_string()));
-        assert!(!tokens.contains(&"--force".to_string()));
+        assert_eq!(
+            tokens,
+            vec![
+                "git".to_string(),
+                "commit".to_string(),
+                "--no-verify".to_string(),
+                "--".to_string(),
+                "--force".to_string(),
+            ]
+        );
     }
 
     #[test]

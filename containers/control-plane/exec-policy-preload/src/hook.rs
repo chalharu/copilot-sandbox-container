@@ -251,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn ignores_tokens_after_double_dash() {
+    fn matches_tokens_after_double_dash() {
         let repo = setup_repo("pre-tool-use-double-dash");
 
         let double_dash = evaluate_pre_tool_use(&hook_input(
@@ -259,9 +259,14 @@ mod tests {
             "git commit --amend -- --no-verify",
             "bash",
         ))
+        .unwrap()
         .unwrap();
 
-        assert_eq!(double_dash, None);
+        assert!(
+            double_dash
+                .permission_decision_reason
+                .contains("git commit --no-verify")
+        );
     }
 
     #[test]
