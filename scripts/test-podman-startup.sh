@@ -112,6 +112,101 @@ if [[ -s "${workdir}/chown.log" ]]; then
   exit 1
 fi
 
+printf '%s\n' 'podman-startup-test: verifying flat legacy rootless storage migrates into driver-specific root' >&2
+prepare_state_tree flat-rootless
+flat_rootless_driver=vfs
+if [[ -e /dev/fuse ]]; then
+  flat_rootless_driver=overlay
+fi
+mkdir -p "${workdir}/flat-rootless/copilot/containers/storage/${flat_rootless_driver}"
+printf '%s\n' 'flat-rootless-sentinel' > "${workdir}/flat-rootless/copilot/containers/storage/${flat_rootless_driver}/flat-rootless-sentinel"
+
+set +e
+flat_rootless_output="$("${container_bin}" run --rm \
+  --name control-plane-podman-startup-legacy \
+  "${all_startup_caps[@]}" \
+  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForStartupRegression control-plane-startup' \
+  -e CONTROL_PLANE_PODMAN_STORAGE_DRIVER="${flat_rootless_driver}" \
+  -v "${workdir}/flat-rootless/copilot:/home/copilot/.copilot" \
+  -v "${workdir}/flat-rootless/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/flat-rootless/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/flat-rootless/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/flat-rootless/workspace:/workspace" \
+  "${entrypoint_override_args[@]}" \
+  "${control_plane_image}" \
+  bash -lc "test -L /home/copilot/.copilot/containers && test -f \"/var/tmp/control-plane/rootless-podman/${flat_rootless_driver}/storage/${flat_rootless_driver}/flat-rootless-sentinel\" && printf \"%s\n\" startup-ok" 2>&1)"
+flat_rootless_status=$?
+set -e
+
+if [[ "${flat_rootless_status}" -ne 0 ]]; then
+  printf 'Expected startup to migrate flat legacy rootless Podman storage into the driver-specific root\n' >&2
+  printf '%s\n' "${flat_rootless_output}" >&2
+  exit 1
+fi
+grep -qx 'startup-ok' <<<"${flat_rootless_output}"
+
+printf '%s\n' 'podman-startup-test: verifying flat legacy rootless storage still migrates when the target graphroot already exists and is empty' >&2
+prepare_state_tree flat-rootless-existing-target
+mkdir -p "${workdir}/flat-rootless-existing-target/copilot/containers/storage/${flat_rootless_driver}"
+printf '%s\n' 'flat-rootless-existing-target-sentinel' > "${workdir}/flat-rootless-existing-target/copilot/containers/storage/${flat_rootless_driver}/flat-rootless-existing-target-sentinel"
+mkdir -p "${workdir}/flat-rootless-existing-target/tmp-root/rootless-podman/${flat_rootless_driver}/storage"
+
+set +e
+flat_rootless_existing_target_output="$("${container_bin}" run --rm \
+  --name control-plane-podman-startup-legacy \
+  "${all_startup_caps[@]}" \
+  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForStartupRegression control-plane-startup' \
+  -e CONTROL_PLANE_PODMAN_STORAGE_DRIVER="${flat_rootless_driver}" \
+  -v "${workdir}/flat-rootless-existing-target/copilot:/home/copilot/.copilot" \
+  -v "${workdir}/flat-rootless-existing-target/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/flat-rootless-existing-target/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/flat-rootless-existing-target/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/flat-rootless-existing-target/workspace:/workspace" \
+  -v "${workdir}/flat-rootless-existing-target/tmp-root:/var/tmp/control-plane" \
+  "${entrypoint_override_args[@]}" \
+  "${control_plane_image}" \
+  bash -lc "test -L /home/copilot/.copilot/containers && test -f \"/var/tmp/control-plane/rootless-podman/${flat_rootless_driver}/storage/${flat_rootless_driver}/flat-rootless-existing-target-sentinel\" && printf \"%s\n\" startup-ok" 2>&1)"
+flat_rootless_existing_target_status=$?
+set -e
+
+if [[ "${flat_rootless_existing_target_status}" -ne 0 ]]; then
+  printf 'Expected startup to migrate flat legacy rootless Podman storage even when the target graphroot already exists and is empty\n' >&2
+  printf '%s\n' "${flat_rootless_existing_target_output}" >&2
+  exit 1
+fi
+grep -qx 'startup-ok' <<<"${flat_rootless_existing_target_output}"
+
+printf '%s\n' 'podman-startup-test: verifying conflicting flat legacy rootless storage fails loudly instead of being mis-migrated' >&2
+prepare_state_tree flat-rootless-conflict
+mkdir -p "${workdir}/flat-rootless-conflict/copilot/containers/storage/${flat_rootless_driver}"
+printf '%s\n' 'flat-rootless-conflict-sentinel' > "${workdir}/flat-rootless-conflict/copilot/containers/storage/${flat_rootless_driver}/flat-rootless-conflict-sentinel"
+mkdir -p "${workdir}/flat-rootless-conflict/tmp-root/rootless-podman/${flat_rootless_driver}/storage"
+printf '%s\n' 'existing-target-sentinel' > "${workdir}/flat-rootless-conflict/tmp-root/rootless-podman/${flat_rootless_driver}/storage/existing-target-sentinel"
+
+set +e
+flat_rootless_conflict_output="$("${container_bin}" run --rm \
+  --name control-plane-podman-startup-legacy \
+  "${all_startup_caps[@]}" \
+  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForStartupRegression control-plane-startup' \
+  -e CONTROL_PLANE_PODMAN_STORAGE_DRIVER="${flat_rootless_driver}" \
+  -v "${workdir}/flat-rootless-conflict/copilot:/home/copilot/.copilot" \
+  -v "${workdir}/flat-rootless-conflict/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/flat-rootless-conflict/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/flat-rootless-conflict/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/flat-rootless-conflict/workspace:/workspace" \
+  -v "${workdir}/flat-rootless-conflict/tmp-root:/var/tmp/control-plane" \
+  "${entrypoint_override_args[@]}" \
+  "${control_plane_image}" \
+  bash -lc 'printf "%s\n" startup-ok' 2>&1)"
+flat_rootless_conflict_status=$?
+set -e
+
+if [[ "${flat_rootless_conflict_status}" -eq 0 ]]; then
+  printf 'Expected startup to refuse conflicting flat legacy rootless Podman storage\n' >&2
+  exit 1
+fi
+grep -q 'Refusing to continue with legacy flat Podman storage' <<<"${flat_rootless_conflict_output}"
+
 printf '%s\n' 'podman-startup-test: verifying rootful-service uses dedicated rootful Podman storage' >&2
 prepare_state_tree rootful
 mkdir -p "${workdir}/rootful/rootful-podman"

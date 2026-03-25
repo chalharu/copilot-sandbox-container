@@ -817,12 +817,14 @@ grep -qx 'events_logger = "file"' ~/.config/containers/containers.conf
 printf '%s\n' 'kind-test remote: containers.conf ok' >&2
 expected_driver=""
 expected_state_dir=""
+expected_state_root="/var/tmp/control-plane/rootless-podman"
 if [[ -e /dev/fuse ]]; then
   expected_driver=overlay
 else
   expected_driver=vfs
 fi
-expected_state_dir="/home/copilot/.copilot/containers/\${expected_driver}"
+expected_state_dir="\${expected_state_root}/\${expected_driver}"
+test "\$(readlink /home/copilot/.copilot/containers)" = "\${expected_state_root}"
 test "\$(readlink /home/copilot/.local/share/containers)" = "\${expected_state_dir}"
 grep -qx "graphroot = \"\${expected_state_dir}/storage\"" ~/.config/containers/storage.conf
 grep -qx "runroot = \"/run/user/1000/\${expected_driver}/containers/storage\"" ~/.config/containers/storage.conf
