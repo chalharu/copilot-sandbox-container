@@ -60,6 +60,8 @@ run_helper() {
     PATH="${fake_bin}:${PATH}" \
     HOME="${HOME}" \
     USER="${USER:-copilot}" \
+    K8S_RUST_BRANCH=test-branch \
+    K8S_RUST_REMOTE_URL=https://example.com/chalharu/copilot-sandbox-container.git \
     CONTROL_PLANE_RUNTIME_ENV_FILE="${runtime_env}" \
     CONTROL_PLANE_K8S_NAMESPACE=control-plane-ns \
     CAPTURED_CONTROL_PLANE_RUN_ARGS="${workdir}/control-plane-run.args" \
@@ -71,6 +73,8 @@ run_helper() {
 printf '%s\n' 'k8s-rust-sccache-dist-test: verifying local-cache fallback wiring' >&2
 local_script="${workdir}/local-job-script.sh"
 run_helper "${local_script}"
+assert_contains "${local_script}" 'branch=test-branch'
+assert_contains "${local_script}" 'repo_url=https://example.com/chalharu/copilot-sandbox-container.git'
 assert_contains "${local_script}" 'sccache_dist_enabled=0'
 assert_contains "${local_script}" 'sccache_dir='
 assert_contains "${local_script}" "\${cache_root}/sccache"
