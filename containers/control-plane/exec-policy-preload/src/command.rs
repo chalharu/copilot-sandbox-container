@@ -49,9 +49,11 @@ impl CommandInvocation {
     }
 
     pub fn match_tokens(&self) -> Vec<String> {
-        let mut tokens = Vec::with_capacity(self.args.len() + 1);
+        let option_value_tokens = option_value_tokens(&self.args);
+        let mut tokens = Vec::with_capacity(self.args.len() + 1 + option_value_tokens.len());
         tokens.push(self.executable_basename.clone());
         tokens.extend(matchable_args(&self.args));
+        tokens.extend(option_value_tokens);
         tokens
     }
 
@@ -115,6 +117,7 @@ const OPTIONS_WITH_VALUE: &[&str] = &[
     "--trailer",
     "--work-tree",
 ];
+const OPTION_VALUE_TOKEN_PREFIX: &str = "--option-value=";
 
 fn matchable_args(args: &[String]) -> Vec<String> {
     let mut matchable = Vec::new();
@@ -159,25 +162,115 @@ fn matchable_args(args: &[String]) -> Vec<String> {
     matchable
 }
 
-fn sanitize_short_token(token: &str) -> (String, bool) {
-    let chars: Vec<char> = token.chars().collect();
-    if chars.len() <= 1 {
-        return (token.to_string(), false);
+fn option_value_tokens(args: &[String]) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut index = 0;
+
+    while index < args.len() {
+        let token = &args[index];
+        if token == "--" {
+            break;
+        }
+
+        if token == "-" || !token.starts_with('-') {
+            index += 1;
+            continue;
+        }
+
+        if token.starts_with("--") {
+            let (option_name, attached_value) = token
+                .split_once('=')
+                .map(|(name, value)| (name, Some(value)))
+                .unwrap_or((token.as_str(), None));
+            if option_takes_value(option_name) {
+                if let Some(value) =
+                    attached_value.or_else(|| args.get(index + 1).map(|value| value.as_str()))
+                {
+                    push_option_value_token(&mut tokens, option_name, value);
+                }
+                index += if attached_value.is_none() && args.get(index + 1).is_some() {
+                    2
+                } else {
+                    1
+                };
+            } else {
+                index += 1;
+            }
+            continue;
+        }
+
+        let analysis = analyze_short_token(token);
+        if let Some(option_name) = analysis.value_option.as_deref()
+            && let Some(value) = analysis
+                .attached_value
+                .as_deref()
+                .or_else(|| args.get(index + 1).map(|value| value.as_str()))
+        {
+            push_option_value_token(&mut tokens, option_name, value);
+        }
+        index += 1;
+        if analysis.consumes_next {
+            index += 1;
+        }
     }
 
-    let mut sanitized = String::from("-");
+    tokens
+}
+
+fn push_option_value_token(tokens: &mut Vec<String>, option_name: &str, value: &str) {
+    let token = format!("{OPTION_VALUE_TOKEN_PREFIX}{option_name}={value}");
+    if !tokens.contains(&token) {
+        tokens.push(token);
+    }
+}
+
+struct ShortTokenAnalysis {
+    match_token: String,
+    value_option: Option<String>,
+    consumes_next: bool,
+    attached_value: Option<String>,
+}
+
+fn analyze_short_token(token: &str) -> ShortTokenAnalysis {
+    let chars: Vec<char> = token.chars().collect();
+    if chars.len() <= 1 {
+        return ShortTokenAnalysis {
+            match_token: token.to_string(),
+            value_option: None,
+            consumes_next: false,
+            attached_value: None,
+        };
+    }
+
+    let mut match_token = String::from("-");
+    let mut value_option = None;
     let mut consumes_next = false;
+    let mut attached_value = None;
     for short_index in 1..chars.len() {
         let short_flag = chars[short_index];
-        sanitized.push(short_flag);
+        match_token.push(short_flag);
         let option_name = format!("-{short_flag}");
         if option_takes_value(&option_name) {
+            value_option = Some(option_name);
             consumes_next = short_index == chars.len() - 1;
+            if !consumes_next {
+                attached_value = Some(chars[short_index + 1..].iter().collect());
+            }
             break;
         }
     }
 
-    (sanitized, consumes_next)
+    ShortTokenAnalysis {
+        match_token,
+        value_option,
+        consumes_next,
+        attached_value,
+    }
+}
+
+fn sanitize_short_token(token: &str) -> (String, bool) {
+    let analysis = analyze_short_token(token);
+    (analysis.match_token, analysis.consumes_next)
 }
 
 fn option_takes_value(token: &str) -> bool {
@@ -348,6 +441,74 @@ mod tests {
 
         assert!(tokens.contains(&"--no-verify".to_string()));
         assert!(!tokens.contains(&"--force".to_string()));
+    }
+
+    #[test]
+    fn emits_option_value_tokens_for_separate_and_long_values() {
+        let invocation = CommandInvocation::from_exec(
+            "git",
+            &[
+                "git".to_string(),
+                "--config-env=credential.helper=HELPER".to_string(),
+                "commit".to_string(),
+                "-m".to_string(),
+                "ship it".to_string(),
+            ],
+            Vec::new(),
+        )
+        .unwrap();
+
+        let tokens = invocation.match_tokens();
+
+        assert!(tokens.contains(&"commit".to_string()));
+        assert!(tokens.contains(&"-m".to_string()));
+        assert!(tokens.contains(&"--config-env".to_string()));
+        assert!(tokens.contains(&"--option-value=-m=ship it".to_string()));
+        assert!(
+            tokens.contains(&"--option-value=--config-env=credential.helper=HELPER".to_string())
+        );
+    }
+
+    #[test]
+    fn emits_option_value_tokens_for_attached_short_values() {
+        let invocation = CommandInvocation::from_exec(
+            "git",
+            &[
+                "git".to_string(),
+                "-ccore.hooksPath=/tmp/evil".to_string(),
+                "status".to_string(),
+            ],
+            Vec::new(),
+        )
+        .unwrap();
+
+        let tokens = invocation.match_tokens();
+
+        assert!(tokens.contains(&"-c".to_string()));
+        assert!(tokens.contains(&"status".to_string()));
+        assert!(tokens.contains(&"--option-value=-c=core.hooksPath=/tmp/evil".to_string()));
+    }
+
+    #[test]
+    fn emits_option_value_tokens_for_clustered_short_values() {
+        let invocation = CommandInvocation::from_exec(
+            "git",
+            &[
+                "git".to_string(),
+                "commit".to_string(),
+                "-nm".to_string(),
+                "message".to_string(),
+            ],
+            Vec::new(),
+        )
+        .unwrap();
+
+        let tokens = invocation.match_tokens();
+
+        assert!(tokens.contains(&"commit".to_string()));
+        assert!(tokens.contains(&"-nm".to_string()));
+        assert!(tokens.contains(&"--option-value=-m=message".to_string()));
+        assert!(!tokens.contains(&"message".to_string()));
     }
 
     #[test]

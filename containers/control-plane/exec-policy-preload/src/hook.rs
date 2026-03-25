@@ -198,6 +198,36 @@ mod tests {
     }
 
     #[test]
+    fn denies_git_hooks_path_config_overrides() {
+        let repo = setup_repo("pre-tool-use-hooks-path");
+
+        let dash_c = evaluate_pre_tool_use(&hook_input(
+            &repo,
+            "git -c core.hooksPath=/tmp/evil commit -m \"skip hooks\"",
+            "bash",
+        ))
+        .unwrap()
+        .unwrap();
+        let config_env = evaluate_pre_tool_use(&hook_input(
+            &repo,
+            "HOOKS=/tmp/evil git --config-env=core.hooksPath=HOOKS status --short",
+            "bash",
+        ))
+        .unwrap()
+        .unwrap();
+
+        assert!(
+            dash_c
+                .permission_decision_reason
+                .contains("core.hooksPath overrides")
+        );
+        assert_eq!(
+            config_env.permission_decision_reason,
+            dash_c.permission_decision_reason
+        );
+    }
+
+    #[test]
     fn allows_safe_git_commands_and_non_bash_tools() {
         let repo = setup_repo("pre-tool-use-allow");
 

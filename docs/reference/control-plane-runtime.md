@@ -105,6 +105,7 @@ Git 側では次を固定します。
 - `main` / `master` への commit / push
 - `git commit --no-verify`
 - `git push --no-verify`
+- `git -c core.hooksPath=...` や同等の hooksPath override
 - `git push --force` / `-f`
 - 危険な Git config 環境変数 override
 

@@ -107,12 +107,25 @@ mod tests {
             std::env::set_var("GIT_CONFIG_GLOBAL", "/managed");
         }
         let config = CompiledConfig {
-            command_rules: vec![CompiledRule {
-                reason: "blocked".to_string(),
-                basename_pattern: Regex::new("^(?:git)$").unwrap(),
-                command_patterns: vec![Regex::new("^(?:commit)$").unwrap()],
-                option_patterns: vec![Regex::new("^(?:--no-verify|-n|-[^-]*n[^-]*)$").unwrap()],
-            }],
+            command_rules: vec![
+                CompiledRule {
+                    reason: "blocked".to_string(),
+                    basename_pattern: Regex::new("^(?:git)$").unwrap(),
+                    command_patterns: vec![Regex::new("^(?:commit)$").unwrap()],
+                    option_patterns: vec![Regex::new("^(?:--no-verify|-n|-[^-]*n[^-]*)$").unwrap()],
+                },
+                CompiledRule {
+                    reason: "hooks path blocked".to_string(),
+                    basename_pattern: Regex::new("^(?:git)$").unwrap(),
+                    command_patterns: Vec::new(),
+                    option_patterns: vec![
+                        Regex::new(
+                            "^(?:--option-value=(?:-c|--config-env)=(?i:core\\.hookspath=.*))$",
+                        )
+                        .unwrap(),
+                    ],
+                },
+            ],
             protected_environments: vec![Regex::new("^(?:GIT_CONFIG_GLOBAL)$").unwrap()],
         };
         let rule_invocation = CommandInvocation::from_exec(
@@ -154,6 +167,17 @@ mod tests {
             }],
         )
         .unwrap();
+        let hooks_path_invocation = CommandInvocation::from_exec(
+            "git",
+            &[
+                "git".to_string(),
+                "-c".to_string(),
+                "core.hooksPath=/tmp/evil".to_string(),
+                "status".to_string(),
+            ],
+            Vec::new(),
+        )
+        .unwrap();
 
         assert_eq!(
             match_exec_rule(&config, &rule_invocation).as_deref(),
@@ -170,5 +194,9 @@ mod tests {
                 .contains("Protected environment overrides are blocked")
         );
         assert_eq!(match_exec_rule(&config, &managed_env_invocation), None);
+        assert_eq!(
+            match_exec_rule(&config, &hooks_path_invocation).as_deref(),
+            Some("hooks path blocked")
+        );
     }
 }

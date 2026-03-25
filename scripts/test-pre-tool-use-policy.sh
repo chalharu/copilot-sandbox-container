@@ -105,6 +105,14 @@ printf '%s\n' "${commit_cluster_deny}" | jq -e '.permissionDecisionReason | cont
 commit_attached_value_allow="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git commit -mn\"}"}')"
 test -z "${commit_attached_value_allow}"
 
+hooks_path_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git -c core.hooksPath=/tmp/evil commit -m \\\"skip\\\"\"}"}')"
+printf '%s\n' "${hooks_path_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
+printf '%s\n' "${hooks_path_deny}" | jq -e '.permissionDecisionReason | contains("core.hooksPath overrides")' >/dev/null
+
+hooks_path_env_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"HOOKS=/tmp/evil git --config-env=core.hooksPath=HOOKS status --short\"}"}')"
+printf '%s\n' "${hooks_path_env_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
+printf '%s\n' "${hooks_path_env_deny}" | jq -e '.permissionDecisionReason | contains("core.hooksPath overrides")' >/dev/null
+
 push_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git push origin HEAD --no-verify\"}"}')"
 printf '%s\n' "${push_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
 printf '%s\n' "${push_deny}" | jq -e '.permissionDecisionReason | contains("git push --no-verify")' >/dev/null
@@ -146,6 +154,8 @@ printf '%s\n' "${override_deny}" | jq -e '.permissionDecision == "deny"' >/dev/n
 printf '%s\n' "${override_deny}" | jq -e '.permissionDecisionReason == "repo-local policy"' >/dev/null
 
 assert_denied_exec 'git commit --no-verify' git commit --no-verify -m skip
+assert_denied_exec 'core.hooksPath overrides are blocked' git -c core.hooksPath=/tmp/evil commit -m skip
+assert_denied_exec 'core.hooksPath overrides are blocked' env HOOKS=/tmp/evil git --config-env=core.hooksPath=HOOKS status --short
 assert_denied_exec 'Force pushes are blocked' git push -f origin HEAD
 assert_denied_exec 'Protected environment overrides are blocked' env GIT_CONFIG_GLOBAL=/tmp/evil git status --short
 assert_denied_exec 'repo-local policy' git status --short

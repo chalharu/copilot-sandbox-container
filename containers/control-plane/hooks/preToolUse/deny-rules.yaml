@@ -1,6 +1,10 @@
 commandRules:
   - rule:
       - git
+      - --option-value=(?:-c|--config-env)=(?i:core\.hookspath=.*)
+    reason: git core.hooksPath overrides are blocked by control-plane policy. Use the managed hooks path provided by the control plane so hooks stay enforced.
+  - rule:
+      - git
       - commit
       - --no-verify|-n|-[^-]*n[^-]*
     reason: git commit --no-verify is blocked by control-plane policy. Run git commit without --no-verify so hooks stay enforced.
