@@ -125,9 +125,17 @@ mod tests {
             "bash",
         ))
         .unwrap();
+        let stacked_short_form = evaluate_pre_tool_use(&hook_input(
+            &repo,
+            "git commit -a -n -m \"skip hooks\"",
+            "bash",
+        ))
+        .unwrap();
         let clustered_short_form =
             evaluate_pre_tool_use(&hook_input(&repo, "git commit -nm \"skip hooks\"", "bash"))
                 .unwrap();
+        let attached_cluster_form =
+            evaluate_pre_tool_use(&hook_input(&repo, "git commit -mn", "bash")).unwrap();
 
         assert_eq!(
             long_form,
@@ -137,7 +145,9 @@ mod tests {
             })
         );
         assert_eq!(short_form, long_form);
+        assert_eq!(stacked_short_form, long_form);
         assert_eq!(clustered_short_form, long_form);
+        assert_eq!(attached_cluster_form, long_form);
     }
 
     #[test]
@@ -241,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn ignores_tokens_after_double_dash_and_message_values() {
+    fn ignores_tokens_after_double_dash() {
         let repo = setup_repo("pre-tool-use-double-dash");
 
         let double_dash = evaluate_pre_tool_use(&hook_input(
@@ -250,11 +260,8 @@ mod tests {
             "bash",
         ))
         .unwrap();
-        let message_value =
-            evaluate_pre_tool_use(&hook_input(&repo, "git commit -m \"-n\"", "bash")).unwrap();
 
         assert_eq!(double_dash, None);
-        assert_eq!(message_value, None);
     }
 
     #[test]

@@ -14,7 +14,6 @@ pub const PROTECTED_ENVIRONMENT_REASON: &str = "Protected environment overrides 
 pub struct CompiledConfig {
     pub command_rules: Vec<CompiledRule>,
     pub protected_environments: Vec<Regex>,
-    pub options_with_value: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -23,6 +22,17 @@ pub struct CompiledRule {
     pub basename_pattern: Regex,
     pub command_patterns: Vec<Regex>,
     pub option_patterns: Vec<Regex>,
+    pub matcher_groups: Vec<CompiledMatcher>,
+    pub argv_sequence_patterns: Vec<Regex>,
+}
+
+#[derive(Clone, Debug)]
+pub enum CompiledMatcher {
+    Command(Regex),
+    Option(Regex),
+    AllOf(Vec<CompiledMatcher>),
+    AnyOf(Vec<CompiledMatcher>),
+    SeqOf(Vec<Regex>),
 }
 
 #[derive(Debug, Deserialize)]
@@ -32,15 +42,33 @@ struct RawConfig {
     command_rules: Vec<RawRule>,
     #[serde(default, rename = "protectedEnvironments")]
     protected_environments: Vec<String>,
-    #[serde(default, rename = "optionsWithValue")]
-    options_with_value: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawRule {
-    rule: Vec<String>,
+    rule: Vec<RawMatcher>,
     reason: String,
+    #[serde(default, rename = "argvSequence")]
+    argv_sequence: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum RawMatcher {
+    Pattern(String),
+    Group(RawMatcherGroup),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawMatcherGroup {
+    #[serde(default, rename = "allOf")]
+    all_of: Option<Vec<RawMatcher>>,
+    #[serde(default, rename = "anyOf")]
+    any_of: Option<Vec<RawMatcher>>,
+    #[serde(default, rename = "seqOf")]
+    seq_of: Option<Vec<String>>,
 }
 
 static BUNDLED_RULES: OnceLock<Result<CompiledConfig, String>> = OnceLock::new();
@@ -93,11 +121,6 @@ pub fn load_rules(repo_root: Option<&Path>) -> Result<CompiledConfig, String> {
         config
             .protected_environments
             .extend(repo_config.protected_environments);
-        config
-            .options_with_value
-            .extend(repo_config.options_with_value);
-        config.options_with_value.sort();
-        config.options_with_value.dedup();
     }
     Ok(config)
 }
@@ -155,20 +178,10 @@ fn compile_config(
         config.protected_environments,
         &format!("protectedEnvironments in {}", path.display()),
     )?;
-    let mut options_with_value = compile_option_names(
-        config.options_with_value,
-        &format!("optionsWithValue in {}", path.display()),
-    )?;
-    options_with_value.sort();
-    options_with_value.dedup();
 
-    if !optional
-        && command_rules.is_empty()
-        && protected_environments.is_empty()
-        && options_with_value.is_empty()
-    {
+    if !optional && command_rules.is_empty() && protected_environments.is_empty() {
         return Err(format!(
-            "{} must define at least one commandRules entry, protectedEnvironments pattern, or optionsWithValue entry.",
+            "{} must define at least one commandRules entry or protectedEnvironments pattern.",
             path.display()
         ));
     }
@@ -176,7 +189,6 @@ fn compile_config(
     Ok(CompiledConfig {
         command_rules,
         protected_environments,
-        options_with_value,
     })
 }
 
@@ -191,39 +203,146 @@ fn compile_rule(rule: RawRule, path: &Path, rule_index: usize) -> Result<Compile
         ));
     }
     let mut raw_patterns = rule.rule.into_iter();
-    let basename = raw_patterns
+    let basename = match raw_patterns
         .next()
-        .expect("rule must contain at least one pattern after validation");
-    let remaining_patterns: Vec<String> = raw_patterns.collect();
+        .expect("rule must contain at least one pattern after validation")
+    {
+        RawMatcher::Pattern(pattern) => pattern,
+        RawMatcher::Group(_) => {
+            return Err(format!(
+                "basename in {description} must be a string pattern, not a matcher group."
+            ));
+        }
+    };
+
+    let mut command_patterns = Vec::new();
+    let mut option_patterns = Vec::new();
+    let mut matcher_groups = Vec::new();
+    for (index, matcher) in raw_patterns.enumerate() {
+        match matcher {
+            RawMatcher::Pattern(entry) => {
+                let regex = compile_pattern(
+                    entry.clone(),
+                    &format!("rule patterns in {description}"),
+                    index + 2,
+                )?;
+                if entry.starts_with('-') {
+                    option_patterns.push(regex);
+                } else {
+                    command_patterns.push(regex);
+                }
+            }
+            RawMatcher::Group(group) => matcher_groups.push(compile_matcher_group(
+                group,
+                &description,
+                format!("{}", index + 2),
+            )?),
+        }
+    }
 
     Ok(CompiledRule {
         reason: rule.reason,
         basename_pattern: compile_pattern(basename, &format!("basename in {description}"), 1)?,
-        command_patterns: remaining_patterns
-            .iter()
-            .enumerate()
-            .filter(|(_, entry)| !entry.starts_with('-'))
-            .map(|(index, entry)| {
-                compile_pattern(
-                    entry.clone(),
-                    &format!("command patterns in {description}"),
-                    index + 2,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-        option_patterns: remaining_patterns
-            .into_iter()
-            .enumerate()
-            .filter(|(_, entry)| entry.starts_with('-'))
-            .map(|(index, entry)| {
-                compile_pattern(
-                    entry,
-                    &format!("option patterns in {description}"),
-                    index + 2,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?,
+        command_patterns,
+        option_patterns,
+        matcher_groups,
+        argv_sequence_patterns: compile_patterns(
+            rule.argv_sequence,
+            &format!("argvSequence in {description}"),
+        )?,
     })
+}
+
+fn compile_matcher(
+    matcher: RawMatcher,
+    description: &str,
+    index_path: String,
+) -> Result<CompiledMatcher, String> {
+    match matcher {
+        RawMatcher::Pattern(entry) => {
+            let regex = compile_pattern(
+                entry.clone(),
+                &format!("matcher group {index_path} in {description}"),
+                1,
+            )?;
+            Ok(if entry.starts_with('-') {
+                CompiledMatcher::Option(regex)
+            } else {
+                CompiledMatcher::Command(regex)
+            })
+        }
+        RawMatcher::Group(group) => compile_matcher_group(group, description, index_path),
+    }
+}
+
+fn compile_matcher_group(
+    group: RawMatcherGroup,
+    description: &str,
+    index_path: String,
+) -> Result<CompiledMatcher, String> {
+    let kind_count = usize::from(group.all_of.is_some())
+        + usize::from(group.any_of.is_some())
+        + usize::from(group.seq_of.is_some());
+    if kind_count != 1 {
+        return Err(format!(
+            "matcher group {index_path} in {description} must define exactly one of allOf, anyOf, or seqOf."
+        ));
+    }
+
+    if let Some(entries) = group.all_of {
+        if entries.is_empty() {
+            return Err(format!(
+                "allOf matcher group {index_path} in {description} must be non-empty."
+            ));
+        }
+        return Ok(CompiledMatcher::AllOf(
+            entries
+                .into_iter()
+                .enumerate()
+                .map(|(index, entry)| {
+                    compile_matcher(
+                        entry,
+                        description,
+                        format!("{index_path}.allOf.{}", index + 1),
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        ));
+    }
+
+    if let Some(entries) = group.any_of {
+        if entries.is_empty() {
+            return Err(format!(
+                "anyOf matcher group {index_path} in {description} must be non-empty."
+            ));
+        }
+        return Ok(CompiledMatcher::AnyOf(
+            entries
+                .into_iter()
+                .enumerate()
+                .map(|(index, entry)| {
+                    compile_matcher(
+                        entry,
+                        description,
+                        format!("{index_path}.anyOf.{}", index + 1),
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        ));
+    }
+
+    let seq_entries = group
+        .seq_of
+        .expect("validated matcher group should define seqOf");
+    if seq_entries.is_empty() {
+        return Err(format!(
+            "seqOf matcher group {index_path} in {description} must be non-empty."
+        ));
+    }
+    Ok(CompiledMatcher::SeqOf(compile_patterns(
+        seq_entries,
+        &format!("seqOf matcher group {index_path} in {description}"),
+    )?))
 }
 
 fn compile_patterns(entries: Vec<String>, description: &str) -> Result<Vec<Regex>, String> {
@@ -231,33 +350,6 @@ fn compile_patterns(entries: Vec<String>, description: &str) -> Result<Vec<Regex
         .into_iter()
         .enumerate()
         .map(|(index, entry)| compile_pattern(entry, description, index + 1))
-        .collect()
-}
-
-fn compile_option_names(entries: Vec<String>, description: &str) -> Result<Vec<String>, String> {
-    entries
-        .into_iter()
-        .enumerate()
-        .map(|(index, entry)| {
-            let expanded = expand_env_placeholders(&entry);
-            let trimmed = expanded.trim();
-            if trimmed.is_empty() {
-                return Err(format!(
-                    "option {} in {} must be a non-empty string.",
-                    index + 1,
-                    description
-                ));
-            }
-            if !trimmed.starts_with('-') {
-                return Err(format!(
-                    "option {} in {} must start with '-': {}",
-                    index + 1,
-                    description,
-                    trimmed
-                ));
-            }
-            Ok(trimmed.to_string())
-        })
         .collect()
 }
 
@@ -314,20 +406,26 @@ mod tests {
 commandRules:
   - rule:
       - git
-      - commit
-      - --no-verify|-n
+      - allOf:
+          - commit
+          - anyOf:
+              - --no-verify
+              - -[A-Za-z0-9]*n[A-Za-z0-9]*
+      - anyOf:
+          - --config-env=(?i:core\.hookspath=.*)
+          - seqOf:
+              - --config-env
+              - (?i:core\.hookspath=.*)
     reason: commit blocked
 protectedEnvironments:
   - GIT_CONFIG_GLOBAL
-optionsWithValue:
-  - -m
 "#;
 
         let config = parse_config(yaml, Path::new("/tmp/rules.yaml"), false).unwrap();
 
         assert_eq!(config.command_rules.len(), 1);
         assert_eq!(config.protected_environments.len(), 1);
-        assert_eq!(config.options_with_value, vec!["-m".to_string()]);
+        assert_eq!(config.command_rules[0].matcher_groups.len(), 2);
     }
 
     #[test]
@@ -364,30 +462,11 @@ commandRules:
     }
 
     #[test]
-    fn parse_config_rejects_non_option_options_with_value_entries() {
-        let yaml = r#"
-commandRules:
-  - rule:
-      - git
-      - status
-    reason: status blocked
-optionsWithValue:
-  - message
-"#;
-
-        let error = parse_config(yaml, Path::new("/tmp/rules.yaml"), false).unwrap_err();
-
-        assert!(error.contains("optionsWithValue"));
-        assert!(error.contains("must start with '-'"));
-    }
-
-    #[test]
     fn parse_config_allows_empty_optional_repo_config() {
         let config = parse_config("", Path::new("/tmp/repo-rules.yaml"), true).unwrap();
 
         assert!(config.command_rules.is_empty());
         assert!(config.protected_environments.is_empty());
-        assert!(config.options_with_value.is_empty());
     }
 
     #[test]

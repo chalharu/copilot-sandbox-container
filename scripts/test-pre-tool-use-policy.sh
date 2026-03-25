@@ -98,12 +98,17 @@ commit_short_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":
 printf '%s\n' "${commit_short_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
 printf '%s\n' "${commit_short_deny}" | jq -e '.permissionDecisionReason | contains("git commit --no-verify")' >/dev/null
 
+commit_stacked_short_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git commit -a -n -m \\\"skip\\\"\"}"}')"
+printf '%s\n' "${commit_stacked_short_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
+printf '%s\n' "${commit_stacked_short_deny}" | jq -e '.permissionDecisionReason | contains("git commit --no-verify")' >/dev/null
+
 commit_cluster_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git commit -nm \\\"skip\\\"\"}"}')"
 printf '%s\n' "${commit_cluster_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
 printf '%s\n' "${commit_cluster_deny}" | jq -e '.permissionDecisionReason | contains("git commit --no-verify")' >/dev/null
 
-commit_attached_value_allow="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git commit -mn\"}"}')"
-test -z "${commit_attached_value_allow}"
+commit_attached_cluster_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git commit -mn\"}"}')"
+printf '%s\n' "${commit_attached_cluster_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
+printf '%s\n' "${commit_attached_cluster_deny}" | jq -e '.permissionDecisionReason | contains("git commit --no-verify")' >/dev/null
 
 hooks_path_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git -c core.hooksPath=/tmp/evil commit -m \\\"skip\\\"\"}"}')"
 printf '%s\n' "${hooks_path_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null

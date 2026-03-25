@@ -353,9 +353,10 @@ mod tests {
                 basename_pattern: Regex::new("^(?:git)$").unwrap(),
                 command_patterns: vec![Regex::new("^(?:push)$").unwrap()],
                 option_patterns: vec![Regex::new("^(?:-f)$").unwrap()],
+                matcher_groups: Vec::new(),
+                argv_sequence_patterns: Vec::new(),
             }],
             protected_environments: vec![Regex::new("^(?:GIT_CONFIG_GLOBAL)$").unwrap()],
-            options_with_value: Vec::new(),
         };
         let invocation = CommandInvocation::from_exec(
             "git",

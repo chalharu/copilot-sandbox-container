@@ -1,52 +1,37 @@
-optionsWithValue:
-  - -c
-  - -C
-  - -F
-  - -m
-  - -o
-  - -t
-  - --author
-  - --cleanup
-  - --config-env
-  - --date
-  - --exec
-  - --exec-path
-  - --file
-  - --fixup
-  - --git-dir
-  - --literal-pathspecs-from-file
-  - --message
-  - --namespace
-  - --pathspec-from-file
-  - --push-option
-  - --reedit-message
-  - --receive-pack
-  - --repo
-  - --reuse-message
-  - --squash
-  - --super-prefix
-  - --template
-  - --trailer
-  - --work-tree
 commandRules:
   - rule:
       - git
-      - --option-value=(?:-c|--config-env)=(?i:core\.hookspath=.*)
+      - anyOf:
+          - -c(?i:core\.hookspath=.*)
+          - seqOf:
+              - -c
+              - (?i:core\.hookspath=.*)
+          - --config-env=(?i:core\.hookspath=.*)
+          - seqOf:
+              - --config-env
+              - (?i:core\.hookspath=.*)
     reason: git core.hooksPath overrides are blocked by control-plane policy. Use the managed hooks path provided by the control plane so hooks stay enforced.
   - rule:
       - git
-      - commit
-      - --no-verify|-n|-[^-]*n[^-]*
+      - allOf:
+          - commit
+          - anyOf:
+              - --no-verify
+              - -[A-Za-z0-9]*n[A-Za-z0-9]*
     reason: git commit --no-verify is blocked by control-plane policy. Run git commit without --no-verify so hooks stay enforced.
   - rule:
       - git
-      - push
-      - --no-verify
+      - allOf:
+          - push
+          - --no-verify
     reason: git push --no-verify is blocked by control-plane policy. Run git push without --no-verify so push hooks still run.
   - rule:
       - git
-      - push
-      - --force|-f|-[^-]*f[^-]*
+      - allOf:
+          - push
+          - anyOf:
+              - --force
+              - -[A-Za-z0-9]*f[A-Za-z0-9]*
     reason: Force pushes are blocked by control-plane policy. Push without --force. Use --force-with-lease when you need a guarded overwrite.
 protectedEnvironments:
   - GIT_CONFIG_GLOBAL
