@@ -112,13 +112,12 @@ metadata:
   namespace: copilot-sandbox
 spec:
   accessModes:
-    - ReadWriteOncePod
+    - ReadWriteOnce
   resources:
     requests:
       storage: 5Gi
-  # Use a storage class whose CSI driver supports ReadWriteOncePod. The
-  # sample sidecar builder keeps roughly 20% headroom by capping the cached
-  # toolchain artifacts at 4 GiB inside this 5 GiB PVC.
+  # The dedicated sccache-dist deployment keeps roughly 20% headroom by
+  # capping the cached toolchain artifacts at 4 GiB inside this 5 GiB PVC.
   storageClassName: standard
 ---
 apiVersion: v1
@@ -214,8 +213,8 @@ data:
   CONTROL_PLANE_WORKSPACE_PVC: control-plane-workspace-pvc
   CONTROL_PLANE_WORKSPACE_SUBPATH: workspace
   # Rust Kubernetes jobs use sccache-dist over the cluster network. The client
-  # token stays in a dedicated Secret mount, while the sidecar builder keeps the
-  # shared toolchain cache on its own RWOP PVC.
+  # token stays in a dedicated Secret mount, while the standalone sccache-dist
+  # deployment keeps the shared toolchain cache on its own RWO PVC.
   SCCACHE_DIST_SCHEDULER_URL: http://sccache-dist.copilot-sandbox.svc.cluster.local:10600
   SCCACHE_DIST_CLIENT_TOKEN_FILE: /var/run/sccache-dist-auth-client/client-token
   SCCACHE_DIST_SCHEDULER_BIND_ADDR: 0.0.0.0:10600
@@ -289,14 +288,158 @@ metadata:
   name: sccache-dist
   namespace: copilot-sandbox
   labels:
-    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/name: sccache-dist
 spec:
   selector:
-    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/name: sccache-dist
   ports:
     - name: scheduler
       port: 10600
       targetPort: dist-sch
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sccache-dist
+  namespace: copilot-sandbox
+  labels:
+    app.kubernetes.io/name: sccache-dist
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sccache-dist
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sccache-dist
+    spec:
+      # Upstream sccache-dist scheduler/server binaries only support Linux/x86_64.
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      containers:
+        - name: sccache-dist-scheduler
+          image: ghcr.io/chalharu/copilot-sandbox-container/sccache-dist:0.14.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /usr/local/bin/sccache-dist-entrypoint
+            - scheduler
+          envFrom:
+            - configMapRef:
+                name: control-plane-env
+          env:
+            - name: SCCACHE_DIST_SERVER_TOKEN_FILE
+              value: /var/run/sccache-dist-auth-server/server-token
+          ports:
+            - containerPort: 10600
+              name: dist-sch
+          readinessProbe:
+            tcpSocket:
+              port: dist-sch
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: dist-sch
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: sccache-dist-auth-client
+              mountPath: /var/run/sccache-dist-auth-client
+              readOnly: true
+            - name: sccache-dist-auth-server
+              mountPath: /var/run/sccache-dist-auth-server
+              readOnly: true
+        - name: sccache-dist-builder
+          image: ghcr.io/chalharu/copilot-sandbox-container/sccache-dist:0.14.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /usr/local/bin/sccache-dist-entrypoint
+            - server
+          envFrom:
+            - configMapRef:
+                name: control-plane-env
+          env:
+            - name: SCCACHE_DIST_SERVER_TOKEN_FILE
+              value: /var/run/sccache-dist-auth-server/server-token
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.podIP
+            - name: SCCACHE_DIST_SERVER_PUBLIC_ADDR
+              value: $(POD_IP):10501
+          securityContext:
+            privileged: false
+            runAsUser: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: true
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+                - SETGID
+                - SETUID
+                - SYS_ADMIN
+                - SYS_CHROOT
+            seccompProfile:
+              type: Unconfined
+          ports:
+            - containerPort: 10501
+              name: dist-bld
+          readinessProbe:
+            tcpSocket:
+              port: dist-bld
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: dist-bld
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: sccache-dist
+              mountPath: /var/cache/sccache-dist
+            - name: sccache-dist-auth-server
+              mountPath: /var/run/sccache-dist-auth-server
+              readOnly: true
+      volumes:
+        - name: sccache-dist
+          persistentVolumeClaim:
+            claimName: control-plane-sccache-pvc
+        - name: sccache-dist-auth-client
+          secret:
+            secretName: sccache-dist-auth
+            items:
+              - key: client-token
+                path: client-token
+        - name: sccache-dist-auth-server
+          secret:
+            secretName: sccache-dist-auth
+            items:
+              - key: server-token
+                path: server-token
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -324,11 +467,6 @@ spec:
       securityContext:
         fsGroup: 1000
       serviceAccountName: control-plane
-      # Upstream sccache-dist scheduler/server binaries only support Linux/x86_64.
-      # If you need an arm64-only cluster, remove the dist sidecars/env and let
-      # Rust jobs fall back to local /workspace/cache/<repo>/<branch>/sccache.
-      nodeSelector:
-        kubernetes.io/arch: amd64
       initContainers:
         - name: init-state-dirs
           # renovate: datasource=docker depName=busybox versioning=docker
@@ -531,111 +669,6 @@ spec:
             - name: sccache-dist-auth-client
               mountPath: /var/run/sccache-dist-auth-client
               readOnly: true
-        - name: sccache-dist-scheduler
-          # Upstream sccache-dist scheduler/server binaries are Linux/x86_64 only.
-          image: ghcr.io/chalharu/copilot-sandbox-container/sccache-dist:0.14.0
-          imagePullPolicy: IfNotPresent
-          command:
-            - /usr/local/bin/sccache-dist-entrypoint
-            - scheduler
-          envFrom:
-            - configMapRef:
-                name: control-plane-env
-          env:
-            - name: SCCACHE_DIST_SERVER_TOKEN_FILE
-              value: /var/run/sccache-dist-auth-server/server-token
-          ports:
-            - containerPort: 10600
-              name: dist-sch
-          readinessProbe:
-            tcpSocket:
-              port: dist-sch
-            periodSeconds: 5
-            failureThreshold: 12
-          livenessProbe:
-            tcpSocket:
-              port: dist-sch
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            failureThreshold: 6
-          resources:
-            requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
-              cpu: 500m
-              memory: 512Mi
-          volumeMounts:
-            - name: sccache-dist-auth-client
-              mountPath: /var/run/sccache-dist-auth-client
-              readOnly: true
-            - name: sccache-dist-auth-server
-              mountPath: /var/run/sccache-dist-auth-server
-              readOnly: true
-        - name: sccache-dist-builder
-          image: ghcr.io/chalharu/copilot-sandbox-container/sccache-dist:0.14.0
-          imagePullPolicy: IfNotPresent
-          command:
-            - /usr/local/bin/sccache-dist-entrypoint
-            - server
-          envFrom:
-            - configMapRef:
-                name: control-plane-env
-          env:
-            - name: SCCACHE_DIST_SERVER_TOKEN_FILE
-              value: /var/run/sccache-dist-auth-server/server-token
-            - name: POD_IP
-              valueFrom:
-                fieldRef:
-                  apiVersion: v1
-                  fieldPath: status.podIP
-            - name: SCCACHE_DIST_SERVER_PUBLIC_ADDR
-              value: $(POD_IP):10501
-          securityContext:
-            privileged: false
-            runAsUser: 0
-            runAsNonRoot: false
-            allowPrivilegeEscalation: true
-            capabilities:
-              drop:
-                - ALL
-              add:
-                - CHOWN
-                - DAC_OVERRIDE
-                - FOWNER
-                - SETGID
-                - SETUID
-                - SYS_ADMIN
-                - SYS_CHROOT
-            seccompProfile:
-              type: Unconfined
-          ports:
-            - containerPort: 10501
-              name: dist-bld
-          readinessProbe:
-            tcpSocket:
-              port: dist-bld
-            periodSeconds: 5
-            failureThreshold: 12
-          livenessProbe:
-            tcpSocket:
-              port: dist-bld
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            failureThreshold: 6
-          resources:
-            requests:
-              cpu: 250m
-              memory: 512Mi
-            limits:
-              cpu: "2"
-              memory: 2Gi
-          volumeMounts:
-            - name: sccache-dist
-              mountPath: /var/cache/sccache-dist
-            - name: sccache-dist-auth-server
-              mountPath: /var/run/sccache-dist-auth-server
-              readOnly: true
       volumes:
         - name: copilot-session
           persistentVolumeClaim:
@@ -643,9 +676,6 @@ spec:
         - name: workspace
           persistentVolumeClaim:
             claimName: control-plane-workspace-pvc
-        - name: sccache-dist
-          persistentVolumeClaim:
-            claimName: control-plane-sccache-pvc
         - name: cache
           emptyDir: {}
         # Optional advanced rootless profile: if your cluster policy allows
@@ -671,12 +701,6 @@ spec:
             items:
               - key: client-token
                 path: client-token
-        - name: sccache-dist-auth-server
-          secret:
-            secretName: sccache-dist-auth
-            items:
-              - key: server-token
-                path: server-token
         - name: control-plane-config
           configMap:
             name: control-plane-config

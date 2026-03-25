@@ -15,9 +15,9 @@
 - `CONTROL_PLANE_JOB_NAMESPACE` lacks the PVC-backed `/workspace` mount that long-running jobs need.
 - `CONTROL_PLANE_K8S_NAMESPACE` does expose the `/workspace` PVC, but the default runtime env points to a missing `control-plane-job` service account there. Clear `CONTROL_PLANE_JOB_SERVICE_ACCOUNT` before starting the job.
 - Clone the pushed branch into `/var/tmp/containerized-rust/<repo>/<branch>/src` so `.git`, temp files, and `target` stay ephemeral. Unpushed local changes are not visible to the job.
-- Keep reusable `cargo` and `rustup` caches in `/workspace/cache/<repo>/<branch>`, but keep the clone, temp files, and `target` under `/var/tmp/containerized-rust/<repo>/<branch>`.
-- When `SCCACHE_DIST_SCHEDULER_URL` and `SCCACHE_DIST_CLIENT_TOKEN_FILE` are available, keep only ephemeral client state under `/var/tmp/containerized-rust/<repo>/<branch>/sccache` and send reusable toolchains through the `sccache-dist` Service. Without dist mode, keep `sccache` under `/workspace/cache/<repo>/<branch>/sccache` and cap it with `SCCACHE_CACHE_SIZE`.
-- The local helper still reuses `containers/sccache/` for the `sccache` client binary, while the sample manifest publishes the scheduler/builder sidecars from `containers/sccache-dist/`.
+- Keep reusable `cargo` and `rustup` caches in `/workspace/cache/<repo>/<branch>`, but keep the clone, temp files, `target`, and `sccache` under `/var/tmp/containerized-rust/<repo>/<branch>`.
+- When `SCCACHE_DIST_SCHEDULER_URL` and `SCCACHE_DIST_CLIENT_TOKEN_FILE` are available, keep only ephemeral client state under `/var/tmp/containerized-rust/<repo>/<branch>/sccache` and send reusable toolchains through the `sccache-dist` Service. Without dist mode, keep the same ephemeral `sccache` path and cap it with `SCCACHE_CACHE_SIZE`.
+- The local helper still reuses `containers/sccache/` for the `sccache` client binary, while the sample manifest publishes a standalone scheduler/builder Deployment from `containers/sccache-dist/`.
 - Upstream `sccache-dist` scheduler/server binaries currently target Linux/x86_64 only. On other cluster architectures, leave dist mode disabled and rely on the local fallback cache path instead.
 - `k8s-rust.sh` injects its local installer scripts into the job so bootstrap changes can be validated before push, but the Rust source build/test still runs against the pushed branch clone.
 - The default `control-plane-run` job limit is `2Gi` memory here. First-time `cargo install --locked sccache` can be OOM-killed unless it is serialized with `CARGO_BUILD_JOBS=1` (or `SCCACHE_BOOTSTRAP_JOBS=1` when using `k8s-rust.sh`).
@@ -34,11 +34,10 @@
 - Kubernetes job caches:
   - `/workspace/cache/<repo>/<branch>/rustup`
   - `/workspace/cache/<repo>/<branch>/cargo`
-  - `/workspace/cache/<repo>/<branch>/sccache` (local fallback only)
-  - `/var/tmp/containerized-rust/<repo>/<branch>/sccache` (`sccache-dist` client state)
+  - `/var/tmp/containerized-rust/<repo>/<branch>/sccache` (local fallback and `sccache-dist` client state)
   - `/var/tmp/containerized-rust/<repo>/<branch>/dist-client` (`sccache-dist` toolchain cache)
   - `/var/tmp/containerized-rust/<repo>/<branch>/target`
-- `sccache-dist-builder` keeps the shared toolchain cache under `/var/cache/sccache-dist` on the dedicated RWOP PVC.
+- The standalone `sccache-dist` Deployment keeps the shared toolchain cache under `/var/cache/sccache-dist` on the dedicated RWO PVC.
 - Set `RUSTC_WRAPPER=sccache`, `CARGO_TARGET_DIR` to the ephemeral target directory, and `CARGO_INCREMENTAL=0` so repeated runs favor reusable cache hits over per-run incremental artifacts.
 - When invoking `cargo llvm-cov`, also ensure the toolchain has `llvm-tools-preview` installed before running coverage.
 

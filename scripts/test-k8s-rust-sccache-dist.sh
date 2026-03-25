@@ -52,6 +52,16 @@ assert_contains() {
   }
 }
 
+assert_not_contains() {
+  local path="$1"
+  local unexpected="$2"
+
+  if grep -Fq -- "${unexpected}" "${path}"; then
+    printf 'Did not expect %s to contain: %s\n' "${path}" "${unexpected}" >&2
+    exit 1
+  fi
+}
+
 run_helper() {
   local script_capture_path="$1"
   shift
@@ -77,7 +87,8 @@ assert_contains "${local_script}" 'branch=test-branch'
 assert_contains "${local_script}" 'repo_url=https://example.com/chalharu/copilot-sandbox-container.git'
 assert_contains "${local_script}" 'sccache_dist_enabled=0'
 assert_contains "${local_script}" 'sccache_dir='
-assert_contains "${local_script}" "\${cache_root}/sccache"
+assert_contains "${local_script}" "\${ephemeral_root}/sccache"
+assert_not_contains "${local_script}" "\${cache_root}/sccache"
 assert_contains "${local_script}" 'SCCACHE_CACHE_SIZE:-10G'
 
 printf '%s\n' 'k8s-rust-sccache-dist-test: verifying dist-client wiring' >&2

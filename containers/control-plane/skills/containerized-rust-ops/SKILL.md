@@ -42,7 +42,7 @@ Examples:
 - `bash ~/.copilot/skills/containerized-rust-ops/scripts/k8s-rust.sh -- cargo test --workspace --all-targets -- --nocapture`
 - `bash ~/.copilot/skills/containerized-rust-ops/scripts/k8s-rust.sh -- cargo llvm-cov --workspace --all-targets --summary-only`
 
-The Kubernetes helper keeps the clone, temp files, and `target` under `/var/tmp/containerized-rust/...`, while `cargo` and `rustup` stay under `/workspace/cache/...`. When the runtime exposes `SCCACHE_DIST_SCHEDULER_URL` plus `SCCACHE_DIST_CLIENT_TOKEN_FILE`, `k8s-rust.sh` writes an `SCCACHE_CONF` for `sccache-dist` and keeps only ephemeral client state under `/var/tmp/containerized-rust/.../sccache`. The sample manifest serves those requests from the dedicated `containers/sccache-dist/` helper image. Without dist mode, it falls back to `/workspace/cache/<repo>/<branch>/sccache`.
+The Kubernetes helper keeps the clone, temp files, `target`, and `sccache` state under `/var/tmp/containerized-rust/...`, while `cargo` and `rustup` stay under `/workspace/cache/...`. When the runtime exposes `SCCACHE_DIST_SCHEDULER_URL` plus `SCCACHE_DIST_CLIENT_TOKEN_FILE`, `k8s-rust.sh` writes an `SCCACHE_CONF` for `sccache-dist`. The sample manifest serves those requests from a standalone `sccache-dist` Deployment backed by the dedicated `containers/sccache-dist/` helper image. Without dist mode, the helper still uses the same ephemeral `sccache` path so `/workspace` does not accumulate object-cache data.
 
 ## Keep cache-aware workflows aligned
 

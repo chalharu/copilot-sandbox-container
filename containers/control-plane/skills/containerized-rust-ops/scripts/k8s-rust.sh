@@ -8,11 +8,10 @@ Usage:
   k8s-rust.sh -- <command> [args...]
 
 Run Rust commands in a control-plane Kubernetes job with persistent cargo and
-rustup caches under /workspace/cache. Local-only runs keep the sccache object
-cache under /workspace/cache/<repo>/<branch>/sccache, while distributed runs
-connect to SCCACHE_DIST_SCHEDULER_URL and keep only ephemeral client state under
-/var/tmp. The clone, target directory, and temp files always live on ephemeral
-storage.
+rustup caches under /workspace/cache. Both local-only and distributed runs keep
+their sccache state under /var/tmp so the shared workspace PVC only carries the
+minimum reusable Rust toolchain data. The clone, target directory, and temp
+files always live on ephemeral storage.
 USAGE
 }
 
@@ -179,13 +178,10 @@ src_root=\"\${ephemeral_root}/src\"
 tmp_dir=\"\${ephemeral_root}/tmp\"
 cargo_home=\"\${cache_root}/cargo\"
 rustup_home=\"\${cache_root}/rustup\"
-sccache_dir=\"\${cache_root}/sccache\"
+sccache_dir=\"\${ephemeral_root}/sccache\"
 sccache_conf=\"\${tmp_dir}/sccache-client.toml\"
 sccache_dist_client_cache=\"\${ephemeral_root}/dist-client\"
 target_dir=\"\${ephemeral_root}/target\"
-if [ \"\${sccache_dist_enabled}\" = \"1\" ]; then
-  sccache_dir=\"\${ephemeral_root}/sccache\"
-fi
 mkdir -p \"\${tmp_dir}\" \"\${cargo_home}\" \"\${rustup_home}\" \"\${sccache_dir}\" \"\${target_dir}\" \"\${sccache_dist_client_cache}\"
 export TMPDIR=\"\${tmp_dir}\"
 if [ ! -x \"\${cargo_home}/bin/cargo\" ]; then
