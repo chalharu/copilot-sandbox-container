@@ -213,8 +213,8 @@ assert_file_contains "${rust_skill_file}" 'containers/sccache/Dockerfile'
 assert_file_contains "${rust_podman_script_file}" '/containers/sccache'
 assert_file_contains "${rust_podman_script_file}" 'sccache.context-sha256'
 assert_file_contains "${rust_podman_script_file}" 'CONTAINERIZED_RUST_CONTAINER_BIN'
-assert_file_contains "${rust_podman_script_file}" '"${container_cmd[@]}" cp "${container_id}:/usr/local/bin/sccache" "${sccache_binary}"'
-assert_file_contains "${rust_podman_script_file}" '-w "${workdir_container}"'
+assert_file_contains "${rust_podman_script_file}" "\"\${container_cmd[@]}\" cp \"\${container_id}:/usr/local/bin/sccache\" \"\${sccache_binary}\""
+assert_file_contains "${rust_podman_script_file}" "-w \"\${workdir_container}\""
 assert_file_not_contains "${rust_podman_script_file}" 'assets/sccache-image'
 assert_file_not_contains "${rust_podman_script_file}" '--entrypoint cat'
 assert_file_not_contains "${rust_skill_file}" '.github/skills/containerized-rust-ops'
