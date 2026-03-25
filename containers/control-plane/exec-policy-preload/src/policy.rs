@@ -32,7 +32,7 @@ pub fn match_exec_rule(config: &CompiledConfig, invocation: &CommandInvocation) 
 
 fn match_rule(rule: &CompiledRule, invocations: &[CommandInvocation]) -> Option<String> {
     for invocation in invocations {
-        let tokens = invocation.normalized_tokens();
+        let tokens = invocation.match_tokens();
         if rule_matches(rule, &tokens) {
             return Some(rule.reason.clone());
         }
@@ -111,7 +111,7 @@ mod tests {
                 reason: "blocked".to_string(),
                 basename_pattern: Regex::new("^(?:git)$").unwrap(),
                 command_patterns: vec![Regex::new("^(?:commit)$").unwrap()],
-                option_patterns: vec![Regex::new("^(?:--no-verify|-n)$").unwrap()],
+                option_patterns: vec![Regex::new("^(?:--no-verify|-n|-[^-]*n[^-]*)$").unwrap()],
             }],
             protected_environments: vec![Regex::new("^(?:GIT_CONFIG_GLOBAL)$").unwrap()],
         };
@@ -129,8 +129,9 @@ mod tests {
             "git",
             &[
                 "git".to_string(),
-                "--no-verify".to_string(),
                 "commit".to_string(),
+                "-nm".to_string(),
+                "skip hooks".to_string(),
             ],
             Vec::new(),
         )

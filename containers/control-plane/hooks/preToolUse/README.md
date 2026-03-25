@@ -19,6 +19,6 @@ commandRules:
 
 ## Matching model
 
-`bash.command` は生文字列 grep ではなく、shell 風 token 化と command chain 分割、`sh -c` / `bash -lc` unwrap、環境変数 prefix 解析を行ったうえで評価します。`rule` の各要素は内部で `^(?:<pattern>)$` に包まれ、先頭要素は basename、2 個目以降の非 option token は command prefix、option token は位置に依らない必須 flag として扱います。これにより `git commit -n` と `git -n commit` の両方を拾いつつ、`git commit -m "-n"` のような値つき option による誤検知は engine 内の option-value 判定で避けます。
+`bash.command` は生文字列 grep ではなく、shell 風 token 化と command chain 分割、`sh -c` / `bash -lc` unwrap、環境変数 prefix 解析を行ったうえで評価します。`rule` の各要素は内部で `^(?:<pattern>)$` に包まれ、先頭要素は basename、2 個目以降の非 option token は command prefix、option token は位置に依らない必須 flag として扱います。option token は raw token 優先で扱うので、clustered short option を拾いたい場合は `--no-verify|-n|-[^-]*n[^-]*` のように設定側で表現できます。一方で `git commit -m "-n"` や `git commit -mn` のような値部分は、engine 側が慣例的な dashed option だけ保守的に除外します。
 
 `protectedEnvironments` は command rule とは独立した global deny list です。exec 側では親プロセス環境との差分だけを override とみなすため、control plane が管理する既定の `GIT_CONFIG_GLOBAL` はそのまま通しつつ、上書き・追加・unset は拒否できます。`git push --force-with-lease` は引き続き許可します。

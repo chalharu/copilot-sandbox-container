@@ -98,6 +98,13 @@ commit_short_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":
 printf '%s\n' "${commit_short_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
 printf '%s\n' "${commit_short_deny}" | jq -e '.permissionDecisionReason | contains("git commit --no-verify")' >/dev/null
 
+commit_cluster_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git commit -nm \\\"skip\\\"\"}"}')"
+printf '%s\n' "${commit_cluster_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
+printf '%s\n' "${commit_cluster_deny}" | jq -e '.permissionDecisionReason | contains("git commit --no-verify")' >/dev/null
+
+commit_attached_value_allow="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git commit -mn\"}"}')"
+test -z "${commit_attached_value_allow}"
+
 push_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git push origin HEAD --no-verify\"}"}')"
 printf '%s\n' "${push_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
 printf '%s\n' "${push_deny}" | jq -e '.permissionDecisionReason | contains("git push --no-verify")' >/dev/null
@@ -105,6 +112,10 @@ printf '%s\n' "${push_deny}" | jq -e '.permissionDecisionReason | contains("git 
 force_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"FOO=1 git -C . push -f origin HEAD\"}"}')"
 printf '%s\n' "${force_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
 printf '%s\n' "${force_deny}" | jq -e '.permissionDecisionReason | contains("Force pushes")' >/dev/null
+
+force_cluster_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git push -fn origin HEAD\"}"}')"
+printf '%s\n' "${force_cluster_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
+printf '%s\n' "${force_cluster_deny}" | jq -e '.permissionDecisionReason | contains("Force pushes")' >/dev/null
 
 force_with_lease_allow="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"git push --force-with-lease origin HEAD\"}"}')"
 test -z "${force_with_lease_allow}"

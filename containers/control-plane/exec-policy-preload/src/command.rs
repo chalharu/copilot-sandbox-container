@@ -48,10 +48,10 @@ impl CommandInvocation {
         })
     }
 
-    pub fn normalized_tokens(&self) -> Vec<String> {
+    pub fn match_tokens(&self) -> Vec<String> {
         let mut tokens = Vec::with_capacity(self.args.len() + 1);
         tokens.push(self.executable_basename.clone());
-        tokens.extend(normalize_args(&self.args));
+        tokens.extend(matchable_args(&self.args));
         tokens
     }
 
@@ -116,8 +116,8 @@ const OPTIONS_WITH_VALUE: &[&str] = &[
     "--work-tree",
 ];
 
-fn normalize_args(args: &[String]) -> Vec<String> {
-    let mut normalized = Vec::new();
+fn matchable_args(args: &[String]) -> Vec<String> {
+    let mut matchable = Vec::new();
     let mut index = 0;
 
     while index < args.len() {
@@ -127,7 +127,7 @@ fn normalize_args(args: &[String]) -> Vec<String> {
         }
 
         if token == "-" || !token.starts_with('-') {
-            normalized.push(token.clone());
+            matchable.push(token.clone());
             index += 1;
             continue;
         }
@@ -136,24 +136,19 @@ fn normalize_args(args: &[String]) -> Vec<String> {
             let option_name = token
                 .split_once('=')
                 .map(|(name, _)| name)
-                .unwrap_or(token.as_str())
-                .to_string();
-            let consumes_next = !token.contains('=') && option_takes_value(&option_name);
-            normalized.push(option_name);
+                .unwrap_or(token.as_str());
+            let consumes_next = !token.contains('=') && option_takes_value(option_name);
+            if token.contains('=') && option_takes_value(option_name) {
+                matchable.push(option_name.to_string());
+            } else {
+                matchable.push(token.clone());
+            }
             index += if consumes_next { 2 } else { 1 };
             continue;
         }
 
-        let chars: Vec<char> = token.chars().collect();
-        let mut consumes_next = false;
-        for short_index in 1..chars.len() {
-            let option_name = format!("-{}", chars[short_index]);
-            normalized.push(option_name.clone());
-            if option_takes_value(&option_name) {
-                consumes_next = short_index == chars.len() - 1;
-                break;
-            }
-        }
+        let (sanitized_token, consumes_next) = sanitize_short_token(token);
+        matchable.push(sanitized_token);
 
         index += 1;
         if consumes_next {
@@ -161,7 +156,28 @@ fn normalize_args(args: &[String]) -> Vec<String> {
         }
     }
 
-    normalized
+    matchable
+}
+
+fn sanitize_short_token(token: &str) -> (String, bool) {
+    let chars: Vec<char> = token.chars().collect();
+    if chars.len() <= 1 {
+        return (token.to_string(), false);
+    }
+
+    let mut sanitized = String::from("-");
+    let mut consumes_next = false;
+    for short_index in 1..chars.len() {
+        let short_flag = chars[short_index];
+        sanitized.push(short_flag);
+        let option_name = format!("-{short_flag}");
+        if option_takes_value(&option_name) {
+            consumes_next = short_index == chars.len() - 1;
+            break;
+        }
+    }
+
+    (sanitized, consumes_next)
 }
 
 fn option_takes_value(token: &str) -> bool {
@@ -263,7 +279,7 @@ mod tests {
         )
         .unwrap();
 
-        let tokens = invocation.normalized_tokens();
+        let tokens = invocation.match_tokens();
 
         assert_eq!(tokens[0], "git");
         assert!(tokens.contains(&"commit".to_string()));
@@ -286,15 +302,35 @@ mod tests {
         )
         .unwrap();
 
-        let tokens = invocation.normalized_tokens();
+        let tokens = invocation.match_tokens();
 
-        assert!(tokens.contains(&"-n".to_string()));
-        assert!(tokens.contains(&"-m".to_string()));
+        assert!(tokens.contains(&"-nm".to_string()));
         assert!(!tokens.contains(&"message".to_string()));
     }
 
     #[test]
-    fn stops_emitting_arg_facts_after_double_dash() {
+    fn trims_attached_values_from_clustered_short_options() {
+        let invocation = CommandInvocation::from_exec(
+            "git",
+            &[
+                "git".to_string(),
+                "commit".to_string(),
+                "-mn".to_string(),
+                "--no-verify".to_string(),
+            ],
+            Vec::new(),
+        )
+        .unwrap();
+
+        let tokens = invocation.match_tokens();
+
+        assert!(tokens.contains(&"-m".to_string()));
+        assert!(!tokens.contains(&"-mn".to_string()));
+        assert!(tokens.contains(&"--no-verify".to_string()));
+    }
+
+    #[test]
+    fn stops_emitting_tokens_after_double_dash() {
         let invocation = CommandInvocation::from_exec(
             "git",
             &[
@@ -308,7 +344,7 @@ mod tests {
         )
         .unwrap();
 
-        let tokens = invocation.normalized_tokens();
+        let tokens = invocation.match_tokens();
 
         assert!(tokens.contains(&"--no-verify".to_string()));
         assert!(!tokens.contains(&"--force".to_string()));

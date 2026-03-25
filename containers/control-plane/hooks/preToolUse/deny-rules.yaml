@@ -2,7 +2,7 @@ commandRules:
   - rule:
       - git
       - commit
-      - --no-verify|-n
+      - --no-verify|-n|-[^-]*n[^-]*
     reason: git commit --no-verify is blocked by control-plane policy. Run git commit without --no-verify so hooks stay enforced.
   - rule:
       - git
@@ -12,7 +12,7 @@ commandRules:
   - rule:
       - git
       - push
-      - --force|-f
+      - --force|-f|-[^-]*f[^-]*
     reason: Force pushes are blocked by control-plane policy. Push without --force. Use --force-with-lease when you need a guarded overwrite.
 protectedEnvironments:
   - GIT_CONFIG_GLOBAL
