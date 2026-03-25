@@ -18,6 +18,37 @@ die() {
   exit 64
 }
 
+canonicalize_path() {
+  realpath -m -- "$1"
+}
+
+path_is_within() {
+  local candidate_root="$1"
+  local parent_root="$2"
+  local candidate_path
+  local parent_path
+
+  candidate_path="$(canonicalize_path "${candidate_root}")"
+  parent_path="$(canonicalize_path "${parent_root}")"
+  case "${candidate_path}/" in
+    "${parent_path}/"*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+reject_copilot_session_state_path() {
+  local label="$1"
+  local candidate_path="$2"
+  local copilot_home="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"
+  local session_state_root="${copilot_home}/.copilot/session-state"
+
+  if path_is_within "${candidate_path}" "${session_state_root}"; then
+    die "${label} must not live under ${session_state_root}; use ${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane} or CONTAINERIZED_RUST_TMP_ROOT instead"
+  fi
+}
+
 slugify() {
   printf '%s' "$1" | tr '/:@' '---' | tr -cs '[:alnum:]._-' '-'
 }
@@ -105,7 +136,7 @@ repo_key="${repo_key%-}"
 [[ -n "${repo_key}" ]] || repo_key=workspace
 
 control_plane_tmp_root="${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane}"
-base_tmp_root="${CONTAINERIZED_RUST_TMP_ROOT:-${TMPDIR:-${control_plane_tmp_root}/tmp-$(id -u)}}"
+base_tmp_root="${CONTAINERIZED_RUST_TMP_ROOT:-${control_plane_tmp_root}/tmp-$(id -u)}"
 state_root="${CONTAINERIZED_RUST_STATE_ROOT:-${base_tmp_root%/}/containerized-rust/${repo_key}}"
 toolchain_root="${CONTAINERIZED_RUST_TOOLCHAIN_ROOT:-${state_root}/toolchain}"
 rustup_cache="${CONTAINERIZED_RUST_RUSTUP_DIR:-${toolchain_root}/rustup}"
@@ -118,6 +149,15 @@ sccache_image_context="${CONTAINERIZED_SCCACHE_IMAGE_CONTEXT:-${repo_root}/conta
 sccache_image_label='io.github.chalharu.containerized-rust.sccache-context-sha256'
 sccache_binary="${cargo_cache}/bin/sccache"
 sccache_binary_context_hash_path="${cargo_cache}/bin/sccache.context-sha256"
+
+reject_copilot_session_state_path "CONTAINERIZED_RUST_TMP_ROOT" "${base_tmp_root}"
+reject_copilot_session_state_path "CONTAINERIZED_RUST_STATE_ROOT" "${state_root}"
+reject_copilot_session_state_path "CONTAINERIZED_RUST_TOOLCHAIN_ROOT" "${toolchain_root}"
+reject_copilot_session_state_path "CONTAINERIZED_RUST_RUSTUP_DIR" "${rustup_cache}"
+reject_copilot_session_state_path "CONTAINERIZED_RUST_CARGO_DIR" "${cargo_cache}"
+reject_copilot_session_state_path "CONTAINERIZED_RUST_TARGET_DIR" "${target_cache}"
+reject_copilot_session_state_path "CONTAINERIZED_RUST_WORK_TMPDIR" "${tool_tmp_dir}"
+reject_copilot_session_state_path "CONTAINERIZED_RUST_SCCACHE_DIR" "${sccache_cache}"
 
 mkdir -p "${base_tmp_root}" "${tool_tmp_dir}" "${rustup_cache}" "${cargo_cache}" "${target_cache}" "${sccache_cache}"
 chmod 700 "${tool_tmp_dir}" 2>/dev/null || true

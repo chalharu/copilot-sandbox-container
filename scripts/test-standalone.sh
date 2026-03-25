@@ -266,12 +266,14 @@ grep -qx 'cgroup_manager = "cgroupfs"' /home/copilot/.config/containers/containe
 grep -qx 'events_logger = "file"' /home/copilot/.config/containers/containers.conf
 expected_driver=""
 expected_state_dir=""
+expected_state_root="/var/tmp/control-plane/rootless-podman"
 if [[ -e /dev/fuse ]]; then
   expected_driver=overlay
 else
   expected_driver=vfs
 fi
-expected_state_dir="/home/copilot/.copilot/containers/${expected_driver}"
+expected_state_dir="${expected_state_root}/${expected_driver}"
+test "$(readlink /home/copilot/.copilot/containers)" = "${expected_state_root}"
 test "$(readlink /home/copilot/.local/share/containers)" = "${expected_state_dir}"
 grep -qx "graphroot = \"${expected_state_dir}/storage\"" /home/copilot/.config/containers/storage.conf
 grep -qx "runroot = \"/run/user/1000/${expected_driver}/containers/storage\"" /home/copilot/.config/containers/storage.conf

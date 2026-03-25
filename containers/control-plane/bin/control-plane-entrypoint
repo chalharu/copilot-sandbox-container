@@ -16,9 +16,10 @@ gh_hosts_path="${gh_config_dir}/hosts.yml"
 containers_config_dir="${control_plane_home}/.config/containers"
 containers_storage_config_path="${containers_config_dir}/storage.conf"
 containers_engine_config_path="${containers_config_dir}/containers.conf"
-podman_state_root="${control_plane_home}/.copilot/containers"
+legacy_podman_state_root="${control_plane_home}/.copilot/containers"
 runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${control_plane_uid}}"
 tmp_root="${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane}"
+podman_state_root="${CONTROL_PLANE_PODMAN_STATE_ROOT:-${tmp_root}/rootless-podman}"
 hook_tmp_root="${CONTROL_PLANE_HOOK_TMP_ROOT:-${tmp_root}/hooks}"
 tmp_dir="${TMPDIR:-${tmp_root}/tmp-${control_plane_uid}}"
 node_compile_cache_dir="${CONTROL_PLANE_NODE_COMPILE_CACHE_DIR:-${hook_tmp_root}/node-compile-cache}"
@@ -344,11 +345,18 @@ migrate_legacy_podman_state() {
   local detected_driver
 
   [[ -d "${legacy_state_root}/storage" ]] || return 0
-  [[ ! -e "${podman_graphroot}" ]] || return 0
 
   detected_driver="$(detect_legacy_podman_storage_driver "${legacy_state_root}" || true)"
   if [[ -z "${detected_driver}" ]] || [[ "${detected_driver}" != "${podman_storage_driver}" ]]; then
     return 0
+  fi
+
+  if [[ -e "${podman_graphroot}" ]]; then
+    if [[ -d "${podman_graphroot}" ]] && ! directory_has_entries "${podman_graphroot}"; then
+      rmdir "${podman_graphroot}"
+    else
+      return 0
+    fi
   fi
 
   mkdir -p "${podman_state_dir}"
@@ -592,6 +600,87 @@ ensure_podman_storage_link() {
   ln -s "${state_path}" "${link_path}"
 }
 
+ensure_legacy_rootless_podman_state() {
+  local legacy_root="$1"
+  local state_root="$2"
+  local entries=()
+  local rootless_entries=()
+  local flat_storage_path=""
+  local entry_basename
+  local entry_path
+
+  mkdir -p "${state_root}"
+
+  if [[ -L "${legacy_root}" ]]; then
+    if [[ "$(readlink "${legacy_root}")" == "${state_root}" ]]; then
+      return
+    fi
+
+    rm -f "${legacy_root}"
+    ln -s "${state_root}" "${legacy_root}"
+    return
+  fi
+
+  if [[ -e "${legacy_root}" ]] && [[ ! -d "${legacy_root}" ]]; then
+    printf 'Refusing to replace non-directory path at %s\n' "${legacy_root}" >&2
+    exit 1
+  fi
+
+  if [[ -d "${legacy_root}" ]] && directory_has_entries "${legacy_root}"; then
+    shopt -s dotglob nullglob
+    entries=("${legacy_root}"/*)
+    shopt -u dotglob nullglob
+
+    for entry_path in "${entries[@]}"; do
+      entry_basename="$(basename -- "${entry_path}")"
+      case "${entry_basename}" in
+        overlay|vfs)
+          rootless_entries+=("${entry_path}")
+          ;;
+        storage)
+          flat_storage_path="${entry_path}"
+          ;;
+      esac
+    done
+
+    if [[ -n "${flat_storage_path}" ]] && directory_has_entries "${flat_storage_path}"; then
+      printf 'Refusing to continue with legacy flat Podman storage at %s; migrate it into %s manually\n' "${flat_storage_path}" "${podman_graphroot}" >&2
+      exit 1
+    fi
+
+    if [[ ${#rootless_entries[@]} -gt 0 ]]; then
+      if directory_has_entries "${state_root}"; then
+        printf 'Refusing to overwrite existing Podman storage; migrate %s into %s manually\n' "${legacy_root}" "${state_root}" >&2
+        exit 1
+      fi
+
+      mv -n "${rootless_entries[@]}" "${state_root}/"
+      for entry_path in "${rootless_entries[@]}"; do
+        if [[ -e "${entry_path}" ]] || [[ -L "${entry_path}" ]]; then
+          printf 'Refusing to continue after partial Podman storage migration from %s into %s\n' "${legacy_root}" "${state_root}" >&2
+          exit 1
+        fi
+      done
+    fi
+
+    if [[ -n "${flat_storage_path}" ]]; then
+      rm -rf "${flat_storage_path}"
+    fi
+  fi
+
+  if [[ ! -e "${legacy_root}" ]]; then
+    ln -s "${state_root}" "${legacy_root}"
+    return
+  fi
+
+  if directory_has_entries "${legacy_root}"; then
+    return
+  fi
+
+  rm -rf "${legacy_root}"
+  ln -s "${state_root}" "${legacy_root}"
+}
+
 ensure_ssh_host_key() {
   local key_type="$1"
   local key_basename="$2"
@@ -767,7 +856,6 @@ mkdir -p \
   "${podman_state_root}" \
   "${copilot_session_state_dir}" \
   "${audit_log_db_dir}" \
-  "${podman_state_dir}" \
   "${screen_dir}" \
   "${tmp_root}" \
   "${hook_tmp_root}" \
@@ -780,9 +868,11 @@ mkdir -p \
   "${rootful_podman_runtime_dir}" \
   /run/sshd \
   "${runtime_dir}"
-migrate_legacy_podman_state "${podman_state_root}"
+migrate_legacy_podman_state "${legacy_podman_state_root}"
+ensure_legacy_rootless_podman_state "${legacy_podman_state_root}" "${podman_state_root}"
 
 mkdir -p \
+  "${podman_state_dir}" \
   "${podman_graphroot}" \
   "${podman_graphroot}/${podman_storage_driver}" \
   "${podman_graphroot}/volumes" \
@@ -833,6 +923,7 @@ chown "${control_plane_user}:${control_plane_user}" \
 
 ensure_podman_storage_link "${control_plane_home}/.local/share/containers" "${podman_state_dir}"
 
+chown -h "${control_plane_user}:${control_plane_user}" "${legacy_podman_state_root}"
 chown -h "${control_plane_user}:${control_plane_user}" "${control_plane_home}/.local/share/containers"
 chown root:root "${host_key_dir}"
 chown root:root /run/sshd
@@ -1006,6 +1097,7 @@ fi
     write_runtime_var CONTROL_PLANE_ROOTFUL_PODMAN_STATE_ROOT "${rootful_podman_state_root}"
     write_runtime_var CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR "${rootful_podman_runtime_dir}"
   fi
+  write_runtime_var CONTROL_PLANE_PODMAN_STATE_ROOT "${podman_state_root}"
   write_runtime_var KUBECONFIG "${KUBECONFIG:-}"
   if [[ -n "${copilot_github_token}" ]]; then
     write_runtime_var CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE "${copilot_token_path}"

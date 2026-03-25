@@ -6,7 +6,7 @@
 - In this control-plane environment, `CONTAINER_HOST` or `DOCKER_HOST` can point at a stale rootful Podman socket. Use local Podman by clearing both variables for repo-local runs.
 - For local rootless Podman here, do not force `--user 1000:1000`; container root already maps back to the host user and explicit IDs break writes into bind-mounted cache paths.
 - Use `sh -c` inside `docker.io/rust:1.94.0-bookworm`. `bash -lc` in that image drops the Rust toolchain from `PATH`.
-- Keep local toolchain state and temp files on disk-backed `TMPDIR` / `/var/tmp`, keep `sccache` in its own sibling cache directory, and keep `target` ephemeral instead of writing large caches into `.git`.
+- Keep local toolchain state and temp files under `${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane}/tmp-<uid>` unless the caller explicitly overrides `CONTAINERIZED_RUST_*`, keep `sccache` in its own sibling cache directory, and keep `target` ephemeral instead of writing large caches into `.git` or `~/.copilot/session-state`.
 - The local helper builds or reuses the shared `containers/sccache/` image context and refreshes the copied `/usr/local/bin/sccache` in the shared cargo cache only when that image context changes, so repeated runs do not re-bootstrap `sccache` from source.
 
 ## Control-plane Kubernetes workflow
@@ -24,9 +24,9 @@
 ## Cache layout
 
 - Local Podman caches:
-  - `${TMPDIR}/containerized-rust/<repo>/toolchain/rustup`
-  - `${TMPDIR}/containerized-rust/<repo>/toolchain/cargo`
-  - `${TMPDIR}/containerized-rust/<repo>/target`
+  - `${CONTAINERIZED_RUST_TMP_ROOT:-${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane}/tmp-<uid>}/containerized-rust/<repo>/toolchain/rustup`
+  - `${CONTAINERIZED_RUST_TMP_ROOT:-${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane}/tmp-<uid>}/containerized-rust/<repo>/toolchain/cargo`
+  - `${CONTAINERIZED_RUST_TMP_ROOT:-${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane}/tmp-<uid>}/containerized-rust/<repo>/target`
   - `${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane}/sccache/<repo>`
 - Kubernetes job caches:
   - `/workspace/cache/<repo>/<branch>/rustup`
