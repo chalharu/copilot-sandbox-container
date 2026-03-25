@@ -1,3 +1,33 @@
+optionsWithValue:
+  - -c
+  - -C
+  - -F
+  - -m
+  - -o
+  - -t
+  - --author
+  - --cleanup
+  - --config-env
+  - --date
+  - --exec
+  - --exec-path
+  - --file
+  - --fixup
+  - --git-dir
+  - --literal-pathspecs-from-file
+  - --message
+  - --namespace
+  - --pathspec-from-file
+  - --push-option
+  - --reedit-message
+  - --receive-pack
+  - --repo
+  - --reuse-message
+  - --squash
+  - --super-prefix
+  - --template
+  - --trailer
+  - --work-tree
 commandRules:
   - rule:
       - git

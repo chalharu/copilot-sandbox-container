@@ -48,11 +48,11 @@ impl CommandInvocation {
         })
     }
 
-    pub fn match_tokens(&self) -> Vec<String> {
-        let option_value_tokens = option_value_tokens(&self.args);
+    pub fn match_tokens(&self, options_with_value: &[String]) -> Vec<String> {
+        let option_value_tokens = option_value_tokens(&self.args, options_with_value);
         let mut tokens = Vec::with_capacity(self.args.len() + 1 + option_value_tokens.len());
         tokens.push(self.executable_basename.clone());
-        tokens.extend(matchable_args(&self.args));
+        tokens.extend(matchable_args(&self.args, options_with_value));
         tokens.extend(option_value_tokens);
         tokens
     }
@@ -85,41 +85,9 @@ pub fn merge_env_bindings(parent: &[EnvBinding], child: &[EnvBinding]) -> Vec<En
     merged
 }
 
-// Keep value-taking option handling inside the parser so the YAML stays focused on policy.
-const OPTIONS_WITH_VALUE: &[&str] = &[
-    "-c",
-    "-C",
-    "-F",
-    "-m",
-    "-o",
-    "-t",
-    "--author",
-    "--cleanup",
-    "--config-env",
-    "--date",
-    "--exec",
-    "--exec-path",
-    "--file",
-    "--fixup",
-    "--git-dir",
-    "--literal-pathspecs-from-file",
-    "--message",
-    "--namespace",
-    "--pathspec-from-file",
-    "--push-option",
-    "--reedit-message",
-    "--receive-pack",
-    "--repo",
-    "--reuse-message",
-    "--squash",
-    "--super-prefix",
-    "--template",
-    "--trailer",
-    "--work-tree",
-];
 const OPTION_VALUE_TOKEN_PREFIX: &str = "--option-value=";
 
-fn matchable_args(args: &[String]) -> Vec<String> {
+fn matchable_args(args: &[String], options_with_value: &[String]) -> Vec<String> {
     let mut matchable = Vec::new();
     let mut index = 0;
 
@@ -140,8 +108,9 @@ fn matchable_args(args: &[String]) -> Vec<String> {
                 .split_once('=')
                 .map(|(name, _)| name)
                 .unwrap_or(token.as_str());
-            let consumes_next = !token.contains('=') && option_takes_value(option_name);
-            if token.contains('=') && option_takes_value(option_name) {
+            let consumes_next =
+                !token.contains('=') && option_takes_value(option_name, options_with_value);
+            if token.contains('=') && option_takes_value(option_name, options_with_value) {
                 matchable.push(option_name.to_string());
             } else {
                 matchable.push(token.clone());
@@ -150,7 +119,7 @@ fn matchable_args(args: &[String]) -> Vec<String> {
             continue;
         }
 
-        let (sanitized_token, consumes_next) = sanitize_short_token(token);
+        let (sanitized_token, consumes_next) = sanitize_short_token(token, options_with_value);
         matchable.push(sanitized_token);
 
         index += 1;
@@ -162,7 +131,7 @@ fn matchable_args(args: &[String]) -> Vec<String> {
     matchable
 }
 
-fn option_value_tokens(args: &[String]) -> Vec<String> {
+fn option_value_tokens(args: &[String], options_with_value: &[String]) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut index = 0;
 
@@ -182,7 +151,7 @@ fn option_value_tokens(args: &[String]) -> Vec<String> {
                 .split_once('=')
                 .map(|(name, value)| (name, Some(value)))
                 .unwrap_or((token.as_str(), None));
-            if option_takes_value(option_name) {
+            if option_takes_value(option_name, options_with_value) {
                 if let Some(value) =
                     attached_value.or_else(|| args.get(index + 1).map(|value| value.as_str()))
                 {
@@ -199,7 +168,7 @@ fn option_value_tokens(args: &[String]) -> Vec<String> {
             continue;
         }
 
-        let analysis = analyze_short_token(token);
+        let analysis = analyze_short_token(token, options_with_value);
         if let Some(option_name) = analysis.value_option.as_deref()
             && let Some(value) = analysis
                 .attached_value
@@ -231,7 +200,7 @@ struct ShortTokenAnalysis {
     attached_value: Option<String>,
 }
 
-fn analyze_short_token(token: &str) -> ShortTokenAnalysis {
+fn analyze_short_token(token: &str, options_with_value: &[String]) -> ShortTokenAnalysis {
     let chars: Vec<char> = token.chars().collect();
     if chars.len() <= 1 {
         return ShortTokenAnalysis {
@@ -250,7 +219,7 @@ fn analyze_short_token(token: &str) -> ShortTokenAnalysis {
         let short_flag = chars[short_index];
         match_token.push(short_flag);
         let option_name = format!("-{short_flag}");
-        if option_takes_value(&option_name) {
+        if option_takes_value(&option_name, options_with_value) {
             value_option = Some(option_name);
             consumes_next = short_index == chars.len() - 1;
             if !consumes_next {
@@ -268,13 +237,13 @@ fn analyze_short_token(token: &str) -> ShortTokenAnalysis {
     }
 }
 
-fn sanitize_short_token(token: &str) -> (String, bool) {
-    let analysis = analyze_short_token(token);
+fn sanitize_short_token(token: &str, options_with_value: &[String]) -> (String, bool) {
+    let analysis = analyze_short_token(token, options_with_value);
     (analysis.match_token, analysis.consumes_next)
 }
 
-fn option_takes_value(token: &str) -> bool {
-    OPTIONS_WITH_VALUE.contains(&token)
+fn option_takes_value(token: &str, options_with_value: &[String]) -> bool {
+    options_with_value.iter().any(|entry| entry == token)
 }
 
 struct EnvWrapperPrefix {
@@ -357,6 +326,10 @@ fn basename(value: &str) -> &str {
 mod tests {
     use super::{CommandInvocation, EnvBinding};
 
+    fn value_options(entries: &[&str]) -> Vec<String> {
+        entries.iter().map(|entry| entry.to_string()).collect()
+    }
+
     #[test]
     fn skips_option_values_and_keeps_flags() {
         let invocation = CommandInvocation::from_exec(
@@ -372,7 +345,7 @@ mod tests {
         )
         .unwrap();
 
-        let tokens = invocation.match_tokens();
+        let tokens = invocation.match_tokens(&value_options(&["-m"]));
 
         assert_eq!(tokens[0], "git");
         assert!(tokens.contains(&"commit".to_string()));
@@ -395,7 +368,7 @@ mod tests {
         )
         .unwrap();
 
-        let tokens = invocation.match_tokens();
+        let tokens = invocation.match_tokens(&value_options(&["-m"]));
 
         assert!(tokens.contains(&"-nm".to_string()));
         assert!(!tokens.contains(&"message".to_string()));
@@ -415,7 +388,7 @@ mod tests {
         )
         .unwrap();
 
-        let tokens = invocation.match_tokens();
+        let tokens = invocation.match_tokens(&value_options(&["-m"]));
 
         assert!(tokens.contains(&"-m".to_string()));
         assert!(!tokens.contains(&"-mn".to_string()));
@@ -437,7 +410,7 @@ mod tests {
         )
         .unwrap();
 
-        let tokens = invocation.match_tokens();
+        let tokens = invocation.match_tokens(&value_options(&["--message"]));
 
         assert!(tokens.contains(&"--no-verify".to_string()));
         assert!(!tokens.contains(&"--force".to_string()));
@@ -458,7 +431,7 @@ mod tests {
         )
         .unwrap();
 
-        let tokens = invocation.match_tokens();
+        let tokens = invocation.match_tokens(&value_options(&["-m", "--config-env"]));
 
         assert!(tokens.contains(&"commit".to_string()));
         assert!(tokens.contains(&"-m".to_string()));
@@ -482,7 +455,7 @@ mod tests {
         )
         .unwrap();
 
-        let tokens = invocation.match_tokens();
+        let tokens = invocation.match_tokens(&value_options(&["-c"]));
 
         assert!(tokens.contains(&"-c".to_string()));
         assert!(tokens.contains(&"status".to_string()));
@@ -503,7 +476,7 @@ mod tests {
         )
         .unwrap();
 
-        let tokens = invocation.match_tokens();
+        let tokens = invocation.match_tokens(&value_options(&["-m"]));
 
         assert!(tokens.contains(&"commit".to_string()));
         assert!(tokens.contains(&"-nm".to_string()));

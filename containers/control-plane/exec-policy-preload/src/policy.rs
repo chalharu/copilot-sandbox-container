@@ -13,7 +13,7 @@ pub fn match_hook_rule(
     config
         .command_rules
         .iter()
-        .find_map(|rule| match_rule(rule, invocations))
+        .find_map(|rule| match_rule(rule, invocations, &config.options_with_value))
 }
 
 pub fn match_exec_rule(config: &CompiledConfig, invocation: &CommandInvocation) -> Option<String> {
@@ -24,15 +24,22 @@ pub fn match_exec_rule(config: &CompiledConfig, invocation: &CommandInvocation) 
         return Some(PROTECTED_ENVIRONMENT_REASON.to_string());
     }
 
-    config
-        .command_rules
-        .iter()
-        .find_map(|rule| match_rule(rule, std::slice::from_ref(invocation)))
+    config.command_rules.iter().find_map(|rule| {
+        match_rule(
+            rule,
+            std::slice::from_ref(invocation),
+            &config.options_with_value,
+        )
+    })
 }
 
-fn match_rule(rule: &CompiledRule, invocations: &[CommandInvocation]) -> Option<String> {
+fn match_rule(
+    rule: &CompiledRule,
+    invocations: &[CommandInvocation],
+    options_with_value: &[String],
+) -> Option<String> {
     for invocation in invocations {
-        let tokens = invocation.match_tokens();
+        let tokens = invocation.match_tokens(options_with_value);
         if rule_matches(rule, &tokens) {
             return Some(rule.reason.clone());
         }
@@ -127,6 +134,11 @@ mod tests {
                 },
             ],
             protected_environments: vec![Regex::new("^(?:GIT_CONFIG_GLOBAL)$").unwrap()],
+            options_with_value: vec![
+                "-c".to_string(),
+                "-m".to_string(),
+                "--config-env".to_string(),
+            ],
         };
         let rule_invocation = CommandInvocation::from_exec(
             "git",

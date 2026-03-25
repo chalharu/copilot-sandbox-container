@@ -14,6 +14,7 @@ pub const PROTECTED_ENVIRONMENT_REASON: &str = "Protected environment overrides 
 pub struct CompiledConfig {
     pub command_rules: Vec<CompiledRule>,
     pub protected_environments: Vec<Regex>,
+    pub options_with_value: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -31,6 +32,8 @@ struct RawConfig {
     command_rules: Vec<RawRule>,
     #[serde(default, rename = "protectedEnvironments")]
     protected_environments: Vec<String>,
+    #[serde(default, rename = "optionsWithValue")]
+    options_with_value: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,6 +93,11 @@ pub fn load_rules(repo_root: Option<&Path>) -> Result<CompiledConfig, String> {
         config
             .protected_environments
             .extend(repo_config.protected_environments);
+        config
+            .options_with_value
+            .extend(repo_config.options_with_value);
+        config.options_with_value.sort();
+        config.options_with_value.dedup();
     }
     Ok(config)
 }
@@ -116,10 +124,10 @@ fn load_rule_file(path: &Path, optional: bool) -> Result<CompiledConfig, String>
         }
     };
 
-    parse_config(&raw, path)
+    parse_config(&raw, path, optional)
 }
 
-fn parse_config(raw: &str, path: &Path) -> Result<CompiledConfig, String> {
+fn parse_config(raw: &str, path: &Path, optional: bool) -> Result<CompiledConfig, String> {
     let config: RawConfig = serde_norway::from_str(raw).map_err(|error| {
         format!(
             "failed to parse exec policy rules at {}: {}",
@@ -128,10 +136,14 @@ fn parse_config(raw: &str, path: &Path) -> Result<CompiledConfig, String> {
         )
     })?;
 
-    compile_config(config, path)
+    compile_config(config, path, optional)
 }
 
-fn compile_config(config: RawConfig, path: &Path) -> Result<CompiledConfig, String> {
+fn compile_config(
+    config: RawConfig,
+    path: &Path,
+    optional: bool,
+) -> Result<CompiledConfig, String> {
     let command_rules = config
         .command_rules
         .into_iter()
@@ -143,10 +155,20 @@ fn compile_config(config: RawConfig, path: &Path) -> Result<CompiledConfig, Stri
         config.protected_environments,
         &format!("protectedEnvironments in {}", path.display()),
     )?;
+    let mut options_with_value = compile_option_names(
+        config.options_with_value,
+        &format!("optionsWithValue in {}", path.display()),
+    )?;
+    options_with_value.sort();
+    options_with_value.dedup();
 
-    if command_rules.is_empty() && protected_environments.is_empty() {
+    if !optional
+        && command_rules.is_empty()
+        && protected_environments.is_empty()
+        && options_with_value.is_empty()
+    {
         return Err(format!(
-            "{} must define at least one commandRules entry or protectedEnvironments pattern.",
+            "{} must define at least one commandRules entry, protectedEnvironments pattern, or optionsWithValue entry.",
             path.display()
         ));
     }
@@ -154,6 +176,7 @@ fn compile_config(config: RawConfig, path: &Path) -> Result<CompiledConfig, Stri
     Ok(CompiledConfig {
         command_rules,
         protected_environments,
+        options_with_value,
     })
 }
 
@@ -208,6 +231,33 @@ fn compile_patterns(entries: Vec<String>, description: &str) -> Result<Vec<Regex
         .into_iter()
         .enumerate()
         .map(|(index, entry)| compile_pattern(entry, description, index + 1))
+        .collect()
+}
+
+fn compile_option_names(entries: Vec<String>, description: &str) -> Result<Vec<String>, String> {
+    entries
+        .into_iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            let expanded = expand_env_placeholders(&entry);
+            let trimmed = expanded.trim();
+            if trimmed.is_empty() {
+                return Err(format!(
+                    "option {} in {} must be a non-empty string.",
+                    index + 1,
+                    description
+                ));
+            }
+            if !trimmed.starts_with('-') {
+                return Err(format!(
+                    "option {} in {} must start with '-': {}",
+                    index + 1,
+                    description,
+                    trimmed
+                ));
+            }
+            Ok(trimmed.to_string())
+        })
         .collect()
 }
 
@@ -269,12 +319,15 @@ commandRules:
     reason: commit blocked
 protectedEnvironments:
   - GIT_CONFIG_GLOBAL
+optionsWithValue:
+  - -m
 "#;
 
-        let config = parse_config(yaml, Path::new("/tmp/rules.yaml")).unwrap();
+        let config = parse_config(yaml, Path::new("/tmp/rules.yaml"), false).unwrap();
 
         assert_eq!(config.command_rules.len(), 1);
         assert_eq!(config.protected_environments.len(), 1);
+        assert_eq!(config.options_with_value, vec!["-m".to_string()]);
     }
 
     #[test]
@@ -287,7 +340,7 @@ protectedEnvironments:
   - ${CONTROL_PLANE_TEST_ALLOWED_PATH}
 "#;
 
-        let config = parse_config(yaml, Path::new("/tmp/rules.yaml")).unwrap();
+        let config = parse_config(yaml, Path::new("/tmp/rules.yaml"), false).unwrap();
 
         assert!(config.protected_environments[0].is_match("/tmp/allowed"));
     }
@@ -304,10 +357,37 @@ commandRules:
         reason: blocked
 "#;
 
-        let error = parse_config(yaml, Path::new("/tmp/rules.yaml")).unwrap_err();
+        let error = parse_config(yaml, Path::new("/tmp/rules.yaml"), false).unwrap_err();
 
         assert!(error.contains("unknown field"));
         assert!(error.contains("toolName"));
+    }
+
+    #[test]
+    fn parse_config_rejects_non_option_options_with_value_entries() {
+        let yaml = r#"
+commandRules:
+  - rule:
+      - git
+      - status
+    reason: status blocked
+optionsWithValue:
+  - message
+"#;
+
+        let error = parse_config(yaml, Path::new("/tmp/rules.yaml"), false).unwrap_err();
+
+        assert!(error.contains("optionsWithValue"));
+        assert!(error.contains("must start with '-'"));
+    }
+
+    #[test]
+    fn parse_config_allows_empty_optional_repo_config() {
+        let config = parse_config("", Path::new("/tmp/repo-rules.yaml"), true).unwrap();
+
+        assert!(config.command_rules.is_empty());
+        assert!(config.protected_environments.is_empty());
+        assert!(config.options_with_value.is_empty());
     }
 
     #[test]

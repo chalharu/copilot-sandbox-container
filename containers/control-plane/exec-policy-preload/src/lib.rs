@@ -355,6 +355,7 @@ mod tests {
                 option_patterns: vec![Regex::new("^(?:-f)$").unwrap()],
             }],
             protected_environments: vec![Regex::new("^(?:GIT_CONFIG_GLOBAL)$").unwrap()],
+            options_with_value: Vec::new(),
         };
         let invocation = CommandInvocation::from_exec(
             "git",
