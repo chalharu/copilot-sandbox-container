@@ -2,13 +2,30 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-manifest_path="${script_dir}/../deploy/kubernetes/control-plane.example.yaml"
+manifest_root="${script_dir}/../deploy/kubernetes/control-plane.example"
+manifest_path="$(mktemp)"
+
+cleanup() {
+  rm -f "${manifest_path}"
+}
+
+trap cleanup EXIT
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || {
     printf 'Missing required command: %s\n' "$1" >&2
     exit 1
   }
+}
+
+render_sample_manifest() {
+  if command -v kustomize >/dev/null 2>&1; then
+    kustomize build "${manifest_root}" >"${manifest_path}"
+    return
+  fi
+
+  require_command kubectl
+  kubectl kustomize "${manifest_root}" >"${manifest_path}"
 }
 
 resource_block() {
@@ -104,7 +121,10 @@ assert_deployment_absent() {
   fi
 }
 
-printf '%s\n' 'k8s-sample-storage-layout-test: validating sample manifest syntax' >&2
+printf '%s\n' 'k8s-sample-storage-layout-test: rendering sample kustomization' >&2
+render_sample_manifest
+
+printf '%s\n' 'k8s-sample-storage-layout-test: validating rendered manifest syntax' >&2
 grep -Eq '^apiVersion:' "${manifest_path}" || {
   printf 'Expected sample manifest to contain Kubernetes resources\n' >&2
   exit 1
@@ -153,7 +173,6 @@ printf '%s\n' 'k8s-sample-storage-layout-test: checking ConfigMap-backed environ
 assert_resource_present ConfigMap control-plane-config
 assert_resource_contains ConfigMap control-plane-config 'copilot-config.json: |'
 assert_resource_present ConfigMap control-plane-env
-assert_resource_present ConfigMap garage-bootstrap
 assert_resource_present Secret garage-admin-auth
 assert_resource_present Secret garage-sccache-auth
 assert_resource_contains ConfigMap control-plane-env 'SSH_PUBLIC_KEY_FILE: /var/run/control-plane-auth/ssh-public-key'
@@ -168,16 +187,18 @@ assert_resource_contains ConfigMap control-plane-env 'SCCACHE_S3_USE_SSL: "false
 assert_resource_contains ConfigMap control-plane-env 'SCCACHE_S3_KEY_PREFIX: sccache/'
 assert_resource_contains ConfigMap control-plane-env 'AWS_ACCESS_KEY_ID_FILE: /var/run/garage-sccache-auth/access-key-id'
 assert_resource_contains ConfigMap control-plane-env 'AWS_SECRET_ACCESS_KEY_FILE: /var/run/garage-sccache-auth/secret-access-key'
-assert_resource_contains ConfigMap control-plane-env 'SCCACHE_CACHE_SIZE: "4G"'
-assert_resource_contains ConfigMap control-plane-env 'TZ: Asia/Tokyo'
+assert_resource_contains ConfigMap control-plane-env 'SCCACHE_CACHE_SIZE: 4G'
 
 printf '%s\n' 'k8s-sample-storage-layout-test: checking services, deployments, and cache mounts' >&2
 assert_resource_present Service control-plane
 assert_resource_present Service garage-s3
 assert_resource_present Deployment garage-s3
+assert_resource_present Job garage-bootstrap
 assert_resource_contains Service garage-s3 'port: 3900'
 assert_resource_contains Service garage-s3 'targetPort: s3'
 assert_resource_contains Service garage-s3 'app.kubernetes.io/name: garage-s3'
+assert_resource_contains Service garage-s3 'port: 3903'
+assert_resource_contains Service garage-s3 'targetPort: admin'
 assert_deployment_contains 'claimName: control-plane-copilot-session-pvc'
 assert_deployment_contains 'claimName: control-plane-workspace-pvc'
 assert_deployment_contains 'envFrom:'
@@ -207,27 +228,35 @@ assert_deployment_absent '/usr/local/bin/sccache-dist-entrypoint'
 assert_resource_absent Secret sccache-dist-auth
 assert_resource_absent Service sccache-dist
 assert_resource_absent Deployment sccache-dist
-assert_resource_contains ConfigMap garage-bootstrap 'bootstrap.py: |'
-assert_resource_contains ConfigMap garage-bootstrap 'def apply_lifecycle():'
+assert_resource_absent ConfigMap garage-bootstrap
 assert_resource_contains Deployment garage-s3 'claimName: control-plane-sccache-pvc'
 assert_resource_contains Deployment garage-s3 'name: init-garage-config'
 assert_resource_contains Deployment garage-s3 'mountPath: /garage-config'
 assert_resource_contains Deployment garage-s3 'image: dxflrs/garage:v2.2.0'
-assert_resource_contains Deployment garage-s3 'image: python:3.14.3-bookworm@sha256:f357fca37376cc10aba3bb909d13bba0108a39670d7b9bc8b4039ac94674e874'
-assert_resource_contains Deployment garage-s3 'name: garage-bootstrap'
 assert_resource_contains Deployment garage-s3 'mountPath: /etc/garage'
-assert_resource_contains Deployment garage-s3 'mountPath: /var/run/garage-bootstrap'
-assert_resource_contains Deployment garage-s3 'emptyDir: {}'
-assert_resource_contains Deployment garage-s3 'python3'
-assert_resource_contains Deployment garage-s3 '/var/run/garage-bootstrap/bootstrap.py'
+assert_resource_contains Deployment garage-s3 'containerPort: 3903'
+assert_resource_contains Deployment garage-s3 'name: admin'
 assert_resource_contains Deployment garage-s3 'mountPath: /var/lib/garage'
 assert_resource_contains Deployment garage-s3 'mountPath: /var/run/garage-admin-auth'
-assert_resource_contains Deployment garage-s3 'mountPath: /var/run/garage-sccache-auth'
 assert_resource_contains Deployment garage-s3 'fieldPath: status.podIP'
-assert_resource_contains Deployment garage-s3 'GARAGE_CACHE_QUOTA_BYTES'
-assert_resource_contains Deployment garage-s3 'GARAGE_CACHE_EXPIRATION_DAYS'
 assert_resource_not_contains Deployment garage-s3 'ghcr.io/chalharu/copilot-sandbox-container/garage'
+assert_resource_not_contains Deployment garage-s3 'name: garage-bootstrap'
+assert_resource_not_contains Deployment garage-s3 'mountPath: /var/run/garage-sccache-auth'
+assert_resource_not_contains Deployment garage-s3 'mountPath: /var/run/garage-bootstrap'
 assert_resource_not_contains Deployment garage-s3 'kubernetes.io/arch: amd64'
+assert_resource_not_contains Service garage-s3 'name: garage-admin'
+assert_resource_absent Service garage-admin
+assert_resource_contains Job garage-bootstrap 'image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha'
+assert_resource_contains Job garage-bootstrap '/usr/local/bin/garage-bootstrap.mjs'
+assert_resource_contains Job garage-bootstrap 'restartPolicy: OnFailure'
+assert_resource_contains Job garage-bootstrap 'backoffLimit: 6'
+assert_resource_contains Job garage-bootstrap 'automountServiceAccountToken: false'
+assert_resource_contains Job garage-bootstrap 'http://garage-s3.copilot-sandbox.svc.cluster.local:3903'
+assert_resource_contains Job garage-bootstrap 'http://garage-s3.copilot-sandbox.svc.cluster.local:3900'
+assert_resource_contains Job garage-bootstrap 'mountPath: /var/run/garage-admin-auth'
+assert_resource_contains Job garage-bootstrap 'mountPath: /var/run/garage-sccache-auth'
+assert_resource_contains Job garage-bootstrap 'GARAGE_CACHE_QUOTA_BYTES'
+assert_resource_contains Job garage-bootstrap 'GARAGE_CACHE_EXPIRATION_DAYS'
 
 printf '%s\n' 'k8s-sample-storage-layout-test: checking Podman defaults and legacy PVC removal' >&2
 if grep -Fq '/run/control-plane/podman' "${manifest_path}"; then

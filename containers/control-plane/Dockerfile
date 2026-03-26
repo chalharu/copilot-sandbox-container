@@ -141,6 +141,7 @@ COPY --chmod=755 bin/control-plane-job-transfer /usr/local/bin/control-plane-job
 COPY --chmod=755 bin/control-plane-run /usr/local/bin/control-plane-run
 COPY --chmod=755 bin/control-plane-session /usr/local/bin/control-plane-session
 COPY --chmod=755 bin/control-plane-ssh-shell /usr/local/bin/control-plane-ssh-shell
+COPY --chmod=755 bin/garage-bootstrap.mjs /usr/local/bin/garage-bootstrap.mjs
 COPY --chmod=755 bin/k8s-job-start /usr/local/bin/k8s-job-start
 COPY --chmod=755 bin/k8s-job-wait /usr/local/bin/k8s-job-wait
 COPY --chmod=755 bin/k8s-job-pod /usr/local/bin/k8s-job-pod

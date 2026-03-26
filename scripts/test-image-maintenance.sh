@@ -33,6 +33,16 @@ assert_file_matches() {
   }
 }
 
+assert_file_not_matches() {
+  local path="$1"
+  local unexpected_pattern="$2"
+
+  if grep -Eq -- "${unexpected_pattern}" "${path}"; then
+    printf 'Did not expect %s to match: %s\n' "${path}" "${unexpected_pattern}" >&2
+    exit 1
+  fi
+}
+
 assert_file_not_contains() {
   local path="$1"
   local unexpected="$2"
@@ -196,12 +206,20 @@ assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache:man
 assert_file_matches "${workflow_path}" '^[[:space:]]+- sccache$'
 assert_file_contains "${renovate_config_path}" '/^containers\\/(control-plane|yamllint|sccache)\\/Dockerfile$/'
 assert_file_not_contains "${workflow_path}" 'garage_changed'
-assert_file_not_contains "${workflow_path}" 'containers/garage'
+assert_file_not_contains "${workflow_path}" 'garage_bootstrap_changed'
+assert_file_not_matches "${workflow_path}" 'containers/garage([[:space:]/]|$)'
+assert_file_not_contains "${workflow_path}" 'containers/garage-bootstrap'
 assert_file_not_contains "${workflow_path}" 'GHCR_GARAGE_IMAGE'
-assert_file_not_contains "${workflow_path}" 'PUBLISH_GARAGE'
+assert_file_not_contains "${workflow_path}" 'GHCR_GARAGE_BOOTSTRAP_IMAGE'
+assert_file_not_contains "${workflow_path}" 'PUBLISH_GARAGE:'
+assert_file_not_contains "${workflow_path}" 'PUBLISH_GARAGE_BOOTSTRAP'
 assert_file_not_contains "${workflow_path}" 'garage_component_tag'
+assert_file_not_contains "${workflow_path}" 'garage_bootstrap_component_tag'
 assert_file_not_contains "${workflow_path}" 'localhost/garage:test'
-assert_file_not_contains "${workflow_path}" '  - garage'
+assert_file_not_contains "${workflow_path}" 'localhost/garage-bootstrap:test'
+assert_file_not_matches "${workflow_path}" '^[[:space:]]+- garage$'
+assert_file_not_matches "${workflow_path}" '^[[:space:]]+- garage-bootstrap$'
+assert_file_not_contains "${renovate_config_path}" 'garage-bootstrap'
 
 printf '%s\n' 'image-maintenance-test: verifying GHCR cleanup keeps tagged images' >&2
 assert_file_contains "${workflow_path}" 'delete-only-untagged-versions: '\''true'\'''

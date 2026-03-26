@@ -27,6 +27,7 @@ rust_podman_script_file="${rust_skill_dir}/scripts/podman-rust.sh"
 rust_k8s_script_file="${rust_skill_dir}/scripts/k8s-rust.sh"
 legacy_rust_sccache_image_dockerfile="${rust_skill_dir}/assets/sccache-image/Dockerfile"
 sccache_image_dockerfile="${repo_root}/containers/sccache/Dockerfile"
+garage_bootstrap_script_file="${repo_root}/containers/control-plane/bin/garage-bootstrap.mjs"
 audit_analysis_skill_dir="${repo_root}/containers/control-plane/skills/audit-log-analysis"
 audit_analysis_skill_file="${audit_analysis_skill_dir}/SKILL.md"
 audit_analysis_script_file="${audit_analysis_skill_dir}/scripts/audit-analysis.mjs"
@@ -170,6 +171,7 @@ assert_file_present "${rust_k8s_script_file}"
 assert_file_present "${audit_analysis_skill_file}"
 assert_file_present "${audit_analysis_script_file}"
 assert_file_present "${sccache_image_dockerfile}"
+assert_file_present "${garage_bootstrap_script_file}"
 assert_file_present "${commit_skill_file}"
 assert_file_present "${pull_request_skill_file}"
 assert_file_present "${control_plane_ops_skill_file}"
@@ -185,6 +187,7 @@ assert_file_absent "${repo_git_commit_dir}"
 assert_file_absent "${legacy_yamllint_skill_dir}"
 assert_file_absent "${legacy_rust_sccache_image_dockerfile}"
 assert_file_absent "${repo_root}/containers/garage"
+assert_file_absent "${repo_root}/containers/garage-bootstrap"
 assert_file_absent "${generic_skill_dir}/scripts/example.py"
 assert_file_absent "${generic_skill_dir}/references/api_reference.md"
 assert_file_absent "${generic_skill_dir}/assets/example_asset.txt"
@@ -212,6 +215,8 @@ assert_file_not_contains "${generic_skill_file}" './scripts/test-k8s-job.sh'
 assert_file_contains "${rust_skill_file}" 'name: containerized-rust-ops'
 assert_file_contains "${rust_skill_file}" 'containers/sccache/Dockerfile'
 assert_file_contains "${rust_skill_file}" 'dxflrs/garage:v2.2.0'
+assert_file_contains "${rust_skill_file}" 'containers/control-plane/bin/garage-bootstrap.mjs'
+assert_file_contains "${rust_skill_file}" 'one-shot bootstrap Job'
 assert_file_contains "${rust_podman_script_file}" '/containers/sccache'
 assert_file_contains "${rust_podman_script_file}" 'sccache.context-sha256'
 assert_file_contains "${rust_podman_script_file}" 'CONTAINERIZED_RUST_CONTAINER_BIN'
@@ -223,6 +228,8 @@ assert_file_not_contains "${rust_skill_file}" '.github/skills/containerized-rust
 assert_file_not_contains "${rust_skill_file}" 'assets/sccache-image/Dockerfile'
 assert_file_contains "${rust_runtime_reference_file}" 'containers/sccache/'
 assert_file_contains "${rust_runtime_reference_file}" 'dxflrs/garage:v2.2.0'
+assert_file_contains "${rust_runtime_reference_file}" 'containers/control-plane/bin/garage-bootstrap.mjs'
+assert_file_contains "${rust_runtime_reference_file}" 'one-shot bootstrap Job'
 assert_file_not_contains "${rust_runtime_reference_file}" 'assets/sccache-image/'
 assert_file_not_contains "${rust_runtime_reference_file}" '.copilot-cache'
 assert_file_contains "${audit_analysis_skill_file}" 'name: audit-log-analysis'
@@ -272,6 +279,7 @@ assert_file_not_contains "${bundled_reference_file}" '.github/skills/skill-creat
 assert_file_contains "${dockerfile_path}" 'config/external-skills.yaml'
 assert_file_contains "${dockerfile_path}" 'install-git-skills-from-manifest'
 assert_file_contains "${dockerfile_path}" 'external-skills-manifest-to-tsv.mjs'
+assert_file_contains "${dockerfile_path}" 'COPY --chmod=755 bin/garage-bootstrap.mjs /usr/local/bin/garage-bootstrap.mjs'
 assert_file_not_contains "${dockerfile_path}" 'ANTHROPIC_SKILLS_REPOSITORY'
 assert_file_not_contains "${dockerfile_path}" 'DOC_COAUTHORING_SKILL_PATH'
 assert_file_not_contains "${dockerfile_path}" 'SKILL_CREATOR_SKILL_PATH'

@@ -1,0 +1,298 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: control-plane-workspace-pvc
+  namespace: copilot-sandbox
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard
+
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: control-plane
+  namespace: copilot-sandbox
+  labels:
+    app.kubernetes.io/name: control-plane
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: control-plane
+  ports:
+    - name: ssh
+      port: 2222
+      targetPort: ssh
+
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control-plane
+  namespace: copilot-sandbox
+  labels:
+    app.kubernetes.io/name: control-plane
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: control-plane
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: control-plane
+    spec:
+      # The current cluster leaves `hostUsers: false` Pods stuck in
+      # ContainerCreating, so this sample keeps the default `hostUsers: true`
+      # path and uses a rootful Podman remote service for local in-Pod
+      # containers instead of relying on nested rootless user namespaces.
+      securityContext:
+        fsGroup: 1000
+      serviceAccountName: control-plane
+      initContainers:
+        - name: init-state-dirs
+          # renovate: datasource=docker depName=busybox versioning=docker
+          image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              umask 077
+              mkdir -p \
+                /copilot-session/state/gh \
+                /copilot-session/state/ssh \
+                /copilot-session/state/ssh-host-keys \
+                /copilot-session/session-state \
+                /workspace-state/workspace \
+                /workspace-state/workspace/cache \
+                /cache/rootful-podman \
+                /cache/runtime-tmp
+              touch /copilot-session/state/copilot-config.json /copilot-session/state/command-history-state.json
+              chown -R 1000:1000 /copilot-session/state /copilot-session/session-state
+              find /copilot-session/state /copilot-session/session-state -type d -exec chmod 700 {} +
+              find /copilot-session/state /copilot-session/session-state -type f -exec chmod 600 {} +
+              # Preserve user workspace file modes; only hand the shared mount root
+              # back to UID/GID 1000 so the control-plane session can use it.
+              chown 1000:1000 /workspace-state/workspace /workspace-state/workspace/cache
+              chmod 700 /workspace-state/workspace /workspace-state/workspace/cache
+              # Keep graphroot root-only, but leave the runtime tmp path traversable
+              # so the copilot user can reach the rootful Podman socket later.
+              chown 0:0 /cache/rootful-podman
+              chmod 700 /cache/rootful-podman
+              chown 0:1000 /cache/runtime-tmp
+              chmod 755 /cache/runtime-tmp
+              rm -rf /cache/rootful-podman/*
+              mkdir -p /cache/rootful-podman/rootful-overlay /cache/runtime-tmp/rootful-overlay
+              chown 0:0 /cache/rootful-podman/rootful-overlay
+              chmod 700 /cache/rootful-podman/rootful-overlay
+              chown 0:1000 /cache/runtime-tmp/rootful-overlay
+              chmod 755 /cache/runtime-tmp/rootful-overlay
+          securityContext:
+            privileged: false
+            runAsUser: 0
+            runAsGroup: 1000
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: copilot-session
+              mountPath: /copilot-session
+            - name: workspace
+              mountPath: /workspace-state
+            - name: cache
+              mountPath: /cache
+        - name: init-state
+          # renovate: datasource=docker depName=busybox versioning=docker
+          image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              umask 077
+              [ -s /state/copilot-config.json ] || cat > /state/copilot-config.json <<'JSON'
+              {
+                "telemetry": false
+              }
+              JSON
+          securityContext:
+            privileged: false
+            runAsUser: 1000
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: copilot-session
+              mountPath: /state
+              subPath: state
+      containers:
+        - name: control-plane
+          # Pin deployments to a published commit SHA tag so the running image
+          # matches the revision you intend to operate.
+          image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: control-plane-env
+          # Keep `drop: ALL`, but re-add the capabilities that SSH startup and
+          # the current-cluster rootful Podman remote-service fallback need.
+          # This stays `privileged: false`, yet still lets local `podman run`
+          # work on the current node runtime by combining:
+          # - AUDIT_WRITE plus KILL for sshd PTY login accounting and preauth cleanup
+          # - MKNOD / NET_ADMIN / SETFCAP / SETPCAP / SYS_ADMIN for nested
+          #   rootful Podman on this cluster
+          # - unconfined seccomp/AppArmor so the nested runtime can manage its
+          #   own cgroups and network namespace details
+          securityContext:
+            privileged: false
+            runAsUser: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: true
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - AUDIT_WRITE
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+                - KILL
+                - MKNOD
+                - NET_ADMIN
+                - SETFCAP
+                - SETGID
+                - SETPCAP
+                - SETUID
+                - SYS_ADMIN
+                - SYS_CHROOT
+            seccompProfile:
+              type: Unconfined
+            appArmorProfile:
+              type: Unconfined
+          ports:
+            - containerPort: 2222
+              name: ssh
+          readinessProbe:
+            tcpSocket:
+              port: ssh
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: ssh
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: copilot-session
+              mountPath: /home/copilot/.copilot/config.json
+              subPath: state/copilot-config.json
+            - name: copilot-session
+              mountPath: /home/copilot/.copilot/command-history-state.json
+              subPath: state/command-history-state.json
+            - name: copilot-session
+              mountPath: /home/copilot/.copilot/session-state
+              subPath: session-state
+            - name: copilot-session
+              mountPath: /home/copilot/.config/gh
+              subPath: state/gh
+            - name: copilot-session
+              mountPath: /home/copilot/.ssh
+              subPath: state/ssh
+            - name: copilot-session
+              mountPath: /var/lib/control-plane/ssh-host-keys
+              subPath: state/ssh-host-keys
+            - name: workspace
+              mountPath: /workspace
+              subPath: workspace
+            - name: cache
+              mountPath: /var/lib/control-plane/rootful-podman
+              subPath: rootful-podman
+            - name: cache
+              mountPath: /var/tmp/control-plane
+              subPath: runtime-tmp
+            # Optional advanced rootless profile: if your cluster really
+            # supports `hostUsers: false`, `/dev/fuse`, and nested user
+            # namespaces, you can switch CONTROL_PLANE_LOCAL_PODMAN_MODE back to
+            # `rootless` and mount /dev/fuse for fuse-overlayfs.
+            # - name: fuse-device
+            #   mountPath: /dev/fuse
+            # Optional advanced rootless profile: /dev/net/tun enables
+            # slirp4netns networking when you are not using the current-cluster
+            # rootful-service fallback.
+            # - name: tun-device
+            #   mountPath: /dev/net/tun
+            - name: control-plane-auth
+              mountPath: /var/run/control-plane-auth
+              readOnly: true
+            - name: control-plane-config
+              mountPath: /var/run/control-plane-config
+              readOnly: true
+            - name: garage-sccache-auth
+              mountPath: /var/run/garage-sccache-auth
+              readOnly: true
+      volumes:
+        - name: copilot-session
+          persistentVolumeClaim:
+            claimName: control-plane-copilot-session-pvc
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: control-plane-workspace-pvc
+        - name: cache
+          emptyDir: {}
+        # Optional advanced rootless profile: if your cluster policy allows
+        # hostPath devices, mount /dev/fuse for fuse-overlayfs. On stricter
+        # clusters use a device plugin-backed resource instead.
+        # - name: fuse-device
+        #   hostPath:
+        #     path: /dev/fuse
+        #     type: CharDevice
+        # Optional advanced rootless profile: if your cluster policy allows
+        # hostPath devices, mount /dev/net/tun for slirp4netns. On stricter
+        # clusters use a device plugin-backed resource instead.
+        # - name: tun-device
+        #   hostPath:
+        #     path: /dev/net/tun
+        #     type: CharDevice
+        - name: control-plane-auth
+          secret:
+            secretName: control-plane-auth
+        - name: garage-sccache-auth
+          secret:
+            secretName: garage-sccache-auth
+            items:
+              - key: access-key-id
+                path: access-key-id
+              - key: secret-access-key
+                path: secret-access-key
+        - name: control-plane-config
+          configMap:
+            name: control-plane-config
