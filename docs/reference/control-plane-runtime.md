@@ -50,9 +50,10 @@ standalone Garage Deployment 用です。sample manifest では
 Garage bucket quota を `4294967296` bytes に抑えて 4GiB までに制限します。
 Rust Job 自体は PVC を mount せず、`SCCACHE_BUCKET`、`SCCACHE_ENDPOINT`、
 `AWS_ACCESS_KEY_ID_FILE`、`AWS_SECRET_ACCESS_KEY_FILE` を受け取って cluster 内の
-`garage-s3` Service へ接続します。Garage container 自身は downward API で得た
-Pod IP を `GARAGE_RPC_PUBLIC_ADDR` に広告し、single-node layout を bootstrap します。
-古い cache object は S3 lifecycle expiration で自動削除します。object-store mode
+`garage-s3` Service へ接続します。Garage 本体は公式 `dxflrs/garage:v2.2.0`
+image を使い、initContainer が `garage.toml` を生成し、companion bootstrap
+container が single-node layout / key / bucket / lifecycle を idempotent に
+適用します。古い cache object は S3 lifecycle expiration で自動削除します。object-store mode
 を無効化した場合も、`sccache` 自体は
 `/var/tmp/containerized-rust/<repo>/<branch>/sccache` の ephemeral path を使い、
 `/workspace` PVC には `cargo` / `rustup` cache だけを残します。

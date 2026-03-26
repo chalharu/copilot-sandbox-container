@@ -99,16 +99,19 @@ ConfigMap / Secret / write-back の具体的な path は
    sample manifest の `replace-me-with-rwx-storage-class` を実クラスタ向けに
    置き換える
 4. `control-plane-sccache-pvc` は standalone Garage Deployment 専用の
-   `ReadWriteOnce` claim です。sample manifest の `standard` を、
-   実クラスタ向けの storage class へ置き換える
-5. `GARAGE_CACHE_QUOTA_BYTES=4294967296` を維持し、5Gi の dedicated PVC に
+   `ReadWriteOnce` claim です。Garage 本体は公式 `dxflrs/garage:v2.2.0`
+   image で動かし、initContainer が `garage.toml` を生成し、companion
+   bootstrap container が bucket / quota / lifecycle を初期化します
+5. sample manifest の `standard` を、実クラスタ向けの storage class へ
+   置き換える
+6. `GARAGE_CACHE_QUOTA_BYTES=4294967296` を維持し、5Gi の dedicated PVC に
    対して 20% の headroom を残す。古い cache object は
    `GARAGE_CACHE_EXPIRATION_DAYS` の lifecycle で自動削除する
-6. `SCCACHE_ENDPOINT` は
+7. `SCCACHE_ENDPOINT` は
    `http://garage-s3.<namespace>.svc.cluster.local:3900` を指し、
    Rust Job は PVC を mount せず Service 経由で接続する。Garage 自身の
-   `GARAGE_RPC_PUBLIC_ADDR` は Pod IP から組み立てる
-7. Rust Job の S3 credential は `garage-sccache-auth` Secret を control-plane Pod に
+   `rpc_public_addr` は initContainer が Pod IP から組み立てる
+8. Rust Job の S3 credential は `garage-sccache-auth` Secret を control-plane Pod に
    mount し、`k8s-rust.sh` が job-local `SCCACHE_CONF` へ埋め込む
 
 永続 path、Podman graphroot、ConfigMap / Secret の注入先などの具体的な

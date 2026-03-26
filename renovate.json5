@@ -107,7 +107,7 @@
     {
       customType: "regex",
       managerFilePatterns: [
-        "/^containers\\/(control-plane|garage|yamllint|sccache)\\/Dockerfile$/",
+        "/^containers\\/(control-plane|yamllint|sccache)\\/Dockerfile$/",
       ],
       matchStrings: [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s+ARG [A-Z0-9_]+=(?<currentValue>\\S+)",
