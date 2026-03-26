@@ -226,3 +226,9 @@ Bound しないと Garage Pod が立ち上がりません。
 - `kubectl get pvc control-plane-sccache-pvc -n copilot-sandbox` が `Bound`
 - `kubectl get pod -n copilot-sandbox -l app.kubernetes.io/name=garage-s3` が `1/1 Ready`
 - `kubectl get svc garage-s3 -n copilot-sandbox` で `3900/TCP` が見える
+- `kubectl get job garage-bootstrap -n copilot-sandbox` が `Complete`
+
+`garage-bootstrap` Job が失敗した場合は、まず
+`kubectl logs -n copilot-sandbox job/garage-bootstrap` で bootstrap の失敗点を見ます。
+fresh PVC や sample credential を再初期化したいときだけ、`kubectl delete job garage-bootstrap -n copilot-sandbox`
+のあとに sample manifest を再適用して rerun してください。
