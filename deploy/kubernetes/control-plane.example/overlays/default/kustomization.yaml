@@ -2,3 +2,67 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 bases:
   - ../../base
+
+# This overlay is the customization point for the shipped sample.
+# Keep it as-is when you want the default `control-plane` resources.
+#
+# When you need a named variant instead, uncomment the block below and replace
+# the `replace-me-*` values with your own instance-specific names.
+#
+# patchesJson6902:
+#   - target:
+#       version: v1
+#       kind: PersistentVolumeClaim
+#       name: control-plane-workspace-pvc
+#     path: workspace-pvc-patch.yaml
+#   - target:
+#       version: v1
+#       kind: Service
+#       name: control-plane
+#     path: service-patch.yaml
+#   - target:
+#       group: apps
+#       version: v1
+#       kind: Deployment
+#       name: control-plane
+#     path: deployment-patch.yaml
+#
+# Candidate `workspace-pvc-patch.yaml`:
+# - op: replace
+#   path: /metadata/name
+#   value: replace-me-with-workspace-pvc-name
+# - op: replace
+#   path: /spec/resources/requests/storage
+#   value: 8Gi
+#   # Remove the storage op when the default size is already fine.
+#
+# Candidate `service-patch.yaml`:
+# - op: replace
+#   path: /metadata/name
+#   value: replace-me-with-service-name
+# - op: replace
+#   path: /metadata/labels/app.kubernetes.io~1name
+#   value: replace-me-with-instance-label
+# - op: replace
+#   path: /spec/selector/app.kubernetes.io~1name
+#   value: replace-me-with-instance-label
+#
+# Candidate `deployment-patch.yaml`:
+# - op: replace
+#   path: /metadata/name
+#   value: replace-me-with-deployment-name
+# - op: replace
+#   path: /metadata/labels/app.kubernetes.io~1name
+#   value: replace-me-with-instance-label
+# - op: replace
+#   path: /spec/selector/matchLabels/app.kubernetes.io~1name
+#   value: replace-me-with-instance-label
+# - op: replace
+#   path: /spec/template/metadata/labels/app.kubernetes.io~1name
+#   value: replace-me-with-instance-label
+# - op: test
+#   path: /spec/template/spec/volumes/1/name
+#   value: workspace
+# - op: replace
+#   path: /spec/template/spec/volumes/1/persistentVolumeClaim/claimName
+#   value: replace-me-with-workspace-pvc-name
