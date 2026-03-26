@@ -247,16 +247,15 @@ assert_resource_contains ConfigMap control-plane-config 'copilot-config.json: |'
 assert_resource_present ConfigMap control-plane-env
 assert_resource_present ServiceAccount garage-bootstrap
 assert_resource_present Secret garage-admin-auth
-assert_resource_present Secret garage-sccache-auth
+assert_resource_absent Secret garage-sccache-auth
 assert_resource_present Role garage-bootstrap-secret-writer
 assert_resource_present RoleBinding garage-bootstrap-secret-writer
+assert_resource_contains Role garage-bootstrap-secret-writer '- create'
 assert_resource_contains Role garage-bootstrap-secret-writer 'resourceNames:'
 assert_resource_contains Role garage-bootstrap-secret-writer '- garage-sccache-auth'
 assert_resource_contains Role garage-bootstrap-secret-writer '- get'
 assert_resource_contains Role garage-bootstrap-secret-writer '- patch'
 assert_resource_contains Role garage-bootstrap-secret-writer '- update'
-assert_resource_contains Secret garage-sccache-auth 'access-key-id: replace-me-bootstrap-generated-access-key-id'
-assert_resource_contains Secret garage-sccache-auth 'secret-access-key: replace-me-bootstrap-generated-secret-access-key'
 assert_resource_contains ConfigMap control-plane-env 'SSH_PUBLIC_KEY_FILE: /var/run/control-plane-auth/ssh-public-key'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS: "10000"'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha'
@@ -292,6 +291,7 @@ assert_deployment_contains 'subPath: state/gh'
 assert_deployment_contains 'subPath: state/ssh'
 assert_deployment_contains 'subPath: state/ssh-host-keys'
 assert_deployment_contains 'mountPath: /var/run/garage-sccache-auth'
+assert_deployment_contains 'secretName: garage-sccache-auth'
 assert_deployment_contains 'chown 1000:1000 /workspace-state/workspace /workspace-state/workspace/cache'
 assert_deployment_contains 'chmod 700 /workspace-state/workspace /workspace-state/workspace/cache'
 assert_deployment_contains 'mountPath: /var/lib/control-plane/rootful-podman'

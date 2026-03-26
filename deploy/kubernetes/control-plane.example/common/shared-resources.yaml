@@ -107,6 +107,11 @@ metadata:
   name: garage-bootstrap-secret-writer
   namespace: copilot-sandbox
 rules:
+  # `create` cannot be scoped with `resourceNames`, so keep it isolated from
+  # the exact-name update rule below.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
   - apiGroups: [""]
     resources: ["secrets"]
     resourceNames: ["garage-sccache-auth"]
@@ -171,20 +176,6 @@ type: Opaque
 stringData:
   admin-token: replace-me-garage-admin-token
   rpc-secret: replace-me-garage-rpc-secret
-
-
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: garage-sccache-auth
-  namespace: copilot-sandbox
-type: Opaque
-stringData:
-  # The bootstrap Job replaces these placeholder values with the generated
-  # Garage S3 access key before control-plane Jobs start using the cache.
-  access-key-id: replace-me-bootstrap-generated-access-key-id
-  secret-access-key: replace-me-bootstrap-generated-secret-access-key
 
 
 ---
@@ -453,10 +444,11 @@ spec:
         app.kubernetes.io/name: garage-bootstrap
     spec:
       # This job initializes the Garage key/bucket/quota/lifecycle state once for
-      # the shared PVC. It is intentionally separate from the Garage Deployment so
-      # pod restarts do not rerun bootstrap. Delete and recreate the Job only when
-      # you need to bootstrap a fresh PVC or rerun the sample initialization
-      # manually.
+      # the shared PVC and creates or refreshes the garage-sccache-auth Secret
+      # consumed by control-plane Pods. It is intentionally separate from the
+      # Garage Deployment so pod restarts do not rerun bootstrap. Delete and
+      # recreate the Job only when you need to bootstrap a fresh PVC or rerun
+      # the sample initialization manually.
       serviceAccountName: garage-bootstrap
       automountServiceAccountToken: true
       restartPolicy: OnFailure
