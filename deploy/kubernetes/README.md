@@ -1,37 +1,41 @@
-# Kubernetes sample manifests
+# Kubernetes サンプルマニフェスト
 
-`deploy/kubernetes/control-plane.example/` is the maintained sample entrypoint for the control-plane Kubernetes deployment.
+`deploy/kubernetes/control-plane.example/` は、control-plane の Kubernetes サンプルをまとめたエントリーポイントです。
 
-Apply the shipped sample with:
+サンプル全体は次の 1 コマンドで適用できます。
 
 ```bash
 kubectl apply -k deploy/kubernetes/control-plane.example
 ```
 
-## Layout
+## 構成
 
-- `control-plane.example/common/`: shared namespaces, RBAC, Secrets, ConfigMaps, Garage S3 resources, and the one-shot `garage-bootstrap` Job.
-- `control-plane.example/base/`: one reusable control-plane instance (`PersistentVolumeClaim`, `Service`, and `Deployment`).
-- `control-plane.example/overlays/default/`: the customization point for the shipped sample. It layers on top of `base/` and is composed with `common/` by the root `kustomization.yaml`.
+- `control-plane.example/common/`: Namespace、RBAC、Secret、ConfigMap、Garage S3 関連リソース、`garage-bootstrap` Job などの共通リソース。
+- `control-plane.example/base/`: 1 つの control-plane インスタンスとして再利用する `PersistentVolumeClaim`、`Service`、`Deployment`。
+- `control-plane.example/overlays/default/`: 同梱サンプルのカスタマイズポイント。`base/` に重ね、ルート `kustomization.yaml` から `common/` と一緒に compose されます。
 
-The root `control-plane.example/kustomization.yaml` intentionally keeps the operator path simple: edit the sample files, then keep using one `kubectl apply -k ...` command.
+ルートの `control-plane.example/kustomization.yaml` は、編集後も `kubectl apply -k ...` をそのまま使えるように、運用側の手順をできるだけ単純に保つ構成にしています。
 
-## What to edit first
+## 最初に書き換える場所
 
-1. Replace placeholder credentials and cluster-specific defaults in `control-plane.example/common/shared-resources.yaml`.
-2. Update the published image tags in `control-plane.example/common/shared-resources.yaml` and `control-plane.example/base/control-plane-instance.yaml`.
-3. Replace storage classes and PVC sizes with values that match your cluster.
-4. If you need to rename the default instance or change its workspace PVC, start in `control-plane.example/overlays/default/kustomization.yaml`.
+1. `control-plane.example/common/shared-resources.yaml` の placeholder な credential とクラスタ依存値を置き換える。
+2. `control-plane` image tag を、次の 3 箇所でそろえて書き換える。
+   - `control-plane.example/base/control-plane-instance.yaml` の `Deployment/control-plane`
+   - `control-plane.example/common/shared-resources.yaml` の `ConfigMap/control-plane-env` にある `CONTROL_PLANE_JOB_TRANSFER_IMAGE`
+   - `control-plane.example/common/shared-resources.yaml` の `Job/garage-bootstrap`
+3. storage class と PVC サイズをクラスタに合わせて書き換える。
+4. デフォルトのインスタンス名や workspace PVC 名を変えたい場合は、`control-plane.example/overlays/default/kustomization.yaml` から着手する。
 
-## Customizing the default overlay
+## default overlay のカスタマイズ
 
-`control-plane.example/overlays/default/kustomization.yaml` contains commented candidate rewrites for the fields that usually differ per instance:
+`control-plane.example/overlays/default/kustomization.yaml` には、インスタンスごとに差し替えやすい項目の候補をコメントで入れています。
 
-- the workspace PVC name
-- the workspace PVC size when the default `5Gi` is not enough
-- the `Service` name and selector label
-- the `Deployment` name, selector label, pod template label, and mounted workspace PVC name
+- workspace PVC 名
+- デフォルトの `5Gi` では足りないときの workspace PVC サイズ
+- 別の公開 revision に pin したいときの `control-plane` container image tag
+- `Service` 名と selector label
+- `Deployment` 名、selector label、pod template label、mount する workspace PVC 名
 
-The comments are intentionally generic. Uncomment the candidate block, replace the `replace-me-*` values with your instance-specific names, and keep the rest of the sample unchanged.
+コメントは固有のサンプル名に寄せず、generic な形にしています。候補ブロックを uncomment して、`replace-me-*` を自分の値に置き換えて使ってください。
 
-If you need multiple named instances at the same time, copy `overlays/default/` to a sibling overlay and create another composing kustomization next to the shipped root instead of editing the default overlay in place.
+複数の名前付きインスタンスを同時に持ちたい場合は、`overlays/default/` を sibling overlay として複製し、同梱のルートとは別に compose 用の `kustomization.yaml` を追加してください。

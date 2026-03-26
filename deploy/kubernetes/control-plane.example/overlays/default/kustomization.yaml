@@ -26,6 +26,12 @@ bases:
 #       kind: Deployment
 #       name: control-plane
 #     path: deployment-patch.yaml
+#   - target:
+#       group: apps
+#       version: v1
+#       kind: Deployment
+#       name: control-plane
+#     path: deployment-image-patch.yaml
 #
 # Candidate `workspace-pvc-patch.yaml`:
 # - op: replace
@@ -66,3 +72,10 @@ bases:
 # - op: replace
 #   path: /spec/template/spec/volumes/1/persistentVolumeClaim/claimName
 #   value: replace-me-with-workspace-pvc-name
+#
+# Candidate `deployment-image-patch.yaml`:
+# - op: replace
+#   path: /spec/template/spec/containers/0/image
+#   value: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha
+# Keep the same tag aligned in `../../common/shared-resources.yaml` for
+# `CONTROL_PLANE_JOB_TRANSFER_IMAGE` and the `garage-bootstrap` Job image.
