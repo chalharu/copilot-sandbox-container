@@ -50,13 +50,15 @@ standalone Garage Deployment 用です。sample manifest では
 Garage bucket quota を `4294967296` bytes に抑えて 4GiB までに制限します。
 Rust Job 自体は PVC を mount せず、`SCCACHE_BUCKET`、`SCCACHE_ENDPOINT`、
 `AWS_ACCESS_KEY_ID_FILE`、`AWS_SECRET_ACCESS_KEY_FILE` を受け取って cluster 内の
-`garage-s3` Service へ接続します。Garage 本体は公式 `dxflrs/garage:v2.2.0`
-image を使い、initContainer が `garage.toml` を生成します。single-node layout /
-key / bucket / lifecycle は別 Pod の `garage-bootstrap` Job が、既存の
-`control-plane` image に同梱した bootstrap script から idempotent に適用します。
-この Job は normal Garage pod
-restart とは切り離され、fresh PVC や sample credential 再初期化時だけ
-delete/recreate して rerun します。古い cache object は S3 lifecycle expiration で自動削除します。object-store mode
+`garage-s3` Service へ接続します。これらの file は control-plane Pod に mount
+した `garage-sccache-auth` Secret から供給され、Secret の中身自体は別 Pod の
+`garage-bootstrap` Job が Garage admin API の `CreateKey` で生成した key と同期します。
+Garage 本体は公式 `dxflrs/garage:v2.2.0` image を使い、initContainer が
+`garage.toml` を生成します。single-node layout / key / bucket / lifecycle は
+既存の `control-plane` image に同梱した bootstrap script から idempotent に適用します。
+この Job は normal Garage pod restart とは切り離され、fresh PVC や
+bootstrap-managed Garage credential を再初期化したいときだけ delete/recreate
+して rerun します。古い cache object は S3 lifecycle expiration で自動削除します。object-store mode
 を無効化した場合も、`sccache` 自体は
 `/var/tmp/containerized-rust/<repo>/<branch>/sccache` の ephemeral path を使い、
 `/workspace` PVC には `cargo` / `rustup` cache だけを残します。
@@ -103,7 +105,7 @@ driver を `overlay` にし、`/dev/fuse` がある場合だけ `fuse-overlayfs`
 
 - `control-plane-auth`: `ssh-public-key` と認証系の Secret 値
 - `garage-admin-auth`: Garage bootstrap 用の admin token / rpc secret
-- `garage-sccache-auth`: `sccache` S3 access key / secret key
+- `garage-sccache-auth`: `garage-bootstrap` Job が生成・更新する `sccache` S3 access key / secret key
 - `gh` 認証は `gh-github-token` または `gh-hosts.yml`
 - 必要に応じて `copilot-github-token`、DockerHub 認証情報も保持
 

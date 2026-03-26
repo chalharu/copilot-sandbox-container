@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 
@@ -34,6 +35,24 @@ function readSecret(path) {
 		return value;
 	} catch (error) {
 		die(`secret file not found: ${path}`);
+	}
+}
+
+function applyManifest(manifestJson, description) {
+	try {
+		execFileSync("kubectl", ["apply", "-f", "-"], {
+			encoding: "utf8",
+			input: manifestJson,
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+	} catch (error) {
+		const stderr = typeof error?.stderr === "string" ? error.stderr.trim() : "";
+		const stdout = typeof error?.stdout === "string" ? error.stdout.trim() : "";
+		const details =
+			stderr ||
+			stdout ||
+			(error instanceof Error ? error.message : String(error));
+		throw new Error(`${description} failed: ${details}`);
 	}
 }
 
@@ -179,31 +198,63 @@ async function upsertLayout() {
 	);
 }
 
+async function readKeyInfoByName({ required = true } = {}) {
+	const keysJson = await adminJson("GET", "/v2/ListKeys");
+	const matchingKeys = (Array.isArray(keysJson) ? keysJson : []).filter(
+		(key) => key?.name === s3KeyName,
+	);
+	if (matchingKeys.length === 0) {
+		if (!required) {
+			return null;
+		}
+		throw new HttpError(`Garage key ${s3KeyName} not found`, 404);
+	}
+	if (matchingKeys.length > 1) {
+		die(
+			`Garage key name ${s3KeyName} matched multiple keys; delete duplicates and rerun bootstrap`,
+		);
+	}
+	return await adminJson(
+		"GET",
+		`/v2/GetKeyInfo?id=${encodeURIComponent(matchingKeys[0].id)}&showSecretKey=true`,
+	);
+}
+
+function parseKeyCredentials(keyJson) {
+	const accessKeyId = keyJson?.accessKeyId ?? "";
+	if (!accessKeyId) {
+		die(`Garage key ${s3KeyName} did not report an access key id`);
+	}
+	const secretAccessKey = keyJson?.secretAccessKey ?? "";
+	if (!secretAccessKey) {
+		die(`Garage key ${s3KeyName} did not report a secret access key`);
+	}
+	return { accessKeyId, secretAccessKey };
+}
+
 async function upsertKey() {
-	const payload = {
-		accessKeyId: awsAccessKeyId,
-		secretAccessKey: awsSecretAccessKey,
-		name: s3KeyName,
-	};
+	const existingKeyJson = await readKeyInfoByName({ required: false });
+	if (existingKeyJson) {
+		return parseKeyCredentials(existingKeyJson);
+	}
 
 	let keyJson;
 	try {
-		keyJson = await adminJson("POST", "/v2/ImportKey", payload, [200, 201]);
+		keyJson = await adminJson(
+			"POST",
+			"/v2/CreateKey",
+			{ name: s3KeyName },
+			[200, 201],
+		);
 	} catch (error) {
 		keyJson = await readExistingAfterCreateFailure(error, () =>
-			adminJson(
-				"GET",
-				`/v2/GetKeyInfo?id=${encodeURIComponent(awsAccessKeyId)}&showSecretKey=true`,
-			),
+			readKeyInfoByName(),
 		);
 	}
-	const actualSecret = keyJson?.secretAccessKey ?? "";
-	if (actualSecret !== awsSecretAccessKey) {
-		die(`Garage key ${awsAccessKeyId} already exists with a different secret`);
-	}
+	return parseKeyCredentials(keyJson);
 }
 
-async function upsertBucket() {
+async function upsertBucket(accessKeyId) {
 	let bucketJson;
 	try {
 		bucketJson = await adminJson(
@@ -237,7 +288,7 @@ async function upsertBucket() {
 		"/v2/AllowBucketKey",
 		{
 			bucketId,
-			accessKeyId: awsAccessKeyId,
+			accessKeyId,
 			permissions: { owner: true, read: true, write: true },
 		},
 		[200, 204],
@@ -280,7 +331,7 @@ function dateStamp(date) {
 	return date.toISOString().slice(0, 10).replaceAll("-", "");
 }
 
-async function applyLifecycle() {
+async function applyLifecycle(accessKeyId, secretAccessKey) {
 	const lifecycleXml = `<LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
   <Rule>
     <ID>sccache-expiry</ID>
@@ -332,12 +383,12 @@ async function applyLifecycle() {
 	].join("\n");
 	const signature = createHmac(
 		"sha256",
-		getSignatureKey(awsSecretAccessKey, shortDate, s3Region, "s3"),
+		getSignatureKey(secretAccessKey, shortDate, s3Region, "s3"),
 	)
 		.update(stringToSign)
 		.digest("hex");
 	const authorization =
-		`AWS4-HMAC-SHA256 Credential=${awsAccessKeyId}/${credentialScope}, ` +
+		`AWS4-HMAC-SHA256 Credential=${accessKeyId}/${credentialScope}, ` +
 		`SignedHeaders=${signedHeaders}, Signature=${signature}`;
 
 	await request(
@@ -354,6 +405,26 @@ async function applyLifecycle() {
 			body: lifecycleBody,
 			expected: [200],
 		},
+	);
+}
+
+function syncS3AuthSecret(accessKeyId, secretAccessKey) {
+	const manifestJson = JSON.stringify({
+		apiVersion: "v1",
+		kind: "Secret",
+		metadata: {
+			name: s3AuthSecretName,
+			namespace: kubernetesNamespace,
+		},
+		type: "Opaque",
+		stringData: {
+			"access-key-id": accessKeyId,
+			"secret-access-key": secretAccessKey,
+		},
+	});
+	applyManifest(
+		manifestJson,
+		`kubectl apply Secret/${s3AuthSecretName} in namespace ${kubernetesNamespace}`,
 	);
 }
 
@@ -382,26 +453,25 @@ const cacheExpirationDays = Number(
 const abortMultipartDays = Number(
 	env("GARAGE_ABORT_MULTIPART_DAYS", { defaultValue: "1" }),
 );
+const kubernetesNamespace = env("POD_NAMESPACE", { required: true });
+const s3AuthSecretName = env("GARAGE_S3_AUTH_SECRET_NAME", {
+	defaultValue: "garage-sccache-auth",
+});
 const waitTimeoutSeconds = Number(
 	env("GARAGE_WAIT_TIMEOUT_SECONDS", { defaultValue: "120" }),
 );
 const adminToken = readSecret(
 	env("GARAGE_ADMIN_TOKEN_FILE", { required: true }),
 );
-const awsAccessKeyId = readSecret(
-	env("AWS_ACCESS_KEY_ID_FILE", { required: true }),
-);
-const awsSecretAccessKey = readSecret(
-	env("AWS_SECRET_ACCESS_KEY_FILE", { required: true }),
-);
 
 try {
 	await waitForAdmin();
 	await upsertLayout();
-	await upsertKey();
-	await upsertBucket();
+	const key = await upsertKey();
+	await upsertBucket(key.accessKeyId);
 	await waitForS3();
-	await applyLifecycle();
+	await applyLifecycle(key.accessKeyId, key.secretAccessKey);
+	syncS3AuthSecret(key.accessKeyId, key.secretAccessKey);
 	console.log("garage-bootstrap: bootstrap complete");
 } catch (error) {
 	die(error instanceof Error ? error.message : String(error));

@@ -110,7 +110,9 @@ ConfigMap / Secret / write-back の具体的な path は
    image で動かし、initContainer が `garage.toml` を生成します。bucket /
    quota / lifecycle の初期化は、別 Pod で 1 回だけ走る `garage-bootstrap`
    Job に分離し、その処理本体は既存の `control-plane` image に同梱した
-   bootstrap script を使います
+   bootstrap script を使います。`garage-bootstrap` は Garage admin API の
+   `CreateKey` で `sccache` 用 key を生成または再利用し、`garage-sccache-auth`
+   Secret へ反映します
 6. `GARAGE_CACHE_QUOTA_BYTES=4294967296` を維持し、5Gi の dedicated PVC に
    対して 20% の headroom を残す。古い cache object は
    `GARAGE_CACHE_EXPIRATION_DAYS` の lifecycle で自動削除する
@@ -119,7 +121,9 @@ ConfigMap / Secret / write-back の具体的な path は
    Rust Job は PVC を mount せず Service 経由で接続する。Garage 自身の
    `rpc_public_addr` は initContainer が Pod IP から組み立てる
 8. Rust Job の S3 credential は `garage-sccache-auth` Secret を control-plane Pod に
-   mount し、`k8s-rust.sh` が job-local `SCCACHE_CONF` へ埋め込む
+   mount し、`k8s-rust.sh` が job-local `SCCACHE_CONF` へ埋め込む。sample では
+   この Secret を手入力で合わせ込むのではなく、`garage-bootstrap` Job が
+   生成した Garage key で上書きする
 
 永続 path、Podman graphroot、ConfigMap / Secret の注入先などの具体的な
 path は `docs/reference/control-plane-runtime.md` を参照してください。
@@ -139,7 +143,7 @@ kubectl apply -k deploy/kubernetes/control-plane.example
 ```
 
 `garage-bootstrap` Job は Garage Pod の通常再起動では rerun しません。fresh PVC
-や sample credential の再初期化が必要になったときだけ、
+や bootstrap-managed Garage credential の再初期化が必要になったときだけ、
 `kubectl delete job garage-bootstrap -n copilot-sandbox` のあとに shared PVC 定義と
 通常 sample を順に再適用してください。
 

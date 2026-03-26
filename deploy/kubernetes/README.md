@@ -28,7 +28,7 @@ kubectl apply -k deploy/kubernetes/control-plane.example
 
 1. `control-plane.example/install/shared-persistent-volume-claims.yaml` の shared PVC 設定をクラスタに合わせる。特に `control-plane-copilot-session-pvc` の RWX storage class は初回導入前に書き換える。
 2. `control-plane.example/base/control-plane-instance.yaml` の workspace PVC 設定をクラスタに合わせる。PVC spec は bound 後に自由に変更できないので、storage class やサイズは初回導入前に確定させる。
-3. `control-plane.example/common/shared-resources.yaml` の placeholder な credential とクラスタ依存値を置き換える。
+3. `control-plane.example/common/shared-resources.yaml` の placeholder な credential とクラスタ依存値を置き換える。`garage-sccache-auth` は `garage-bootstrap` Job が上書きするので、通常は `control-plane-auth` と `garage-admin-auth` を主に調整する。
 4. `control-plane` image tag を、次の 3 箇所でそろえて書き換える。
    - `control-plane.example/base/control-plane-instance.yaml` の `Deployment/control-plane`
    - `control-plane.example/common/shared-resources.yaml` の `ConfigMap/control-plane-env` にある `CONTROL_PLANE_JOB_TRANSFER_IMAGE`
