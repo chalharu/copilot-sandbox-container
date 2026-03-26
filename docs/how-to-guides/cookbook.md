@@ -102,7 +102,8 @@ ConfigMap / Secret / write-back の具体的な path は
    `ReadWriteOnce` claim です。Garage 本体は公式 `dxflrs/garage:v2.2.0`
    image で動かし、initContainer が `garage.toml` を生成します。bucket /
    quota / lifecycle の初期化は、別 Pod で 1 回だけ走る `garage-bootstrap`
-   Job と専用 bootstrap image に分離します
+   Job に分離し、その処理本体は既存の `control-plane` image に同梱した
+   bootstrap script を使います
 5. sample manifest の `standard` を、実クラスタ向けの storage class へ
    置き換える
 6. `GARAGE_CACHE_QUOTA_BYTES=4294967296` を維持し、5Gi の dedicated PVC に

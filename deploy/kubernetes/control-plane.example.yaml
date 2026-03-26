@@ -307,18 +307,6 @@ spec:
     - name: s3
       port: 3900
       targetPort: s3
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: garage-admin
-  namespace: copilot-sandbox
-  labels:
-    app.kubernetes.io/name: garage-s3
-spec:
-  selector:
-    app.kubernetes.io/name: garage-s3
-  ports:
     - name: admin
       port: 3903
       targetPort: admin
@@ -460,11 +448,14 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: garage-bootstrap
-          image: ghcr.io/chalharu/copilot-sandbox-container/garage-bootstrap:replace-me-with-commit-sha
+          image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha
           imagePullPolicy: IfNotPresent
+          command:
+            - node
+            - /usr/local/bin/garage-bootstrap.mjs
           env:
             - name: GARAGE_ADMIN_URL
-              value: http://garage-admin.copilot-sandbox.svc.cluster.local:3903
+              value: http://garage-s3.copilot-sandbox.svc.cluster.local:3903
             - name: GARAGE_S3_ENDPOINT
               value: http://garage-s3.copilot-sandbox.svc.cluster.local:3900
             - name: GARAGE_ADMIN_TOKEN_FILE
@@ -501,8 +492,8 @@ spec:
               cpu: 250m
               memory: 256Mi
           securityContext:
-            runAsUser: 65532
-            runAsGroup: 65532
+            runAsUser: 1000
+            runAsGroup: 1000
             runAsNonRoot: true
             allowPrivilegeEscalation: false
             capabilities:

@@ -88,7 +88,6 @@ label_store="${workdir}/podman-label"
 workflow_path="${repo_root}/.github/workflows/control-plane-ci.yml"
 renovate_config_path="${repo_root}/renovate.json5"
 sccache_dockerfile_path="${repo_root}/containers/sccache/Dockerfile"
-garage_bootstrap_dockerfile_path="${repo_root}/containers/garage-bootstrap/Dockerfile"
 mkdir -p "${context_dir}" "${fake_bin_dir}"
 cat > "${context_dir}/Dockerfile" <<'EOF'
 FROM docker.io/library/busybox:1.37.0
@@ -160,11 +159,6 @@ assert_file_contains "${sccache_dockerfile_path}" 'FROM scratch'
 assert_file_contains "${sccache_dockerfile_path}" 'COPY --from=fetcher /out/ /'
 assert_file_contains "${sccache_dockerfile_path}" 'USER 65532:65532'
 assert_file_contains "${sccache_dockerfile_path}" 'ENTRYPOINT ["/usr/local/bin/sccache"]'
-assert_file_contains "${garage_bootstrap_dockerfile_path}" 'ARG GARAGE_BOOTSTRAP_VERSION=1.0.0'
-assert_file_contains "${garage_bootstrap_dockerfile_path}" 'FROM docker.io/library/python:3.14.3-bookworm@sha256:f357fca37376cc10aba3bb909d13bba0108a39670d7b9bc8b4039ac94674e874'
-assert_file_contains "${garage_bootstrap_dockerfile_path}" 'COPY --chmod=755 bootstrap.py /usr/local/bin/garage-bootstrap'
-assert_file_contains "${garage_bootstrap_dockerfile_path}" 'USER 65532:65532'
-assert_file_contains "${garage_bootstrap_dockerfile_path}" 'ENTRYPOINT ["python3", "/usr/local/bin/garage-bootstrap"]'
 
 helper_image_changes_block="$(job_block helper-image-changes)"
 publish_block="$(job_block publish-architecture-images)"
@@ -186,52 +180,46 @@ manifest_block="$(job_block publish-manifests)"
 assert_block_contains "${helper_image_changes_block}" 'fetch-depth: 0' 'helper-image-changes job block'
 assert_block_contains "${helper_image_changes_block}" "yamllint_changed=\"\$(changed_in_range containers/yamllint)\"" 'helper-image-changes job block'
 assert_block_contains "${helper_image_changes_block}" "sccache_changed=\"\$(changed_in_range containers/sccache)\"" 'helper-image-changes job block'
-assert_block_contains "${helper_image_changes_block}" "garage_bootstrap_changed=\"\$(changed_in_range containers/garage-bootstrap)\"" 'helper-image-changes job block'
 assert_block_contains "${helper_image_changes_block}" "printf 'yamllint_changed=%s\\n' \"\${yamllint_changed}\" >> \"\${GITHUB_OUTPUT}\"" 'helper-image-changes job block'
 assert_block_contains "${helper_image_changes_block}" "printf 'sccache_changed=%s\\n' \"\${sccache_changed}\" >> \"\${GITHUB_OUTPUT}\"" 'helper-image-changes job block'
-assert_block_contains "${helper_image_changes_block}" "printf 'garage_bootstrap_changed=%s\\n' \"\${garage_bootstrap_changed}\" >> \"\${GITHUB_OUTPUT}\"" 'helper-image-changes job block'
 
 assert_block_contains "${publish_block}" '- helper-image-changes' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "if: needs.helper-image-changes.outputs.yamllint_changed == 'true'" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "if: needs.helper-image-changes.outputs.sccache_changed == 'true'" 'publish-architecture-images job block'
-assert_block_contains "${publish_block}" "if: needs.helper-image-changes.outputs.garage_bootstrap_changed == 'true'" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "PUBLISH_YAMLLINT: \${{ needs.helper-image-changes.outputs.yamllint_changed }}" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "PUBLISH_SCCACHE: \${{ needs.helper-image-changes.outputs.sccache_changed }}" 'publish-architecture-images job block'
-assert_block_contains "${publish_block}" "PUBLISH_GARAGE_BOOTSTRAP: \${{ needs.helper-image-changes.outputs.garage_bootstrap_changed }}" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "if [[ \"\${PUBLISH_YAMLLINT}\" == \"true\" ]]; then" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "if [[ \"\${PUBLISH_SCCACHE}\" == \"true\" ]]; then" 'publish-architecture-images job block'
-assert_block_contains "${publish_block}" "if [[ \"\${PUBLISH_GARAGE_BOOTSTRAP}\" == \"true\" ]]; then" 'publish-architecture-images job block'
 
 assert_block_contains "${manifest_block}" '- helper-image-changes' 'publish-manifests job block'
 assert_block_contains "${manifest_block}" "PUBLISH_YAMLLINT: \${{ needs.helper-image-changes.outputs.yamllint_changed }}" 'publish-manifests job block'
 assert_block_contains "${manifest_block}" "PUBLISH_SCCACHE: \${{ needs.helper-image-changes.outputs.sccache_changed }}" 'publish-manifests job block'
-assert_block_contains "${manifest_block}" "PUBLISH_GARAGE_BOOTSTRAP: \${{ needs.helper-image-changes.outputs.garage_bootstrap_changed }}" 'publish-manifests job block'
 assert_block_contains "${manifest_block}" "if [[ \"\${PUBLISH_YAMLLINT}\" == \"true\" ]]; then" 'publish-manifests job block'
 assert_block_contains "${manifest_block}" "if [[ \"\${PUBLISH_SCCACHE}\" == \"true\" ]]; then" 'publish-manifests job block'
-assert_block_contains "${manifest_block}" "if [[ \"\${PUBLISH_GARAGE_BOOTSTRAP}\" == \"true\" ]]; then" 'publish-manifests job block'
 
 assert_file_contains "${workflow_path}" 'podman build --tag localhost/sccache:test containers/sccache'
-assert_file_contains "${workflow_path}" 'podman build --tag localhost/garage-bootstrap:test containers/garage-bootstrap'
 assert_file_contains "${workflow_path}" "GHCR_SCCACHE_IMAGE: ghcr.io/\${{ github.repository }}/sccache"
-assert_file_contains "${workflow_path}" "GHCR_GARAGE_BOOTSTRAP_IMAGE: ghcr.io/\${{ github.repository }}/garage-bootstrap"
 assert_file_contains "${workflow_path}" "podman tag localhost/sccache:test \"\${GHCR_SCCACHE_IMAGE}:\${GITHUB_SHA}-\${IMAGE_ARCH}\""
 assert_file_contains "${workflow_path}" "podman push \"\${GHCR_SCCACHE_IMAGE}:\${{ steps.image_versions.outputs.sccache_component_tag }}-\${IMAGE_ARCH}\""
 assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache:manifest-latest\" \"\${GHCR_SCCACHE_IMAGE}:latest\""
 assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache:manifest-version\" \"\${GHCR_SCCACHE_IMAGE}:\${{ steps.image_versions.outputs.sccache_component_tag }}\""
-assert_file_contains "${workflow_path}" "podman tag localhost/garage-bootstrap:test \"\${GHCR_GARAGE_BOOTSTRAP_IMAGE}:\${GITHUB_SHA}-\${IMAGE_ARCH}\""
-assert_file_contains "${workflow_path}" "podman push \"\${GHCR_GARAGE_BOOTSTRAP_IMAGE}:\${{ steps.image_versions.outputs.garage_bootstrap_component_tag }}-\${IMAGE_ARCH}\""
-assert_file_contains "${workflow_path}" "create_manifest \"localhost/garage-bootstrap:manifest-latest\" \"\${GHCR_GARAGE_BOOTSTRAP_IMAGE}:latest\""
-assert_file_contains "${workflow_path}" "create_manifest \"localhost/garage-bootstrap:manifest-version\" \"\${GHCR_GARAGE_BOOTSTRAP_IMAGE}:\${{ steps.image_versions.outputs.garage_bootstrap_component_tag }}\""
 assert_file_matches "${workflow_path}" '^[[:space:]]+- sccache$'
-assert_file_matches "${workflow_path}" '^[[:space:]]+- garage-bootstrap$'
-assert_file_contains "${renovate_config_path}" '/^containers\\/(control-plane|garage-bootstrap|yamllint|sccache)\\/Dockerfile$/'
+assert_file_contains "${renovate_config_path}" '/^containers\\/(control-plane|yamllint|sccache)\\/Dockerfile$/'
 assert_file_not_contains "${workflow_path}" 'garage_changed'
+assert_file_not_contains "${workflow_path}" 'garage_bootstrap_changed'
 assert_file_not_matches "${workflow_path}" 'containers/garage([[:space:]/]|$)'
+assert_file_not_contains "${workflow_path}" 'containers/garage-bootstrap'
 assert_file_not_contains "${workflow_path}" 'GHCR_GARAGE_IMAGE'
+assert_file_not_contains "${workflow_path}" 'GHCR_GARAGE_BOOTSTRAP_IMAGE'
 assert_file_not_contains "${workflow_path}" 'PUBLISH_GARAGE:'
+assert_file_not_contains "${workflow_path}" 'PUBLISH_GARAGE_BOOTSTRAP'
 assert_file_not_contains "${workflow_path}" 'garage_component_tag'
+assert_file_not_contains "${workflow_path}" 'garage_bootstrap_component_tag'
 assert_file_not_contains "${workflow_path}" 'localhost/garage:test'
+assert_file_not_contains "${workflow_path}" 'localhost/garage-bootstrap:test'
 assert_file_not_matches "${workflow_path}" '^[[:space:]]+- garage$'
+assert_file_not_matches "${workflow_path}" '^[[:space:]]+- garage-bootstrap$'
+assert_file_not_contains "${renovate_config_path}" 'garage-bootstrap'
 
 printf '%s\n' 'image-maintenance-test: verifying GHCR cleanup keeps tagged images' >&2
 assert_file_contains "${workflow_path}" 'delete-only-untagged-versions: '\''true'\'''

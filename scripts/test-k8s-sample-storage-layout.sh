@@ -173,14 +173,13 @@ assert_resource_contains ConfigMap control-plane-env 'TZ: Asia/Tokyo'
 printf '%s\n' 'k8s-sample-storage-layout-test: checking services, deployments, and cache mounts' >&2
 assert_resource_present Service control-plane
 assert_resource_present Service garage-s3
-assert_resource_present Service garage-admin
 assert_resource_present Deployment garage-s3
 assert_resource_present Job garage-bootstrap
 assert_resource_contains Service garage-s3 'port: 3900'
 assert_resource_contains Service garage-s3 'targetPort: s3'
 assert_resource_contains Service garage-s3 'app.kubernetes.io/name: garage-s3'
-assert_resource_contains Service garage-admin 'port: 3903'
-assert_resource_contains Service garage-admin 'targetPort: admin'
+assert_resource_contains Service garage-s3 'port: 3903'
+assert_resource_contains Service garage-s3 'targetPort: admin'
 assert_deployment_contains 'claimName: control-plane-copilot-session-pvc'
 assert_deployment_contains 'claimName: control-plane-workspace-pvc'
 assert_deployment_contains 'envFrom:'
@@ -226,11 +225,14 @@ assert_resource_not_contains Deployment garage-s3 'name: garage-bootstrap'
 assert_resource_not_contains Deployment garage-s3 'mountPath: /var/run/garage-sccache-auth'
 assert_resource_not_contains Deployment garage-s3 'mountPath: /var/run/garage-bootstrap'
 assert_resource_not_contains Deployment garage-s3 'kubernetes.io/arch: amd64'
-assert_resource_contains Job garage-bootstrap 'image: ghcr.io/chalharu/copilot-sandbox-container/garage-bootstrap:replace-me-with-commit-sha'
+assert_resource_not_contains Service garage-s3 'name: garage-admin'
+assert_resource_absent Service garage-admin
+assert_resource_contains Job garage-bootstrap 'image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha'
+assert_resource_contains Job garage-bootstrap '/usr/local/bin/garage-bootstrap.mjs'
 assert_resource_contains Job garage-bootstrap 'restartPolicy: OnFailure'
 assert_resource_contains Job garage-bootstrap 'backoffLimit: 6'
 assert_resource_contains Job garage-bootstrap 'automountServiceAccountToken: false'
-assert_resource_contains Job garage-bootstrap 'http://garage-admin.copilot-sandbox.svc.cluster.local:3903'
+assert_resource_contains Job garage-bootstrap 'http://garage-s3.copilot-sandbox.svc.cluster.local:3903'
 assert_resource_contains Job garage-bootstrap 'http://garage-s3.copilot-sandbox.svc.cluster.local:3900'
 assert_resource_contains Job garage-bootstrap 'mountPath: /var/run/garage-admin-auth'
 assert_resource_contains Job garage-bootstrap 'mountPath: /var/run/garage-sccache-auth'
