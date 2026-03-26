@@ -310,7 +310,9 @@ assert_resource_contains Deployment garage-s3 'containerPort: 3903'
 assert_resource_contains Deployment garage-s3 'name: admin'
 assert_resource_contains Deployment garage-s3 'mountPath: /var/lib/garage'
 assert_resource_contains Deployment garage-s3 'mountPath: /var/run/garage-admin-auth'
+assert_resource_contains Deployment garage-s3 'defaultMode: 384'
 assert_resource_contains Deployment garage-s3 'fieldPath: status.podIP'
+assert_resource_not_contains Deployment garage-s3 'GARAGE_ALLOW_WORLD_READABLE_SECRETS'
 assert_resource_not_contains Deployment garage-s3 'ghcr.io/chalharu/copilot-sandbox-container/garage'
 assert_resource_not_contains Deployment garage-s3 'name: garage-bootstrap'
 assert_resource_not_contains Deployment garage-s3 'mountPath: /var/run/garage-sccache-auth'
@@ -329,6 +331,7 @@ assert_resource_contains Job garage-bootstrap 'mountPath: /var/run/garage-admin-
 assert_resource_contains Job garage-bootstrap 'mountPath: /var/run/garage-sccache-auth'
 assert_resource_contains Job garage-bootstrap 'GARAGE_CACHE_QUOTA_BYTES'
 assert_resource_contains Job garage-bootstrap 'GARAGE_CACHE_EXPIRATION_DAYS'
+assert_resource_not_contains Job garage-bootstrap 'defaultMode: 384'
 
 printf '%s\n' 'k8s-sample-storage-layout-test: checking Podman defaults and legacy PVC removal' >&2
 if grep -Fq '/run/control-plane/podman' "${manifest_path}"; then
