@@ -42,7 +42,7 @@ Examples:
 - `bash ~/.copilot/skills/containerized-rust-ops/scripts/k8s-rust.sh -- cargo test --workspace --all-targets -- --nocapture`
 - `bash ~/.copilot/skills/containerized-rust-ops/scripts/k8s-rust.sh -- cargo llvm-cov --workspace --all-targets --summary-only`
 
-The Kubernetes helper keeps the clone, temp files, and `target` under `/var/tmp/containerized-rust/...`, while `cargo`, `rustup`, and `sccache` stay under `/workspace/cache/...` so the reusable caches survive across jobs without filling the PVC with `.git` metadata or transient build artifacts.
+The Kubernetes helper keeps the clone, temp files, `target`, and `sccache` state under `/var/tmp/containerized-rust/...`, while `cargo` and `rustup` stay under `/workspace/cache/...`. When the runtime exposes `SCCACHE_BUCKET`, `SCCACHE_ENDPOINT`, and S3 credentials through `AWS_ACCESS_KEY_ID_FILE` / `AWS_SECRET_ACCESS_KEY_FILE` (or direct env values), `k8s-rust.sh` writes an `SCCACHE_CONF` for the S3 backend. The sample manifest serves those requests from a standalone Garage Deployment that runs the official `dxflrs/garage:v2.2.0` image, renders `garage.toml` in an initContainer, and applies bucket/lifecycle bootstrap from a companion container. Without object-store mode, the helper still uses the same ephemeral `sccache` path so `/workspace` does not accumulate object-cache data.
 
 ## Keep cache-aware workflows aligned
 
@@ -51,6 +51,7 @@ When containerized Rust performance or correctness regresses, keep these surface
 - `scripts/podman-rust.sh` for local containerized runs
 - `scripts/k8s-rust.sh` for long control-plane jobs
 - `scripts/install-cargo-llvm-cov.sh` for release-based `cargo-llvm-cov` bootstrap
-- `containers/sccache/Dockerfile` for the cached `sccache` container image
+- `containers/sccache/Dockerfile` for the cached `sccache` client image
+- `deploy/kubernetes/control-plane.example.yaml` for the sample in-cluster Garage deployment and bootstrap wiring
 
 Do not reintroduce `.git`-backed caches, memory-backed `/tmp` defaults, or repo-specific `.github/skills/...` paths into these helpers. Those are known-bad in this environment.

@@ -14,16 +14,18 @@ entrypoint は `~/.config/control-plane/runtime.env` を生成し、login shell 
 - `TZ` で指定した IANA timezone
 - Copilot CPU cap
 - 監査ログ SQLite DB の path と record cap
+- `sccache` S3 backend の endpoint / bucket / credential file path（設定時）
 - Secret / ConfigMap 由来の file path
 - Job 実行先 namespace と mode の既定値
 - exec policy 用の `LD_PRELOAD` と rule path
 
 ## 2. 永続化する state
 
-sample manifest の既定値では、次の 2 つを分けます。
+sample manifest の既定値では、次の 3 つを分けます。
 
 - RWX の copilot session PVC
 - RWO の `/workspace` PVC
+- RWO の dedicated `sccache` object-store PVC（standalone Garage Deployment 用）
 
 copilot session PVC へまとめるもの:
 
@@ -41,6 +43,20 @@ copilot session PVC へまとめるもの:
 `audit-log-analysis` skill と lifecycle analysis hooks
 (`agentStop` / `subagentStop` / `sessionEnd` / `errorOccurred`) が
 同じ永続 state を参照します。
+
+dedicated sccache PVC は current-cluster の long-running Rust Job 向け
+standalone Garage Deployment 用です。sample manifest では
+`ReadWriteOnce` の 5Gi claim を `/var/lib/garage` へ mount し、
+Garage bucket quota を `4294967296` bytes に抑えて 4GiB までに制限します。
+Rust Job 自体は PVC を mount せず、`SCCACHE_BUCKET`、`SCCACHE_ENDPOINT`、
+`AWS_ACCESS_KEY_ID_FILE`、`AWS_SECRET_ACCESS_KEY_FILE` を受け取って cluster 内の
+`garage-s3` Service へ接続します。Garage 本体は公式 `dxflrs/garage:v2.2.0`
+image を使い、initContainer が `garage.toml` を生成し、companion bootstrap
+container が single-node layout / key / bucket / lifecycle を idempotent に
+適用します。古い cache object は S3 lifecycle expiration で自動削除します。object-store mode
+を無効化した場合も、`sccache` 自体は
+`/var/tmp/containerized-rust/<repo>/<branch>/sccache` の ephemeral path を使い、
+`/workspace` PVC には `cargo` / `rustup` cache だけを残します。
 
 監査ログの保持件数は `control-plane-env` ConfigMap の
 `CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）で調整し、
@@ -74,7 +90,7 @@ driver を `overlay` にし、`/dev/fuse` がある場合だけ `fuse-overlayfs`
 ### ConfigMap
 
 - `control-plane-config`: `copilot-config.json` の JSON object overlay
-- `control-plane-env`: namespace / PVC / Job 既定値 / file path のような
+- `control-plane-env`: namespace / PVC / Job 既定値 / file path / sccache S3 endpoint のような
   非機密 env
 
 `COPILOT_CONFIG_JSON_FILE` で渡した JSON object は、PVC 上の既存
@@ -83,6 +99,8 @@ driver を `overlay` にし、`/dev/fuse` がある場合だけ `fuse-overlayfs`
 ### Secret
 
 - `control-plane-auth`: `ssh-public-key` と認証系の Secret 値
+- `garage-admin-auth`: Garage bootstrap 用の admin token / rpc secret
+- `garage-sccache-auth`: `sccache` S3 access key / secret key
 - `gh` 認証は `gh-github-token` または `gh-hosts.yml`
 - 必要に応じて `copilot-github-token`、DockerHub 認証情報も保持
 

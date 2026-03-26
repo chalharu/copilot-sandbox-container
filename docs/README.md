@@ -7,7 +7,7 @@
 
 - 最短で lint / build / test を通したい: `README.md`
 - current-cluster の smoke と manifest 更新を進めたい: `docs/how-to-guides/cookbook.md`
-- runtime.env、永続 state、Podman cache、hook / Git policy の path を引きたい: `docs/reference/control-plane-runtime.md`
+- runtime.env、永続 state、Podman cache、hook / Git policy、sccache S3 / Garage の path を引きたい: `docs/reference/control-plane-runtime.md`
 - なぜ rootful-service fallback や Kubernetes Job が既定なのか知りたい: `docs/explanation/knowledge.md`
 - 現行構成へ至る経緯を追いたい: `docs/explanation/history.md`
 - 代表ログから障害点を引きたい: `docs/reference/debug-log.md`

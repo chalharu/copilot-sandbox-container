@@ -33,6 +33,16 @@ assert_file_matches() {
   }
 }
 
+assert_file_not_contains() {
+  local path="$1"
+  local unexpected="$2"
+
+  if grep -Fq -- "${unexpected}" "${path}"; then
+    printf 'Did not expect %s to contain: %s\n' "${path}" "${unexpected}" >&2
+    exit 1
+  fi
+}
+
 job_block() {
   local job_name="$1"
 
@@ -133,11 +143,12 @@ build_image_for_toolchain podman localhost/image-maintenance:test "${context_dir
 [[ "${first_hash}" != "${second_hash}" ]]
 grep -Fq "build --isolation=chroot --label $(build_context_hash_label_key)=${second_hash} --tag localhost/image-maintenance:test ${context_dir}" "${podman_log}"
 
-printf '%s\n' 'image-maintenance-test: verifying sccache helper image release wiring' >&2
+printf '%s\n' 'image-maintenance-test: verifying helper image release wiring' >&2
 assert_file_contains "${sccache_dockerfile_path}" 'FROM docker.io/library/alpine:3.23.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659 AS fetcher'
 assert_file_contains "${sccache_dockerfile_path}" 'FROM scratch'
 assert_file_contains "${sccache_dockerfile_path}" 'COPY --from=fetcher /out/ /'
 assert_file_contains "${sccache_dockerfile_path}" 'USER 65532:65532'
+assert_file_contains "${sccache_dockerfile_path}" 'ENTRYPOINT ["/usr/local/bin/sccache"]'
 
 helper_image_changes_block="$(job_block helper-image-changes)"
 publish_block="$(job_block publish-architecture-images)"
@@ -184,6 +195,13 @@ assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache:man
 assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache:manifest-version\" \"\${GHCR_SCCACHE_IMAGE}:\${{ steps.image_versions.outputs.sccache_component_tag }}\""
 assert_file_matches "${workflow_path}" '^[[:space:]]+- sccache$'
 assert_file_contains "${renovate_config_path}" '/^containers\\/(control-plane|yamllint|sccache)\\/Dockerfile$/'
+assert_file_not_contains "${workflow_path}" 'garage_changed'
+assert_file_not_contains "${workflow_path}" 'containers/garage'
+assert_file_not_contains "${workflow_path}" 'GHCR_GARAGE_IMAGE'
+assert_file_not_contains "${workflow_path}" 'PUBLISH_GARAGE'
+assert_file_not_contains "${workflow_path}" 'garage_component_tag'
+assert_file_not_contains "${workflow_path}" 'localhost/garage:test'
+assert_file_not_contains "${workflow_path}" '  - garage'
 
 printf '%s\n' 'image-maintenance-test: verifying GHCR cleanup keeps tagged images' >&2
 assert_file_contains "${workflow_path}" 'delete-only-untagged-versions: '\''true'\'''

@@ -106,6 +106,21 @@ spec:
   storageClassName: standard
 ---
 apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: control-plane-sccache-pvc
+  namespace: copilot-sandbox
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  # The dedicated Garage-backed object store keeps roughly 20% headroom by
+  # capping the sccache bucket at 4 GiB inside this 5 GiB PVC.
+  storageClassName: standard
+---
+apiVersion: v1
 kind: Secret
 metadata:
   name: control-plane-auth
@@ -135,6 +150,26 @@ stringData:
   # the file paths without exporting the raw secret values into the login shell.
   # dockerhub-username: your-dockerhub-user
   # dockerhub-token: dckr_pat_... replace-me
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: garage-admin-auth
+  namespace: copilot-sandbox
+type: Opaque
+stringData:
+  admin-token: replace-me-garage-admin-token
+  rpc-secret: replace-me-garage-rpc-secret
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: garage-sccache-auth
+  namespace: copilot-sandbox
+type: Opaque
+stringData:
+  access-key-id: replace-me-sccache-access-key-id
+  secret-access-key: replace-me-sccache-secret-access-key
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -187,6 +222,15 @@ data:
   CONTROL_PLANE_JOB_NAMESPACE: copilot-sandbox-jobs
   CONTROL_PLANE_WORKSPACE_PVC: control-plane-workspace-pvc
   CONTROL_PLANE_WORKSPACE_SUBPATH: workspace
+  # Rust Kubernetes jobs keep only ephemeral local sccache state under /var/tmp
+  # and store shared cache objects in the in-cluster Garage S3 service.
+  SCCACHE_BUCKET: control-plane-sccache
+  SCCACHE_ENDPOINT: http://garage-s3.copilot-sandbox.svc.cluster.local:3900
+  SCCACHE_REGION: garage
+  SCCACHE_S3_USE_SSL: "false"
+  SCCACHE_S3_KEY_PREFIX: sccache/
+  AWS_ACCESS_KEY_ID_FILE: /var/run/garage-sccache-auth/access-key-id
+  AWS_SECRET_ACCESS_KEY_FILE: /var/run/garage-sccache-auth/secret-access-key
   # Optional: when the job namespace has its own shared workspace PVC
   # that exposes the same repository contents, mount it into Jobs too.
   # Otherwise keep Jobs stateless and use `--mount-file`, which stages
@@ -230,6 +274,303 @@ data:
   CONTROL_PLANE_JOB_CPU_LIMIT: "2"
   CONTROL_PLANE_JOB_MEMORY_REQUEST: 256Mi
   CONTROL_PLANE_JOB_MEMORY_LIMIT: 2Gi
+  # Optional local-only fallback for Rust helpers when dist mode is disabled.
+  SCCACHE_CACHE_SIZE: "4G"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: garage-bootstrap
+  namespace: copilot-sandbox
+data:
+  bootstrap.py: |
+    import hashlib
+    import hmac
+    import html
+    import json
+    import os
+    import sys
+    import time
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    from datetime import datetime, timezone
+
+    def die(message):
+        print(f"garage-bootstrap: {message}", file=sys.stderr, flush=True)
+        raise SystemExit(64)
+
+    def env(name, default=None, required=False):
+        value = os.environ.get(name, default)
+        if required and not value:
+            die(f"{name} is required")
+        return value
+
+    def read_secret(path):
+        if not os.path.isfile(path):
+            die(f"secret file not found: {path}")
+        with open(path, encoding="utf-8") as handle:
+            value = handle.read().strip()
+        if not value:
+            die(f"secret file must not be empty: {path}")
+        return value
+
+    def request(method, url, headers=None, body=None, expected=(200,)):
+        req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as response:
+                status = response.getcode()
+                payload = response.read()
+        except urllib.error.HTTPError as err:
+            status = err.code
+            payload = err.read()
+        except urllib.error.URLError as err:
+            raise RuntimeError(f"{method} {url} failed: {err}") from err
+
+        if expected is not None and status not in expected:
+            text = payload.decode("utf-8", "replace")
+            raise RuntimeError(f"{method} {url} failed with HTTP {status}: {text}")
+        return status, payload
+
+    def admin_json(method, path, payload=None, expected=(200, 201, 204)):
+        headers = {"Authorization": f"Bearer {admin_token}"}
+        body = None
+        if payload is not None:
+            headers["Content-Type"] = "application/json"
+            body = json.dumps(payload).encode("utf-8")
+        _, response_body = request(method, f"{admin_url}{path}", headers=headers, body=body, expected=expected)
+        if not response_body:
+            return None
+        return json.loads(response_body.decode("utf-8"))
+
+    def wait_for_admin():
+        deadline = time.time() + wait_timeout_seconds
+        while time.time() < deadline:
+            try:
+                admin_json("GET", "/v2/GetClusterStatus")
+                return
+            except RuntimeError:
+                time.sleep(2)
+        die("Garage admin API did not become ready")
+
+    def wait_for_s3():
+        deadline = time.time() + wait_timeout_seconds
+        while time.time() < deadline:
+            try:
+                request("GET", s3_endpoint, expected=(200, 301, 302, 307, 403))
+                return
+            except RuntimeError:
+                time.sleep(2)
+        die("Garage S3 API did not become ready")
+
+    def upsert_layout():
+        status_json = admin_json("GET", "/v2/GetClusterStatus")
+        node_id = (status_json.get("nodes") or [{}])[0].get("id", "")
+        if not node_id:
+            die("Garage did not report any cluster node")
+
+        current_role = {}
+        for node in status_json.get("nodes", []):
+            if node.get("id") == node_id:
+                current_role = node.get("role") or {}
+                break
+
+        normalized_current = {
+            "zone": current_role.get("zone"),
+            "capacity": current_role.get("capacity"),
+            "tags": sorted(current_role.get("tags") or []),
+        }
+        normalized_desired = {
+            "zone": layout_zone,
+            "capacity": layout_capacity_bytes,
+            "tags": sorted(layout_tags),
+        }
+        if normalized_current == normalized_desired:
+            return
+
+        layout_json = admin_json(
+            "POST",
+            "/v2/UpdateClusterLayout",
+            {
+                "roles": [
+                    {
+                        "id": node_id,
+                        "zone": layout_zone,
+                        "capacity": layout_capacity_bytes,
+                        "tags": layout_tags,
+                    }
+                ]
+            },
+            expected=(200, 201),
+        )
+        admin_json(
+            "POST",
+            "/v2/ApplyClusterLayout",
+            {"version": int(layout_json["version"]) + 1},
+            expected=(200, 204),
+        )
+
+    def upsert_key():
+        payload = {
+            "accessKeyId": aws_access_key_id,
+            "secretAccessKey": aws_secret_access_key,
+            "name": s3_key_name,
+        }
+        try:
+            key_json = admin_json("POST", "/v2/ImportKey", payload, expected=(200, 201))
+        except RuntimeError:
+            quoted_key_id = urllib.parse.quote(aws_access_key_id, safe="")
+            key_json = admin_json("GET", f"/v2/GetKeyInfo?id={quoted_key_id}&showSecretKey=true")
+        actual_secret = (key_json or {}).get("secretAccessKey", "")
+        if actual_secret != aws_secret_access_key:
+            die(f"Garage key {aws_access_key_id} already exists with a different secret")
+
+    def upsert_bucket():
+        try:
+            bucket_json = admin_json(
+                "POST",
+                "/v2/CreateBucket",
+                {"globalAlias": s3_bucket},
+                expected=(200, 201),
+            )
+        except RuntimeError:
+            quoted_bucket = urllib.parse.quote(s3_bucket, safe="")
+            bucket_json = admin_json("GET", f"/v2/GetBucketInfo?globalAlias={quoted_bucket}")
+
+        bucket_id = (bucket_json or {}).get("id", "")
+        if not bucket_id:
+            die(f"Garage bucket {s3_bucket} did not report an id")
+
+        quoted_bucket_id = urllib.parse.quote(bucket_id, safe="")
+        admin_json(
+            "POST",
+            f"/v2/UpdateBucket?id={quoted_bucket_id}",
+            {"quotas": {"maxSize": cache_quota_bytes, "maxObjects": None}},
+            expected=(200, 204),
+        )
+        admin_json(
+            "POST",
+            "/v2/AllowBucketKey",
+            {
+                "bucketId": bucket_id,
+                "accessKeyId": aws_access_key_id,
+                "permissions": {"owner": True, "read": True, "write": True},
+            },
+            expected=(200, 204),
+        )
+
+    def get_signature_key(secret_key, date_stamp, region_name, service_name):
+        date_key = hmac.new(("AWS4" + secret_key).encode("utf-8"), date_stamp.encode("utf-8"), hashlib.sha256).digest()
+        region_key = hmac.new(date_key, region_name.encode("utf-8"), hashlib.sha256).digest()
+        service_key = hmac.new(region_key, service_name.encode("utf-8"), hashlib.sha256).digest()
+        return hmac.new(service_key, b"aws4_request", hashlib.sha256).digest()
+
+    def apply_lifecycle():
+        prefix_xml = html.escape(s3_key_prefix)
+        lifecycle_xml = f"""<LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+      <Rule>
+        <ID>sccache-expiry</ID>
+        <Status>Enabled</Status>
+        <Filter>
+          <Prefix>{prefix_xml}</Prefix>
+        </Filter>
+        <Expiration>
+          <Days>{cache_expiration_days}</Days>
+        </Expiration>
+        <AbortIncompleteMultipartUpload>
+          <DaysAfterInitiation>{abort_multipart_days}</DaysAfterInitiation>
+        </AbortIncompleteMultipartUpload>
+      </Rule>
+    </LifecycleConfiguration>"""
+        lifecycle_body = lifecycle_xml.encode("utf-8")
+        parsed_endpoint = urllib.parse.urlparse(s3_endpoint)
+        if not parsed_endpoint.scheme or not parsed_endpoint.netloc:
+            die(f"invalid GARAGE_S3_ENDPOINT: {s3_endpoint}")
+
+        canonical_uri = f"/{s3_bucket}"
+        canonical_query = "lifecycle="
+        payload_hash = hashlib.sha256(lifecycle_body).hexdigest()
+        now = datetime.now(timezone.utc)
+        amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+        date_stamp = now.strftime("%Y%m%d")
+        canonical_headers = {
+            "content-type": "application/xml",
+            "host": parsed_endpoint.netloc,
+            "x-amz-content-sha256": payload_hash,
+            "x-amz-date": amz_date,
+        }
+        canonical_headers_block = "".join(f"{key}:{canonical_headers[key]}\n" for key in sorted(canonical_headers))
+        signed_headers = ";".join(sorted(canonical_headers))
+        canonical_request = "\n".join(
+            [
+                "PUT",
+                canonical_uri,
+                canonical_query,
+                canonical_headers_block,
+                signed_headers,
+                payload_hash,
+            ]
+        )
+        credential_scope = f"{date_stamp}/{s3_region}/s3/aws4_request"
+        string_to_sign = "\n".join(
+            [
+                "AWS4-HMAC-SHA256",
+                amz_date,
+                credential_scope,
+                hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
+            ]
+        )
+        signature = hmac.new(
+            get_signature_key(aws_secret_access_key, date_stamp, s3_region, "s3"),
+            string_to_sign.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        authorization = (
+            "AWS4-HMAC-SHA256 "
+            f"Credential={aws_access_key_id}/{credential_scope}, "
+            f"SignedHeaders={signed_headers}, "
+            f"Signature={signature}"
+        )
+        request(
+            "PUT",
+            f"{s3_endpoint.rstrip('/')}{canonical_uri}?lifecycle=",
+            headers={
+                "Authorization": authorization,
+                "Content-Type": "application/xml",
+                "Host": parsed_endpoint.netloc,
+                "X-Amz-Content-Sha256": payload_hash,
+                "X-Amz-Date": amz_date,
+            },
+            body=lifecycle_body,
+            expected=(200,),
+        )
+
+    admin_url = env("GARAGE_ADMIN_URL", "http://127.0.0.1:3903")
+    s3_endpoint = env("GARAGE_S3_ENDPOINT", "http://127.0.0.1:3900")
+    s3_region = env("GARAGE_S3_REGION", "garage")
+    s3_bucket = env("GARAGE_S3_BUCKET", required=True)
+    s3_key_name = env("GARAGE_S3_KEY_NAME", s3_bucket)
+    s3_key_prefix = env("GARAGE_S3_KEY_PREFIX", "sccache/")
+    layout_zone = env("GARAGE_LAYOUT_ZONE", "dc1")
+    layout_tags = [tag.strip() for tag in env("GARAGE_LAYOUT_TAGS", "control-plane,sccache").split(",") if tag.strip()]
+    layout_capacity_bytes = int(env("GARAGE_LAYOUT_CAPACITY_BYTES", "5368709120"))
+    cache_quota_bytes = int(env("GARAGE_CACHE_QUOTA_BYTES", "4294967296"))
+    cache_expiration_days = int(env("GARAGE_CACHE_EXPIRATION_DAYS", "30"))
+    abort_multipart_days = int(env("GARAGE_ABORT_MULTIPART_DAYS", "1"))
+    wait_timeout_seconds = int(env("GARAGE_WAIT_TIMEOUT_SECONDS", "120"))
+    admin_token = read_secret(env("GARAGE_ADMIN_TOKEN_FILE", required=True))
+    aws_access_key_id = read_secret(env("AWS_ACCESS_KEY_ID_FILE", required=True))
+    aws_secret_access_key = read_secret(env("AWS_SECRET_ACCESS_KEY_FILE", required=True))
+
+    wait_for_admin()
+    upsert_layout()
+    upsert_key()
+    upsert_bucket()
+    wait_for_s3()
+    apply_lifecycle()
+    print("garage-bootstrap: bootstrap complete", flush=True)
+    while True:
+        time.sleep(3600)
 ---
 apiVersion: v1
 kind: Service
@@ -246,6 +587,203 @@ spec:
     - name: ssh
       port: 2222
       targetPort: ssh
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: garage-s3
+  namespace: copilot-sandbox
+  labels:
+    app.kubernetes.io/name: garage-s3
+spec:
+  selector:
+    app.kubernetes.io/name: garage-s3
+  ports:
+    - name: s3
+      port: 3900
+      targetPort: s3
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: garage-s3
+  namespace: copilot-sandbox
+  labels:
+    app.kubernetes.io/name: garage-s3
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: garage-s3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: garage-s3
+    spec:
+      initContainers:
+        - name: init-garage-config
+          # renovate: datasource=docker depName=docker.io/library/busybox versioning=docker
+          image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              mkdir -p /garage-config
+              cat > /garage-config/garage.toml <<EOF
+              metadata_dir = "/var/lib/garage/meta"
+              data_dir = "/var/lib/garage/data"
+              db_engine = "sqlite"
+              replication_factor = 1
+
+              rpc_bind_addr = "0.0.0.0:3901"
+              rpc_public_addr = "${POD_IP}:3901"
+
+              [s3_api]
+              s3_region = "garage"
+              api_bind_addr = "0.0.0.0:3900"
+
+              [admin]
+              api_bind_addr = "127.0.0.1:3903"
+              EOF
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.podIP
+          volumeMounts:
+            - name: garage-config
+              mountPath: /garage-config
+      containers:
+        - name: garage
+          # renovate: datasource=docker depName=docker.io/dxflrs/garage versioning=docker
+          image: dxflrs/garage:v2.2.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /garage
+            - -c
+            - /etc/garage/garage.toml
+            - server
+          env:
+            - name: GARAGE_RPC_SECRET_FILE
+              value: /var/run/garage-admin-auth/rpc-secret
+            - name: GARAGE_ADMIN_TOKEN_FILE
+              value: /var/run/garage-admin-auth/admin-token
+          ports:
+            - containerPort: 3900
+              name: s3
+          readinessProbe:
+            tcpSocket:
+              port: s3
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: s3
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: garage-data
+              mountPath: /var/lib/garage
+            - name: garage-config
+              mountPath: /etc/garage
+            - name: garage-admin-auth
+              mountPath: /var/run/garage-admin-auth
+              readOnly: true
+        - name: garage-bootstrap
+          # renovate: datasource=docker depName=docker.io/library/python versioning=docker
+          image: python:3.14.3-bookworm@sha256:f357fca37376cc10aba3bb909d13bba0108a39670d7b9bc8b4039ac94674e874
+          imagePullPolicy: IfNotPresent
+          command:
+            - python3
+            - /var/run/garage-bootstrap/bootstrap.py
+          env:
+            - name: GARAGE_ADMIN_URL
+              value: http://127.0.0.1:3903
+            - name: GARAGE_S3_ENDPOINT
+              value: http://127.0.0.1:3900
+            - name: GARAGE_ADMIN_TOKEN_FILE
+              value: /var/run/garage-admin-auth/admin-token
+            - name: AWS_ACCESS_KEY_ID_FILE
+              value: /var/run/garage-sccache-auth/access-key-id
+            - name: AWS_SECRET_ACCESS_KEY_FILE
+              value: /var/run/garage-sccache-auth/secret-access-key
+            - name: GARAGE_S3_BUCKET
+              value: control-plane-sccache
+            - name: GARAGE_S3_KEY_NAME
+              value: control-plane-sccache
+            - name: GARAGE_S3_KEY_PREFIX
+              value: sccache/
+            - name: GARAGE_S3_REGION
+              value: garage
+            - name: GARAGE_LAYOUT_ZONE
+              value: dc1
+            - name: GARAGE_LAYOUT_TAGS
+              value: control-plane,sccache
+            - name: GARAGE_LAYOUT_CAPACITY_BYTES
+              value: "5368709120"
+            - name: GARAGE_CACHE_QUOTA_BYTES
+              value: "4294967296"
+            - name: GARAGE_CACHE_EXPIRATION_DAYS
+              value: "30"
+            - name: GARAGE_ABORT_MULTIPART_DAYS
+              value: "1"
+          resources:
+            requests:
+              cpu: 25m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          volumeMounts:
+            - name: garage-bootstrap
+              mountPath: /var/run/garage-bootstrap
+              readOnly: true
+            - name: garage-admin-auth
+              mountPath: /var/run/garage-admin-auth
+              readOnly: true
+            - name: garage-sccache-auth
+              mountPath: /var/run/garage-sccache-auth
+              readOnly: true
+      volumes:
+        - name: garage-data
+          persistentVolumeClaim:
+            claimName: control-plane-sccache-pvc
+        - name: garage-config
+          emptyDir: {}
+        - name: garage-bootstrap
+          configMap:
+            name: garage-bootstrap
+            items:
+              - key: bootstrap.py
+                path: bootstrap.py
+        - name: garage-admin-auth
+          secret:
+            secretName: garage-admin-auth
+            items:
+              - key: admin-token
+                path: admin-token
+              - key: rpc-secret
+                path: rpc-secret
+        - name: garage-sccache-auth
+          secret:
+            secretName: garage-sccache-auth
+            items:
+              - key: access-key-id
+                path: access-key-id
+              - key: secret-access-key
+                path: secret-access-key
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -289,6 +827,7 @@ spec:
                 /copilot-session/state/ssh-host-keys \
                 /copilot-session/session-state \
                 /workspace-state/workspace \
+                /workspace-state/workspace/cache \
                 /cache/rootful-podman \
                 /cache/runtime-tmp
               touch /copilot-session/state/copilot-config.json /copilot-session/state/command-history-state.json
@@ -297,8 +836,8 @@ spec:
               find /copilot-session/state /copilot-session/session-state -type f -exec chmod 600 {} +
               # Preserve user workspace file modes; only hand the shared mount root
               # back to UID/GID 1000 so the control-plane session can use it.
-              chown 1000:1000 /workspace-state/workspace
-              chmod 700 /workspace-state/workspace
+              chown 1000:1000 /workspace-state/workspace /workspace-state/workspace/cache
+              chmod 700 /workspace-state/workspace /workspace-state/workspace/cache
               # Keep graphroot root-only, but leave the runtime tmp path traversable
               # so the copilot user can reach the rootful Podman socket later.
               chown 0:0 /cache/rootful-podman
@@ -471,6 +1010,9 @@ spec:
             - name: control-plane-config
               mountPath: /var/run/control-plane-config
               readOnly: true
+            - name: garage-sccache-auth
+              mountPath: /var/run/garage-sccache-auth
+              readOnly: true
       volumes:
         - name: copilot-session
           persistentVolumeClaim:
@@ -497,6 +1039,14 @@ spec:
         - name: control-plane-auth
           secret:
             secretName: control-plane-auth
+        - name: garage-sccache-auth
+          secret:
+            secretName: garage-sccache-auth
+            items:
+              - key: access-key-id
+                path: access-key-id
+              - key: secret-access-key
+                path: secret-access-key
         - name: control-plane-config
           configMap:
             name: control-plane-config

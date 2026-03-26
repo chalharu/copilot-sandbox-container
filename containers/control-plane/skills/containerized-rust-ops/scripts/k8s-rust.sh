@@ -7,9 +7,12 @@ Usage:
   k8s-rust.sh <fmt-check|check|clippy|build|test>
   k8s-rust.sh -- <command> [args...]
 
-Run Rust commands in a control-plane Kubernetes job with persistent cargo,
-rustup, and sccache caches under /workspace/cache, while keeping the clone,
-target directory, and temp files on ephemeral /var/tmp storage.
+Run Rust commands in a control-plane Kubernetes job with persistent cargo and
+rustup caches under /workspace/cache. The clone, target directory, temp files,
+and local sccache state always live on ephemeral storage under /var/tmp so the
+shared workspace PVC only carries the minimum reusable Rust toolchain data.
+When the runtime exposes an S3-backed sccache endpoint, this helper writes an
+SCCACHE_CONF so shared cache objects stay in the object store instead.
 USAGE
 }
 
@@ -20,6 +23,16 @@ die() {
 
 slugify() {
   printf '%s' "$1" | tr '/:@' '---' | tr -cs '[:alnum:]._-' '-'
+}
+
+read_secret_file() {
+  local path="$1"
+  local value
+
+  [[ -f "${path}" ]] || die "secret file not found: ${path}"
+  value="$(tr -d '\r\n' < "${path}")"
+  [[ -n "${value}" ]] || die "secret file must not be empty: ${path}"
+  printf '%s' "${value}"
 }
 
 [[ $# -gt 0 ]] || {
@@ -99,11 +112,55 @@ namespace="${CONTROL_PLANE_K8S_NAMESPACE:-}"
 sccache_version="${SCCACHE_VERSION:-0.14.0}"
 sccache_release_base_url="${SCCACHE_RELEASE_BASE_URL:-https://github.com/mozilla/sccache/releases/download}"
 sccache_bootstrap_jobs="${SCCACHE_BOOTSTRAP_JOBS:-1}"
+sccache_bucket="${SCCACHE_BUCKET:-}"
+sccache_endpoint="${SCCACHE_ENDPOINT:-}"
+sccache_region="${SCCACHE_REGION:-garage}"
+sccache_s3_use_ssl="${SCCACHE_S3_USE_SSL:-false}"
+sccache_s3_key_prefix="${SCCACHE_S3_KEY_PREFIX:-sccache/}"
+aws_access_key_id_file="${AWS_ACCESS_KEY_ID_FILE:-}"
+aws_secret_access_key_file="${AWS_SECRET_ACCESS_KEY_FILE:-}"
+aws_access_key_id="${AWS_ACCESS_KEY_ID:-}"
+aws_secret_access_key="${AWS_SECRET_ACCESS_KEY:-}"
+sccache_s3_requested=0
+sccache_s3_enabled=0
 cargo_llvm_cov_version="${CARGO_LLVM_COV_VERSION:-0.8.5}"
 cargo_llvm_cov_release_base_url="${CARGO_LLVM_COV_RELEASE_BASE_URL:-https://github.com/taiki-e/cargo-llvm-cov/releases}"
 enable_cargo_llvm_cov=0
 if [[ "${#cmd[@]}" -ge 2 && "${cmd[0]}" == "cargo" && "${cmd[1]}" == "llvm-cov" ]]; then
   enable_cargo_llvm_cov=1
+fi
+
+if [[ -n "${SCCACHE_BUCKET:-}" || -n "${SCCACHE_ENDPOINT:-}" || -n "${SCCACHE_REGION:-}" || -n "${SCCACHE_S3_USE_SSL:-}" || -n "${SCCACHE_S3_KEY_PREFIX:-}" || -n "${aws_access_key_id_file}" || -n "${aws_secret_access_key_file}" ]]; then
+  sccache_s3_requested=1
+fi
+
+case "${sccache_s3_use_ssl}" in
+  true|false)
+    ;;
+  *)
+    die "SCCACHE_S3_USE_SSL must be true or false"
+    ;;
+esac
+
+if [[ -n "${aws_access_key_id_file}" && -n "${aws_access_key_id}" ]]; then
+  die "set either AWS_ACCESS_KEY_ID or AWS_ACCESS_KEY_ID_FILE, not both"
+fi
+if [[ -n "${aws_secret_access_key_file}" && -n "${aws_secret_access_key}" ]]; then
+  die "set either AWS_SECRET_ACCESS_KEY or AWS_SECRET_ACCESS_KEY_FILE, not both"
+fi
+if [[ -n "${aws_access_key_id_file}" ]]; then
+  aws_access_key_id="$(read_secret_file "${aws_access_key_id_file}")"
+fi
+if [[ -n "${aws_secret_access_key_file}" ]]; then
+  aws_secret_access_key="$(read_secret_file "${aws_secret_access_key_file}")"
+fi
+
+if [[ "${sccache_s3_requested}" -eq 1 ]]; then
+  [[ -n "${sccache_bucket}" ]] || die "SCCACHE_BUCKET is required when S3-backed sccache is configured"
+  [[ -n "${sccache_endpoint}" ]] || die "SCCACHE_ENDPOINT is required when S3-backed sccache is configured"
+  [[ -n "${aws_access_key_id}" ]] || die "AWS_ACCESS_KEY_ID or AWS_ACCESS_KEY_ID_FILE is required when S3-backed sccache is configured"
+  [[ -n "${aws_secret_access_key}" ]] || die "AWS_SECRET_ACCESS_KEY or AWS_SECRET_ACCESS_KEY_FILE is required when S3-backed sccache is configured"
+  sccache_s3_enabled=1
 fi
 
 branch_key="$(slugify "${branch}")"
@@ -133,6 +190,14 @@ branch_key_q="$(printf '%q' "${branch_key}")"
 sccache_version_q="$(printf '%q' "${sccache_version}")"
 sccache_release_base_url_q="$(printf '%q' "${sccache_release_base_url}")"
 sccache_bootstrap_jobs_q="$(printf '%q' "${sccache_bootstrap_jobs}")"
+sccache_bucket_q="$(printf '%q' "${sccache_bucket}")"
+sccache_endpoint_q="$(printf '%q' "${sccache_endpoint}")"
+sccache_region_q="$(printf '%q' "${sccache_region}")"
+sccache_s3_use_ssl_q="$(printf '%q' "${sccache_s3_use_ssl}")"
+sccache_s3_key_prefix_q="$(printf '%q' "${sccache_s3_key_prefix}")"
+aws_access_key_id_q="$(printf '%q' "${aws_access_key_id}")"
+aws_secret_access_key_q="$(printf '%q' "${aws_secret_access_key}")"
+sccache_s3_enabled_q="$(printf '%q' "${sccache_s3_enabled}")"
 cargo_llvm_cov_version_q="$(printf '%q' "${cargo_llvm_cov_version}")"
 cargo_llvm_cov_release_base_url_q="$(printf '%q' "${cargo_llvm_cov_release_base_url}")"
 enable_cargo_llvm_cov_q="$(printf '%q' "${enable_cargo_llvm_cov}")"
@@ -146,6 +211,14 @@ branch_key=${branch_key_q}
 sccache_version=${sccache_version_q}
 sccache_release_base_url=${sccache_release_base_url_q}
 sccache_bootstrap_jobs=${sccache_bootstrap_jobs_q}
+sccache_bucket=${sccache_bucket_q}
+sccache_endpoint=${sccache_endpoint_q}
+sccache_region=${sccache_region_q}
+sccache_s3_use_ssl=${sccache_s3_use_ssl_q}
+sccache_s3_key_prefix=${sccache_s3_key_prefix_q}
+aws_access_key_id=${aws_access_key_id_q}
+aws_secret_access_key=${aws_secret_access_key_q}
+sccache_s3_enabled=${sccache_s3_enabled_q}
 cargo_llvm_cov_version=${cargo_llvm_cov_version_q}
 cargo_llvm_cov_release_base_url=${cargo_llvm_cov_release_base_url_q}
 enable_cargo_llvm_cov=${enable_cargo_llvm_cov_q}
@@ -155,7 +228,8 @@ src_root=\"\${ephemeral_root}/src\"
 tmp_dir=\"\${ephemeral_root}/tmp\"
 cargo_home=\"\${cache_root}/cargo\"
 rustup_home=\"\${cache_root}/rustup\"
-sccache_dir=\"\${cache_root}/sccache\"
+sccache_dir=\"\${ephemeral_root}/sccache\"
+sccache_conf=\"\${tmp_dir}/sccache-client.toml\"
 target_dir=\"\${ephemeral_root}/target\"
 mkdir -p \"\${tmp_dir}\" \"\${cargo_home}\" \"\${rustup_home}\" \"\${sccache_dir}\" \"\${target_dir}\"
 export TMPDIR=\"\${tmp_dir}\"
@@ -170,7 +244,24 @@ export RUSTUP_HOME=\"\${rustup_home}\"
 export PATH=\"\${CARGO_HOME}/bin:\${PATH}\"
 export CARGO_TARGET_DIR=\"\${target_dir}\"
 export SCCACHE_DIR=\"\${sccache_dir}\"
-export SCCACHE_CACHE_SIZE=\"\${SCCACHE_CACHE_SIZE:-10G}\"
+if [ \"\${sccache_s3_enabled}\" = \"1\" ]; then
+  cat > \"\${sccache_conf}\" <<EOF3
+[cache]
+type = "s3"
+
+[cache.s3]
+bucket = \"\${sccache_bucket}\"
+endpoint = \"\${sccache_endpoint}\"
+region = \"\${sccache_region}\"
+use_ssl = \${sccache_s3_use_ssl}
+key_prefix = \"\${sccache_s3_key_prefix}\"
+EOF3
+  export AWS_ACCESS_KEY_ID=\"\${aws_access_key_id}\"
+  export AWS_SECRET_ACCESS_KEY=\"\${aws_secret_access_key}\"
+  export SCCACHE_CONF=\"\${sccache_conf}\"
+else
+  export SCCACHE_CACHE_SIZE=\"\${SCCACHE_CACHE_SIZE:-10G}\"
+fi
 export CARGO_INCREMENTAL=0
 export CARGO_TERM_PROGRESS_WHEN=never
 rm -rf \"\${src_root}\"

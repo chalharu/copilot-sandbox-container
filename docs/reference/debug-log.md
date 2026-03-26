@@ -24,6 +24,7 @@
 | injected Copilot config が壊れている | [§10](#10-injected-copilot-config-が壊れている) |
 | gh Secret の指定が足りない | [§11](#11-gh-secret-の指定が足りない) |
 | 監査分析 hook の設定が壊れている | [§12](#12-監査分析-hook-の設定が壊れている) |
+| `control-plane-sccache-pvc` が `Pending` のまま | [§13](#13-garage-cache-pvc-が-bound-しない) |
 
 ## 1. bundled skill が読めない
 
@@ -204,3 +205,24 @@ control-plane audit analysis: Audit analysis config at /home/copilot/.copilot/co
 - `~/.copilot/config.json` の `controlPlane.auditAnalysis` が JSON object
 - `~/.copilot/session-state/audit/audit-analysis.db` が存在する
 - `node ~/.copilot/skills/audit-log-analysis/scripts/audit-analysis.mjs status --json` が成功する
+
+## 13. Garage cache PVC が Bound しない
+
+### 代表ログ
+
+```text
+Warning  FailedScheduling  default-scheduler  0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims.
+```
+
+### 意味
+
+sample manifest の `control-plane-sccache-pvc` は standalone Garage
+Deployment 専用の `ReadWriteOnce` claim です。Job 側へ PVC を mount するのではなく、
+`garage-s3` Service 経由で各クライアントを接続させる前提なので、この claim が
+Bound しないと Garage Pod が立ち上がりません。
+
+### 期待する確認結果
+
+- `kubectl get pvc control-plane-sccache-pvc -n copilot-sandbox` が `Bound`
+- `kubectl get pod -n copilot-sandbox -l app.kubernetes.io/name=garage-s3` が `1/1 Ready`
+- `kubectl get svc garage-s3 -n copilot-sandbox` で `3900/TCP` が見える

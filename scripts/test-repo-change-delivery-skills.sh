@@ -184,6 +184,7 @@ assert_file_absent "${script_dir}/install-git-skill.sh"
 assert_file_absent "${repo_git_commit_dir}"
 assert_file_absent "${legacy_yamllint_skill_dir}"
 assert_file_absent "${legacy_rust_sccache_image_dockerfile}"
+assert_file_absent "${repo_root}/containers/garage"
 assert_file_absent "${generic_skill_dir}/scripts/example.py"
 assert_file_absent "${generic_skill_dir}/references/api_reference.md"
 assert_file_absent "${generic_skill_dir}/assets/example_asset.txt"
@@ -210,6 +211,7 @@ assert_file_not_contains "${generic_skill_file}" '.github/workflows/control-plan
 assert_file_not_contains "${generic_skill_file}" './scripts/test-k8s-job.sh'
 assert_file_contains "${rust_skill_file}" 'name: containerized-rust-ops'
 assert_file_contains "${rust_skill_file}" 'containers/sccache/Dockerfile'
+assert_file_contains "${rust_skill_file}" 'dxflrs/garage:v2.2.0'
 assert_file_contains "${rust_podman_script_file}" '/containers/sccache'
 assert_file_contains "${rust_podman_script_file}" 'sccache.context-sha256'
 assert_file_contains "${rust_podman_script_file}" 'CONTAINERIZED_RUST_CONTAINER_BIN'
@@ -220,6 +222,7 @@ assert_file_not_contains "${rust_podman_script_file}" '--entrypoint cat'
 assert_file_not_contains "${rust_skill_file}" '.github/skills/containerized-rust-ops'
 assert_file_not_contains "${rust_skill_file}" 'assets/sccache-image/Dockerfile'
 assert_file_contains "${rust_runtime_reference_file}" 'containers/sccache/'
+assert_file_contains "${rust_runtime_reference_file}" 'dxflrs/garage:v2.2.0'
 assert_file_not_contains "${rust_runtime_reference_file}" 'assets/sccache-image/'
 assert_file_not_contains "${rust_runtime_reference_file}" '.copilot-cache'
 assert_file_contains "${audit_analysis_skill_file}" 'name: audit-log-analysis'
