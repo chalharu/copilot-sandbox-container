@@ -388,6 +388,9 @@ spec:
         - name: garage-admin-auth
           secret:
             secretName: garage-admin-auth
+            # Garage refuses to start when rpc-secret is mounted with the
+            # Kubernetes Secret default of 0644.
+            defaultMode: 384
             items:
               - key: admin-token
                 path: admin-token
