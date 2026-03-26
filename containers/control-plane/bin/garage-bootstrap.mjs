@@ -1,6 +1,14 @@
 import { createHash, createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 
+class HttpError extends Error {
+	constructor(message, status) {
+		super(message);
+		this.name = "HttpError";
+		this.status = status;
+	}
+}
+
 function die(message) {
 	console.error(`garage-bootstrap: ${message}`);
 	process.exit(64);
@@ -47,8 +55,9 @@ async function request(
 	}
 	const responseBody = await response.text();
 	if (expected !== null && !expected.includes(response.status)) {
-		throw new Error(
+		throw new HttpError(
 			`${method} ${url} failed with HTTP ${response.status}: ${responseBody}`,
+			response.status,
 		);
 	}
 	return { status: response.status, body: responseBody };
@@ -97,6 +106,17 @@ async function waitForS3() {
 		() => request("GET", s3Endpoint, { expected: [200, 301, 302, 307, 403] }),
 		"Garage S3 API did not become ready",
 	);
+}
+
+async function readExistingAfterCreateFailure(createError, readExisting) {
+	try {
+		return await readExisting();
+	} catch (error) {
+		if (error instanceof HttpError && error.status === 404) {
+			throw createError;
+		}
+		throw error;
+	}
 }
 
 function stableJson(value) {
@@ -169,10 +189,12 @@ async function upsertKey() {
 	let keyJson;
 	try {
 		keyJson = await adminJson("POST", "/v2/ImportKey", payload, [200, 201]);
-	} catch {
-		keyJson = await adminJson(
-			"GET",
-			`/v2/GetKeyInfo?id=${encodeURIComponent(awsAccessKeyId)}&showSecretKey=true`,
+	} catch (error) {
+		keyJson = await readExistingAfterCreateFailure(error, () =>
+			adminJson(
+				"GET",
+				`/v2/GetKeyInfo?id=${encodeURIComponent(awsAccessKeyId)}&showSecretKey=true`,
+			),
 		);
 	}
 	const actualSecret = keyJson?.secretAccessKey ?? "";
@@ -190,10 +212,12 @@ async function upsertBucket() {
 			{ globalAlias: s3Bucket },
 			[200, 201],
 		);
-	} catch {
-		bucketJson = await adminJson(
-			"GET",
-			`/v2/GetBucketInfo?globalAlias=${encodeURIComponent(s3Bucket)}`,
+	} catch (error) {
+		bucketJson = await readExistingAfterCreateFailure(error, () =>
+			adminJson(
+				"GET",
+				`/v2/GetBucketInfo?globalAlias=${encodeURIComponent(s3Bucket)}`,
+			),
 		);
 	}
 
