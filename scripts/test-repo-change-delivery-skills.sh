@@ -279,7 +279,7 @@ assert_file_not_contains "${bundled_reference_file}" '.github/skills/skill-creat
 assert_file_contains "${dockerfile_path}" 'config/external-skills.yaml'
 assert_file_contains "${dockerfile_path}" 'install-git-skills-from-manifest'
 assert_file_contains "${dockerfile_path}" 'external-skills-manifest-to-tsv.mjs'
-assert_file_contains "${dockerfile_path}" 'bin/garage-bootstrap.mjs'
+assert_file_contains "${dockerfile_path}" 'COPY --chmod=755 bin/garage-bootstrap.mjs /usr/local/bin/garage-bootstrap.mjs'
 assert_file_not_contains "${dockerfile_path}" 'ANTHROPIC_SKILLS_REPOSITORY'
 assert_file_not_contains "${dockerfile_path}" 'DOC_COAUTHORING_SKILL_PATH'
 assert_file_not_contains "${dockerfile_path}" 'SKILL_CREATOR_SKILL_PATH'
