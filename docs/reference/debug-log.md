@@ -230,6 +230,6 @@ Bound しないと Garage Pod が立ち上がりません。
 
 `garage-bootstrap` Job が失敗した場合は、まず
 `kubectl logs -n copilot-sandbox job/garage-bootstrap` で bootstrap の失敗点を見ます。
-fresh PVC や sample credential を再初期化したいときだけ、`kubectl delete job garage-bootstrap -n copilot-sandbox`
+fresh PVC や bootstrap-managed Garage credential を再初期化したいときだけ、`kubectl delete job garage-bootstrap -n copilot-sandbox`
 のあとに sample manifest を再適用して rerun してください。bootstrap 処理は
 `control-plane` image に同梱した script が実行します。

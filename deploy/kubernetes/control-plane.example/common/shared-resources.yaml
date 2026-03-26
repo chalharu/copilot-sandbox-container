@@ -23,6 +23,14 @@ metadata:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
+  name: garage-bootstrap
+  namespace: copilot-sandbox
+
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
   name: control-plane-job
   namespace: copilot-sandbox-jobs
 
@@ -91,6 +99,40 @@ roleRef:
   kind: Role
   name: control-plane-job-self-read
 
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: garage-bootstrap-secret-writer
+  namespace: copilot-sandbox
+rules:
+  # `create` cannot be scoped with `resourceNames`, so keep it isolated from
+  # the exact-name update rule below.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["garage-sccache-auth"]
+    verbs: ["get", "patch", "update"]
+
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: garage-bootstrap-secret-writer
+  namespace: copilot-sandbox
+subjects:
+  - kind: ServiceAccount
+    name: garage-bootstrap
+    namespace: copilot-sandbox
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: garage-bootstrap-secret-writer
+
 ---
 apiVersion: v1
 kind: Secret
@@ -134,18 +176,6 @@ type: Opaque
 stringData:
   admin-token: replace-me-garage-admin-token
   rpc-secret: replace-me-garage-rpc-secret
-
-
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: garage-sccache-auth
-  namespace: copilot-sandbox
-type: Opaque
-stringData:
-  access-key-id: replace-me-sccache-access-key-id
-  secret-access-key: replace-me-sccache-secret-access-key
 
 
 ---
@@ -413,11 +443,14 @@ spec:
       labels:
         app.kubernetes.io/name: garage-bootstrap
     spec:
-      # This job initializes the Garage bucket/quota/lifecycle state once for the
-      # shared PVC. It is intentionally separate from the Garage Deployment so pod
-      # restarts do not rerun bootstrap. Delete and recreate the Job only when you
-      # need to bootstrap a fresh PVC or rerun the sample initialization manually.
-      automountServiceAccountToken: false
+      # This job initializes the Garage key/bucket/quota/lifecycle state once for
+      # the shared PVC and creates or refreshes the garage-sccache-auth Secret
+      # consumed by control-plane Pods. It is intentionally separate from the
+      # Garage Deployment so pod restarts do not rerun bootstrap. Delete and
+      # recreate the Job only when you need to bootstrap a fresh PVC or rerun
+      # the sample initialization manually.
+      serviceAccountName: garage-bootstrap
+      automountServiceAccountToken: true
       restartPolicy: OnFailure
       containers:
         - name: garage-bootstrap
@@ -433,18 +466,21 @@ spec:
               value: http://garage-s3.copilot-sandbox.svc.cluster.local:3900
             - name: GARAGE_ADMIN_TOKEN_FILE
               value: /var/run/garage-admin-auth/admin-token
-            - name: AWS_ACCESS_KEY_ID_FILE
-              value: /var/run/garage-sccache-auth/access-key-id
-            - name: AWS_SECRET_ACCESS_KEY_FILE
-              value: /var/run/garage-sccache-auth/secret-access-key
             - name: GARAGE_S3_BUCKET
               value: control-plane-sccache
             - name: GARAGE_S3_KEY_NAME
               value: control-plane-sccache
+            - name: GARAGE_S3_AUTH_SECRET_NAME
+              value: garage-sccache-auth
             - name: GARAGE_S3_KEY_PREFIX
               value: sccache/
             - name: GARAGE_S3_REGION
               value: garage
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
             - name: GARAGE_LAYOUT_ZONE
               value: dc1
             - name: GARAGE_LAYOUT_TAGS
@@ -478,9 +514,6 @@ spec:
             - name: garage-admin-auth
               mountPath: /var/run/garage-admin-auth
               readOnly: true
-            - name: garage-sccache-auth
-              mountPath: /var/run/garage-sccache-auth
-              readOnly: true
       volumes:
         - name: garage-admin-auth
           secret:
@@ -488,11 +521,3 @@ spec:
             items:
               - key: admin-token
                 path: admin-token
-        - name: garage-sccache-auth
-          secret:
-            secretName: garage-sccache-auth
-            items:
-              - key: access-key-id
-                path: access-key-id
-              - key: secret-access-key
-                path: secret-access-key

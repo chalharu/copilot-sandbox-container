@@ -94,7 +94,7 @@ assert_resource_contains() {
   local block
 
   block="$(resource_block "${kind}" "${name}")"
-  grep -Fq "${expected}" <<<"${block}" || {
+  grep -Fq -- "${expected}" <<<"${block}" || {
     printf 'Expected %s/%s to contain: %s\n' "${kind}" "${name}" "${expected}" >&2
     exit 1
   }
@@ -107,7 +107,7 @@ assert_resource_not_contains() {
   local block
 
   block="$(resource_block "${kind}" "${name}")"
-  if grep -Fq "${unexpected}" <<<"${block}"; then
+  if grep -Fq -- "${unexpected}" <<<"${block}"; then
     printf 'Did not expect %s/%s to contain: %s\n' "${kind}" "${name}" "${unexpected}" >&2
     exit 1
   fi
@@ -245,8 +245,17 @@ printf '%s\n' 'k8s-sample-storage-layout-test: checking ConfigMap-backed environ
 assert_resource_present ConfigMap control-plane-config
 assert_resource_contains ConfigMap control-plane-config 'copilot-config.json: |'
 assert_resource_present ConfigMap control-plane-env
+assert_resource_present ServiceAccount garage-bootstrap
 assert_resource_present Secret garage-admin-auth
-assert_resource_present Secret garage-sccache-auth
+assert_resource_absent Secret garage-sccache-auth
+assert_resource_present Role garage-bootstrap-secret-writer
+assert_resource_present RoleBinding garage-bootstrap-secret-writer
+assert_resource_contains Role garage-bootstrap-secret-writer '- create'
+assert_resource_contains Role garage-bootstrap-secret-writer 'resourceNames:'
+assert_resource_contains Role garage-bootstrap-secret-writer '- garage-sccache-auth'
+assert_resource_contains Role garage-bootstrap-secret-writer '- get'
+assert_resource_contains Role garage-bootstrap-secret-writer '- patch'
+assert_resource_contains Role garage-bootstrap-secret-writer '- update'
 assert_resource_contains ConfigMap control-plane-env 'SSH_PUBLIC_KEY_FILE: /var/run/control-plane-auth/ssh-public-key'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS: "10000"'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha'
@@ -282,6 +291,7 @@ assert_deployment_contains 'subPath: state/gh'
 assert_deployment_contains 'subPath: state/ssh'
 assert_deployment_contains 'subPath: state/ssh-host-keys'
 assert_deployment_contains 'mountPath: /var/run/garage-sccache-auth'
+assert_deployment_contains 'secretName: garage-sccache-auth'
 assert_deployment_contains 'chown 1000:1000 /workspace-state/workspace /workspace-state/workspace/cache'
 assert_deployment_contains 'chmod 700 /workspace-state/workspace /workspace-state/workspace/cache'
 assert_deployment_contains 'mountPath: /var/lib/control-plane/rootful-podman'
@@ -324,13 +334,18 @@ assert_resource_contains Job garage-bootstrap 'image: ghcr.io/chalharu/copilot-s
 assert_resource_contains Job garage-bootstrap '/usr/local/bin/garage-bootstrap.mjs'
 assert_resource_contains Job garage-bootstrap 'restartPolicy: OnFailure'
 assert_resource_contains Job garage-bootstrap 'backoffLimit: 6'
-assert_resource_contains Job garage-bootstrap 'automountServiceAccountToken: false'
+assert_resource_contains Job garage-bootstrap 'serviceAccountName: garage-bootstrap'
+assert_resource_contains Job garage-bootstrap 'automountServiceAccountToken: true'
 assert_resource_contains Job garage-bootstrap 'http://garage-s3.copilot-sandbox.svc.cluster.local:3903'
 assert_resource_contains Job garage-bootstrap 'http://garage-s3.copilot-sandbox.svc.cluster.local:3900'
 assert_resource_contains Job garage-bootstrap 'mountPath: /var/run/garage-admin-auth'
-assert_resource_contains Job garage-bootstrap 'mountPath: /var/run/garage-sccache-auth'
 assert_resource_contains Job garage-bootstrap 'GARAGE_CACHE_QUOTA_BYTES'
 assert_resource_contains Job garage-bootstrap 'GARAGE_CACHE_EXPIRATION_DAYS'
+assert_resource_contains Job garage-bootstrap 'GARAGE_S3_AUTH_SECRET_NAME'
+assert_resource_contains Job garage-bootstrap 'fieldPath: metadata.namespace'
+assert_resource_not_contains Job garage-bootstrap 'AWS_ACCESS_KEY_ID_FILE'
+assert_resource_not_contains Job garage-bootstrap 'AWS_SECRET_ACCESS_KEY_FILE'
+assert_resource_not_contains Job garage-bootstrap 'mountPath: /var/run/garage-sccache-auth'
 assert_resource_not_contains Job garage-bootstrap 'defaultMode: 384'
 
 printf '%s\n' 'k8s-sample-storage-layout-test: checking Podman defaults and legacy PVC removal' >&2
