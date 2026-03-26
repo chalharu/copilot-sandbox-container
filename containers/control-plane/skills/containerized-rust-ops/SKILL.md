@@ -53,6 +53,6 @@ When containerized Rust performance or correctness regresses, keep these surface
 - `scripts/install-cargo-llvm-cov.sh` for release-based `cargo-llvm-cov` bootstrap
 - `containers/sccache/Dockerfile` for the cached `sccache` client image
 - `containers/control-plane/bin/garage-bootstrap.mjs` for the bootstrap logic that the sample Job runs from the existing published control-plane image
-- `deploy/kubernetes/control-plane.example.yaml` for the sample in-cluster Garage deployment and one-shot bootstrap Job wiring
+- `deploy/kubernetes/control-plane.example/` for the sample kustomize layout, in-cluster Garage deployment, and one-shot bootstrap Job wiring
 
 Do not reintroduce `.git`-backed caches, memory-backed `/tmp` defaults, or repo-specific `.github/skills/...` paths into these helpers. Those are known-bad in this environment.

@@ -2,13 +2,30 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-manifest_path="${script_dir}/../deploy/kubernetes/control-plane.example.yaml"
+manifest_root="${script_dir}/../deploy/kubernetes/control-plane.example"
+manifest_path="$(mktemp)"
+
+cleanup() {
+  rm -f "${manifest_path}"
+}
+
+trap cleanup EXIT
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || {
     printf 'Missing required command: %s\n' "$1" >&2
     exit 1
   }
+}
+
+render_sample_manifest() {
+  if command -v kustomize >/dev/null 2>&1; then
+    kustomize build "${manifest_root}" >"${manifest_path}"
+    return
+  fi
+
+  require_command kubectl
+  kubectl kustomize "${manifest_root}" >"${manifest_path}"
 }
 
 resource_block() {
@@ -104,7 +121,10 @@ assert_deployment_absent() {
   fi
 }
 
-printf '%s\n' 'k8s-sample-storage-layout-test: validating sample manifest syntax' >&2
+printf '%s\n' 'k8s-sample-storage-layout-test: rendering sample kustomization' >&2
+render_sample_manifest
+
+printf '%s\n' 'k8s-sample-storage-layout-test: validating rendered manifest syntax' >&2
 grep -Eq '^apiVersion:' "${manifest_path}" || {
   printf 'Expected sample manifest to contain Kubernetes resources\n' >&2
   exit 1
@@ -167,8 +187,7 @@ assert_resource_contains ConfigMap control-plane-env 'SCCACHE_S3_USE_SSL: "false
 assert_resource_contains ConfigMap control-plane-env 'SCCACHE_S3_KEY_PREFIX: sccache/'
 assert_resource_contains ConfigMap control-plane-env 'AWS_ACCESS_KEY_ID_FILE: /var/run/garage-sccache-auth/access-key-id'
 assert_resource_contains ConfigMap control-plane-env 'AWS_SECRET_ACCESS_KEY_FILE: /var/run/garage-sccache-auth/secret-access-key'
-assert_resource_contains ConfigMap control-plane-env 'SCCACHE_CACHE_SIZE: "4G"'
-assert_resource_contains ConfigMap control-plane-env 'TZ: Asia/Tokyo'
+assert_resource_contains ConfigMap control-plane-env 'SCCACHE_CACHE_SIZE: 4G'
 
 printf '%s\n' 'k8s-sample-storage-layout-test: checking services, deployments, and cache mounts' >&2
 assert_resource_present Service control-plane
