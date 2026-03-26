@@ -3,7 +3,9 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 manifest_root="${script_dir}/../deploy/kubernetes/control-plane.example"
+install_manifest_root="${script_dir}/../deploy/kubernetes/control-plane.example/install"
 manifest_path="$(mktemp)"
+install_manifest_path="${install_manifest_root}/shared-persistent-volume-claims.yaml"
 
 cleanup() {
   rm -f "${manifest_path}"
@@ -18,19 +20,27 @@ require_command() {
   }
 }
 
-render_sample_manifest() {
+render_kustomization() {
+  local source_root="$1"
+  local output_path="$2"
+
   if command -v kustomize >/dev/null 2>&1; then
-    kustomize build "${manifest_root}" >"${manifest_path}"
+    kustomize build "${source_root}" >"${output_path}"
     return
   fi
 
   require_command kubectl
-  kubectl kustomize "${manifest_root}" >"${manifest_path}"
+  kubectl kustomize "${source_root}" >"${output_path}"
 }
 
-resource_block() {
-  local kind="$1"
-  local name="$2"
+render_sample_manifests() {
+  render_kustomization "${manifest_root}" "${manifest_path}"
+}
+
+resource_block_from_file() {
+  local source_manifest="$1"
+  local kind="$2"
+  local name="$3"
 
   awk -v kind="${kind}" -v name="${name}" '
     BEGIN {
@@ -46,7 +56,15 @@ resource_block() {
     END {
       exit(found ? 0 : 1)
     }
-  ' "${manifest_path}"
+  ' "${source_manifest}"
+}
+
+resource_block() {
+  resource_block_from_file "${manifest_path}" "$1" "$2"
+}
+
+install_resource_block() {
+  resource_block_from_file "${install_manifest_path}" "$1" "$2"
 }
 
 assert_resource_present() {
@@ -95,6 +113,29 @@ assert_resource_not_contains() {
   fi
 }
 
+assert_install_resource_present() {
+  local kind="$1"
+  local name="$2"
+
+  install_resource_block "${kind}" "${name}" >/dev/null || {
+    printf 'Expected %s/%s in install sample manifest\n' "${kind}" "${name}" >&2
+    exit 1
+  }
+}
+
+assert_install_resource_contains() {
+  local kind="$1"
+  local name="$2"
+  local expected="$3"
+  local block
+
+  block="$(install_resource_block "${kind}" "${name}")"
+  grep -Fq "${expected}" <<<"${block}" || {
+    printf 'Expected install %s/%s to contain: %s\n' "${kind}" "${name}" "${expected}" >&2
+    exit 1
+  }
+}
+
 deployment_block() {
   resource_block Deployment control-plane
 }
@@ -122,16 +163,27 @@ assert_deployment_absent() {
 }
 
 printf '%s\n' 'k8s-sample-storage-layout-test: rendering sample kustomization' >&2
-render_sample_manifest
+if grep -R -n '^bases:' "${manifest_root}" >/dev/null; then
+  printf 'Expected sample kustomizations to stop using deprecated bases\n' >&2
+  exit 1
+fi
+
+render_sample_manifests
 
 printf '%s\n' 'k8s-sample-storage-layout-test: validating rendered manifest syntax' >&2
 grep -Eq '^apiVersion:' "${manifest_path}" || {
   printf 'Expected sample manifest to contain Kubernetes resources\n' >&2
   exit 1
 }
+grep -Eq '^apiVersion:' "${install_manifest_path}" || {
+  printf 'Expected install sample manifest to contain Kubernetes resources\n' >&2
+  exit 1
+}
 
 printf '%s\n' 'k8s-sample-storage-layout-test: checking persistent volume claims' >&2
-pvc_count="$(awk '
+assert_install_resource_present Namespace copilot-sandbox
+
+root_pvc_count="$(awk '
   BEGIN {
     RS = "---\n"
   }
@@ -144,25 +196,45 @@ pvc_count="$(awk '
     print count + 0
   }
 ' "${manifest_path}")"
-[[ "${pvc_count}" == "3" ]] || {
-  printf 'Expected exactly 3 PersistentVolumeClaims, found %s\n' "${pvc_count}" >&2
+[[ "${root_pvc_count}" == "1" ]] || {
+  printf 'Expected exactly 1 PersistentVolumeClaim in the update-safe root manifest, found %s\n' "${root_pvc_count}" >&2
   exit 1
 }
+install_pvc_count="$(awk '
+  BEGIN {
+    RS = "---\n"
+  }
 
-assert_resource_present PersistentVolumeClaim control-plane-copilot-session-pvc
-assert_resource_contains PersistentVolumeClaim control-plane-copilot-session-pvc 'ReadWriteMany'
-assert_resource_contains PersistentVolumeClaim control-plane-copilot-session-pvc 'storage: 2Gi'
-assert_resource_contains PersistentVolumeClaim control-plane-copilot-session-pvc 'storageClassName: replace-me-with-rwx-storage-class'
+  /kind:[[:space:]]*PersistentVolumeClaim/ {
+    count++
+  }
+
+  END {
+    print count + 0
+  }
+' "${install_manifest_path}")"
+[[ "${install_pvc_count}" == "2" ]] || {
+  printf 'Expected exactly 2 PersistentVolumeClaims in the install manifest, found %s\n' "${install_pvc_count}" >&2
+  exit 1
+}
 
 assert_resource_present PersistentVolumeClaim control-plane-workspace-pvc
 assert_resource_contains PersistentVolumeClaim control-plane-workspace-pvc 'ReadWriteOnce'
 assert_resource_contains PersistentVolumeClaim control-plane-workspace-pvc 'storage: 5Gi'
 assert_resource_contains PersistentVolumeClaim control-plane-workspace-pvc 'storageClassName: standard'
 
-assert_resource_present PersistentVolumeClaim control-plane-sccache-pvc
-assert_resource_contains PersistentVolumeClaim control-plane-sccache-pvc 'ReadWriteOnce'
-assert_resource_contains PersistentVolumeClaim control-plane-sccache-pvc 'storage: 5Gi'
-assert_resource_contains PersistentVolumeClaim control-plane-sccache-pvc 'storageClassName: standard'
+assert_resource_absent PersistentVolumeClaim control-plane-copilot-session-pvc
+assert_resource_absent PersistentVolumeClaim control-plane-sccache-pvc
+
+assert_install_resource_present PersistentVolumeClaim control-plane-copilot-session-pvc
+assert_install_resource_contains PersistentVolumeClaim control-plane-copilot-session-pvc 'ReadWriteMany'
+assert_install_resource_contains PersistentVolumeClaim control-plane-copilot-session-pvc 'storage: 2Gi'
+assert_install_resource_contains PersistentVolumeClaim control-plane-copilot-session-pvc 'storageClassName: replace-me-with-rwx-storage-class'
+
+assert_install_resource_present PersistentVolumeClaim control-plane-sccache-pvc
+assert_install_resource_contains PersistentVolumeClaim control-plane-sccache-pvc 'ReadWriteOnce'
+assert_install_resource_contains PersistentVolumeClaim control-plane-sccache-pvc 'storage: 5Gi'
+assert_install_resource_contains PersistentVolumeClaim control-plane-sccache-pvc 'storageClassName: standard'
 assert_resource_absent StorageClass control-plane-local-storage
 
 assert_resource_absent PersistentVolumeClaim control-plane-state-pvc

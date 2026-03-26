@@ -1,10 +1,11 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-bases:
-  - ../../base
+resources: []
 
 # This overlay is the customization point for the shipped sample.
-# Keep it as-is when you want the default `control-plane` resources.
+# The shipped root sample reads `../base/control-plane-instance.yaml` directly.
+# Use this file as a commented scratchpad when you prepare a named variant and
+# then compose that variant with `../../common/shared-resources.yaml`.
 #
 # When you need a named variant instead, uncomment the block below and replace
 # the `replace-me-*` values with your own instance-specific names.
@@ -38,9 +39,16 @@ bases:
 #   path: /metadata/name
 #   value: replace-me-with-workspace-pvc-name
 # - op: replace
+#   path: /spec/storageClassName
+#   value: replace-me-with-workspace-storage-class
+# - op: replace
 #   path: /spec/resources/requests/storage
 #   value: 8Gi
 #   # Remove the storage op when the default size is already fine.
+# Shared PVC candidates such as `control-plane-copilot-session-pvc` and
+# `control-plane-sccache-pvc` live in `../../install/shared-persistent-volume-claims.yaml`
+# because the root kustomization intentionally avoids mutating those immutable
+# shared claims during routine updates.
 #
 # Candidate `service-patch.yaml`:
 # - op: replace
