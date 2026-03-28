@@ -195,7 +195,7 @@ jobs:
           sudo apt-get install -y podman
 
       - name: Set up kubectl
-        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede  # v4.0.1
+        uses: azure/setup-kubectl@15650b3ad78fff148532a140b8a4c821796b2d7b  # v5.0.0
 
       - name: Set up Kind
         uses: engineerd/setup-kind@ecfad61750951586a9ef973db567df1d28671bdc  # v0.6.2
@@ -242,7 +242,7 @@ jobs:
           sudo apt-get install -y podman
 
       - name: Set up kubectl
-        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede  # v4.0.1
+        uses: azure/setup-kubectl@15650b3ad78fff148532a140b8a4c821796b2d7b  # v5.0.0
 
       - name: Set up Kind
         uses: engineerd/setup-kind@ecfad61750951586a9ef973db567df1d28671bdc  # v0.6.2
@@ -289,7 +289,7 @@ jobs:
           sudo apt-get install -y podman
 
       - name: Set up kubectl
-        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede  # v4.0.1
+        uses: azure/setup-kubectl@15650b3ad78fff148532a140b8a4c821796b2d7b  # v5.0.0
 
       - name: Set up Kind
         uses: engineerd/setup-kind@ecfad61750951586a9ef973db567df1d28671bdc  # v0.6.2
