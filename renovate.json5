@@ -16,53 +16,42 @@
   rebaseWhen: "behind-base-branch",
   timezone: "Asia/Tokyo",
   automergeStrategy: "auto",
+  pruneStaleBranches: false,
+  separateMajorMinor: true,
+  separateMinorPatch: true,
+  separateMultipleMajor: true,
+  separateMultipleMinor: true,
   vulnerabilityAlerts: {
     enabled: true,
-    labels: ["dependencies", "renovate"],
+    labels: ["dependencies", "renovate", "security"],
     automerge: true,
     automergeType: "pr",
     platformAutomerge: true,
-    minimumReleaseAge: null,
-  },
-  minor: {
-    automerge: true,
-    automergeType: "pr",
-    platformAutomerge: true,
-    minimumReleaseAge: "3 days",
-  },
-  patch: {
-    automerge: true,
-    automergeType: "pr",
-    platformAutomerge: true,
-    minimumReleaseAge: "3 days",
-  },
-  digest: {
-    automerge: true,
-    automergeType: "pr",
-    platformAutomerge: true,
-    minimumReleaseAge: "3 days",
-  },
-  pin: {
-    automerge: true,
-    automergeType: "pr",
-    platformAutomerge: true,
-    minimumReleaseAge: "3 days",
-  },
-  pinDigest: {
-    automerge: true,
-    automergeType: "pr",
-    platformAutomerge: true,
-    minimumReleaseAge: "3 days",
   },
 
   packageRules: [
     {
-      description: "Automerge @github/copilot after GitHub Actions succeeds and 1 day of release age",
+      description: "Give each target version or digest its own Renovate branch",
+      matchUpdateTypes: ["digest", "major", "minor", "patch", "pin", "pinDigest"],
+      branchTopic:
+        "{{{depNameSanitized}}}__{{updateType}}{{#if newVersion}}__v{{{newVersion}}}{{/if}}{{#if newDigestShort}}__d{{{newDigestShort}}}{{/if}}",
+    },
+    {
+      description: "Opt most dependency updates into a 3-day merge gate via labels",
+      matchPackageNames: ["!@github/copilot"],
+      matchUpdateTypes: ["digest", "major", "minor", "patch", "pin", "pinDigest"],
+      addLabels: ["renovate-gate-wait-3d"],
+    },
+    {
+      description: "Opt @github/copilot into a 1-day merge gate via labels",
       matchPackageNames: ["@github/copilot"],
-      automerge: true,
-      automergeType: "pr",
-      platformAutomerge: true,
-      minimumReleaseAge: "1 day",
+      matchUpdateTypes: ["digest", "major", "minor", "patch", "pin", "pinDigest"],
+      addLabels: ["renovate-gate-wait-1d"],
+    },
+    {
+      description: "Expose custom separateMultiplePatch handling on patch PRs",
+      matchUpdateTypes: ["patch"],
+      addLabels: ["renovate-gate-separate-multiple-patch"],
     },
     {
       description: "Override the helper preset for actions/* GitHub Actions",
@@ -75,8 +64,6 @@
       matchPackageNames: ["dhi.io/python"],
       groupName: "yamllint DHI python images",
       groupSlug: "yamllint-dhi-python",
-      separateMajorMinor: false,
-      separateMinorPatch: false,
     },
     {
       description: "Keep setup-kind manually pinned while the upstream v0.6.2 tag points at the wrong commit",
