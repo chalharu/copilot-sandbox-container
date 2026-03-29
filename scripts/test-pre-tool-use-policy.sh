@@ -235,6 +235,24 @@ gh_auth_token_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs"
 printf '%s\n' "${gh_auth_token_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
 printf '%s\n' "${gh_auth_token_deny}" | jq -e '.permissionDecisionReason | contains("gh auth token")' >/dev/null
 
+gh_pr_merge_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"gh pr merge 123 --squash\"}"}')"
+printf '%s\n' "${gh_pr_merge_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
+printf '%s\n' "${gh_pr_merge_deny}" | jq -e '.permissionDecisionReason | contains("gh pr merge")' >/dev/null
+
+gh_api_merge_endpoint_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"gh api --method PUT https://api.github.com/repos/octo-org/octo-repo/pulls/123/merge\"}"}')"
+printf '%s\n' "${gh_api_merge_endpoint_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
+printf '%s\n' "${gh_api_merge_endpoint_deny}" | jq -e '.permissionDecisionReason | contains("pull request merge endpoints")' >/dev/null
+
+gh_api_merge_short_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"gh api repos/octo-org/octo-repo/pulls/123/merge\"}"}')"
+printf '%s\n' "${gh_api_merge_short_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
+printf '%s\n' "${gh_api_merge_short_deny}" | jq -e '.permissionDecisionReason | contains("pull request merge endpoints")' >/dev/null
+
+gh_pr_view_allow="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"gh pr view 123\"}"}')"
+test -z "${gh_pr_view_allow}"
+
+gh_api_pull_allow="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"gh api repos/octo-org/octo-repo/pulls/123\"}"}')"
+test -z "${gh_api_pull_allow}"
+
 wrapped_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"bash -lc \\\"git commit --no-verify -m \\\\\\\"skip\\\\\\\"\\\"\"}"}')"
 printf '%s\n' "${wrapped_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
 printf '%s\n' "${wrapped_deny}" | jq -e '.permissionDecisionReason | contains("git commit --no-verify")' >/dev/null
@@ -263,6 +281,9 @@ assert_denied_exec 'core.hooksPath overrides are blocked' git -c core.hooksPath=
 assert_denied_exec 'core.hooksPath overrides are blocked' env HOOKS=/tmp/evil git --config-env=core.hooksPath=HOOKS status --short
 assert_denied_exec 'Force pushes are blocked' git push -f origin HEAD
 assert_denied_exec 'gh auth token is blocked' gh auth token
+assert_denied_exec 'gh pr merge is blocked' gh pr merge 123 --squash
+assert_denied_exec 'pull request merge endpoints are blocked' gh api --method PUT https://api.github.com/repos/octo-org/octo-repo/pulls/123/merge
+assert_denied_exec 'pull request merge endpoints are blocked' gh api repos/octo-org/octo-repo/pulls/123/merge
 assert_denied_exec 'Protected environment overrides are blocked' env GIT_CONFIG_GLOBAL=/tmp/evil git status --short
 assert_denied_exec 'repo-local policy' git status --short
 assert_denied_shell 'CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE' 'while IFS= read -r _; do :; done < "${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}"'
@@ -271,6 +292,8 @@ assert_denied_shell '~/.config/gh/hosts.yml' 'while IFS= read -r _; do :; done <
 assert_allowed_shell "${fake_bin}/control-plane-copilot"
 assert_allowed_shell "${fake_bin}/podman"
 assert_allowed_shell "${fake_bin}/gh auth status"
+assert_allowed_shell "${fake_bin}/gh pr view 123"
+assert_allowed_shell "${fake_bin}/gh api repos/octo-org/octo-repo/pulls/123"
 
 cat > /tmp/force-push-wrapper.sh <<'WRAPPER'
 #!/usr/bin/env bash

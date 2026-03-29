@@ -9,6 +9,10 @@ commandRules:
     reason: Force pushes are blocked by control-plane policy. Push without --force. Use --force-with-lease when you need a guarded overwrite.
   - rule: 'gh(?:\x00[^\x00]+)*\x00auth(?:\x00[^\x00]+)*\x00token(?:\x00[^\x00]+)*'
     reason: gh auth token is blocked by control-plane policy. Use gh commands that do not print tokens, or rely on the managed gh hosts configuration.
+  - rule: 'gh(?:\x00[^\x00]+)*\x00pr\x00merge(?:\x00[^\x00]+)*'
+    reason: gh pr merge is blocked by control-plane policy. Do not merge pull requests from the control plane.
+  - rule: 'gh(?:\x00[^\x00]+)*\x00api(?:\x00[^\x00]+)*\x00(?:https://api\.github\.com)?/?repos/[^/\x00]+/[^/\x00]+/pulls/[0-9]+/merge(?:[?#][^\x00]*)?(?:\x00[^\x00]+)*'
+    reason: GitHub pull request merge endpoints are blocked by control-plane policy. Do not merge pull requests from the control plane.
 protectedEnvironments:
   - GIT_CONFIG_GLOBAL
   - GIT_CONFIG_SYSTEM
