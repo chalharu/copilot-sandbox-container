@@ -53,6 +53,22 @@ assert_file_not_contains() {
   fi
 }
 
+assert_line_order() {
+  local path="$1"
+  local earlier="$2"
+  local later="$3"
+  local earlier_line
+  local later_line
+
+  earlier_line="$(grep -nF -- "${earlier}" "${path}" | head -n 1 | cut -d: -f1 || true)"
+  later_line="$(grep -nF -- "${later}" "${path}" | head -n 1 | cut -d: -f1 || true)"
+
+  if [[ -z "${earlier_line}" ]] || [[ -z "${later_line}" ]] || [[ "${later_line}" -le "${earlier_line}" ]]; then
+    printf 'Expected %s to contain %s before %s\n' "${path}" "${earlier}" "${later}" >&2
+    exit 1
+  fi
+}
+
 job_block() {
   local job_name="$1"
 
@@ -88,6 +104,7 @@ label_store="${workdir}/podman-label"
 workflow_path="${repo_root}/.github/workflows/control-plane-ci.yml"
 renovate_config_path="${repo_root}/renovate.json5"
 sccache_dockerfile_path="${repo_root}/containers/sccache/Dockerfile"
+execution_plane_rust_dockerfile_path="${repo_root}/containers/execution-plane-rust/Dockerfile"
 mkdir -p "${context_dir}" "${fake_bin_dir}"
 cat > "${context_dir}/Dockerfile" <<'EOF'
 FROM docker.io/library/busybox:1.37.0
@@ -159,6 +176,12 @@ assert_file_contains "${sccache_dockerfile_path}" 'FROM scratch'
 assert_file_contains "${sccache_dockerfile_path}" 'COPY --from=fetcher /out/ /'
 assert_file_contains "${sccache_dockerfile_path}" 'USER 65532:65532'
 assert_file_contains "${sccache_dockerfile_path}" 'ENTRYPOINT ["/usr/local/bin/sccache"]'
+
+printf '%s\n' 'image-maintenance-test: verifying execution-plane-rust enables sccache' >&2
+assert_file_contains "${execution_plane_rust_dockerfile_path}" 'SCCACHE_DIR=/workspace/.cache/sccache'
+assert_file_contains "${execution_plane_rust_dockerfile_path}" 'RUSTC_WRAPPER=/usr/local/cargo/bin/sccache'
+assert_file_contains "${execution_plane_rust_dockerfile_path}" 'CARGO_INCREMENTAL=0'
+assert_line_order "${execution_plane_rust_dockerfile_path}" 'cargo install --locked sccache' 'RUSTC_WRAPPER=/usr/local/cargo/bin/sccache'
 
 helper_image_changes_block="$(job_block helper-image-changes)"
 publish_block="$(job_block publish-architecture-images)"

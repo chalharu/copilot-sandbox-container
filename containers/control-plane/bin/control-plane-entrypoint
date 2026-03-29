@@ -1087,6 +1087,22 @@ fi
   if [[ -n "${TZ:-}" ]]; then
     write_runtime_var TZ "${TZ}"
   fi
+  for runtime_var in \
+    SCCACHE_VERSION \
+    SCCACHE_RELEASE_BASE_URL \
+    SCCACHE_BOOTSTRAP_JOBS \
+    SCCACHE_BUCKET \
+    SCCACHE_ENDPOINT \
+    SCCACHE_REGION \
+    SCCACHE_S3_USE_SSL \
+    SCCACHE_S3_KEY_PREFIX \
+    SCCACHE_CACHE_SIZE \
+    AWS_ACCESS_KEY_ID_FILE \
+    AWS_SECRET_ACCESS_KEY_FILE; do
+    if [[ -n "${!runtime_var:-}" ]]; then
+      write_runtime_var "${runtime_var}" "${!runtime_var}"
+    fi
+  done
   if [[ "${local_podman_mode}" == "rootful-service" ]]; then
     write_runtime_var CONTAINER_HOST "unix://${rootful_podman_socket}"
     write_runtime_var DOCKER_HOST "unix://${rootful_podman_socket}"

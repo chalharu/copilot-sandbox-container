@@ -4,8 +4,7 @@ ARG EXECUTION_PLANE_UID=1000
 ARG EXECUTION_PLANE_GID=1000
 ARG EXECUTION_PLANE_USER=runner
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    SCCACHE_DIR=/workspace/.cache/sccache
+ENV DEBIAN_FRONTEND=noninteractive
 
 # hadolint ignore=DL3008
 RUN apt-get update -o Acquire::Retries=3 \
@@ -26,6 +25,10 @@ RUN apt-get update -o Acquire::Retries=3 \
     && mkdir -p /workspace \
     && chown -R "${EXECUTION_PLANE_USER}:${EXECUTION_PLANE_USER}" /workspace \
     && chown -R "${EXECUTION_PLANE_USER}:${EXECUTION_PLANE_USER}" "/usr/local/cargo"
+
+ENV SCCACHE_DIR=/workspace/.cache/sccache \
+    RUSTC_WRAPPER=/usr/local/cargo/bin/sccache \
+    CARGO_INCREMENTAL=0
 
 WORKDIR /workspace
 USER ${EXECUTION_PLANE_USER}
