@@ -14,12 +14,20 @@ pub const PROTECTED_ENVIRONMENT_REASON: &str = "Protected environment overrides 
 pub struct CompiledConfig {
     pub command_rules: Vec<CompiledRule>,
     pub protected_environments: Vec<Regex>,
+    pub file_access_rules: Vec<CompiledFileAccessRule>,
 }
 
 #[derive(Clone, Debug)]
 pub struct CompiledRule {
     pub reason: String,
     pub pattern: BytesRegex,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompiledFileAccessRule {
+    pub path: String,
+    pub reason: String,
+    pub allowed_executables: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -29,6 +37,8 @@ struct RawConfig {
     command_rules: Vec<RawRule>,
     #[serde(default, rename = "protectedEnvironments")]
     protected_environments: Vec<String>,
+    #[serde(default, rename = "fileAccessRules")]
+    file_access_rules: Vec<RawFileAccessRule>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -36,6 +46,15 @@ struct RawConfig {
 struct RawRule {
     rule: String,
     reason: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawFileAccessRule {
+    path: String,
+    reason: String,
+    #[serde(default, rename = "allowedExecutables")]
+    allowed_executables: Vec<String>,
 }
 
 static BUNDLED_RULES: OnceLock<Result<CompiledConfig, String>> = OnceLock::new();
@@ -84,12 +103,19 @@ pub fn load_rules(repo_root: Option<&Path>) -> Result<CompiledConfig, String> {
     let mut config = load_bundled_rules()?.clone();
     if let Some(root) = repo_root {
         let repo_config = load_rule_file(&root.join(REPO_RULES_RELATIVE_PATH), true)?;
-        config.command_rules.extend(repo_config.command_rules);
-        config
-            .protected_environments
-            .extend(repo_config.protected_environments);
+        merge_config(&mut config, repo_config);
     }
     Ok(config)
+}
+
+fn merge_config(config: &mut CompiledConfig, repo_config: CompiledConfig) {
+    config.command_rules.extend(repo_config.command_rules);
+    config
+        .protected_environments
+        .extend(repo_config.protected_environments);
+    config
+        .file_access_rules
+        .extend(repo_config.file_access_rules);
 }
 
 fn load_bundled_rules() -> Result<&'static CompiledConfig, String> {
@@ -100,7 +126,13 @@ fn load_bundled_rules() -> Result<&'static CompiledConfig, String> {
 }
 
 fn load_rule_file(path: &Path, optional: bool) -> Result<CompiledConfig, String> {
-    let raw = match fs::read_to_string(path) {
+    let read_result = if crate::policy_guard_active() {
+        crate::with_policy_guard(|| fs::read_to_string(path))
+    } else {
+        fs::read_to_string(path)
+    };
+
+    let raw = match read_result {
         Ok(raw) => raw,
         Err(error) if optional && error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(CompiledConfig::default());
@@ -145,10 +177,22 @@ fn compile_config(
         config.protected_environments,
         &format!("protectedEnvironments in {}", path.display()),
     )?;
+    let file_access_rules = config
+        .file_access_rules
+        .into_iter()
+        .enumerate()
+        .filter_map(|(rule_index, rule)| {
+            compile_file_access_rule(rule, path, rule_index).transpose()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
-    if !optional && command_rules.is_empty() && protected_environments.is_empty() {
+    if !optional
+        && command_rules.is_empty()
+        && protected_environments.is_empty()
+        && file_access_rules.is_empty()
+    {
         return Err(format!(
-            "{} must define at least one commandRules entry or protectedEnvironments pattern.",
+            "{} must define at least one commandRules entry, protectedEnvironments pattern, or fileAccessRules entry.",
             path.display()
         ));
     }
@@ -156,6 +200,7 @@ fn compile_config(
     Ok(CompiledConfig {
         command_rules,
         protected_environments,
+        file_access_rules,
     })
 }
 
@@ -176,6 +221,40 @@ fn compile_rule(rule: RawRule, path: &Path, rule_index: usize) -> Result<Compile
     })
 }
 
+fn compile_file_access_rule(
+    rule: RawFileAccessRule,
+    path: &Path,
+    rule_index: usize,
+) -> Result<Option<CompiledFileAccessRule>, String> {
+    let description = format!("fileAccessRule {} in {}", rule_index + 1, path.display());
+    if rule.reason.trim().is_empty() {
+        return Err(format!("{description} must define a non-empty reason."));
+    }
+    if rule.path.trim().is_empty() {
+        return Err(format!(
+            "{description} must define path as a non-empty string."
+        ));
+    }
+
+    let expanded_path = expand_env_placeholders(&rule.path);
+    if expanded_path.trim().is_empty() {
+        return Ok(None);
+    }
+
+    let allowed_executables = rule
+        .allowed_executables
+        .into_iter()
+        .enumerate()
+        .map(|(index, entry)| compile_allowed_executable(entry, &description, index + 1))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Some(CompiledFileAccessRule {
+        path: expanded_path,
+        reason: rule.reason,
+        allowed_executables,
+    }))
+}
+
 fn compile_rule_pattern(entry: String, description: &str) -> Result<BytesRegex, String> {
     if entry.is_empty() {
         return Err(format!(
@@ -186,6 +265,22 @@ fn compile_rule_pattern(entry: String, description: &str) -> Result<BytesRegex, 
     let anchored = format!("^(?:{expanded})$");
     BytesRegex::new(&anchored)
         .map_err(|error| format!("invalid regex pattern in {description}: {error}"))
+}
+
+fn compile_allowed_executable(
+    entry: String,
+    description: &str,
+    index: usize,
+) -> Result<String, String> {
+    let normalized = normalize_process_name(entry.trim());
+    if normalized.is_empty() {
+        return Err(format!(
+            "allowedExecutables entry {} in {} must be a non-empty string.",
+            index, description
+        ));
+    }
+
+    Ok(normalized)
 }
 
 fn compile_patterns(entries: Vec<String>, description: &str) -> Result<Vec<Regex>, String> {
@@ -236,9 +331,17 @@ fn expand_env_placeholders(input: &str) -> String {
     expanded
 }
 
+fn normalize_process_name(value: &str) -> String {
+    Path::new(value)
+        .file_name()
+        .and_then(|entry| entry.to_str())
+        .unwrap_or(value)
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{discover_repo_root, parse_config};
+    use super::{discover_repo_root, merge_config, parse_config};
     use std::fs;
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -251,16 +354,33 @@ commandRules:
     reason: commit blocked
 protectedEnvironments:
   - GIT_CONFIG_GLOBAL
+fileAccessRules:
+  - path: ${HOME}/.config/gh/hosts.yml
+    reason: gh only
+    allowedExecutables:
+      - gh
 "#;
+        unsafe {
+            std::env::set_var("HOME", "/home/copilot");
+        }
 
         let config = parse_config(yaml, Path::new("/tmp/rules.yaml"), false).unwrap();
 
         assert_eq!(config.command_rules.len(), 1);
         assert_eq!(config.protected_environments.len(), 1);
+        assert_eq!(config.file_access_rules.len(), 1);
         assert!(
             config.command_rules[0]
                 .pattern
                 .is_match(b"git\0commit\0--no-verify")
+        );
+        assert_eq!(
+            config.file_access_rules[0].path,
+            "/home/copilot/.config/gh/hosts.yml"
+        );
+        assert_eq!(
+            config.file_access_rules[0].allowed_executables,
+            vec!["gh".to_string()]
         );
     }
 
@@ -303,6 +423,52 @@ commandRules:
 
         assert!(config.command_rules.is_empty());
         assert!(config.protected_environments.is_empty());
+        assert!(config.file_access_rules.is_empty());
+    }
+
+    #[test]
+    fn parse_config_skips_empty_expanded_file_access_paths() {
+        let yaml = r#"
+fileAccessRules:
+  - path: ${CONTROL_PLANE_TEST_DISABLED_PATH}
+    reason: disabled when missing
+"#;
+
+        let config = parse_config(yaml, Path::new("/tmp/repo-rules.yaml"), true).unwrap();
+
+        assert!(config.file_access_rules.is_empty());
+    }
+
+    #[test]
+    fn merge_config_keeps_repo_local_file_access_rules() {
+        let bundled_yaml = r#"
+commandRules:
+  - rule: 'git\x00status'
+    reason: bundled command rule
+protectedEnvironments:
+  - GIT_CONFIG_GLOBAL
+"#;
+        let repo_yaml = r#"
+fileAccessRules:
+  - path: /tmp/secret-token
+    reason: repo-local file rule
+    allowedExecutables:
+      - podman
+"#;
+
+        let mut bundled = parse_config(bundled_yaml, Path::new("/tmp/rules.yaml"), false).unwrap();
+        let repo = parse_config(repo_yaml, Path::new("/tmp/repo-rules.yaml"), true).unwrap();
+
+        merge_config(&mut bundled, repo);
+
+        assert_eq!(bundled.command_rules.len(), 1);
+        assert_eq!(bundled.protected_environments.len(), 1);
+        assert_eq!(bundled.file_access_rules.len(), 1);
+        assert_eq!(bundled.file_access_rules[0].path, "/tmp/secret-token");
+        assert_eq!(
+            bundled.file_access_rules[0].allowed_executables,
+            vec!["podman".to_string()]
+        );
     }
 
     #[test]

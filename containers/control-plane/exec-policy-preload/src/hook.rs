@@ -35,7 +35,7 @@ pub fn evaluate_pre_tool_use(raw_input: &str) -> Result<Option<HookDecision>, St
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let repo_root = config::discover_repo_root(&cwd).unwrap_or(cwd);
-    let rules = config::load_rules(Some(repo_root.as_path()))?;
+    let rules = crate::with_policy_guard(|| config::load_rules(Some(repo_root.as_path())))?;
     let tool_args = parse_tool_args(input.tool_args)?;
 
     let Some(command) = tool_args.get("command").and_then(Value::as_str) else {
@@ -186,6 +186,21 @@ mod tests {
                 .contains("Force pushes are blocked")
         );
         assert_eq!(force_with_lease, None);
+    }
+
+    #[test]
+    fn denies_gh_auth_token() {
+        let repo = setup_repo("pre-tool-use-gh-auth-token");
+
+        let decision = evaluate_pre_tool_use(&hook_input(&repo, "gh auth token", "bash"))
+            .unwrap()
+            .unwrap();
+
+        assert!(
+            decision
+                .permission_decision_reason
+                .contains("gh auth token")
+        );
     }
 
     #[test]

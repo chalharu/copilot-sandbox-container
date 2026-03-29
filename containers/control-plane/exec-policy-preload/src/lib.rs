@@ -6,7 +6,9 @@ mod shell;
 
 use command::{CommandInvocation, EnvBinding};
 use libc::{c_char, c_int, c_void};
-use std::ffi::CStr;
+use std::cell::Cell;
+use std::ffi::{CStr, OsString};
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 type ExecveFn =
@@ -27,6 +29,13 @@ type PosixSpawnFn = unsafe extern "C" fn(
     *const *mut c_char,
     *const *mut c_char,
 ) -> c_int;
+type OpenFn = unsafe extern "C" fn(*const c_char, c_int, libc::mode_t) -> c_int;
+type OpenatFn = unsafe extern "C" fn(c_int, *const c_char, c_int, libc::mode_t) -> c_int;
+type Open2Fn = unsafe extern "C" fn(*const c_char, c_int) -> c_int;
+type Openat2Fn = unsafe extern "C" fn(c_int, *const c_char, c_int) -> c_int;
+type FopenFn = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut libc::FILE;
+type FreopenFn =
+    unsafe extern "C" fn(*const c_char, *const c_char, *mut libc::FILE) -> *mut libc::FILE;
 
 static EXECVE_SYMBOL: OnceLock<usize> = OnceLock::new();
 static EXECV_SYMBOL: OnceLock<usize> = OnceLock::new();
@@ -35,6 +44,24 @@ static EXECVPE_SYMBOL: OnceLock<usize> = OnceLock::new();
 static EXECVEAT_SYMBOL: OnceLock<usize> = OnceLock::new();
 static POSIX_SPAWN_SYMBOL: OnceLock<usize> = OnceLock::new();
 static POSIX_SPAWNP_SYMBOL: OnceLock<usize> = OnceLock::new();
+static OPEN_SYMBOL: OnceLock<usize> = OnceLock::new();
+static OPEN64_SYMBOL: OnceLock<usize> = OnceLock::new();
+static OPENAT_SYMBOL: OnceLock<usize> = OnceLock::new();
+static OPENAT64_SYMBOL: OnceLock<usize> = OnceLock::new();
+static OPEN_2_SYMBOL: OnceLock<usize> = OnceLock::new();
+static OPEN64_2_SYMBOL: OnceLock<usize> = OnceLock::new();
+static OPENAT_2_SYMBOL: OnceLock<usize> = OnceLock::new();
+static OPENAT64_2_SYMBOL: OnceLock<usize> = OnceLock::new();
+static FOPEN_SYMBOL: OnceLock<usize> = OnceLock::new();
+static FOPEN64_SYMBOL: OnceLock<usize> = OnceLock::new();
+static FREOPEN_SYMBOL: OnceLock<usize> = OnceLock::new();
+static FREOPEN64_SYMBOL: OnceLock<usize> = OnceLock::new();
+
+const SHELL_SCRIPT_INTERPRETERS: &[&str] = &["bash", "sh"];
+
+thread_local! {
+    static POLICY_EVALUATION_DEPTH: Cell<usize> = const { Cell::new(0) };
+}
 
 #[unsafe(no_mangle)]
 /// # Safety
@@ -167,7 +194,225 @@ pub unsafe extern "C" fn posix_spawnp(
     unsafe { real_posix_spawnp()(pid, file, file_actions, attrp, argv, envp) }
 }
 
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// This function replaces libc's `open` via `LD_PRELOAD` and must be called
+/// with the same valid pointers, flags, and mode value that libc expects.
+pub unsafe extern "C" fn open(pathname: *const c_char, flags: c_int, mode: libc::mode_t) -> c_int {
+    if let Some(reason) = block_reason_for_file_access(pathname, libc::AT_FDCWD) {
+        emit_policy_message(&reason);
+        set_errno(libc::EACCES);
+        return -1;
+    }
+
+    unsafe { real_open()(pathname, flags, mode) }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// This function replaces libc's `open64` via `LD_PRELOAD` and must be called
+/// with the same valid pointers, flags, and mode value that libc expects.
+pub unsafe extern "C" fn open64(
+    pathname: *const c_char,
+    flags: c_int,
+    mode: libc::mode_t,
+) -> c_int {
+    if let Some(reason) = block_reason_for_file_access(pathname, libc::AT_FDCWD) {
+        emit_policy_message(&reason);
+        set_errno(libc::EACCES);
+        return -1;
+    }
+
+    unsafe { real_open64()(pathname, flags, mode) }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// This function replaces libc's `openat` via `LD_PRELOAD` and must be called
+/// with the same valid dirfd, pointers, flags, and mode value that libc expects.
+pub unsafe extern "C" fn openat(
+    dirfd: c_int,
+    pathname: *const c_char,
+    flags: c_int,
+    mode: libc::mode_t,
+) -> c_int {
+    if let Some(reason) = block_reason_for_file_access(pathname, dirfd) {
+        emit_policy_message(&reason);
+        set_errno(libc::EACCES);
+        return -1;
+    }
+
+    unsafe { real_openat()(dirfd, pathname, flags, mode) }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// This function replaces libc's `openat64` via `LD_PRELOAD` and must be called
+/// with the same valid dirfd, pointers, flags, and mode value that libc expects.
+pub unsafe extern "C" fn openat64(
+    dirfd: c_int,
+    pathname: *const c_char,
+    flags: c_int,
+    mode: libc::mode_t,
+) -> c_int {
+    if let Some(reason) = block_reason_for_file_access(pathname, dirfd) {
+        emit_policy_message(&reason);
+        set_errno(libc::EACCES);
+        return -1;
+    }
+
+    unsafe { real_openat64()(dirfd, pathname, flags, mode) }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// This function replaces glibc's `__open_2` via `LD_PRELOAD` and must be
+/// called with the same valid pointers and flags that libc expects.
+pub unsafe extern "C" fn __open_2(pathname: *const c_char, flags: c_int) -> c_int {
+    if let Some(reason) = block_reason_for_file_access(pathname, libc::AT_FDCWD) {
+        emit_policy_message(&reason);
+        set_errno(libc::EACCES);
+        return -1;
+    }
+
+    unsafe { real_open_2()(pathname, flags) }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// This function replaces glibc's `__open64_2` via `LD_PRELOAD` and must be
+/// called with the same valid pointers and flags that libc expects.
+pub unsafe extern "C" fn __open64_2(pathname: *const c_char, flags: c_int) -> c_int {
+    if let Some(reason) = block_reason_for_file_access(pathname, libc::AT_FDCWD) {
+        emit_policy_message(&reason);
+        set_errno(libc::EACCES);
+        return -1;
+    }
+
+    unsafe { real_open64_2()(pathname, flags) }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// This function replaces glibc's `__openat_2` via `LD_PRELOAD` and must be
+/// called with the same valid dirfd, pointers, and flags that libc expects.
+pub unsafe extern "C" fn __openat_2(dirfd: c_int, pathname: *const c_char, flags: c_int) -> c_int {
+    if let Some(reason) = block_reason_for_file_access(pathname, dirfd) {
+        emit_policy_message(&reason);
+        set_errno(libc::EACCES);
+        return -1;
+    }
+
+    unsafe { real_openat_2()(dirfd, pathname, flags) }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// This function replaces glibc's `__openat64_2` via `LD_PRELOAD` and must be
+/// called with the same valid dirfd, pointers, and flags that libc expects.
+pub unsafe extern "C" fn __openat64_2(
+    dirfd: c_int,
+    pathname: *const c_char,
+    flags: c_int,
+) -> c_int {
+    if let Some(reason) = block_reason_for_file_access(pathname, dirfd) {
+        emit_policy_message(&reason);
+        set_errno(libc::EACCES);
+        return -1;
+    }
+
+    unsafe { real_openat64_2()(dirfd, pathname, flags) }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// This function replaces libc's `fopen` via `LD_PRELOAD` and must be called
+/// with the same valid pointers that libc expects.
+pub unsafe extern "C" fn fopen(pathname: *const c_char, mode: *const c_char) -> *mut libc::FILE {
+    if let Some(reason) = block_reason_for_file_access(pathname, libc::AT_FDCWD) {
+        emit_policy_message(&reason);
+        set_errno(libc::EACCES);
+        return std::ptr::null_mut();
+    }
+
+    unsafe { real_fopen()(pathname, mode) }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// This function replaces libc's `fopen64` via `LD_PRELOAD` and must be called
+/// with the same valid pointers that libc expects.
+pub unsafe extern "C" fn fopen64(pathname: *const c_char, mode: *const c_char) -> *mut libc::FILE {
+    if let Some(reason) = block_reason_for_file_access(pathname, libc::AT_FDCWD) {
+        emit_policy_message(&reason);
+        set_errno(libc::EACCES);
+        return std::ptr::null_mut();
+    }
+
+    unsafe { real_fopen64()(pathname, mode) }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// This function replaces libc's `freopen` via `LD_PRELOAD` and must be called
+/// with the same valid pointers that libc expects.
+pub unsafe extern "C" fn freopen(
+    pathname: *const c_char,
+    mode: *const c_char,
+    stream: *mut libc::FILE,
+) -> *mut libc::FILE {
+    if let Some(reason) = block_reason_for_file_access(pathname, libc::AT_FDCWD) {
+        emit_policy_message(&reason);
+        set_errno(libc::EACCES);
+        return std::ptr::null_mut();
+    }
+
+    unsafe { real_freopen()(pathname, mode, stream) }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// This function replaces libc's `freopen64` via `LD_PRELOAD` and must be
+/// called with the same valid pointers that libc expects.
+pub unsafe extern "C" fn freopen64(
+    pathname: *const c_char,
+    mode: *const c_char,
+    stream: *mut libc::FILE,
+) -> *mut libc::FILE {
+    if let Some(reason) = block_reason_for_file_access(pathname, libc::AT_FDCWD) {
+        emit_policy_message(&reason);
+        set_errno(libc::EACCES);
+        return std::ptr::null_mut();
+    }
+
+    unsafe { real_freopen64()(pathname, mode, stream) }
+}
+
 fn block_reason_for_exec(
+    path: *const c_char,
+    argv: *const *const c_char,
+    envp: *const *const c_char,
+) -> Option<String> {
+    if policy_guard_active() {
+        return None;
+    }
+
+    with_policy_guard(|| block_reason_for_exec_impl(path, argv, envp))
+}
+
+fn block_reason_for_exec_impl(
     path: *const c_char,
     argv: *const *const c_char,
     envp: *const *const c_char,
@@ -175,10 +420,7 @@ fn block_reason_for_exec(
     let command_path = path_to_string(path);
     let argv = argv_to_vec(argv);
     let env_bindings = envp_to_bindings(envp);
-    let cwd = std::env::current_dir().ok();
-    let repo_root = cwd.as_deref().and_then(config::discover_repo_root).or(cwd);
-
-    let rules = match config::load_rules(repo_root.as_deref()) {
+    let rules = match load_rules_for_current_process() {
         Ok(rules) => rules,
         Err(error) => {
             emit_policy_message(&format!("failed to load rules: {error}"));
@@ -197,6 +439,147 @@ fn block_reason_for_exec(
         invocation = next_invocation;
     }
     None
+}
+
+fn block_reason_for_file_access(path: *const c_char, dirfd: c_int) -> Option<String> {
+    if policy_guard_active() {
+        return None;
+    }
+
+    with_policy_guard(|| block_reason_for_file_access_impl(path, dirfd))
+}
+
+fn block_reason_for_file_access_impl(path: *const c_char, dirfd: c_int) -> Option<String> {
+    let raw_path = path_to_string(path);
+    let candidate_paths = resolve_candidate_paths(&raw_path, dirfd);
+    if candidate_paths.is_empty() {
+        return None;
+    }
+
+    let rules = match load_rules_for_current_process() {
+        Ok(rules) => rules,
+        Err(error) => {
+            emit_policy_message(&format!("failed to load rules: {error}"));
+            return None;
+        }
+    };
+
+    let process_names_storage = current_process_names();
+    let process_names = process_names_storage
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    candidate_paths
+        .iter()
+        .find_map(|candidate| policy::match_file_access_rule(&rules, &process_names, candidate))
+}
+
+pub(crate) fn policy_guard_active() -> bool {
+    POLICY_EVALUATION_DEPTH.with(|depth| depth.get() > 0)
+}
+
+pub(crate) fn with_policy_guard<T>(operation: impl FnOnce() -> T) -> T {
+    POLICY_EVALUATION_DEPTH.with(|depth| {
+        depth.set(depth.get() + 1);
+        let result = operation();
+        depth.set(depth.get() - 1);
+        result
+    })
+}
+
+fn load_rules_for_current_process() -> Result<config::CompiledConfig, String> {
+    let cwd = std::env::current_dir().ok();
+    let repo_root = cwd.as_deref().and_then(config::discover_repo_root).or(cwd);
+    config::load_rules(repo_root.as_deref())
+}
+
+fn current_process_names() -> Vec<String> {
+    let mut names = Vec::new();
+    let args = std::env::args_os().collect::<Vec<_>>();
+
+    if let Some(argv0) = args.first().and_then(basename_from_os_string) {
+        push_unique_string(&mut names, argv0);
+    }
+    if let Ok(current_exe) = std::env::current_exe()
+        && let Some(exe_name) = current_exe
+            .file_name()
+            .and_then(|entry| entry.to_str())
+            .map(str::to_string)
+    {
+        push_unique_string(&mut names, exe_name);
+    }
+
+    if names
+        .iter()
+        .any(|name| SHELL_SCRIPT_INTERPRETERS.contains(&name.as_str()))
+    {
+        for arg in args.iter().skip(1) {
+            let Some(raw_arg) = arg.to_str() else {
+                continue;
+            };
+            if raw_arg.is_empty() || raw_arg.starts_with('-') {
+                continue;
+            }
+            if let Some(script_name) = basename_from_os_string(arg) {
+                push_unique_string(&mut names, script_name);
+                break;
+            }
+        }
+    }
+
+    names
+}
+
+fn basename_from_os_string(value: &OsString) -> Option<String> {
+    Path::new(value)
+        .file_name()
+        .and_then(|entry| entry.to_str())
+        .map(str::to_string)
+}
+
+fn resolve_candidate_paths(path: &str, dirfd: c_int) -> Vec<String> {
+    if path.is_empty() {
+        return Vec::new();
+    }
+
+    let mut candidates = Vec::new();
+    push_unique_string(&mut candidates, path.to_string());
+
+    let requested_path = Path::new(path);
+    let resolved_path = if requested_path.is_absolute() {
+        Some(requested_path.to_path_buf())
+    } else {
+        base_directory_for_dirfd(dirfd).map(|base_dir| base_dir.join(requested_path))
+    };
+
+    if let Some(resolved_path) = resolved_path {
+        push_unique_string(
+            &mut candidates,
+            resolved_path.to_string_lossy().into_owned(),
+        );
+        if let Ok(canonical_path) = resolved_path.canonicalize() {
+            push_unique_string(
+                &mut candidates,
+                canonical_path.to_string_lossy().into_owned(),
+            );
+        }
+    }
+
+    candidates
+}
+
+fn base_directory_for_dirfd(dirfd: c_int) -> Option<PathBuf> {
+    if dirfd == libc::AT_FDCWD {
+        return std::env::current_dir().ok();
+    }
+
+    std::fs::read_link(format!("/proc/self/fd/{dirfd}")).ok()
+}
+
+fn push_unique_string(values: &mut Vec<String>, value: String) {
+    if !values.iter().any(|existing| existing == &value) {
+        values.push(value);
+    }
 }
 
 unsafe fn real_execve() -> ExecveFn {
@@ -241,6 +624,84 @@ unsafe fn real_posix_spawnp() -> PosixSpawnFn {
     unsafe {
         std::mem::transmute(
             *POSIX_SPAWNP_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"posix_spawnp\0")),
+        )
+    }
+}
+
+unsafe fn real_open() -> OpenFn {
+    unsafe { std::mem::transmute(*OPEN_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"open\0"))) }
+}
+
+unsafe fn real_open64() -> OpenFn {
+    unsafe {
+        std::mem::transmute(*OPEN64_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"open64\0")))
+    }
+}
+
+unsafe fn real_openat() -> OpenatFn {
+    unsafe {
+        std::mem::transmute(*OPENAT_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"openat\0")))
+    }
+}
+
+unsafe fn real_openat64() -> OpenatFn {
+    unsafe {
+        std::mem::transmute(*OPENAT64_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"openat64\0")))
+    }
+}
+
+unsafe fn real_open_2() -> Open2Fn {
+    unsafe {
+        std::mem::transmute(*OPEN_2_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"__open_2\0")))
+    }
+}
+
+unsafe fn real_open64_2() -> Open2Fn {
+    unsafe {
+        std::mem::transmute(
+            *OPEN64_2_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"__open64_2\0")),
+        )
+    }
+}
+
+unsafe fn real_openat_2() -> Openat2Fn {
+    unsafe {
+        std::mem::transmute(
+            *OPENAT_2_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"__openat_2\0")),
+        )
+    }
+}
+
+unsafe fn real_openat64_2() -> Openat2Fn {
+    unsafe {
+        std::mem::transmute(
+            *OPENAT64_2_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"__openat64_2\0")),
+        )
+    }
+}
+
+unsafe fn real_fopen() -> FopenFn {
+    unsafe {
+        std::mem::transmute(*FOPEN_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"fopen\0")))
+    }
+}
+
+unsafe fn real_fopen64() -> FopenFn {
+    unsafe {
+        std::mem::transmute(*FOPEN64_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"fopen64\0")))
+    }
+}
+
+unsafe fn real_freopen() -> FreopenFn {
+    unsafe {
+        std::mem::transmute(*FREOPEN_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"freopen\0")))
+    }
+}
+
+unsafe fn real_freopen64() -> FreopenFn {
+    unsafe {
+        std::mem::transmute(
+            *FREOPEN64_SYMBOL.get_or_init(|| resolve_symbol_or_abort(b"freopen64\0")),
         )
     }
 }
@@ -356,6 +817,7 @@ mod tests {
                 .unwrap(),
             }],
             protected_environments: vec![Regex::new("^(?:GIT_CONFIG_GLOBAL)$").unwrap()],
+            file_access_rules: Vec::new(),
         };
         let invocation = CommandInvocation::from_exec(
             "git",

@@ -7,6 +7,8 @@ commandRules:
     reason: git push --no-verify is blocked by control-plane policy. Run git push without --no-verify so push hooks still run.
   - rule: 'git(?:\x00[^\x00]+)*\x00push(?:\x00[^\x00]+)*\x00(?:--force|-[A-Za-z0-9]*f[A-Za-z0-9]*)(?:\x00[^\x00]+)*'
     reason: Force pushes are blocked by control-plane policy. Push without --force. Use --force-with-lease when you need a guarded overwrite.
+  - rule: 'gh(?:\x00[^\x00]+)*\x00auth(?:\x00[^\x00]+)*\x00token(?:\x00[^\x00]+)*'
+    reason: gh auth token is blocked by control-plane policy. Use gh commands that do not print tokens, or rely on the managed gh hosts configuration.
 protectedEnvironments:
   - GIT_CONFIG_GLOBAL
   - GIT_CONFIG_SYSTEM
@@ -15,3 +17,17 @@ protectedEnvironments:
   - GIT_CONFIG_KEY_[0-9]+
   - GIT_CONFIG_VALUE_[0-9]+
   - GIT_CONFIG_PARAMETERS
+fileAccessRules:
+  - path: '${HOME}/.config/control-plane/copilot-github-token'
+    reason: Direct reads of CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE are blocked by control-plane policy. Use control-plane-copilot so the managed launcher injects the token without exposing the file contents.
+    allowedExecutables:
+      - control-plane-copilot
+  - path: '${HOME}/.config/control-plane/dockerhub-token'
+    reason: Direct reads of DOCKERHUB_TOKEN_FILE are blocked by control-plane policy. Use podman or managed runtime wiring instead of reading the token file directly.
+    allowedExecutables:
+      - podman
+      - control-plane-podman
+  - path: '${HOME}/.config/gh/hosts.yml'
+    reason: Direct reads of ~/.config/gh/hosts.yml are blocked by control-plane policy. Use gh so hosts.yml stays confined to the GitHub CLI.
+    allowedExecutables:
+      - gh

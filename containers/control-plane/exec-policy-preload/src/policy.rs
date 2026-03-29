@@ -30,6 +30,20 @@ pub fn match_exec_rule(config: &CompiledConfig, invocation: &CommandInvocation) 
         .find_map(|rule| match_rule(rule, std::slice::from_ref(invocation)))
 }
 
+pub fn match_file_access_rule(
+    config: &CompiledConfig,
+    process_names: &[&str],
+    path: &str,
+) -> Option<String> {
+    config.file_access_rules.iter().find_map(|rule| {
+        if rule.path == path && !file_access_allowed(&rule.allowed_executables, process_names) {
+            return Some(rule.reason.clone());
+        }
+
+        None
+    })
+}
+
 fn match_rule(rule: &CompiledRule, invocations: &[CommandInvocation]) -> Option<String> {
     for invocation in invocations {
         if rule_matches(rule, invocation) {
@@ -70,11 +84,17 @@ fn binding_differs_from_parent(binding: &EnvBinding) -> bool {
     }
 }
 
+fn file_access_allowed(allowed_executables: &[String], process_names: &[&str]) -> bool {
+    allowed_executables
+        .iter()
+        .any(|allowed| process_names.iter().any(|name| name == allowed))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::match_exec_rule;
+    use super::{match_exec_rule, match_file_access_rule};
     use crate::command::{CommandInvocation, EnvBinding};
-    use crate::config::{CompiledConfig, CompiledRule};
+    use crate::config::{CompiledConfig, CompiledFileAccessRule, CompiledRule};
     use regex::{Regex, bytes::Regex as BytesRegex};
 
     #[test]
@@ -100,6 +120,21 @@ mod tests {
                 },
             ],
             protected_environments: vec![Regex::new("^(?:GIT_CONFIG_GLOBAL)$").unwrap()],
+            file_access_rules: vec![
+                CompiledFileAccessRule {
+                    path: "/run/secrets/dockerhub-token".to_string(),
+                    reason: "dockerhub token blocked".to_string(),
+                    allowed_executables: vec![
+                        "podman".to_string(),
+                        "control-plane-podman".to_string(),
+                    ],
+                },
+                CompiledFileAccessRule {
+                    path: "/home/copilot/.config/gh/hosts.yml".to_string(),
+                    reason: "hosts file blocked".to_string(),
+                    allowed_executables: vec!["gh".to_string()],
+                },
+            ],
         };
         let rule_invocation = CommandInvocation::from_exec(
             "git",
@@ -185,6 +220,27 @@ mod tests {
         assert_eq!(
             match_exec_rule(&config, &hooks_path_invocation).as_deref(),
             Some("hooks path blocked")
+        );
+        assert_eq!(
+            match_file_access_rule(&config, &["bash"], "/run/secrets/dockerhub-token").as_deref(),
+            Some("dockerhub token blocked")
+        );
+        assert_eq!(
+            match_file_access_rule(
+                &config,
+                &["bash", "control-plane-podman"],
+                "/run/secrets/dockerhub-token",
+            ),
+            None
+        );
+        assert_eq!(
+            match_file_access_rule(&config, &["gh"], "/home/copilot/.config/gh/hosts.yml"),
+            None
+        );
+        assert_eq!(
+            match_file_access_rule(&config, &["bash"], "/home/copilot/.config/gh/hosts.yml")
+                .as_deref(),
+            Some("hosts file blocked")
         );
     }
 }
