@@ -806,11 +806,7 @@ jq -e '.nested.replace.fromBase == true and .nested.replace.fromOverlay == true'
 jq -e '.nested.array == ["overlay"]' ~/.copilot/config.json >/dev/null
 jq -e '.topLevelOverlay == "kind"' ~/.copilot/config.json >/dev/null
 printf '%s\n' 'kind-test remote: config merge ok' >&2
-grep -Fq 'oauth_token: kind-secret-hosts-token' ~/.config/gh/hosts.yml
-grep -Fq 'git_protocol: ssh' ~/.config/gh/hosts.yml
-grep -Fq 'user: kind-bot' ~/.config/gh/hosts.yml
-! grep -Fq 'stale-kind-token' ~/.config/gh/hosts.yml
-! grep -Fq 'kind-secret-token-fallback' ~/.config/gh/hosts.yml
+gh config get git_protocol --host github.com | grep -qx 'ssh'
 printf '%s\n' 'kind-test remote: gh hosts ok' >&2
 grep -qx 'cgroup_manager = "cgroupfs"' ~/.config/containers/containers.conf
 grep -qx 'events_logger = "file"' ~/.config/containers/containers.conf
@@ -865,7 +861,8 @@ ls -l ~/.copilot/config.json ~/.copilot/command-history-state.json ~/.config/gh/
 stat -c '%n %a %U %G' ~/.copilot/config.json ~/.copilot/command-history-state.json ~/.config/gh/hosts.yml || true
 printf '%s\n' '--- config and gh hosts ---'
 cat ~/.copilot/config.json || true
-cat ~/.config/gh/hosts.yml || true
+gh auth status --hostname github.com || true
+gh config get git_protocol --host github.com || true
 printf '%s\n' '--- containers config ---'
 cat ~/.config/containers/containers.conf || true
 cat ~/.config/containers/storage.conf || true

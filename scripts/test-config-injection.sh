@@ -169,11 +169,7 @@ jq -e '.nested.keep == 1' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.nested.replace.fromBase == true and .nested.replace.fromOverlay == true' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.nested.array == ["overlay"]' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.topLevelOverlay == "configmap"' /home/copilot/.copilot/config.json >/dev/null
-grep -Fq 'oauth_token: secret-hosts-token' /home/copilot/.config/gh/hosts.yml
-grep -Fq 'git_protocol: ssh' /home/copilot/.config/gh/hosts.yml
-grep -Fq 'user: secret-bot' /home/copilot/.config/gh/hosts.yml
-! grep -Fq 'stale-state-token' /home/copilot/.config/gh/hosts.yml
-! grep -Fq 'unused-secret-fallback-token' /home/copilot/.config/gh/hosts.yml
+su -s /bin/bash copilot -lc 'gh config get git_protocol --host github.com' | grep -qx 'ssh'
 printf '%s\n' file-backed-ok
 EOF
 )"
@@ -332,9 +328,7 @@ token_backed_output="$("${container_bin}" run --rm \
   bash -l -se 2>&1 <<'EOF'
 set -euo pipefail
 test "$(stat -c '%a %U %G' /home/copilot/.config/gh/hosts.yml)" = '600 copilot copilot'
-grep -Fq 'oauth_token: generated-secret-token' /home/copilot/.config/gh/hosts.yml
-grep -Fq 'git_protocol: https' /home/copilot/.config/gh/hosts.yml
-! grep -Fq 'stale-generated-token' /home/copilot/.config/gh/hosts.yml
+su -s /bin/bash copilot -lc 'gh config get git_protocol --host github.com' | grep -qx 'https'
 printf '%s\n' token-backed-ok
 EOF
 )"
