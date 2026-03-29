@@ -114,8 +114,9 @@ assert_contains "${s3_script}" 'sccache_s3_key_prefix=sccache/'
 assert_contains "${s3_script}" 'aws_access_key_id=sample-access-key-id'
 assert_contains "${s3_script}" 'aws_secret_access_key=sample-secret-access-key'
 assert_contains "${s3_script}" "\${ephemeral_root}/sccache"
-assert_contains "${s3_script}" '[cache]'
-assert_contains "${s3_script}" 'type = "s3"'
+assert_contains "${s3_script}" '[cache.s3]'
+assert_not_contains "${s3_script}" '[cache]'
+assert_not_contains "${s3_script}" 'type = "s3"'
 assert_contains "${s3_script}" 'bucket = '
 assert_contains "${s3_script}" "\${sccache_bucket}"
 assert_contains "${s3_script}" 'endpoint = '
@@ -126,6 +127,7 @@ assert_contains "${s3_script}" 'use_ssl = '
 assert_contains "${s3_script}" "\${sccache_s3_use_ssl}"
 assert_contains "${s3_script}" 'key_prefix = '
 assert_contains "${s3_script}" "\${sccache_s3_key_prefix}"
+assert_contains "${s3_script}" 'no_credentials = false'
 assert_contains "${s3_script}" 'export AWS_ACCESS_KEY_ID='
 assert_contains "${s3_script}" 'export AWS_SECRET_ACCESS_KEY='
 assert_contains "${s3_script}" 'export SCCACHE_CONF='

@@ -246,15 +246,13 @@ export CARGO_TARGET_DIR=\"\${target_dir}\"
 export SCCACHE_DIR=\"\${sccache_dir}\"
 if [ \"\${sccache_s3_enabled}\" = \"1\" ]; then
   cat > \"\${sccache_conf}\" <<EOF3
-[cache]
-type = "s3"
-
 [cache.s3]
 bucket = \"\${sccache_bucket}\"
 endpoint = \"\${sccache_endpoint}\"
 region = \"\${sccache_region}\"
 use_ssl = \${sccache_s3_use_ssl}
 key_prefix = \"\${sccache_s3_key_prefix}\"
+no_credentials = false
 EOF3
   export AWS_ACCESS_KEY_ID=\"\${aws_access_key_id}\"
   export AWS_SECRET_ACCESS_KEY=\"\${aws_secret_access_key}\"
