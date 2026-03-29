@@ -165,6 +165,69 @@ if [[ "${skill_status}" -ne 0 ]]; then
 fi
 grep -qx 'bundled-skills-ok' <<<"${skill_output}"
 
+printf '%s\n' 'regression-test: verifying runtime env preserves sccache settings for login shells' >&2
+mkdir -p \
+  "${workdir}/runtime-env-state/copilot" \
+  "${workdir}/runtime-env-state/gh" \
+  "${workdir}/runtime-env-state/ssh" \
+  "${workdir}/runtime-env-state/ssh-host-keys" \
+  "${workdir}/runtime-env-state/workspace" \
+  "${workdir}/runtime-env-state/garage-sccache-auth"
+printf '%s' 'sample-access-key-id' > "${workdir}/runtime-env-state/garage-sccache-auth/access-key-id"
+printf '%s' 'sample-secret-access-key' > "${workdir}/runtime-env-state/garage-sccache-auth/secret-access-key"
+
+set +e
+runtime_env_output="$("${container_bin}" run --rm \
+  --name "${container_name}" \
+  "${startup_caps[@]}" \
+  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForRegressionOnly control-plane-regression' \
+  -e SCCACHE_BUCKET=control-plane-sccache \
+  -e SCCACHE_ENDPOINT=http://garage-s3.control-plane.svc.cluster.local:3900 \
+  -e SCCACHE_REGION=garage \
+  -e SCCACHE_S3_USE_SSL=false \
+  -e SCCACHE_S3_KEY_PREFIX=sccache/ \
+  -e SCCACHE_CACHE_SIZE=4G \
+  -e AWS_ACCESS_KEY_ID_FILE=/var/run/garage-sccache-auth/access-key-id \
+  -e AWS_SECRET_ACCESS_KEY_FILE=/var/run/garage-sccache-auth/secret-access-key \
+  -v "${workdir}/runtime-env-state/copilot:/home/copilot/.copilot" \
+  -v "${workdir}/runtime-env-state/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/runtime-env-state/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/runtime-env-state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/runtime-env-state/workspace:/workspace" \
+  -v "${workdir}/runtime-env-state/garage-sccache-auth:/var/run/garage-sccache-auth:ro" \
+  "${control_plane_image}" \
+  bash -lc "set -euo pipefail
+su -l -s /bin/bash copilot -c 'set -euo pipefail
+runtime_env=\"\$HOME/.config/control-plane/runtime.env\"
+grep -Fqx \"SCCACHE_BUCKET=control-plane-sccache\" \"\$runtime_env\"
+grep -Fqx \"SCCACHE_ENDPOINT=http://garage-s3.control-plane.svc.cluster.local:3900\" \"\$runtime_env\"
+grep -Fqx \"SCCACHE_REGION=garage\" \"\$runtime_env\"
+grep -Fqx \"SCCACHE_S3_USE_SSL=false\" \"\$runtime_env\"
+grep -Fqx \"SCCACHE_S3_KEY_PREFIX=sccache/\" \"\$runtime_env\"
+grep -Fqx \"SCCACHE_CACHE_SIZE=4G\" \"\$runtime_env\"
+grep -Fqx \"AWS_ACCESS_KEY_ID_FILE=/var/run/garage-sccache-auth/access-key-id\" \"\$runtime_env\"
+grep -Fqx \"AWS_SECRET_ACCESS_KEY_FILE=/var/run/garage-sccache-auth/secret-access-key\" \"\$runtime_env\"
+[[ \"\${SCCACHE_BUCKET:-}\" == \"control-plane-sccache\" ]]
+[[ \"\${SCCACHE_ENDPOINT:-}\" == \"http://garage-s3.control-plane.svc.cluster.local:3900\" ]]
+[[ \"\${SCCACHE_REGION:-}\" == \"garage\" ]]
+[[ \"\${SCCACHE_S3_USE_SSL:-}\" == \"false\" ]]
+[[ \"\${SCCACHE_S3_KEY_PREFIX:-}\" == \"sccache/\" ]]
+[[ \"\${SCCACHE_CACHE_SIZE:-}\" == \"4G\" ]]
+[[ \"\${AWS_ACCESS_KEY_ID_FILE:-}\" == \"/var/run/garage-sccache-auth/access-key-id\" ]]
+[[ \"\${AWS_SECRET_ACCESS_KEY_FILE:-}\" == \"/var/run/garage-sccache-auth/secret-access-key\" ]]
+[[ -r \"\${AWS_ACCESS_KEY_ID_FILE}\" ]]
+[[ -r \"\${AWS_SECRET_ACCESS_KEY_FILE}\" ]]
+printf \"%s\n\" runtime-env-sccache-ok'" 2>&1)"
+runtime_env_status=$?
+set -e
+
+if [[ "${runtime_env_status}" -ne 0 ]]; then
+  printf 'Expected control-plane startup to preserve sccache settings in runtime.env\n' >&2
+  printf '%s\n' "${runtime_env_output}" >&2
+  exit 1
+fi
+grep -qx 'runtime-env-sccache-ok' <<<"${runtime_env_output}"
+
 printf '%s\n' 'regression-test: verifying file-based DHI auth handling' >&2
 mkdir -p "${workdir}/fake-bin"
 cat > "${workdir}/fake-bin/podman" <<'EOF'
