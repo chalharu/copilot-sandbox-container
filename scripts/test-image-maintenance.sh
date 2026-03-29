@@ -205,6 +205,10 @@ assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache:man
 assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache:manifest-version\" \"\${GHCR_SCCACHE_IMAGE}:\${{ steps.image_versions.outputs.sccache_component_tag }}\""
 assert_file_matches "${workflow_path}" '^[[:space:]]+- sccache$'
 assert_file_contains "${renovate_config_path}" '/^containers\\/(control-plane|yamllint|sccache)\\/Dockerfile$/'
+assert_file_contains "${renovate_config_path}" 'separateMultipleMajor: true'
+assert_file_contains "${renovate_config_path}" 'separateMultipleMinor: true'
+assert_file_contains "${renovate_config_path}" '"{{{depNameSanitized}}}{{#if newVersion}}__v{{{newVersion}}}{{/if}}{{#if newDigestShort}}__d{{{newDigestShort}}}{{/if}}",'
+assert_file_not_contains "${renovate_config_path}" '__{{updateType}}'
 assert_file_not_contains "${workflow_path}" 'garage_changed'
 assert_file_not_contains "${workflow_path}" 'garage_bootstrap_changed'
 assert_file_not_matches "${workflow_path}" 'containers/garage([[:space:]/]|$)'
