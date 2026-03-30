@@ -31,6 +31,12 @@ fileAccessRules:
     allowedExecutables:
       - podman
       - control-plane-podman
+  - path: '${XDG_RUNTIME_DIR}/containers/auth.json'
+    reason: Direct reads of registry auth.json are blocked by control-plane policy. Use podman or docker so the runtime consumes the managed auth without exposing the file contents.
+    allowedExecutables:
+      - podman
+      - docker
+      - control-plane-podman
   - path: '${HOME}/.config/gh/hosts.yml'
     reason: Direct reads of ~/.config/gh/hosts.yml are blocked by control-plane policy. Use gh so hosts.yml stays confined to the GitHub CLI.
     allowedExecutables:

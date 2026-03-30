@@ -51,6 +51,7 @@ fake_bin="$(mktemp -d)"
 copilot_token_path="${HOME}/.config/control-plane/copilot-github-token"
 dockerhub_token_path="${HOME}/.config/control-plane/dockerhub-token"
 gh_hosts_path="${HOME}/.config/gh/hosts.yml"
+registry_auth_path="${XDG_RUNTIME_DIR}/containers/auth.json"
 
 cleanup_local() {
   rm -rf "${fake_bin}" >/dev/null 2>&1 || true
@@ -68,12 +69,20 @@ test "${LD_PRELOAD}" = "${exec_policy_library}"
 mkdir -p "${HOME}/.config/gh"
 export CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE="${copilot_token_path}"
 export DOCKERHUB_TOKEN_FILE="${dockerhub_token_path}"
+export REGISTRY_AUTH_PATH="${registry_auth_path}"
+test -f "${registry_auth_path}"
 
 cat > "${fake_bin}/podman" <<'EOF_PODMAN'
 #!/usr/bin/env bash
 set -euo pipefail
 while IFS= read -r _; do :; done < "${DOCKERHUB_TOKEN_FILE}"
+while IFS= read -r _; do :; done < "${REGISTRY_AUTH_PATH}"
 EOF_PODMAN
+cat > "${fake_bin}/docker" <<'EOF_DOCKER'
+#!/usr/bin/env bash
+set -euo pipefail
+while IFS= read -r _; do :; done < "${REGISTRY_AUTH_PATH}"
+EOF_DOCKER
 cat > "${fake_bin}/gh" <<'EOF_GH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -88,7 +97,7 @@ cat > "${fake_bin}/control-plane-copilot" <<'EOF_COPILOT'
 set -euo pipefail
 while IFS= read -r _; do :; done < "${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}"
 EOF_COPILOT
-chmod 755 "${fake_bin}/podman" "${fake_bin}/gh" "${fake_bin}/control-plane-copilot"
+chmod 755 "${fake_bin}/podman" "${fake_bin}/docker" "${fake_bin}/gh" "${fake_bin}/control-plane-copilot"
 export PATH="${fake_bin}:${PATH}"
 
 run_hook() {
@@ -139,6 +148,8 @@ assert_denied_shell() {
     GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL}" \
     CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE="${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}" \
     DOCKERHUB_TOKEN_FILE="${DOCKERHUB_TOKEN_FILE}" \
+    REGISTRY_AUTH_PATH="${REGISTRY_AUTH_PATH}" \
+    XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
     HOME="${HOME}" \
     PATH="${PATH}" \
     bash -lc "${shell_command}" > /dev/null 2>"${stderr_file}"
@@ -168,6 +179,8 @@ assert_allowed_shell() {
     GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL}" \
     CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE="${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}" \
     DOCKERHUB_TOKEN_FILE="${DOCKERHUB_TOKEN_FILE}" \
+    REGISTRY_AUTH_PATH="${REGISTRY_AUTH_PATH}" \
+    XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
     HOME="${HOME}" \
     PATH="${PATH}" \
     bash -lc "${shell_command}" > /dev/null 2>"${stderr_file}"
@@ -288,9 +301,12 @@ assert_denied_exec 'Protected environment overrides are blocked' env GIT_CONFIG_
 assert_denied_exec 'repo-local policy' git status --short
 assert_denied_shell 'CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE' 'while IFS= read -r _; do :; done < "${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}"'
 assert_denied_shell 'DOCKERHUB_TOKEN_FILE' 'while IFS= read -r _; do :; done < "${DOCKERHUB_TOKEN_FILE}"'
+assert_denied_shell 'registry auth.json' 'while IFS= read -r _; do :; done < "${XDG_RUNTIME_DIR}/containers/auth.json"'
+assert_denied_shell 'registry auth.json' 'cat "${XDG_RUNTIME_DIR}/containers/auth.json"'
 assert_denied_shell '~/.config/gh/hosts.yml' 'while IFS= read -r _; do :; done < "${HOME}/.config/gh/hosts.yml"'
 assert_allowed_shell "${fake_bin}/control-plane-copilot"
 assert_allowed_shell "${fake_bin}/podman"
+assert_allowed_shell "${fake_bin}/docker"
 assert_allowed_shell "${fake_bin}/gh auth status"
 assert_allowed_shell "${fake_bin}/gh pr view 123"
 assert_allowed_shell "${fake_bin}/gh api repos/octo-org/octo-repo/pulls/123"
@@ -390,8 +406,10 @@ output="$("${container_bin}" run --rm \
 set -euo pipefail
 install -d -o copilot -g copilot /home/copilot/.config/gh
 install -d -o copilot -g copilot /home/copilot/.config/control-plane
+install -d -o copilot -g copilot /run/user/1000/containers
 printf '%s\n' 'copilot-secret-token' > /home/copilot/.config/control-plane/copilot-github-token
 printf '%s\n' 'dockerhub-secret-token' > /home/copilot/.config/control-plane/dockerhub-token
+printf '%s\n' '{"auths":{"dhi.io":{"auth":"test-auth"}}}' > /run/user/1000/containers/auth.json
 cat > /home/copilot/.config/gh/hosts.yml <<'YAML'
 github.com:
   oauth_token: managed-gh-token
@@ -399,10 +417,12 @@ github.com:
 YAML
 chown copilot:copilot \
   /home/copilot/.config/control-plane/copilot-github-token \
-  /home/copilot/.config/control-plane/dockerhub-token
+  /home/copilot/.config/control-plane/dockerhub-token \
+  /run/user/1000/containers/auth.json
 chmod 600 \
   /home/copilot/.config/control-plane/copilot-github-token \
-  /home/copilot/.config/control-plane/dockerhub-token
+  /home/copilot/.config/control-plane/dockerhub-token \
+  /run/user/1000/containers/auth.json
 chown copilot:copilot /home/copilot/.config/gh/hosts.yml
 chmod 600 /home/copilot/.config/gh/hosts.yml
 source /home/copilot/.config/control-plane/runtime.env
