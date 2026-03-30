@@ -23,39 +23,21 @@ load_control_plane_runtime_env() {
   set +a
 }
 
-read_file_with_container_runtime() {
-  local container_bin="$1"
-  local helper_image="$2"
-  local file_path="$3"
-  local mounted_path="${4:-/run/control-plane-runtime/secret}"
-  local bridge_runtime="${container_bin}"
-  local value=""
+write_registry_auth_file() {
+  local target_path="$1"
+  local registry="$2"
+  local username="$3"
+  local token="$4"
+  local encoded_auth=""
 
-  [[ -f "${file_path}" ]] || {
-    printf 'Secret file does not exist: %s\n' "${file_path}" >&2
-    return 1
-  }
-
-  if [[ "${bridge_runtime}" != "podman" ]] \
-    && [[ "${bridge_runtime}" != "docker" ]] \
-    && command -v podman >/dev/null 2>&1; then
-    bridge_runtime="podman"
-  fi
-
-  case "${bridge_runtime}" in
-    podman|docker)
-      "${bridge_runtime}" run --rm \
-        --user 0:0 \
-        -v "${file_path}:${mounted_path}:ro" \
-        --entrypoint cat \
-        "${helper_image}" \
-        "${mounted_path}"
-      ;;
-    *)
-      IFS= read -r value < "${file_path}" || true
-      printf '%s' "${value}"
-      ;;
-  esac
+  require_command base64
+  encoded_auth="$(printf '%s' "${username}:${token}" | base64 | tr -d '\n')"
+  mkdir -p "$(dirname "${target_path}")"
+  (
+    umask 077
+    printf '{"auths":{"%s":{"auth":"%s"}}}\n' "${registry}" "${encoded_auth}" > "${target_path}"
+  )
+  chmod 600 "${target_path}"
 }
 
 docker_runtime_available() {

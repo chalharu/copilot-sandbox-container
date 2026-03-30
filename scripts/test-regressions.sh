@@ -228,7 +228,53 @@ if [[ "${runtime_env_status}" -ne 0 ]]; then
 fi
 grep -qx 'runtime-env-sccache-ok' <<<"${runtime_env_output}"
 
-printf '%s\n' 'regression-test: verifying file-based DHI auth handling' >&2
+expected_dhi_auth="$(printf '%s' 'test-user:test-token' | base64 | tr -d '\n')"
+
+printf '%s\n' 'regression-test: verifying startup materializes DHI auth without exposing secret files' >&2
+mkdir -p \
+  "${workdir}/runtime-dhi-auth-state/copilot" \
+  "${workdir}/runtime-dhi-auth-state/gh" \
+  "${workdir}/runtime-dhi-auth-state/ssh" \
+  "${workdir}/runtime-dhi-auth-state/ssh-host-keys" \
+  "${workdir}/runtime-dhi-auth-state/workspace" \
+  "${workdir}/runtime-dhi-auth-state/control-plane-auth"
+printf '%s' 'test-user' > "${workdir}/runtime-dhi-auth-state/control-plane-auth/dockerhub-username"
+printf '%s' 'test-token' > "${workdir}/runtime-dhi-auth-state/control-plane-auth/dockerhub-token"
+
+set +e
+runtime_dhi_auth_output="$("${container_bin}" run --rm \
+  --name "${container_name}" \
+  "${startup_caps[@]}" \
+  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForRegressionOnly control-plane-regression' \
+  -e DOCKERHUB_USERNAME_FILE=/var/run/control-plane-auth/dockerhub-username \
+  -e DOCKERHUB_TOKEN_FILE=/var/run/control-plane-auth/dockerhub-token \
+  -v "${workdir}/runtime-dhi-auth-state/copilot:/home/copilot/.copilot" \
+  -v "${workdir}/runtime-dhi-auth-state/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/runtime-dhi-auth-state/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/runtime-dhi-auth-state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/runtime-dhi-auth-state/workspace:/workspace" \
+  -v "${workdir}/runtime-dhi-auth-state/control-plane-auth:/var/run/control-plane-auth:ro" \
+  "${control_plane_image}" \
+  bash -lc "set -euo pipefail
+runtime_env=/home/copilot/.config/control-plane/runtime.env
+auth_file=\"/run/user/\$(id -u copilot)/containers/auth.json\"
+! grep -q '^DOCKERHUB_' \"\$runtime_env\"
+! grep -q '^REGISTRY_AUTH_FILE=' \"\$runtime_env\"
+test -r \"\$auth_file\"
+grep -Fq '\"dhi.io\"' \"\$auth_file\"
+grep -Fq '\"auth\":\"${expected_dhi_auth}\"' \"\$auth_file\"
+printf '%s\n' runtime-dhi-auth-ok" 2>&1)"
+runtime_dhi_auth_status=$?
+set -e
+
+if [[ "${runtime_dhi_auth_status}" -ne 0 ]]; then
+  printf 'Expected control-plane startup to materialize DHI auth without exposing secret file paths\n' >&2
+  printf '%s\n' "${runtime_dhi_auth_output}" >&2
+  exit 1
+fi
+grep -qx 'runtime-dhi-auth-ok' <<<"${runtime_dhi_auth_output}"
+
+printf '%s\n' 'regression-test: verifying secretless DHI auth handling' >&2
 mkdir -p "${workdir}/fake-bin"
 cat > "${workdir}/fake-bin/podman" <<'EOF'
 #!/usr/bin/env bash
@@ -239,17 +285,11 @@ case "${1:-}" in
   info)
     exit 0
     ;;
-  login)
-    printf '%s\n' "$*" > "${log_dir}/login.args"
-    cat > "${log_dir}/login.stdin"
-    exit 0
-    ;;
   run)
     printf '%s\n' "$*" >> "${log_dir}/run.args"
     shift
     entrypoint=""
     image=""
-    mounts=()
     envs=()
     while [[ "$#" -gt 0 ]]; do
       case "${1:-}" in
@@ -260,9 +300,6 @@ case "${1:-}" in
           case "${1:-}" in
             --entrypoint)
               entrypoint="${2:-}"
-              ;;
-            -v)
-              mounts+=("${2:-}")
               ;;
             -e)
               envs+=("${2:-}")
@@ -281,20 +318,6 @@ case "${1:-}" in
       esac
     done
     case "${entrypoint}" in
-      cat)
-        target_path="${1:-}"
-        for mount in "${mounts[@]}"; do
-          source_path="${mount%%:*}"
-          remainder="${mount#*:}"
-          mounted_path="${remainder%%:*}"
-          if [[ "${mounted_path}" == "${target_path}" ]]; then
-            cat "${source_path}"
-            exit 0
-          fi
-        done
-        printf 'missing fake podman mount for %s\n' "${target_path}" >&2
-        exit 1
-        ;;
       renovate-config-validator)
         printf '%s\n' "${envs[@]}" > "${log_dir}/renovate-validator.env"
         exit 0
@@ -339,6 +362,10 @@ RENOVATE
     ;;
   pull)
     printf '%s\n' "$*" > "${log_dir}/pull.args"
+    printf '%s\n' "${REGISTRY_AUTH_FILE:-}" > "${log_dir}/pull.authfile"
+    if [[ -n "${REGISTRY_AUTH_FILE:-}" ]] && [[ -f "${REGISTRY_AUTH_FILE}" ]]; then
+      cat "${REGISTRY_AUTH_FILE}" > "${log_dir}/pull.auth.json"
+    fi
     : > "${state_file}"
     exit 0
     ;;
@@ -351,101 +378,31 @@ chmod +x "${workdir}/fake-bin/podman"
 cat > "${workdir}/yamllint.Dockerfile" <<'EOF'
 FROM dhi.io/python:3-alpine3.23-dev
 EOF
-printf '%s' 'test-user' > "${workdir}/dockerhub-username"
-printf '%s' 'test-token' > "${workdir}/dockerhub-token"
 
 PATH="${workdir}/fake-bin:${PATH}" \
   TEST_REGRESSION_LOG_DIR="${workdir}" \
+  CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
   CONTROL_PLANE_YAMLLINT_DOCKERFILE="${workdir}/yamllint.Dockerfile" \
-  DOCKERHUB_USERNAME_FILE="${workdir}/dockerhub-username" \
-  DOCKERHUB_TOKEN_FILE="${workdir}/dockerhub-token" \
+  DOCKERHUB_USERNAME=test-user \
+  DOCKERHUB_TOKEN=test-token \
   "${script_dir}/prepare-dhi-images.sh"
 
-grep -Fq 'run --rm --user 0:0 -v '"${workdir}"'/dockerhub-token:/run/control-plane/dockerhub-token:ro --entrypoint cat' "${workdir}/run.args"
-grep -qx 'login dhi.io -u test-user --password-stdin' "${workdir}/login.args"
-grep -qx 'test-token' "${workdir}/login.stdin"
 grep -qx 'image exists dhi.io/python:3-alpine3.23-dev' "${workdir}/image-exists.args"
 grep -qx 'pull dhi.io/python:3-alpine3.23-dev' "${workdir}/pull.args"
+test -n "$(cat "${workdir}/pull.authfile")"
+grep -Fqx '{"auths":{"dhi.io":{"auth":"'"${expected_dhi_auth}"'"}}}' "${workdir}/pull.auth.json"
 
 PATH="${workdir}/fake-bin:${PATH}" \
   TEST_REGRESSION_LOG_DIR="${workdir}" \
+  CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
   CONTROL_PLANE_CONTAINER_BIN=podman \
-  DOCKERHUB_USERNAME_FILE="${workdir}/dockerhub-username" \
-  DOCKERHUB_TOKEN_FILE="${workdir}/dockerhub-token" \
+  DOCKERHUB_USERNAME=test-user \
+  DOCKERHUB_TOKEN=test-token \
+  DOCKERHUB_USERNAME_FILE="${workdir}/missing-username" \
+  DOCKERHUB_TOKEN_FILE="${workdir}/missing-token" \
   "${script_dir}/validate-renovate-config.sh"
 
-grep -Fq 'run --rm --user 0:0 -v '"${workdir}"'/dockerhub-token:/run/control-plane/dockerhub-token:ro --entrypoint cat' "${workdir}/run.args"
 grep -Fqx 'RENOVATE_HOST_RULES=[{"matchHost":"dhi.io","username":"test-user","password":"test-token"}]' "${workdir}/renovate.env"
-
-mkdir -p "${workdir}/fake-docker-bin"
-cat > "${workdir}/fake-docker-bin/docker" <<'EOF'
-#!/bin/bash
-set -euo pipefail
-log_dir="${TEST_REGRESSION_LOG_DIR:?}"
-case "${1:-}" in
-  run)
-    printf '%s\n' "$*" > "${log_dir}/docker-run.args"
-    shift
-    entrypoint=""
-    mounts=()
-    while [[ "$#" -gt 0 ]]; do
-      case "${1:-}" in
-        --rm)
-          shift
-          ;;
-        --user|--entrypoint|-v)
-          case "${1:-}" in
-            --entrypoint)
-              entrypoint="${2:-}"
-              ;;
-            -v)
-              mounts+=("${2:-}")
-              ;;
-          esac
-          shift 2
-          ;;
-        --*)
-          shift
-          ;;
-        *)
-          shift
-          break
-          ;;
-      esac
-    done
-    if [[ "${entrypoint}" == "cat" ]]; then
-      target_path="${1:-}"
-      for mount in "${mounts[@]}"; do
-        source_path="${mount%%:*}"
-        remainder="${mount#*:}"
-        mounted_path="${remainder%%:*}"
-        if [[ "${mounted_path}" == "${target_path}" ]]; then
-          value="$(< "${source_path}")"
-          printf '%s' "${value}"
-          exit 0
-        fi
-      done
-    fi
-    ;;
-esac
-printf 'unexpected fake docker command: %s\n' "$*" >&2
-exit 1
-EOF
-chmod +x "${workdir}/fake-docker-bin/docker"
-
-docker_bridge_output="$(
-  PATH="${workdir}/fake-docker-bin:${workdir}/fake-bin" \
-  TEST_REGRESSION_LOG_DIR="${workdir}" \
-  LIB_CONTAINER_TOOLCHAIN_PATH="${script_dir}/lib-container-toolchain.sh" \
-  TOKEN_FILE="${workdir}/dockerhub-token" \
-  /bin/bash --noprofile --norc -c '
-    set -euo pipefail
-    source "${LIB_CONTAINER_TOOLCHAIN_PATH}"
-    read_file_with_container_runtime docker fake-image "${TOKEN_FILE}" /run/control-plane/dockerhub-token
-  '
-)"
-grep -qx 'test-token' <<<"${docker_bridge_output}"
-grep -Fq 'run --rm --user 0:0 -v '"${workdir}"'/dockerhub-token:/run/control-plane/dockerhub-token:ro --entrypoint cat fake-image /run/control-plane/dockerhub-token' "${workdir}/docker-run.args"
 
 printf '%s\n' 'regression-test: verifying k8s-job-start expands transfer env in rclone config' >&2
 mkdir -p "${workdir}/k8s-home/.ssh" "${workdir}/k8s-host-keys"

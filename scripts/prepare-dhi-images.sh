@@ -6,13 +6,20 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${script_dir}/lib-container-toolchain.sh"
 yamllint_dockerfile="${CONTROL_PLANE_YAMLLINT_DOCKERFILE:-${script_dir}/../containers/yamllint/Dockerfile}"
 dhi_images=()
-dockerhub_username="${DOCKERHUB_USERNAME:-}"
-dockerhub_token="${DOCKERHUB_TOKEN:-}"
-# renovate: datasource=docker depName=ghcr.io/renovatebot/renovate versioning=docker
-auth_helper_image="${CONTROL_PLANE_DOCKERHUB_AUTH_HELPER_IMAGE:-ghcr.io/renovatebot/renovate:43.99.0@sha256:aae697086b93427dcde46eb92e08e334b018946ce19339bf044ce971ca1626e2}"
+temporary_auth_file=""
 
 require_command podman
 require_command awk
+load_control_plane_runtime_env
+dockerhub_username="${DOCKERHUB_USERNAME:-}"
+dockerhub_token="${DOCKERHUB_TOKEN:-}"
+
+cleanup() {
+  if [[ -n "${temporary_auth_file}" ]]; then
+    rm -f "${temporary_auth_file}" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
 
 if [[ ! -f "${yamllint_dockerfile}" ]]; then
   printf 'Missing yamllint Dockerfile: %s\n' "${yamllint_dockerfile}" >&2
@@ -32,58 +39,31 @@ if [[ "${#dhi_images[@]}" -eq 0 ]]; then
   exit 1
 fi
 
-if [[ -z "${dockerhub_username}" ]] && [[ -n "${DOCKERHUB_USERNAME_FILE:-}" ]]; then
-  [[ -f "${DOCKERHUB_USERNAME_FILE}" ]] || {
-    printf 'DOCKERHUB_USERNAME_FILE does not exist: %s\n' "${DOCKERHUB_USERNAME_FILE}" >&2
-    exit 1
-  }
-  IFS= read -r dockerhub_username < "${DOCKERHUB_USERNAME_FILE}" || true
-fi
-
-if [[ -z "${dockerhub_token}" ]] && [[ -n "${DOCKERHUB_TOKEN_FILE:-}" ]]; then
-  dockerhub_token="$(read_file_with_container_runtime \
-    podman \
-    "${auth_helper_image}" \
-    "${DOCKERHUB_TOKEN_FILE}" \
-    /run/control-plane/dockerhub-token)"
-fi
-
-logged_in=0
-
-login_dhi() {
-  if (( logged_in )); then
+ensure_dhi_auth() {
+  if [[ -n "${REGISTRY_AUTH_FILE:-}" ]]; then
+    [[ -f "${REGISTRY_AUTH_FILE}" ]] || {
+      printf 'REGISTRY_AUTH_FILE does not exist: %s\n' "${REGISTRY_AUTH_FILE}" >&2
+      exit 1
+    }
     return
   fi
 
-  : "${dockerhub_username:?DOCKERHUB_USERNAME or DOCKERHUB_USERNAME_FILE is required to pull uncached DHI images}"
-  : "${dockerhub_token:?DOCKERHUB_TOKEN or DOCKERHUB_TOKEN_FILE is required to pull uncached DHI images}"
-  local max_attempts=5
-  local attempt
+  if [[ -z "${dockerhub_username}" ]] && [[ -z "${dockerhub_token}" ]]; then
+    return 0
+  fi
 
-  for attempt in $(seq 1 "${max_attempts}"); do
-    if printf '%s' "${dockerhub_token}" | podman login dhi.io -u "${dockerhub_username}" --password-stdin >/dev/null; then
-      logged_in=1
-      return 0
-    fi
+  : "${dockerhub_username:?DOCKERHUB_USERNAME is required when DOCKERHUB_TOKEN is set}"
+  : "${dockerhub_token:?DOCKERHUB_TOKEN is required when DOCKERHUB_USERNAME is set}"
 
-    if [[ "${attempt}" -eq "${max_attempts}" ]]; then
-      return 1
-    fi
-
-    printf 'Retrying DHI login (%s/%s)\n' "$((attempt + 1))" "${max_attempts}" >&2
-    sleep 5
-  done
+  temporary_auth_file="$(mktemp)"
+  write_registry_auth_file "${temporary_auth_file}" dhi.io "${dockerhub_username}" "${dockerhub_token}"
+  export REGISTRY_AUTH_FILE="${temporary_auth_file}"
 }
 
 pull_image_with_retry() {
   local image="$1"
   local max_attempts=5
   local attempt output
-
-  if ! login_dhi; then
-    printf 'DHI login failed after retries: %s\n' "${image}" >&2
-    return 1
-  fi
 
   for attempt in $(seq 1 "${max_attempts}"); do
     if output="$(podman pull "${image}" 2>&1)"; then
@@ -94,9 +74,10 @@ pull_image_with_retry() {
 
     case "${output}" in
       *"authenticating creds"*|*"Requesting bearer token"*|*"unauthorized"*|*"denied"*)
-        logged_in=0
-        if ! login_dhi; then
-          printf 'DHI login failed after retries: %s\n' "${image}" >&2
+        if [[ -z "${REGISTRY_AUTH_FILE:-}" ]] && [[ -z "${dockerhub_username}" ]] && [[ -z "${dockerhub_token}" ]]; then
+          printf '%s\n' \
+            'DHI auth is not configured. Set DOCKERHUB_USERNAME/DOCKERHUB_TOKEN or preconfigure Podman auth before running this script.' \
+            >&2
           return 1
         fi
         ;;
@@ -115,6 +96,7 @@ pull_image_with_retry() {
 # so keep the preparation step as a direct pull with retries.
 for image in "${dhi_images[@]}"; do
   if ! podman image exists "${image}"; then
+    ensure_dhi_auth
     if ! pull_image_with_retry "${image}" >/dev/null; then
       printf 'Failed to prepare DHI image: %s\n' "${image}" >&2
       exit 1

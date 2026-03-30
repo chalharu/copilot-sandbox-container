@@ -8,7 +8,6 @@ source "${script_dir}/lib-container-toolchain.sh"
 container_bin=""
 # renovate: datasource=docker depName=ghcr.io/renovatebot/renovate versioning=docker
 renovate_image="${CONTROL_PLANE_RENOVATE_IMAGE:-ghcr.io/renovatebot/renovate:43.99.0@sha256:aae697086b93427dcde46eb92e08e334b018946ce19339bf044ce971ca1626e2}"
-auth_helper_image="${CONTROL_PLANE_DOCKERHUB_AUTH_HELPER_IMAGE:-${renovate_image}}"
 base_dir=""
 log_file=""
 # Use container root so restrictive workspace mounts remain readable across
@@ -64,23 +63,9 @@ chmod 0777 "${base_dir}"
 
 require_command "${container_bin}"
 
-if [[ -z "${dockerhub_username}" ]] && [[ -n "${DOCKERHUB_USERNAME_FILE:-}" ]]; then
-  [[ -f "${DOCKERHUB_USERNAME_FILE}" ]] || {
-    printf 'DOCKERHUB_USERNAME_FILE does not exist: %s\n' "${DOCKERHUB_USERNAME_FILE}" >&2
-    exit 1
-  }
-  IFS= read -r dockerhub_username < "${DOCKERHUB_USERNAME_FILE}" || true
-fi
-
-if [[ -z "${dockerhub_token}" ]] && [[ -n "${DOCKERHUB_TOKEN_FILE:-}" ]]; then
-  dockerhub_token="$(read_file_with_container_runtime \
-    "${container_bin}" \
-    "${auth_helper_image}" \
-    "${DOCKERHUB_TOKEN_FILE}" \
-    /run/control-plane/dockerhub-token)"
-fi
-
-if [[ -n "${dockerhub_username}" ]] && [[ -n "${dockerhub_token}" ]]; then
+if [[ -n "${dockerhub_username}" ]] || [[ -n "${dockerhub_token}" ]]; then
+  : "${dockerhub_username:?DOCKERHUB_USERNAME is required when DOCKERHUB_TOKEN is set}"
+  : "${dockerhub_token:?DOCKERHUB_TOKEN is required when DOCKERHUB_USERNAME is set}"
   printf -v renovate_host_rules '[{"matchHost":"dhi.io","username":"%s","password":"%s"}]' \
     "$(json_escape "${dockerhub_username}")" \
     "$(json_escape "${dockerhub_token}")"

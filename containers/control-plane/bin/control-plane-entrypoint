@@ -44,8 +44,7 @@ service_account_dir="/var/run/secrets/kubernetes.io/serviceaccount"
 runtime_config_dir="${control_plane_home}/.config/control-plane"
 runtime_config_path="${runtime_config_dir}/runtime.env"
 copilot_token_path="${runtime_config_dir}/copilot-github-token"
-dockerhub_username_path="${runtime_config_dir}/dockerhub-username"
-dockerhub_token_path="${runtime_config_dir}/dockerhub-token"
+registry_auth_path="${runtime_dir}/containers/auth.json"
 managed_runtime_dir="${CONTROL_PLANE_MANAGED_RUNTIME_DIR:-/var/lib/control-plane/managed-runtime}"
 managed_copilot_home="${CONTROL_PLANE_MANAGED_COPILOT_HOME:-${managed_runtime_dir}/copilot-home}"
 managed_copilot_hooks_dir="${managed_copilot_home}/hooks"
@@ -377,6 +376,46 @@ write_private_file() {
     umask 077
     printf '%s' "${content}" > "${target_path}"
   )
+  chown "${owner}" "${target_path}"
+  chmod 600 "${target_path}"
+}
+
+write_registry_auth_file() {
+  local target_path="$1"
+  local registry="$2"
+  local username="$3"
+  local token="$4"
+  local owner="$5"
+  local target_dir=""
+  local temp_path=""
+  local encoded_auth=""
+
+  if [[ -z "${username}" ]] && [[ -z "${token}" ]]; then
+    return
+  fi
+
+  : "${username:?DockerHub username is required when DockerHub token is configured}"
+  : "${token:?DockerHub token is required when DockerHub username is configured}"
+
+  target_dir="$(dirname "${target_path}")"
+  encoded_auth="$(printf '%s' "${username}:${token}" | base64 | tr -d '\n')"
+
+  mkdir -p "${target_dir}"
+  chown "${owner}" "${target_dir}"
+  chmod 700 "${target_dir}"
+  temp_path="$(mktemp "${target_path}.XXXXXX")"
+
+  if [[ -f "${target_path}" ]]; then
+    jq -c --arg registry "${registry}" --arg auth "${encoded_auth}" \
+      '.auths = ((.auths // {}) + {($registry): {auth: $auth}})' \
+      "${target_path}" > "${temp_path}"
+  else
+    jq -c -n --arg registry "${registry}" --arg auth "${encoded_auth}" \
+      '{auths: {($registry): {auth: $auth}}}' \
+      > "${temp_path}"
+  fi
+
+  mv "${temp_path}" "${target_path}"
   chown "${owner}" "${target_path}"
   chmod 600 "${target_path}"
 }
@@ -981,8 +1020,8 @@ if [[ -z "${dockerhub_token}" ]] && [[ -n "${DOCKERHUB_TOKEN_FILE:-}" ]] && [[ -
 fi
 
 write_private_file "${copilot_token_path}" "${copilot_github_token}" "${control_plane_user}:${control_plane_user}"
-write_private_file "${dockerhub_username_path}" "${dockerhub_username}" "${control_plane_user}:${control_plane_user}"
-write_private_file "${dockerhub_token_path}" "${dockerhub_token}" "${control_plane_user}:${control_plane_user}"
+require_regular_file_or_absent "${registry_auth_path}" "registry auth file"
+write_registry_auth_file "${registry_auth_path}" dhi.io "${dockerhub_username}" "${dockerhub_token}" "${control_plane_user}:${control_plane_user}"
 
 if [[ -z "${KUBECONFIG:-}" ]] \
   && [[ -n "${KUBERNETES_SERVICE_HOST:-}" ]] \
@@ -1117,12 +1156,6 @@ fi
   write_runtime_var KUBECONFIG "${KUBECONFIG:-}"
   if [[ -n "${copilot_github_token}" ]]; then
     write_runtime_var CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE "${copilot_token_path}"
-  fi
-  if [[ -n "${dockerhub_username}" ]]; then
-    write_runtime_var DOCKERHUB_USERNAME_FILE "${dockerhub_username_path}"
-  fi
-  if [[ -n "${dockerhub_token}" ]]; then
-    write_runtime_var DOCKERHUB_TOKEN_FILE "${dockerhub_token_path}"
   fi
 } > "${runtime_config_path}"
 chown "${control_plane_user}:${control_plane_user}" "${runtime_config_path}"

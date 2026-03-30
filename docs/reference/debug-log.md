@@ -147,7 +147,7 @@ unable to retrieve auth token: invalid username/password: unauthorized: authenti
 
 ### 意味
 
-`dockerhub-username` / `dockerhub-token` Secret が無いか、`DOCKERHUB_USERNAME_FILE` / `DOCKERHUB_TOKEN_FILE` の引き回しができていません。`scripts/prepare-dhi-images.sh` と `scripts/validate-renovate-config.sh` は file path fallback を使える前提です。
+`dockerhub-username` / `dockerhub-token` Secret が無いか、Control Plane 起動時の Podman auth 生成ができていません。`scripts/prepare-dhi-images.sh` は既存の Podman auth か明示的な `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` を使い、`scripts/validate-renovate-config.sh` は secret file fallback を前提にしません。
 
 ## 9. Service の `EXTERNAL-IP` が未割当て
 
