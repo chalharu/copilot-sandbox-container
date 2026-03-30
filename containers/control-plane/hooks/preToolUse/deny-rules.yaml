@@ -27,7 +27,7 @@ fileAccessRules:
     allowedExecutables:
       - control-plane-copilot
   - path: '${HOME}/.config/control-plane/dockerhub-token'
-    reason: Direct reads of DOCKERHUB_TOKEN_FILE are blocked by control-plane policy. Use podman or managed runtime wiring instead of reading the token file directly.
+    reason: Direct reads of DOCKERHUB_TOKEN_FILE are blocked by control-plane policy. Use startup-managed Podman auth or explicit DOCKERHUB_* env instead of reading the token file directly.
     allowedExecutables:
       - podman
       - control-plane-podman
