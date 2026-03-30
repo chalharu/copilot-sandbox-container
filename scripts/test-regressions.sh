@@ -263,6 +263,18 @@ auth_file=\"/run/user/\$(id -u copilot)/containers/auth.json\"
 test -r \"\$auth_file\"
 grep -Fq '\"dhi.io\"' \"\$auth_file\"
 grep -Fq '\"auth\":\"${expected_dhi_auth}\"' \"\$auth_file\"
+su -l -s /bin/bash copilot -c 'set -euo pipefail
+set -a
+source \"\$HOME/.config/control-plane/runtime.env\"
+set +a
+stderr_file=\"\$(mktemp)\"
+if cat \"\${XDG_RUNTIME_DIR}/containers/auth.json\" >/dev/null 2>\"\${stderr_file}\"; then
+  printf \"%s\n\" \"Expected direct registry auth.json read to be denied\" >&2
+  exit 1
+fi
+grep -Fq \"control-plane exec policy:\" \"\${stderr_file}\"
+grep -Fq \"registry auth.json\" \"\${stderr_file}\"
+rm -f \"\${stderr_file}\"'
 printf '%s\n' runtime-dhi-auth-ok" 2>&1)"
 runtime_dhi_auth_status=$?
 set -e
