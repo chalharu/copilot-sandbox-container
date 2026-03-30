@@ -23,6 +23,41 @@ load_control_plane_runtime_env() {
   set +a
 }
 
+read_file_with_container_runtime() {
+  local container_bin="$1"
+  local helper_image="$2"
+  local file_path="$3"
+  local mounted_path="${4:-/run/control-plane-runtime/secret}"
+  local bridge_runtime="${container_bin}"
+  local value=""
+
+  [[ -f "${file_path}" ]] || {
+    printf 'Secret file does not exist: %s\n' "${file_path}" >&2
+    return 1
+  }
+
+  if [[ "${bridge_runtime}" != "podman" ]] \
+    && [[ "${bridge_runtime}" != "docker" ]] \
+    && command -v podman >/dev/null 2>&1; then
+    bridge_runtime="podman"
+  fi
+
+  case "${bridge_runtime}" in
+    podman|docker)
+      "${bridge_runtime}" run --rm \
+        --user 0:0 \
+        -v "${file_path}:${mounted_path}:ro" \
+        --entrypoint cat \
+        "${helper_image}" \
+        "${mounted_path}"
+      ;;
+    *)
+      IFS= read -r value < "${file_path}" || true
+      printf '%s' "${value}"
+      ;;
+  esac
+}
+
 docker_runtime_available() {
   command -v docker >/dev/null 2>&1 \
     && docker info >/dev/null 2>&1
