@@ -14,7 +14,7 @@ hadolint_image="${CONTROL_PLANE_HADOLINT_IMAGE:-docker.io/hadolint/hadolint:v2.1
 # renovate: datasource=docker depName=docker.io/koalaman/shellcheck versioning=docker
 shellcheck_image="${CONTROL_PLANE_SHELLCHECK_IMAGE:-docker.io/koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d}"
 # renovate: datasource=docker depName=ghcr.io/biomejs/biome versioning=docker
-biome_image="${CONTROL_PLANE_BIOME_IMAGE:-ghcr.io/biomejs/biome:2.4.8@sha256:b387446dd5528d2c2b5554678b49c29016a925dd4e94f383b07be4ace81e3c46}"
+biome_image="${CONTROL_PLANE_BIOME_IMAGE:-ghcr.io/biomejs/biome:2.4.9@sha256:78db3189a7c9f382248cff169f11cc7053bb8a54aa0e12f28cc073e37867e360}"
 # renovate: datasource=docker depName=docker.io/library/node versioning=docker
 markdownlint_node_image="${CONTROL_PLANE_MARKDOWNLINT_NODE_IMAGE:-docker.io/library/node:24.14.0-bookworm-slim@sha256:d8e448a56fc63242f70026718378bd4b00f8c82e78d20eefb199224a4d8e33d8}"
 # renovate: datasource=npm depName=markdownlint-cli2
