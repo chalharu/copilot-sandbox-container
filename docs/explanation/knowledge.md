@@ -15,6 +15,58 @@ runtime / path / hook の事実関係は
 
 この分離により、対話状態や認証状態は Control Plane に残しつつ、言語別ツールチェーンは Execution Plane に閉じ込められます。
 
+このアーキテクチャを C4 の container 図として簡略化すると、次のようになります。
+
+```mermaid
+flowchart LR
+  classDef person fill:#f5f5f5,stroke:#4b5563,stroke-width:1px,color:#111827;
+  classDef container fill:#e8f1ff,stroke:#1d4ed8,stroke-width:1px,color:#111827;
+  classDef store fill:#fff7e6,stroke:#b45309,stroke-width:1px,color:#111827;
+  classDef external fill:#f3f4f6,stroke:#6b7280,stroke-width:1px,color:#111827;
+
+  operator["Operator / 開発者<br/>SSH login / control-plane-run"]:::person
+  github["GitHub / Copilot<br/>認証・操作対象"]:::external
+  registry["GHCR / Docker Hub<br/>container image registry"]:::external
+
+  subgraph cluster["Kubernetes cluster"]
+    direction LR
+
+    sshsvc["SSH Service<br/>LoadBalancer :2222"]:::external
+
+    subgraph controlplane["copilot-sandbox namespace"]
+      direction TB
+      cp["Control Plane<br/>長寿命の操作面<br/>Copilot CLI / gh / git / kubectl / SSH / GNU Screen<br/>short 実行は local Podman rootful-service"]:::container
+      garage["Garage<br/>sccache 用 S3 互換 cache"]:::container
+      session["copilot session PVC (RWX)<br/>~/.copilot / ~/.config/gh / ~/.ssh / audit DB"]:::store
+      workspace["workspace PVC (RWO)<br/>/workspace"]:::store
+      config["ConfigMap / Secret<br/>control-plane-config / control-plane-env / control-plane-auth / garage-*"]:::store
+      garagepvc["sccache PVC (RWO)<br/>/var/lib/garage"]:::store
+    end
+
+    subgraph jobs["copilot-sandbox-jobs namespace"]
+      direction TB
+      ep["Execution Plane Job / container<br/>短命の作業面<br/>Rust / Go / Node / Python / smoke"]:::container
+    end
+  end
+
+  operator -->|SSH + GNU Screen| sshsvc --> cp
+  cp -->|GitHub 操作 / Copilot 認証| github
+  cp -->|image pull| registry
+  cp -->|long 実行<br/>Job 起動 / file transfer| ep
+  ep -->|base image pull| registry
+  ep -->|Rust sccache| garage
+  cp --> session
+  cp --> workspace
+  ep --> workspace
+  cp --> config
+  garage --> garagepvc
+```
+
+- **Control Plane** は operator が入る長寿命の操作面で、対話状態・認証状態・監査ログを保持します。
+- **Execution Plane** は build / test / lint を隔離して実行する短命の作業面で、`--execution-hint long` では Kubernetes Job として起動します。
+- **Garage** は long-running Rust Job の shared `sccache` backend で、巨大な cache を `/workspace` PVC へ押し込まないための分離面です。
+- **ConfigMap / Secret / PVC** は Control Plane の startup と runtime surface を支える supporting store で、図では読みやすさのため bootstrap Job や補助 sidecar の詳細は省略しています。
+
 ## 2. `kubectl exec` ではなく SSH + GNU Screen を主経路にする理由
 
 Control Plane を Kubernetes Pod で動かす場合、`kubectl exec` は保守用には便利ですが、長い対話やネットワーク断に弱いです。このリポジトリでは SSH login を正規経路にし、その上で GNU Screen を使ってセッションを再開可能にします。
