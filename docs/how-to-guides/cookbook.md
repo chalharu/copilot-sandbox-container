@@ -73,10 +73,12 @@ ConfigMap / Secret / write-back の具体的な path は
    差し替える
 2. `gh` 認証は Secret 側で管理し、簡単な GitHub.com 用なら
    `gh-github-token`、複数 host や `git_protocol: ssh` を含めたいなら
-   `gh-hosts.yml` を使う
+   `gh-hosts.yml` を使う。どちらも startup 時に `gh` 用の managed config へ
+   取り込まれ、`/run/control-plane-auth` の raw mount を直接読む運用はしない
 3. 必要なら `dockerhub-username` / `dockerhub-token` と
    `copilot-github-token` も入れる。DockerHub Secret は Control Plane
-   起動時に Podman auth へ取り込み、repo script から直接読まない
+   起動時に Podman auth へ取り込み、Copilot token も private runtime file へ
+   staging される。いずれも `/run/control-plane-auth` から直接読まない
 4. Copilot CLI の追加設定は `control-plane-config` ConfigMap の
    `copilot-config.json` へ書き、PVC 上の既存 `~/.copilot/config.json`
    へ merge させる

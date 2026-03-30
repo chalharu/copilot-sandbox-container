@@ -105,14 +105,13 @@ driver を `overlay` にし、`/dev/fuse` がある場合だけ `fuse-overlayfs`
 
 ### Secret
 
-- `control-plane-auth`: `ssh-public-key` と認証系の Secret 値
+- `control-plane-auth`: `ssh-public-key` と認証系の Secret 値を startup 専用 input として供給
 - `garage-admin-auth`: Garage bootstrap 用の admin token / rpc secret
 - `garage-sccache-auth`: `garage-bootstrap` Job が初回作成し、rerun 時は更新する `sccache` S3 access key / secret key
 - `gh` 認証は `gh-github-token` または `gh-hosts.yml`
 - 必要に応じて `copilot-github-token`、DockerHub 認証情報も保持
 
-`GH_HOSTS_YML_FILE` があればその file を優先し、無ければ
-`GH_GITHUB_TOKEN_FILE` から最小 `~/.config/gh/hosts.yml` を生成します。
+`control-plane-auth` 配下の mounted file は entrypoint が起動時に消費し、interactive shell からの direct read は exec policy が拒否します。`GH_HOSTS_YML_FILE` があればその file を優先し、無ければ `GH_GITHUB_TOKEN_FILE` から最小 `~/.config/gh/hosts.yml` を生成します。`COPILOT_GITHUB_TOKEN_FILE` は private runtime token file へ、DockerHub credential は managed registry auth へ移し、以後は raw mount を読ませません。
 
 ## 5. Hook と Git policy surface
 
