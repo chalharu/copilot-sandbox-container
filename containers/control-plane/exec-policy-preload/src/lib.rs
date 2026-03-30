@@ -57,7 +57,14 @@ static FOPEN64_SYMBOL: OnceLock<usize> = OnceLock::new();
 static FREOPEN_SYMBOL: OnceLock<usize> = OnceLock::new();
 static FREOPEN64_SYMBOL: OnceLock<usize> = OnceLock::new();
 
-const SHELL_SCRIPT_INTERPRETERS: &[&str] = &["bash", "sh"];
+const TRUSTED_SHELL_INTERPRETER_PATHS: &[&str] = &[
+    "/usr/bin/bash",
+    "/bin/bash",
+    "/usr/bin/sh",
+    "/bin/sh",
+    "/usr/bin/dash",
+    "/bin/dash",
+];
 
 thread_local! {
     static POLICY_EVALUATION_DEPTH: Cell<usize> = const { Cell::new(0) };
@@ -494,25 +501,26 @@ fn load_rules_for_current_process() -> Result<config::CompiledConfig, String> {
 }
 
 fn current_process_names() -> Vec<String> {
-    let mut names = Vec::new();
     let args = std::env::args_os().collect::<Vec<_>>();
+    let current_exe = std::env::current_exe().ok();
 
-    if let Some(argv0) = args.first().and_then(basename_from_os_string) {
+    collect_process_names(&args, current_exe.as_deref())
+}
+
+fn collect_process_names(args: &[OsString], current_exe: Option<&Path>) -> Vec<String> {
+    let mut names = Vec::new();
+    let shell_script_interpreter = current_exe
+        .map(is_shell_script_interpreter_path)
+        .unwrap_or(false);
+
+    if let Some(argv0) = args.first().and_then(os_string_to_non_empty_string) {
         push_unique_string(&mut names, argv0);
     }
-    if let Ok(current_exe) = std::env::current_exe()
-        && let Some(exe_name) = current_exe
-            .file_name()
-            .and_then(|entry| entry.to_str())
-            .map(str::to_string)
-    {
-        push_unique_string(&mut names, exe_name);
+    if let Some(exe_path) = current_exe.and_then(path_to_non_empty_string) {
+        push_unique_string(&mut names, exe_path);
     }
 
-    if names
-        .iter()
-        .any(|name| SHELL_SCRIPT_INTERPRETERS.contains(&name.as_str()))
-    {
+    if shell_script_interpreter {
         for arg in args.iter().skip(1) {
             let Some(raw_arg) = arg.to_str() else {
                 continue;
@@ -520,8 +528,8 @@ fn current_process_names() -> Vec<String> {
             if raw_arg.is_empty() || raw_arg.starts_with('-') {
                 continue;
             }
-            if let Some(script_name) = basename_from_os_string(arg) {
-                push_unique_string(&mut names, script_name);
+            if let Some(script_path) = os_string_to_non_empty_string(arg) {
+                push_unique_string(&mut names, script_path);
                 break;
             }
         }
@@ -530,11 +538,30 @@ fn current_process_names() -> Vec<String> {
     names
 }
 
-fn basename_from_os_string(value: &OsString) -> Option<String> {
-    Path::new(value)
-        .file_name()
-        .and_then(|entry| entry.to_str())
-        .map(str::to_string)
+fn os_string_to_non_empty_string(value: &OsString) -> Option<String> {
+    let raw = value.to_str()?;
+    if raw.is_empty() {
+        return None;
+    }
+
+    Some(raw.to_string())
+}
+
+fn path_to_non_empty_string(value: &Path) -> Option<String> {
+    let raw = value.to_str()?;
+    if raw.is_empty() {
+        return None;
+    }
+
+    Some(raw.to_string())
+}
+
+fn is_shell_script_interpreter_path(value: &Path) -> bool {
+    if let Some(path) = value.to_str() {
+        return TRUSTED_SHELL_INTERPRETER_PATHS.contains(&path);
+    }
+
+    false
 }
 
 fn resolve_candidate_paths(path: &str, dirfd: c_int) -> Vec<String> {
@@ -801,10 +828,13 @@ fn set_errno(value: c_int) {
 
 #[cfg(test)]
 mod tests {
+    use super::collect_process_names;
     use crate::command::CommandInvocation;
     use crate::config::{CompiledConfig, CompiledRule};
     use crate::policy::match_exec_rule;
     use regex::{Regex, bytes::Regex as BytesRegex};
+    use std::ffi::OsString;
+    use std::path::Path;
 
     #[test]
     fn exec_rule_matching_uses_token_sequences() {
@@ -830,5 +860,74 @@ mod tests {
             match_exec_rule(&config, &invocation).as_deref(),
             Some("blocked")
         );
+    }
+
+    #[test]
+    fn collect_process_names_keeps_absolute_binary_paths() {
+        let names = collect_process_names(
+            &[
+                OsString::from("gh"),
+                OsString::from("auth"),
+                OsString::from("status"),
+            ],
+            Some(Path::new("/usr/bin/gh")),
+        );
+
+        assert_eq!(names, vec!["gh".to_string(), "/usr/bin/gh".to_string()]);
+    }
+
+    #[test]
+    fn collect_process_names_uses_shell_script_path_instead_of_basename() {
+        let names = collect_process_names(
+            &[
+                OsString::from("bash"),
+                OsString::from("/usr/local/bin/podman"),
+                OsString::from("pull"),
+            ],
+            Some(Path::new("/usr/bin/bash")),
+        );
+
+        assert_eq!(
+            names,
+            vec![
+                "bash".to_string(),
+                "/usr/bin/bash".to_string(),
+                "/usr/local/bin/podman".to_string(),
+            ]
+        );
+        assert!(!names.iter().any(|name| name == "podman"));
+    }
+
+    #[test]
+    fn collect_process_names_does_not_trust_spoofed_shell_argv0() {
+        let names = collect_process_names(
+            &[
+                OsString::from("bash"),
+                OsString::from("/usr/bin/gh"),
+                OsString::from("auth"),
+            ],
+            Some(Path::new("/tmp/not-a-shell")),
+        );
+
+        assert_eq!(
+            names,
+            vec!["bash".to_string(), "/tmp/not-a-shell".to_string()]
+        );
+        assert!(!names.iter().any(|name| name == "/usr/bin/gh"));
+    }
+
+    #[test]
+    fn collect_process_names_does_not_trust_untrusted_shell_path() {
+        let names = collect_process_names(
+            &[
+                OsString::from("/tmp/bash"),
+                OsString::from("/usr/bin/gh"),
+                OsString::from("auth"),
+            ],
+            Some(Path::new("/tmp/bash")),
+        );
+
+        assert_eq!(names, vec!["/tmp/bash".to_string()]);
+        assert!(!names.iter().any(|name| name == "/usr/bin/gh"));
     }
 }

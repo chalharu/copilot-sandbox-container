@@ -16,7 +16,7 @@ fileAccessRules:
   - path: ${HOME}/.config/gh/hosts.yml
     reason: gh only
     allowedExecutables:
-      - gh
+      - /usr/bin/gh
 ```
 
 ## Matching model
@@ -25,4 +25,4 @@ fileAccessRules:
 
 `protectedEnvironments` は command rule とは独立した global deny list です。exec 側では親プロセス環境との差分だけを override とみなすため、control plane が管理する既定の `GIT_CONFIG_GLOBAL` はそのまま通しつつ、上書き・追加・unset は拒否できます。`git push --force-with-lease` は引き続き許可します。
 
-`fileAccessRules` は exact path ベースの read blocker で、`${VAR}` 展開後の path が空なら rule 自体を無効化します。`allowedExecutables` は実行中プロセス名に加えて、`bash script.sh` のような shell wrapper では script basename も参照するため、`podman` や `control-plane-copilot` のような managed wrapper だけを例外にできます。
+`fileAccessRules` は exact path ベースの read blocker で、`${VAR}` 展開後の path が空なら rule 自体を無効化します。`allowedExecutables` も absolute path 必須で、exec 側は実行中 binary の実 path と、`bash /usr/local/bin/podman` のような shell wrapper では script path 自体を照合します。basename-only allowlist は受け付けないので、`/usr/local/bin/podman` や `/usr/local/bin/control-plane-copilot` のように managed wrapper の full path を明示してください。
