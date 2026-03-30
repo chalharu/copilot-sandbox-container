@@ -89,8 +89,11 @@ assert_contains "${local_script}" 'sccache_s3_enabled=0'
 assert_contains "${local_script}" 'sccache_dir='
 assert_contains "${local_script}" "\${ephemeral_root}/sccache"
 assert_contains "${local_script}" "src_root=\"\${ephemeral_root}/src\""
-assert_contains "${local_script}" "cargo_home=\"\${cache_root}/cargo\""
+assert_contains "${local_script}" "toolchain_root=\"\${ephemeral_root}/toolchain\""
+assert_contains "${local_script}" "cargo_home=\"\${toolchain_root}/cargo\""
+assert_contains "${local_script}" "rustup_home=\"\${toolchain_root}/rustup\""
 assert_not_contains "${local_script}" "src_root=\\\"\\\${ephemeral_root}/src\\\""
+assert_not_contains "${local_script}" '/workspace/cache'
 assert_not_contains "${local_script}" "\${cache_root}/sccache"
 assert_contains "${local_script}" 'SCCACHE_CACHE_SIZE:-10G'
 
@@ -117,6 +120,8 @@ assert_contains "${s3_script}" 'sccache_s3_key_prefix=sccache/'
 assert_contains "${s3_script}" 'aws_access_key_id=sample-access-key-id'
 assert_contains "${s3_script}" 'aws_secret_access_key=sample-secret-access-key'
 assert_contains "${s3_script}" "\${ephemeral_root}/sccache"
+assert_contains "${s3_script}" "toolchain_root=\"\${ephemeral_root}/toolchain\""
+assert_not_contains "${s3_script}" '/workspace/cache'
 assert_contains "${s3_script}" "if \"\$@\"; then"
 assert_not_contains "${s3_script}" "if \\\"\$@\\\"; then"
 assert_contains "${s3_script}" '[cache.s3]'

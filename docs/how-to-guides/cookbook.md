@@ -123,7 +123,9 @@ ConfigMap / Secret / write-back の具体的な path は
 8. Rust Job の S3 credential は `garage-sccache-auth` Secret を control-plane Pod に
    mount し、`k8s-rust.sh` が job-local `SCCACHE_CONF` へ埋め込む。sample では
    この Secret を manifest に含めず、`garage-bootstrap` Job が生成した Garage key
-   で作成・更新する
+   で作成・更新する。Rust Job の `cargo` / `rustup` / `target` / `sccache`
+   client state は `/var/tmp/containerized-rust/...` に寄せ、shared `/workspace`
+   PVC に Rust cache を残さない
 
 永続 path、Podman graphroot、ConfigMap / Secret の注入先などの具体的な
 path は `docs/reference/control-plane-runtime.md` を参照してください。

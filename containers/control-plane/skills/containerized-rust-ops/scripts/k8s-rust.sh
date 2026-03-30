@@ -7,12 +7,12 @@ Usage:
   k8s-rust.sh <fmt-check|check|clippy|build|test>
   k8s-rust.sh -- <command> [args...]
 
-Run Rust commands in a control-plane Kubernetes job with persistent cargo and
-rustup caches under /workspace/cache. The clone, target directory, temp files,
-and local sccache state always live on ephemeral storage under /var/tmp so the
-shared workspace PVC only carries the minimum reusable Rust toolchain data.
-When the runtime exposes an S3-backed sccache endpoint, this helper writes an
-SCCACHE_CONF so shared cache objects stay in the object store instead.
+Run Rust commands in a control-plane Kubernetes job with ephemeral clone,
+toolchain, target, temp-file, and local sccache state under /var/tmp. When the
+runtime exposes an S3-backed sccache endpoint, this helper writes an
+`SCCACHE_CONF`, keeps only the client-side state local, and sends reusable
+cache objects through the object store instead of accumulating Rust job caches
+on `/workspace`.
 USAGE
 }
 
@@ -222,12 +222,12 @@ sccache_s3_enabled=${sccache_s3_enabled_q}
 cargo_llvm_cov_version=${cargo_llvm_cov_version_q}
 cargo_llvm_cov_release_base_url=${cargo_llvm_cov_release_base_url_q}
 enable_cargo_llvm_cov=${enable_cargo_llvm_cov_q}
-cache_root=/workspace/cache/\${repo_key}/\${branch_key}
 ephemeral_root=/var/tmp/containerized-rust/\${repo_key}/\${branch_key}
+toolchain_root="\${ephemeral_root}/toolchain"
 src_root="\${ephemeral_root}/src"
 tmp_dir="\${ephemeral_root}/tmp"
-cargo_home="\${cache_root}/cargo"
-rustup_home="\${cache_root}/rustup"
+cargo_home="\${toolchain_root}/cargo"
+rustup_home="\${toolchain_root}/rustup"
 sccache_dir="\${ephemeral_root}/sccache"
 sccache_conf="\${tmp_dir}/sccache-client.toml"
 target_dir="\${ephemeral_root}/target"
