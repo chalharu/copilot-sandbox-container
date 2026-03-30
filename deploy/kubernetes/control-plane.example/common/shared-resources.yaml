@@ -157,11 +157,14 @@ stringData:
   # Optional: add a fine-grained PAT with Copilot access when you want the
   # control plane to start with COPILOT_GITHUB_TOKEN configured.
   # The entrypoint copies it into a private runtime file and only injects it
-  # into the Copilot process via --secret-env-vars=COPILOT_GITHUB_TOKEN.
+  # into the Copilot process via --secret-env-vars=COPILOT_GITHUB_TOKEN. The
+  # mounted Secret file under /var/run/control-plane-auth is startup-only and
+  # not intended for direct reads from the login shell.
   # copilot-github-token: github_pat_... replace-me
   # Optional: Docker Hub credentials for DHI image pulls. The entrypoint copies
-  # them into private runtime files and `scripts/prepare-dhi-images.sh` reads
-  # the file paths without exporting the raw secret values into the login shell.
+  # them into managed registry auth during startup. The mounted files under
+  # /var/run/control-plane-auth are startup-only and should not be read
+  # directly from the login shell or repo scripts.
   # dockerhub-username: your-dockerhub-user
   # dockerhub-token: dckr_pat_... replace-me
 
@@ -213,6 +216,9 @@ data:
   # Keep envFrom-safe settings separate from control-plane-config so
   # file-content keys like copilot-config.json never get projected as
   # process environment variables.
+  # These /var/run/control-plane-auth file paths are startup inputs for the
+  # entrypoint. After startup, use the managed runtime surfaces instead of
+  # reading the Secret mount directly.
   SSH_PUBLIC_KEY_FILE: /var/run/control-plane-auth/ssh-public-key
   COPILOT_CONFIG_JSON_FILE: /var/run/control-plane-config/copilot-config.json
   # Optional: uncomment when the Secret contains gh-github-token.

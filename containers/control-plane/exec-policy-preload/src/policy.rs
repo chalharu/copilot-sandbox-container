@@ -36,7 +36,9 @@ pub fn match_file_access_rule(
     path: &str,
 ) -> Option<String> {
     config.file_access_rules.iter().find_map(|rule| {
-        if rule.path == path && !file_access_allowed(&rule.allowed_executables, process_names) {
+        if path_matches_rule(&rule.path, path)
+            && !file_access_allowed(&rule.allowed_executables, process_names)
+        {
             return Some(rule.reason.clone());
         }
 
@@ -90,6 +92,13 @@ fn file_access_allowed(allowed_executables: &[String], process_names: &[&str]) -
         .any(|allowed| process_names.iter().any(|name| name == allowed))
 }
 
+fn path_matches_rule(rule_path: &str, path: &str) -> bool {
+    path == rule_path
+        || path
+            .strip_prefix(rule_path)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{match_exec_rule, match_file_access_rule};
@@ -133,6 +142,11 @@ mod tests {
                     path: "/home/copilot/.config/gh/hosts.yml".to_string(),
                     reason: "hosts file blocked".to_string(),
                     allowed_executables: vec!["/usr/bin/gh".to_string()],
+                },
+                CompiledFileAccessRule {
+                    path: "/run/control-plane-auth".to_string(),
+                    reason: "control-plane auth mount blocked".to_string(),
+                    allowed_executables: Vec::new(),
                 },
             ],
         };
@@ -254,6 +268,32 @@ mod tests {
             )
             .as_deref(),
             Some("hosts file blocked")
+        );
+        assert_eq!(
+            match_file_access_rule(
+                &config,
+                &["/usr/bin/bash"],
+                "/run/control-plane-auth/dockerhub-token"
+            )
+            .as_deref(),
+            Some("control-plane auth mount blocked")
+        );
+        assert_eq!(
+            match_file_access_rule(
+                &config,
+                &["/usr/bin/bash"],
+                "/run/control-plane-auth/..data/dockerhub-token"
+            )
+            .as_deref(),
+            Some("control-plane auth mount blocked")
+        );
+        assert_eq!(
+            match_file_access_rule(
+                &config,
+                &["/usr/bin/bash"],
+                "/run/control-plane-auth-copy/dockerhub-token"
+            ),
+            None
         );
     }
 }

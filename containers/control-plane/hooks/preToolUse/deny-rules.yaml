@@ -41,3 +41,6 @@ fileAccessRules:
     reason: Direct reads of ~/.config/gh/hosts.yml are blocked by control-plane policy. Use gh so hosts.yml stays confined to the GitHub CLI.
     allowedExecutables:
       - /usr/bin/gh
+  - path: /run/control-plane-auth
+    reason: Direct reads of /run/control-plane-auth are blocked by control-plane policy. Startup consumes mounted auth Secrets and stages them into managed runtime surfaces; use ssh, gh, control-plane-copilot, or podman instead of reading the Secret mount directly.
+    allowedExecutables: []
