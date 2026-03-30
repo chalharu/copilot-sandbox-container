@@ -2,17 +2,14 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib-container-toolchain.sh
+source "${script_dir}/lib-container-toolchain.sh"
 yamllint_dockerfile="${CONTROL_PLANE_YAMLLINT_DOCKERFILE:-${script_dir}/../containers/yamllint/Dockerfile}"
 dhi_images=()
 dockerhub_username="${DOCKERHUB_USERNAME:-}"
 dockerhub_token="${DOCKERHUB_TOKEN:-}"
-
-require_command() {
-  command -v "$1" >/dev/null 2>&1 || {
-    printf 'Missing required command: %s\n' "$1" >&2
-    exit 1
-  }
-}
+# renovate: datasource=docker depName=ghcr.io/renovatebot/renovate versioning=docker
+auth_helper_image="${CONTROL_PLANE_DOCKERHUB_AUTH_HELPER_IMAGE:-ghcr.io/renovatebot/renovate:43.99.0@sha256:aae697086b93427dcde46eb92e08e334b018946ce19339bf044ce971ca1626e2}"
 
 require_command podman
 require_command awk
@@ -44,11 +41,11 @@ if [[ -z "${dockerhub_username}" ]] && [[ -n "${DOCKERHUB_USERNAME_FILE:-}" ]]; 
 fi
 
 if [[ -z "${dockerhub_token}" ]] && [[ -n "${DOCKERHUB_TOKEN_FILE:-}" ]]; then
-  [[ -f "${DOCKERHUB_TOKEN_FILE}" ]] || {
-    printf 'DOCKERHUB_TOKEN_FILE does not exist: %s\n' "${DOCKERHUB_TOKEN_FILE}" >&2
-    exit 1
-  }
-  IFS= read -r dockerhub_token < "${DOCKERHUB_TOKEN_FILE}" || true
+  dockerhub_token="$(read_file_with_container_runtime \
+    podman \
+    "${auth_helper_image}" \
+    "${DOCKERHUB_TOKEN_FILE}" \
+    /run/control-plane/dockerhub-token)"
 fi
 
 logged_in=0
