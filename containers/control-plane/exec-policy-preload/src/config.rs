@@ -272,15 +272,22 @@ fn compile_allowed_executable(
     description: &str,
     index: usize,
 ) -> Result<String, String> {
-    let normalized = normalize_process_name(entry.trim());
-    if normalized.is_empty() {
+    let expanded = expand_env_placeholders(entry.trim());
+    if expanded.is_empty() {
         return Err(format!(
             "allowedExecutables entry {} in {} must be a non-empty string.",
             index, description
         ));
     }
 
-    Ok(normalized)
+    if !Path::new(&expanded).is_absolute() {
+        return Err(format!(
+            "allowedExecutables entry {} in {} must be an absolute path.",
+            index, description
+        ));
+    }
+
+    Ok(expanded)
 }
 
 fn compile_patterns(entries: Vec<String>, description: &str) -> Result<Vec<Regex>, String> {
@@ -331,14 +338,6 @@ fn expand_env_placeholders(input: &str) -> String {
     expanded
 }
 
-fn normalize_process_name(value: &str) -> String {
-    Path::new(value)
-        .file_name()
-        .and_then(|entry| entry.to_str())
-        .unwrap_or(value)
-        .to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::{discover_repo_root, merge_config, parse_config};
@@ -358,7 +357,7 @@ fileAccessRules:
   - path: ${HOME}/.config/gh/hosts.yml
     reason: gh only
     allowedExecutables:
-      - gh
+      - /usr/bin/gh
 "#;
         unsafe {
             std::env::set_var("HOME", "/home/copilot");
@@ -380,7 +379,7 @@ fileAccessRules:
         );
         assert_eq!(
             config.file_access_rules[0].allowed_executables,
-            vec!["gh".to_string()]
+            vec!["/usr/bin/gh".to_string()]
         );
     }
 
@@ -440,6 +439,22 @@ fileAccessRules:
     }
 
     #[test]
+    fn parse_config_rejects_non_absolute_allowed_executables() {
+        let yaml = r#"
+fileAccessRules:
+  - path: /tmp/secret-token
+    reason: repo-local file rule
+    allowedExecutables:
+      - podman
+"#;
+
+        let error = parse_config(yaml, Path::new("/tmp/repo-rules.yaml"), true).unwrap_err();
+
+        assert!(error.contains("allowedExecutables entry 1"));
+        assert!(error.contains("must be an absolute path"));
+    }
+
+    #[test]
     fn merge_config_keeps_repo_local_file_access_rules() {
         let bundled_yaml = r#"
 commandRules:
@@ -453,7 +468,7 @@ fileAccessRules:
   - path: /tmp/secret-token
     reason: repo-local file rule
     allowedExecutables:
-      - podman
+      - /usr/local/bin/podman
 "#;
 
         let mut bundled = parse_config(bundled_yaml, Path::new("/tmp/rules.yaml"), false).unwrap();
@@ -467,7 +482,7 @@ fileAccessRules:
         assert_eq!(bundled.file_access_rules[0].path, "/tmp/secret-token");
         assert_eq!(
             bundled.file_access_rules[0].allowed_executables,
-            vec!["podman".to_string()]
+            vec!["/usr/local/bin/podman".to_string()]
         );
     }
 

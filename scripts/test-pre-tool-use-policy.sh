@@ -47,16 +47,9 @@ hook_script="${HOME}/.copilot/hooks/preToolUse/main"
 hook_config="${HOME}/.copilot/hooks/preToolUse/deny-rules.yaml"
 exec_policy_library="${CONTROL_PLANE_EXEC_POLICY_LIBRARY:-}"
 exec_policy_rules="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE:-}"
-fake_bin="$(mktemp -d)"
 copilot_token_path="${HOME}/.config/control-plane/copilot-github-token"
 dockerhub_token_path="${HOME}/.config/control-plane/dockerhub-token"
-gh_hosts_path="${HOME}/.config/gh/hosts.yml"
 registry_auth_path="${XDG_RUNTIME_DIR}/containers/auth.json"
-
-cleanup_local() {
-  rm -rf "${fake_bin}" >/dev/null 2>&1 || true
-}
-trap cleanup_local EXIT
 
 test -x "${hook_script}"
 test -f "${hook_config}"
@@ -71,34 +64,6 @@ export CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE="${copilot_token_path}"
 export DOCKERHUB_TOKEN_FILE="${dockerhub_token_path}"
 export REGISTRY_AUTH_PATH="${registry_auth_path}"
 test -f "${registry_auth_path}"
-
-cat > "${fake_bin}/podman" <<'EOF_PODMAN'
-#!/usr/bin/env bash
-set -euo pipefail
-while IFS= read -r _; do :; done < "${DOCKERHUB_TOKEN_FILE}"
-while IFS= read -r _; do :; done < "${REGISTRY_AUTH_PATH}"
-EOF_PODMAN
-cat > "${fake_bin}/docker" <<'EOF_DOCKER'
-#!/usr/bin/env bash
-set -euo pipefail
-while IFS= read -r _; do :; done < "${REGISTRY_AUTH_PATH}"
-EOF_DOCKER
-cat > "${fake_bin}/gh" <<'EOF_GH'
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ "${1:-}" == "auth" ]] && [[ "${2:-}" == "token" ]]; then
-  printf '%s\n' 'gh auth token should have been denied before executing gh' >&2
-  exit 99
-fi
-while IFS= read -r _; do :; done < "${HOME}/.config/gh/hosts.yml"
-EOF_GH
-cat > "${fake_bin}/control-plane-copilot" <<'EOF_COPILOT'
-#!/usr/bin/env bash
-set -euo pipefail
-while IFS= read -r _; do :; done < "${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}"
-EOF_COPILOT
-chmod 755 "${fake_bin}/podman" "${fake_bin}/docker" "${fake_bin}/gh" "${fake_bin}/control-plane-copilot"
-export PATH="${fake_bin}:${PATH}"
 
 run_hook() {
   local payload="$1"
@@ -304,12 +269,13 @@ assert_denied_shell 'DOCKERHUB_TOKEN_FILE' 'while IFS= read -r _; do :; done < "
 assert_denied_shell 'registry auth.json' 'while IFS= read -r _; do :; done < "${XDG_RUNTIME_DIR}/containers/auth.json"'
 assert_denied_shell 'registry auth.json' 'cat "${XDG_RUNTIME_DIR}/containers/auth.json"'
 assert_denied_shell '~/.config/gh/hosts.yml' 'while IFS= read -r _; do :; done < "${HOME}/.config/gh/hosts.yml"'
-assert_allowed_shell "${fake_bin}/control-plane-copilot"
-assert_allowed_shell "${fake_bin}/podman"
-assert_allowed_shell "${fake_bin}/docker"
-assert_allowed_shell "${fake_bin}/gh auth status"
-assert_allowed_shell "${fake_bin}/gh pr view 123"
-assert_allowed_shell "${fake_bin}/gh api repos/octo-org/octo-repo/pulls/123"
+assert_allowed_shell '/usr/local/bin/control-plane-copilot'
+assert_allowed_shell '/usr/local/bin/podman'
+assert_allowed_shell '/usr/local/bin/control-plane-podman'
+assert_allowed_shell '/usr/local/bin/docker'
+assert_allowed_shell '/usr/bin/gh auth status'
+assert_allowed_shell '/usr/bin/gh pr view 123'
+assert_allowed_shell '/usr/bin/gh api repos/octo-org/octo-repo/pulls/123'
 
 cat > /tmp/force-push-wrapper.sh <<'WRAPPER'
 #!/usr/bin/env bash
@@ -425,6 +391,49 @@ chmod 600 \
   /run/user/1000/containers/auth.json
 chown copilot:copilot /home/copilot/.config/gh/hosts.yml
 chmod 600 /home/copilot/.config/gh/hosts.yml
+rm -f \
+  /usr/local/bin/podman \
+  /usr/local/bin/docker \
+  /usr/local/bin/control-plane-podman \
+  /usr/local/bin/control-plane-copilot \
+  /usr/bin/gh
+cat > /usr/local/bin/control-plane-copilot <<'EOF_COPILOT'
+#!/usr/bin/env bash
+set -euo pipefail
+while IFS= read -r _; do :; done < "${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}"
+EOF_COPILOT
+cat > /usr/local/bin/control-plane-podman <<'EOF_CONTROL_PLANE_PODMAN'
+#!/usr/bin/env bash
+set -euo pipefail
+while IFS= read -r _; do :; done < "${DOCKERHUB_TOKEN_FILE}"
+while IFS= read -r _; do :; done < "${REGISTRY_AUTH_PATH}"
+EOF_CONTROL_PLANE_PODMAN
+cat > /usr/local/bin/podman <<'EOF_PODMAN'
+#!/usr/bin/env bash
+set -euo pipefail
+while IFS= read -r _; do :; done < "${DOCKERHUB_TOKEN_FILE}"
+while IFS= read -r _; do :; done < "${REGISTRY_AUTH_PATH}"
+EOF_PODMAN
+cat > /usr/local/bin/docker <<'EOF_DOCKER'
+#!/usr/bin/env bash
+set -euo pipefail
+while IFS= read -r _; do :; done < "${REGISTRY_AUTH_PATH}"
+EOF_DOCKER
+cat > /usr/bin/gh <<'EOF_GH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "auth" ]] && [[ "${2:-}" == "token" ]]; then
+  printf '%s\n' 'gh auth token should have been denied before executing gh' >&2
+  exit 99
+fi
+while IFS= read -r _; do :; done < "${HOME}/.config/gh/hosts.yml"
+EOF_GH
+chmod 755 \
+  /usr/local/bin/control-plane-copilot \
+  /usr/local/bin/control-plane-podman \
+  /usr/local/bin/podman \
+  /usr/local/bin/docker \
+  /usr/bin/gh
 source /home/copilot/.config/control-plane/runtime.env
 su -s /bin/bash copilot -lc /tmp/pre-tool-use-check.sh
 EOF

@@ -125,14 +125,14 @@ mod tests {
                     path: "/run/secrets/dockerhub-token".to_string(),
                     reason: "dockerhub token blocked".to_string(),
                     allowed_executables: vec![
-                        "podman".to_string(),
-                        "control-plane-podman".to_string(),
+                        "/usr/local/bin/podman".to_string(),
+                        "/usr/local/bin/control-plane-podman".to_string(),
                     ],
                 },
                 CompiledFileAccessRule {
                     path: "/home/copilot/.config/gh/hosts.yml".to_string(),
                     reason: "hosts file blocked".to_string(),
-                    allowed_executables: vec!["gh".to_string()],
+                    allowed_executables: vec!["/usr/bin/gh".to_string()],
                 },
             ],
         };
@@ -222,24 +222,37 @@ mod tests {
             Some("hooks path blocked")
         );
         assert_eq!(
-            match_file_access_rule(&config, &["bash"], "/run/secrets/dockerhub-token").as_deref(),
+            match_file_access_rule(&config, &["/usr/bin/bash"], "/run/secrets/dockerhub-token")
+                .as_deref(),
             Some("dockerhub token blocked")
         );
         assert_eq!(
             match_file_access_rule(
                 &config,
-                &["bash", "control-plane-podman"],
+                &["/usr/bin/bash", "/usr/local/bin/control-plane-podman"],
                 "/run/secrets/dockerhub-token",
             ),
             None
         );
         assert_eq!(
-            match_file_access_rule(&config, &["gh"], "/home/copilot/.config/gh/hosts.yml"),
+            match_file_access_rule(&config, &["podman"], "/run/secrets/dockerhub-token").as_deref(),
+            Some("dockerhub token blocked")
+        );
+        assert_eq!(
+            match_file_access_rule(
+                &config,
+                &["/usr/bin/gh"],
+                "/home/copilot/.config/gh/hosts.yml"
+            ),
             None
         );
         assert_eq!(
-            match_file_access_rule(&config, &["bash"], "/home/copilot/.config/gh/hosts.yml")
-                .as_deref(),
+            match_file_access_rule(
+                &config,
+                &["/usr/bin/bash"],
+                "/home/copilot/.config/gh/hosts.yml"
+            )
+            .as_deref(),
             Some("hosts file blocked")
         );
     }
