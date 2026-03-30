@@ -224,78 +224,78 @@ cargo_llvm_cov_release_base_url=${cargo_llvm_cov_release_base_url_q}
 enable_cargo_llvm_cov=${enable_cargo_llvm_cov_q}
 cache_root=/workspace/cache/\${repo_key}/\${branch_key}
 ephemeral_root=/var/tmp/containerized-rust/\${repo_key}/\${branch_key}
-src_root=\"\${ephemeral_root}/src\"
-tmp_dir=\"\${ephemeral_root}/tmp\"
-cargo_home=\"\${cache_root}/cargo\"
-rustup_home=\"\${cache_root}/rustup\"
-sccache_dir=\"\${ephemeral_root}/sccache\"
-sccache_conf=\"\${tmp_dir}/sccache-client.toml\"
-target_dir=\"\${ephemeral_root}/target\"
-mkdir -p \"\${tmp_dir}\" \"\${cargo_home}\" \"\${rustup_home}\" \"\${sccache_dir}\" \"\${target_dir}\"
-export TMPDIR=\"\${tmp_dir}\"
-if [ ! -x \"\${cargo_home}/bin/cargo\" ]; then
-  cp -a /usr/local/cargo/. \"\${cargo_home}/\"
+src_root="\${ephemeral_root}/src"
+tmp_dir="\${ephemeral_root}/tmp"
+cargo_home="\${cache_root}/cargo"
+rustup_home="\${cache_root}/rustup"
+sccache_dir="\${ephemeral_root}/sccache"
+sccache_conf="\${tmp_dir}/sccache-client.toml"
+target_dir="\${ephemeral_root}/target"
+mkdir -p "\${tmp_dir}" "\${cargo_home}" "\${rustup_home}" "\${sccache_dir}" "\${target_dir}"
+export TMPDIR="\${tmp_dir}"
+if [ ! -x "\${cargo_home}/bin/cargo" ]; then
+  cp -a /usr/local/cargo/. "\${cargo_home}/"
 fi
-if [ ! -d \"\${rustup_home}/toolchains\" ]; then
-  cp -a /usr/local/rustup/. \"\${rustup_home}/\"
+if [ ! -d "\${rustup_home}/toolchains" ]; then
+  cp -a /usr/local/rustup/. "\${rustup_home}/"
 fi
-export CARGO_HOME=\"\${cargo_home}\"
-export RUSTUP_HOME=\"\${rustup_home}\"
-export PATH=\"\${CARGO_HOME}/bin:\${PATH}\"
-export CARGO_TARGET_DIR=\"\${target_dir}\"
-export SCCACHE_DIR=\"\${sccache_dir}\"
-if [ \"\${sccache_s3_enabled}\" = \"1\" ]; then
-  cat > \"\${sccache_conf}\" <<EOF3
+export CARGO_HOME="\${cargo_home}"
+export RUSTUP_HOME="\${rustup_home}"
+export PATH="\${CARGO_HOME}/bin:\${PATH}"
+export CARGO_TARGET_DIR="\${target_dir}"
+export SCCACHE_DIR="\${sccache_dir}"
+if [ "\${sccache_s3_enabled}" = "1" ]; then
+  cat > "\${sccache_conf}" <<EOF3
 [cache.s3]
-bucket = \"\${sccache_bucket}\"
-endpoint = \"\${sccache_endpoint}\"
-region = \"\${sccache_region}\"
+bucket = "\${sccache_bucket}"
+endpoint = "\${sccache_endpoint}"
+region = "\${sccache_region}"
 use_ssl = \${sccache_s3_use_ssl}
-key_prefix = \"\${sccache_s3_key_prefix}\"
+key_prefix = "\${sccache_s3_key_prefix}"
 no_credentials = false
 EOF3
-  export AWS_ACCESS_KEY_ID=\"\${aws_access_key_id}\"
-  export AWS_SECRET_ACCESS_KEY=\"\${aws_secret_access_key}\"
-  export SCCACHE_CONF=\"\${sccache_conf}\"
+  export AWS_ACCESS_KEY_ID="\${aws_access_key_id}"
+  export AWS_SECRET_ACCESS_KEY="\${aws_secret_access_key}"
+  export SCCACHE_CONF="\${sccache_conf}"
 else
-  export SCCACHE_CACHE_SIZE=\"\${SCCACHE_CACHE_SIZE:-10G}\"
+  export SCCACHE_CACHE_SIZE="\${SCCACHE_CACHE_SIZE:-10G}"
 fi
 export CARGO_INCREMENTAL=0
 export CARGO_TERM_PROGRESS_WHEN=never
-rm -rf \"\${src_root}\"
-git clone --branch \"\${branch}\" --depth 1 \"\${repo_url}\" \"\${src_root}\"
-cd \"\${src_root}\"
-cat > \"\${tmp_dir}/install-sccache.sh\" <<'INSTALL_SCCACHE'
+rm -rf "\${src_root}"
+git clone --branch "\${branch}" --depth 1 "\${repo_url}" "\${src_root}"
+cd "\${src_root}"
+cat > "\${tmp_dir}/install-sccache.sh" <<'INSTALL_SCCACHE'
 ${install_sccache_script}
 INSTALL_SCCACHE
-chmod 0755 \"\${tmp_dir}/install-sccache.sh\"
-cat > \"\${tmp_dir}/install-cargo-llvm-cov.sh\" <<'INSTALL_CARGO_LLVM_COV'
+chmod 0755 "\${tmp_dir}/install-sccache.sh"
+cat > "\${tmp_dir}/install-cargo-llvm-cov.sh" <<'INSTALL_CARGO_LLVM_COV'
 ${install_cargo_llvm_cov_script}
 INSTALL_CARGO_LLVM_COV
-chmod 0755 \"\${tmp_dir}/install-cargo-llvm-cov.sh\"
-rustfmt --version >/dev/null 2>&1 || rustup component add rustfmt >\"\${tmp_dir}/rustfmt.log\" 2>&1
-rustfmt --version >/dev/null 2>&1 || { cat \"\${tmp_dir}/rustfmt.log\" >&2; exit 1; }
-cargo clippy --version >/dev/null 2>&1 || rustup component add clippy >\"\${tmp_dir}/clippy.log\" 2>&1
-cargo clippy --version >/dev/null 2>&1 || { cat \"\${tmp_dir}/clippy.log\" >&2; exit 1; }
-export SCCACHE_VERSION=\"\${sccache_version}\"
-export SCCACHE_RELEASE_BASE_URL=\"\${sccache_release_base_url}\"
-export SCCACHE_BOOTSTRAP_JOBS=\"\${sccache_bootstrap_jobs}\"
-sh \"\${tmp_dir}/install-sccache.sh\"
-if [ \"\${enable_cargo_llvm_cov}\" = \"1\" ]; then
-  export CARGO_LLVM_COV_VERSION=\"\${cargo_llvm_cov_version}\"
-  export CARGO_LLVM_COV_RELEASE_BASE_URL=\"\${cargo_llvm_cov_release_base_url}\"
-  sh \"\${tmp_dir}/install-cargo-llvm-cov.sh\"
-  rustup component list --installed | grep -Eq \"^llvm-tools\" || rustup component add llvm-tools-preview >\"\${tmp_dir}/llvm-tools.log\" 2>&1
-  rustup component list --installed | grep -Eq \"^llvm-tools\" || { cat \"\${tmp_dir}/llvm-tools.log\" >&2; exit 1; }
+chmod 0755 "\${tmp_dir}/install-cargo-llvm-cov.sh"
+rustfmt --version >/dev/null 2>&1 || rustup component add rustfmt >"\${tmp_dir}/rustfmt.log" 2>&1
+rustfmt --version >/dev/null 2>&1 || { cat "\${tmp_dir}/rustfmt.log" >&2; exit 1; }
+cargo clippy --version >/dev/null 2>&1 || rustup component add clippy >"\${tmp_dir}/clippy.log" 2>&1
+cargo clippy --version >/dev/null 2>&1 || { cat "\${tmp_dir}/clippy.log" >&2; exit 1; }
+export SCCACHE_VERSION="\${sccache_version}"
+export SCCACHE_RELEASE_BASE_URL="\${sccache_release_base_url}"
+export SCCACHE_BOOTSTRAP_JOBS="\${sccache_bootstrap_jobs}"
+sh "\${tmp_dir}/install-sccache.sh"
+if [ "\${enable_cargo_llvm_cov}" = "1" ]; then
+  export CARGO_LLVM_COV_VERSION="\${cargo_llvm_cov_version}"
+  export CARGO_LLVM_COV_RELEASE_BASE_URL="\${cargo_llvm_cov_release_base_url}"
+  sh "\${tmp_dir}/install-cargo-llvm-cov.sh"
+  rustup component list --installed | grep -Eq "^llvm-tools" || rustup component add llvm-tools-preview >"\${tmp_dir}/llvm-tools.log" 2>&1
+  rustup component list --installed | grep -Eq "^llvm-tools" || { cat "\${tmp_dir}/llvm-tools.log" >&2; exit 1; }
 fi
-export RUSTC_WRAPPER=\"\${CARGO_HOME}/bin/sccache\"
-if \"\$@\"; then
+export RUSTC_WRAPPER="\${CARGO_HOME}/bin/sccache"
+if "\$@"; then
   status=0
 else
   status=\$?
 fi
 sccache --show-stats || true
-exit \"\${status}\"
+exit "\${status}"
 EOF2
 )"
 
