@@ -15,7 +15,7 @@
 - `CONTROL_PLANE_JOB_NAMESPACE` lacks the PVC-backed `/workspace` mount that long-running jobs need.
 - `CONTROL_PLANE_K8S_NAMESPACE` does expose the `/workspace` PVC, but the default runtime env points to a missing `control-plane-job` service account there. Clear `CONTROL_PLANE_JOB_SERVICE_ACCOUNT` before starting the job.
 - Clone the pushed branch into `/var/tmp/containerized-rust/<repo>/<branch>/src` so `.git`, temp files, and `target` stay ephemeral. Unpushed local changes are not visible to the job.
-- Keep reusable `cargo` and `rustup` caches in `/workspace/cache/<repo>/<branch>`, but keep the clone, temp files, `target`, and `sccache` under `/var/tmp/containerized-rust/<repo>/<branch>`.
+- Keep the clone, temp files, toolchain state (`cargo` / `rustup`), `target`, and `sccache` under `/var/tmp/containerized-rust/<repo>/<branch>` so long-running jobs do not accumulate Rust caches on the shared `/workspace` PVC.
 - When `SCCACHE_BUCKET`, `SCCACHE_ENDPOINT`, and S3 credentials are available, keep only ephemeral client state under `/var/tmp/containerized-rust/<repo>/<branch>/sccache` and send reusable cache objects through the in-cluster Garage S3 Service. Without object-store mode, keep the same ephemeral `sccache` path and cap it with `SCCACHE_CACHE_SIZE`.
 - The local helper still reuses `containers/sccache/` for the `sccache` client binary, while the sample manifest runs Garage from the official `dxflrs/garage:v2.2.0` image and renders `garage.toml` in an initContainer.
 - The sample bootstrap logic now lives in `containers/control-plane/bin/garage-bootstrap.mjs` and runs from the existing published `control-plane` image in a one-shot bootstrap Job instead of a sidecar on every Garage pod start.
@@ -34,8 +34,8 @@
   - `${CONTAINERIZED_RUST_TMP_ROOT:-${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane}/tmp-<uid>}/containerized-rust/<repo>/target`
   - `${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane}/sccache/<repo>`
 - Kubernetes job caches:
-  - `/workspace/cache/<repo>/<branch>/rustup`
-  - `/workspace/cache/<repo>/<branch>/cargo`
+  - `/var/tmp/containerized-rust/<repo>/<branch>/toolchain/rustup`
+  - `/var/tmp/containerized-rust/<repo>/<branch>/toolchain/cargo`
   - `/var/tmp/containerized-rust/<repo>/<branch>/sccache` (local fallback and S3 client state)
   - `/var/tmp/containerized-rust/<repo>/<branch>/target`
 - The standalone Garage Deployment keeps the shared cache bucket under `/var/lib/garage` on the dedicated RWO PVC and mounts `/etc/garage/garage.toml` from the init-generated config volume, while the one-shot bootstrap Job talks to the `garage-s3` Service on both the S3 and admin ports.
