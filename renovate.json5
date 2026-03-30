@@ -22,7 +22,6 @@
   separateMultipleMajor: true,
   separateMultipleMinor: true,
   automerge: true,
-  automergeStrategy: "auto",
   platformAutomerge: false,
   vulnerabilityAlerts: {
     enabled: true,
