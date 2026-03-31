@@ -16,8 +16,7 @@ die() {
   exit 64
 }
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(git -C "${script_dir}" rev-parse --show-toplevel 2>/dev/null || true)"
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 [[ -n "${repo_root}" ]] || die "run this script from inside the repository"
 
 # shellcheck source=scripts/lib-container-toolchain.sh

@@ -41,6 +41,7 @@ dockerfile_path="${repo_root}/containers/control-plane/Dockerfile"
 entrypoint_path="${repo_root}/containers/control-plane/bin/control-plane-entrypoint"
 control_plane_image="${CONTROL_PLANE_IMAGE_TAG:-localhost/control-plane:test}"
 package_dir="$(mktemp -d)"
+yamllint_smoke_dir="${package_dir}/yamllint-smoke"
 external_skill_dir="${package_dir}/external-skills"
 doc_coauthor_skill_dir="${external_skill_dir}/doc-coauthoring"
 doc_coauthor_skill_file="${doc_coauthor_skill_dir}/SKILL.md"
@@ -322,14 +323,26 @@ assert_file_present "${pull_request_package_file}"
 assert_file_present "${repo_package_file}"
 assert_file_present "${skill_creator_package_file}"
 
+printf '%s\n' 'repo-change-delivery-skills-test: smoke testing out-of-tree yamllint helper' >&2
+install -d -m 0755 "${yamllint_smoke_dir}/scripts"
+install -m 0644 "${yamllint_script_file}" "${yamllint_smoke_dir}/scripts/podman-yamllint.sh"
+(
+  cd "${repo_root}"
+  bash "${yamllint_smoke_dir}/scripts/podman-yamllint.sh" .github/workflows/control-plane-ci.yml
+)
+
 # shellcheck disable=SC2016
-"${container_bin}" run --rm --entrypoint bash "${control_plane_image}" -lc '
+"${container_bin}" run --rm \
+  --entrypoint bash "${control_plane_image}" -lc '
 set -euo pipefail
 doc_root=/usr/local/share/control-plane/skills/doc-coauthoring
+yamllint_root=/usr/local/share/control-plane/skills/containerized-yamllint-ops
 skill_creator_root=/usr/local/share/control-plane/skills/skill-creator
 audit_analysis_root=/usr/local/share/control-plane/skills/audit-log-analysis
 test -r "$doc_root/SKILL.md"
 grep -Fqx "name: doc-coauthoring" "$doc_root/SKILL.md"
+test -r "$yamllint_root/SKILL.md"
+test -r "$yamllint_root/scripts/podman-yamllint.sh"
 test -r "$skill_creator_root/SKILL.md"
 test -r "$skill_creator_root/LICENSE.txt"
 grep -Fqx "name: skill-creator" "$skill_creator_root/SKILL.md"
