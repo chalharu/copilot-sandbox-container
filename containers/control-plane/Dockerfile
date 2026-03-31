@@ -1,4 +1,4 @@
-FROM docker.io/library/rust:1.94.0-bookworm@sha256:365468470075493dc4583f47387001854321c5a8583ea9604b297e67f01c5a4f AS exec-policy-builder
+FROM docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895 AS exec-policy-builder
 
 WORKDIR /build/control-plane-exec-policy
 COPY exec-policy-preload/Cargo.toml exec-policy-preload/Cargo.lock ./
