@@ -67,7 +67,7 @@ function setupRepo(t, prefix) {
 	);
 	fs.appendFileSync(
 		path.join(repo, ".git", "info", "exclude"),
-		["bin/", "hook.log", ".copilot/hooks/"].join("\n") + "\n",
+		`${["bin/", "hook.log", ".copilot/hooks/"].join("\n")}\n`,
 		"utf8",
 	);
 
@@ -177,8 +177,8 @@ function createToolStubs(
 			[
 				"#!/bin/sh",
 				'printf "bash %s\\n" "$*" >> "$HOOK_LOG"',
-				'printf "NODE_COMPILE_CACHE=%s\\n" "${NODE_COMPILE_CACHE:-}" >> "$HOOK_LOG"',
-				'printf "NPM_CONFIG_CACHE=%s\\n" "${NPM_CONFIG_CACHE:-}" >> "$HOOK_LOG"',
+				'printf "NODE_COMPILE_CACHE=%s\\n" "$NODE_COMPILE_CACHE" >> "$HOOK_LOG"',
+				'printf "NPM_CONFIG_CACHE=%s\\n" "$NPM_CONFIG_CACHE" >> "$HOOK_LOG"',
 				'if [ "$1" = "containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh" ] && [ "$2" = "fmt" ]; then',
 				"  exit 0",
 				"fi",

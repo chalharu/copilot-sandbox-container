@@ -2,6 +2,7 @@
 name = "control-plane-exec-policy-preload"
 version = "0.1.0"
 edition = "2024"
+license = "AGPL-3.0-only"
 
 [lib]
 name = "control_plane_exec_policy"

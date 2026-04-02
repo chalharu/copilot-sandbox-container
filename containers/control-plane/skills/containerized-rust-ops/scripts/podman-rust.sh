@@ -138,7 +138,6 @@ case "$1" in
 esac
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-skill_root="$(cd "${script_dir}/.." && pwd)"
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 [[ -n "${repo_root}" ]] || die "run this script from inside a Git repository"
 repo_root="$(canonicalize_path "${repo_root}")"
@@ -237,6 +236,7 @@ install_sccache_from_image() {
   (
     set -euo pipefail
     container_id="$("${container_cmd[@]}" create "${sccache_image}")"
+    # shellcheck disable=SC2329
     cleanup() {
       "${container_cmd[@]}" rm "${container_id}" >/dev/null
     }
@@ -248,6 +248,7 @@ install_sccache_from_image() {
 }
 
 ensure_tools() {
+  # shellcheck disable=SC2016
   "${container_cmd[@]}" run --rm -i \
     -e CARGO_LLVM_COV_VERSION="${cargo_llvm_cov_version}" \
     -e CARGO_LLVM_COV_RELEASE_BASE_URL="${cargo_llvm_cov_release_base_url}" \
@@ -280,6 +281,7 @@ bootstrap_toolchain
 install_sccache_from_image
 ensure_tools
 
+# shellcheck disable=SC2016
 "${container_cmd[@]}" run --rm -i \
   -e CARGO_TERM_PROGRESS_WHEN=never \
   -v "${repo_root}:/workspace" \

@@ -1,4 +1,3 @@
----
 - repository: https://github.com/anthropics/skills
   ref: 98669c11ca63e9c81c11501e1437e5c47b556621 # renovate: datasource=git-refs currentValue=main
   skills:

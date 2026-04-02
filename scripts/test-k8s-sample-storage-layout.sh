@@ -136,6 +136,13 @@ assert_install_resource_contains() {
   }
 }
 
+kind_count_in_file() {
+  local source_manifest="$1"
+  local kind="$2"
+
+  grep -Ec "^[[:space:]]*kind:[[:space:]]*${kind}([[:space:]]|$)" "${source_manifest}"
+}
+
 deployment_block() {
   resource_block Deployment control-plane
 }
@@ -183,36 +190,12 @@ grep -Eq '^apiVersion:' "${install_manifest_path}" || {
 printf '%s\n' 'k8s-sample-storage-layout-test: checking persistent volume claims' >&2
 assert_install_resource_present Namespace copilot-sandbox
 
-root_pvc_count="$(awk '
-  BEGIN {
-    RS = "---\n"
-  }
-
-  /kind:[[:space:]]*PersistentVolumeClaim/ {
-    count++
-  }
-
-  END {
-    print count + 0
-  }
-' "${manifest_path}")"
+root_pvc_count="$(kind_count_in_file "${manifest_path}" PersistentVolumeClaim)"
 [[ "${root_pvc_count}" == "1" ]] || {
   printf 'Expected exactly 1 PersistentVolumeClaim in the update-safe root manifest, found %s\n' "${root_pvc_count}" >&2
   exit 1
 }
-install_pvc_count="$(awk '
-  BEGIN {
-    RS = "---\n"
-  }
-
-  /kind:[[:space:]]*PersistentVolumeClaim/ {
-    count++
-  }
-
-  END {
-    print count + 0
-  }
-' "${install_manifest_path}")"
+install_pvc_count="$(kind_count_in_file "${install_manifest_path}" PersistentVolumeClaim)"
 [[ "${install_pvc_count}" == "2" ]] || {
   printf 'Expected exactly 2 PersistentVolumeClaims in the install manifest, found %s\n' "${install_pvc_count}" >&2
   exit 1

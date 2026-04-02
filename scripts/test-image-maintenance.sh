@@ -203,29 +203,37 @@ manifest_block="$(job_block publish-manifests)"
 assert_block_contains "${helper_image_changes_block}" 'fetch-depth: 0' 'helper-image-changes job block'
 assert_block_contains "${helper_image_changes_block}" "yamllint_changed=\"\$(changed_in_range containers/yamllint)\"" 'helper-image-changes job block'
 assert_block_contains "${helper_image_changes_block}" "sccache_changed=\"\$(changed_in_range containers/sccache)\"" 'helper-image-changes job block'
-assert_block_contains "${helper_image_changes_block}" "printf 'yamllint_changed=%s\\n' \"\${yamllint_changed}\" >> \"\${GITHUB_OUTPUT}\"" 'helper-image-changes job block'
-assert_block_contains "${helper_image_changes_block}" "printf 'sccache_changed=%s\\n' \"\${sccache_changed}\" >> \"\${GITHUB_OUTPUT}\"" 'helper-image-changes job block'
+assert_block_contains "${helper_image_changes_block}" '{' 'helper-image-changes job block'
+assert_block_contains "${helper_image_changes_block}" "printf 'yamllint_changed=%s\\n' \"\${yamllint_changed}\"" 'helper-image-changes job block'
+assert_block_contains "${helper_image_changes_block}" "printf 'sccache_changed=%s\\n' \"\${sccache_changed}\"" 'helper-image-changes job block'
+assert_block_contains "${helper_image_changes_block}" "} >> \"\${GITHUB_OUTPUT}\"" 'helper-image-changes job block'
 
 assert_block_contains "${publish_block}" '- helper-image-changes' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "if: needs.helper-image-changes.outputs.yamllint_changed == 'true'" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "if: needs.helper-image-changes.outputs.sccache_changed == 'true'" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "PUBLISH_YAMLLINT: \${{ needs.helper-image-changes.outputs.yamllint_changed }}" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "PUBLISH_SCCACHE: \${{ needs.helper-image-changes.outputs.sccache_changed }}" 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" "CONTROL_PLANE_COMPONENT_TAG: \${{ steps.image_versions.outputs.control_plane_component_tag }}" 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" "YAMLLINT_COMPONENT_TAG: \${{ steps.image_versions.outputs.yamllint_component_tag }}" 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" "SCCACHE_COMPONENT_TAG: \${{ steps.image_versions.outputs.sccache_component_tag }}" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "if [[ \"\${PUBLISH_YAMLLINT}\" == \"true\" ]]; then" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "if [[ \"\${PUBLISH_SCCACHE}\" == \"true\" ]]; then" 'publish-architecture-images job block'
 
 assert_block_contains "${manifest_block}" '- helper-image-changes' 'publish-manifests job block'
 assert_block_contains "${manifest_block}" "PUBLISH_YAMLLINT: \${{ needs.helper-image-changes.outputs.yamllint_changed }}" 'publish-manifests job block'
 assert_block_contains "${manifest_block}" "PUBLISH_SCCACHE: \${{ needs.helper-image-changes.outputs.sccache_changed }}" 'publish-manifests job block'
+assert_block_contains "${manifest_block}" "CONTROL_PLANE_COMPONENT_TAG: \${{ steps.image_versions.outputs.control_plane_component_tag }}" 'publish-manifests job block'
+assert_block_contains "${manifest_block}" "YAMLLINT_COMPONENT_TAG: \${{ steps.image_versions.outputs.yamllint_component_tag }}" 'publish-manifests job block'
+assert_block_contains "${manifest_block}" "SCCACHE_COMPONENT_TAG: \${{ steps.image_versions.outputs.sccache_component_tag }}" 'publish-manifests job block'
 assert_block_contains "${manifest_block}" "if [[ \"\${PUBLISH_YAMLLINT}\" == \"true\" ]]; then" 'publish-manifests job block'
 assert_block_contains "${manifest_block}" "if [[ \"\${PUBLISH_SCCACHE}\" == \"true\" ]]; then" 'publish-manifests job block'
 
 assert_file_contains "${workflow_path}" 'podman build --tag localhost/sccache:test containers/sccache'
 assert_file_contains "${workflow_path}" "GHCR_SCCACHE_IMAGE: ghcr.io/\${{ github.repository }}/sccache"
 assert_file_contains "${workflow_path}" "podman tag localhost/sccache:test \"\${GHCR_SCCACHE_IMAGE}:\${GITHUB_SHA}-\${IMAGE_ARCH}\""
-assert_file_contains "${workflow_path}" "podman push \"\${GHCR_SCCACHE_IMAGE}:\${{ steps.image_versions.outputs.sccache_component_tag }}-\${IMAGE_ARCH}\""
+assert_file_contains "${workflow_path}" "podman push \"\${GHCR_SCCACHE_IMAGE}:\${SCCACHE_COMPONENT_TAG}-\${IMAGE_ARCH}\""
 assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache:manifest-latest\" \"\${GHCR_SCCACHE_IMAGE}:latest\""
-assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache:manifest-version\" \"\${GHCR_SCCACHE_IMAGE}:\${{ steps.image_versions.outputs.sccache_component_tag }}\""
+assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache:manifest-version\" \"\${GHCR_SCCACHE_IMAGE}:\${SCCACHE_COMPONENT_TAG}\""
 assert_file_matches "${workflow_path}" '^[[:space:]]+- sccache$'
 assert_file_contains "${renovate_config_path}" '/^containers\\/(control-plane|yamllint|sccache)\\/Dockerfile$/'
 assert_file_contains "${renovate_config_path}" 'separateMultipleMajor: true'
