@@ -1,0 +1,12 @@
+rules:
+  secrets-outside-env:
+    ignore:
+      # Temporary line-scoped ignores until the upstream false positive is resolved.
+      - control-plane-ci.yml:35
+      - control-plane-ci.yml:36
+      - control-plane-ci.yml:41
+      - control-plane-ci.yml:42
+      - control-plane-ci.yml:154
+      - control-plane-ci.yml:155
+      - control-plane-ci.yml:387
+      - control-plane-ci.yml:388

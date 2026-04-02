@@ -5,10 +5,10 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 manifest_root="${script_dir}/../deploy/kubernetes/control-plane.example"
 install_manifest_root="${script_dir}/../deploy/kubernetes/control-plane.example/install"
 manifest_path="$(mktemp)"
-install_manifest_path="${install_manifest_root}/shared-persistent-volume-claims.yaml"
+install_manifest_path="$(mktemp)"
 
 cleanup() {
-  rm -f "${manifest_path}"
+  rm -f "${manifest_path}" "${install_manifest_path}"
 }
 
 trap cleanup EXIT
@@ -35,6 +35,7 @@ render_kustomization() {
 
 render_sample_manifests() {
   render_kustomization "${manifest_root}" "${manifest_path}"
+  render_kustomization "${install_manifest_root}" "${install_manifest_path}"
 }
 
 resource_block_from_file() {
@@ -136,6 +137,13 @@ assert_install_resource_contains() {
   }
 }
 
+kind_count_in_file() {
+  local source_manifest="$1"
+  local kind="$2"
+
+  grep -Ec "^[[:space:]]*kind:[[:space:]]*${kind}([[:space:]]|$)" "${source_manifest}"
+}
+
 deployment_block() {
   resource_block Deployment control-plane
 }
@@ -183,36 +191,12 @@ grep -Eq '^apiVersion:' "${install_manifest_path}" || {
 printf '%s\n' 'k8s-sample-storage-layout-test: checking persistent volume claims' >&2
 assert_install_resource_present Namespace copilot-sandbox
 
-root_pvc_count="$(awk '
-  BEGIN {
-    RS = "---\n"
-  }
-
-  /kind:[[:space:]]*PersistentVolumeClaim/ {
-    count++
-  }
-
-  END {
-    print count + 0
-  }
-' "${manifest_path}")"
+root_pvc_count="$(kind_count_in_file "${manifest_path}" PersistentVolumeClaim)"
 [[ "${root_pvc_count}" == "1" ]] || {
   printf 'Expected exactly 1 PersistentVolumeClaim in the update-safe root manifest, found %s\n' "${root_pvc_count}" >&2
   exit 1
 }
-install_pvc_count="$(awk '
-  BEGIN {
-    RS = "---\n"
-  }
-
-  /kind:[[:space:]]*PersistentVolumeClaim/ {
-    count++
-  }
-
-  END {
-    print count + 0
-  }
-' "${install_manifest_path}")"
+install_pvc_count="$(kind_count_in_file "${install_manifest_path}" PersistentVolumeClaim)"
 [[ "${install_pvc_count}" == "2" ]] || {
   printf 'Expected exactly 2 PersistentVolumeClaims in the install manifest, found %s\n' "${install_pvc_count}" >&2
   exit 1

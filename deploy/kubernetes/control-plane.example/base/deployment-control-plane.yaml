@@ -1,36 +1,3 @@
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: control-plane-workspace-pvc
-  namespace: copilot-sandbox
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 5Gi
-  storageClassName: standard
-
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: control-plane
-  namespace: copilot-sandbox
-  labels:
-    app.kubernetes.io/name: control-plane
-spec:
-  type: LoadBalancer
-  selector:
-    app.kubernetes.io/name: control-plane
-  ports:
-    - name: ssh
-      port: 2222
-      targetPort: ssh
-
-
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:

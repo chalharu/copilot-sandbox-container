@@ -33,7 +33,7 @@ function readSecret(path) {
 			die(`secret file must not be empty: ${path}`);
 		}
 		return value;
-	} catch (error) {
+	} catch {
 		die(`secret file not found: ${path}`);
 	}
 }

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: garage-s3
+  namespace: copilot-sandbox
+  labels:
+    app.kubernetes.io/name: garage-s3
+spec:
+  selector:
+    app.kubernetes.io/name: garage-s3
+  ports:
+    - name: s3
+      port: 3900
+      targetPort: s3
+    - name: admin
+      port: 3903
+      targetPort: admin

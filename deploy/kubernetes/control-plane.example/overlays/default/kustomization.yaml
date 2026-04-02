@@ -3,9 +3,9 @@ kind: Kustomization
 resources: []
 
 # This overlay is the customization point for the shipped sample.
-# The shipped root sample reads `../base/control-plane-instance.yaml` directly.
+# The shipped root sample reads the individual files under `../base/` directly.
 # Use this file as a commented scratchpad when you prepare a named variant and
-# then compose that variant with `../../common/shared-resources.yaml`.
+# then compose that variant with the individual files under `../../common/`.
 #
 # When you need a named variant instead, uncomment the block below and replace
 # the `replace-me-*` values with your own instance-specific names.
@@ -46,7 +46,7 @@ resources: []
 #   value: 8Gi
 #   # Remove the storage op when the default size is already fine.
 # Shared PVC candidates such as `control-plane-copilot-session-pvc` and
-# `control-plane-sccache-pvc` live in `../../install/shared-persistent-volume-claims.yaml`
+# `control-plane-sccache-pvc` live in `../../install/`
 # because the root kustomization intentionally avoids mutating those immutable
 # shared claims during routine updates.
 #
@@ -85,5 +85,6 @@ resources: []
 # - op: replace
 #   path: /spec/template/spec/containers/0/image
 #   value: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha
-# Keep the same tag aligned in `../../common/shared-resources.yaml` for
-# `CONTROL_PLANE_JOB_TRANSFER_IMAGE` and the `garage-bootstrap` Job image.
+# Keep the same tag aligned in `../../common/configmap-control-plane-env.yaml`
+# for `CONTROL_PLANE_JOB_TRANSFER_IMAGE` and in
+# `../../common/job-garage-bootstrap.yaml` for the `garage-bootstrap` Job image.
