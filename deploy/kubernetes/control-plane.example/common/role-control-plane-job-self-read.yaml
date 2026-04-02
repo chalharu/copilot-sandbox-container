@@ -1,0 +1,9 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: control-plane-job-self-read
+  namespace: copilot-sandbox-jobs
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]

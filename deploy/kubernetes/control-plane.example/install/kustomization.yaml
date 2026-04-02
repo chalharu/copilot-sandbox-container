@@ -1,0 +1,6 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace-copilot-sandbox.yaml
+  - pvc-control-plane-copilot-session.yaml
+  - pvc-control-plane-sccache.yaml

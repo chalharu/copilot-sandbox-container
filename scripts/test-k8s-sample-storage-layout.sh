@@ -5,10 +5,10 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 manifest_root="${script_dir}/../deploy/kubernetes/control-plane.example"
 install_manifest_root="${script_dir}/../deploy/kubernetes/control-plane.example/install"
 manifest_path="$(mktemp)"
-install_manifest_path="${install_manifest_root}/shared-persistent-volume-claims.yaml"
+install_manifest_path="$(mktemp)"
 
 cleanup() {
-  rm -f "${manifest_path}"
+  rm -f "${manifest_path}" "${install_manifest_path}"
 }
 
 trap cleanup EXIT
@@ -35,6 +35,7 @@ render_kustomization() {
 
 render_sample_manifests() {
   render_kustomization "${manifest_root}" "${manifest_path}"
+  render_kustomization "${install_manifest_root}" "${install_manifest_path}"
 }
 
 resource_block_from_file() {

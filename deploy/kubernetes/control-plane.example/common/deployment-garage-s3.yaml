@@ -1,0 +1,117 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: garage-s3
+  namespace: copilot-sandbox
+  labels:
+    app.kubernetes.io/name: garage-s3
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: garage-s3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: garage-s3
+    spec:
+      initContainers:
+        - name: init-garage-config
+          # renovate: datasource=docker depName=docker.io/library/busybox versioning=docker
+          image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              mkdir -p /garage-config
+              cat > /garage-config/garage.toml <<EOF
+              metadata_dir = "/var/lib/garage/meta"
+              data_dir = "/var/lib/garage/data"
+              db_engine = "sqlite"
+              replication_factor = 1
+
+              rpc_bind_addr = "0.0.0.0:3901"
+              rpc_public_addr = "${POD_IP}:3901"
+
+              [s3_api]
+              s3_region = "garage"
+              api_bind_addr = "0.0.0.0:3900"
+
+              [admin]
+              api_bind_addr = "0.0.0.0:3903"
+              EOF
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.podIP
+          volumeMounts:
+            - name: garage-config
+              mountPath: /garage-config
+      containers:
+        - name: garage
+          # renovate: datasource=docker depName=docker.io/dxflrs/garage versioning=docker
+          image: dxflrs/garage:v2.2.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /garage
+            - -c
+            - /etc/garage/garage.toml
+            - server
+          env:
+            - name: GARAGE_RPC_SECRET_FILE
+              value: /var/run/garage-admin-auth/rpc-secret
+            - name: GARAGE_ADMIN_TOKEN_FILE
+              value: /var/run/garage-admin-auth/admin-token
+          ports:
+            - containerPort: 3900
+              name: s3
+            - containerPort: 3903
+              name: admin
+          readinessProbe:
+            tcpSocket:
+              port: s3
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: s3
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: garage-data
+              mountPath: /var/lib/garage
+            - name: garage-config
+              mountPath: /etc/garage
+            - name: garage-admin-auth
+              mountPath: /var/run/garage-admin-auth
+              readOnly: true
+      volumes:
+        - name: garage-data
+          persistentVolumeClaim:
+            claimName: control-plane-sccache-pvc
+        - name: garage-config
+          emptyDir: {}
+        - name: garage-admin-auth
+          secret:
+            secretName: garage-admin-auth
+            # Garage refuses to start when rpc-secret is mounted with the
+            # Kubernetes Secret default of 0644.
+            defaultMode: 384
+            items:
+              - key: admin-token
+                path: admin-token
+              - key: rpc-secret
+                path: rpc-secret

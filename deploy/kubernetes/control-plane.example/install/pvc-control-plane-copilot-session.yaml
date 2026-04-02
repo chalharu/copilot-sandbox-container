@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: control-plane-copilot-session-pvc
+  namespace: copilot-sandbox
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 2Gi
+  # Replace this with an RWX-capable storage class. Many default `standard`
+  # classes are ReadWriteOnce only and cannot satisfy the shared copilot session.
+  storageClassName: replace-me-with-rwx-storage-class

@@ -1,7 +1,28 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# Shared PVCs are applied once from `install/shared-persistent-volume-claims.yaml`
-# so routine `kubectl apply -k` does not try to mutate bound claim specs.
+# Shared PVCs are applied once from the `install/` kustomization so routine
+# `kubectl apply -k` does not try to mutate bound claim specs.
+# The root sample keeps reading the individual common/base resource files
+# directly so standalone `kustomize` and `kubectl kustomize` stay compatible.
 resources:
-  - common/shared-resources.yaml
-  - base/control-plane-instance.yaml
+  - common/namespace-copilot-sandbox.yaml
+  - common/namespace-copilot-sandbox-jobs.yaml
+  - common/serviceaccount-control-plane.yaml
+  - common/serviceaccount-garage-bootstrap.yaml
+  - common/serviceaccount-control-plane-job.yaml
+  - common/role-control-plane-jobs.yaml
+  - common/rolebinding-control-plane-jobs.yaml
+  - common/role-control-plane-job-self-read.yaml
+  - common/rolebinding-control-plane-job-self-read.yaml
+  - common/role-garage-bootstrap-secret-writer.yaml
+  - common/rolebinding-garage-bootstrap-secret-writer.yaml
+  - common/secret-control-plane-auth.yaml
+  - common/secret-garage-admin-auth.yaml
+  - common/configmap-control-plane-config.yaml
+  - common/configmap-control-plane-env.yaml
+  - common/service-garage-s3.yaml
+  - common/deployment-garage-s3.yaml
+  - common/job-garage-bootstrap.yaml
+  - base/pvc-control-plane-workspace.yaml
+  - base/service-control-plane.yaml
+  - base/deployment-control-plane.yaml
