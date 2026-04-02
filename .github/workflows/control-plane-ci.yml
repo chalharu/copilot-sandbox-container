@@ -9,6 +9,7 @@ jobs:
     name: Lint (${{ matrix.architecture_label }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    environment: dockerhub
     strategy:
       fail-fast: false
       matrix:
@@ -120,6 +121,7 @@ jobs:
     name: Integration Regressions (${{ matrix.architecture_label }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    environment: dockerhub
     needs: integration
     strategy:
       fail-fast: false
@@ -339,6 +341,7 @@ jobs:
     name: Publish Architecture Images (${{ matrix.architecture_label }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    environment: dockerhub
     needs:
       - lint
       - integration-smoke
