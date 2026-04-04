@@ -21,6 +21,7 @@ all_startup_caps=(
   --cap-add SYS_ADMIN
   --cap-add SYS_CHROOT
 )
+control_plane_run_user=(--user 0:0)
 
 cleanup() {
   "${container_bin}" rm -f control-plane-podman-startup-legacy >/dev/null 2>&1 || true
@@ -84,6 +85,7 @@ chmod +x "${workdir}/fake-chown"
 set +e
 legacy_output="$("${container_bin}" run --rm \
   --name control-plane-podman-startup-legacy \
+  "${control_plane_run_user[@]}" \
   "${all_startup_caps[@]}" \
   -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForStartupRegression control-plane-startup' \
   -e TEST_CHOWN_LOG=/var/run/control-plane-test/chown.log \
@@ -124,6 +126,7 @@ printf '%s\n' 'flat-rootless-sentinel' > "${workdir}/flat-rootless/copilot/conta
 set +e
 flat_rootless_output="$("${container_bin}" run --rm \
   --name control-plane-podman-startup-legacy \
+  "${control_plane_run_user[@]}" \
   "${all_startup_caps[@]}" \
   -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForStartupRegression control-plane-startup' \
   -e CONTROL_PLANE_PODMAN_STORAGE_DRIVER="${flat_rootless_driver}" \
@@ -154,6 +157,7 @@ mkdir -p "${workdir}/flat-rootless-existing-target/tmp-root/rootless-podman/${fl
 set +e
 flat_rootless_existing_target_output="$("${container_bin}" run --rm \
   --name control-plane-podman-startup-legacy \
+  "${control_plane_run_user[@]}" \
   "${all_startup_caps[@]}" \
   -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForStartupRegression control-plane-startup' \
   -e CONTROL_PLANE_PODMAN_STORAGE_DRIVER="${flat_rootless_driver}" \
@@ -186,6 +190,7 @@ printf '%s\n' 'existing-target-sentinel' > "${workdir}/flat-rootless-conflict/tm
 set +e
 flat_rootless_conflict_output="$("${container_bin}" run --rm \
   --name control-plane-podman-startup-legacy \
+  "${control_plane_run_user[@]}" \
   "${all_startup_caps[@]}" \
   -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForStartupRegression control-plane-startup' \
   -e CONTROL_PLANE_PODMAN_STORAGE_DRIVER="${flat_rootless_driver}" \
@@ -278,6 +283,7 @@ chmod +x "${workdir}/rootful-startup-check.sh"
 set +e
 rootful_output="$("${container_bin}" run --rm \
   --name control-plane-podman-startup-rootful \
+  "${control_plane_run_user[@]}" \
   "${all_startup_caps[@]}" \
   -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForStartupRegression control-plane-startup' \
   -e CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service \
@@ -335,6 +341,7 @@ chmod +x "${workdir}/timezone-check.sh"
 set +e
 timezone_output="$("${container_bin}" run --rm \
   --name control-plane-podman-startup-timezone \
+  "${control_plane_run_user[@]}" \
   "${all_startup_caps[@]}" \
   -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForStartupRegression control-plane-startup' \
   -e TZ=Asia/Tokyo \

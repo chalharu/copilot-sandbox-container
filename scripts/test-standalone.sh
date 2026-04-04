@@ -10,6 +10,7 @@ container_name="control-plane-standalone-test"
 workdir="$(mktemp -d)"
 state_root="${workdir}/state"
 ssh_key="${workdir}/id_ed25519"
+control_plane_run_user=(--user 0:0)
 container_env=()
 host_network_ssh=0
 custom_sshd_config=""
@@ -177,6 +178,7 @@ ssh_host_fingerprint() {
 start_container() {
   local run_args=(
     run -d --rm
+    "${control_plane_run_user[@]}"
     --name "${container_name}"
     --cap-add AUDIT_WRITE
     -e SSH_PUBLIC_KEY="$(cat "${ssh_key}.pub")"
@@ -619,7 +621,7 @@ fi
 printf '%s\n' 'standalone-test: persisted state looks good' >&2
 
 set +e
-missing_caps_output="$("${container_bin}" run --rm --cap-drop ALL "${control_plane_image}" 2>&1)"
+missing_caps_output="$("${container_bin}" run --rm "${control_plane_run_user[@]}" --cap-drop ALL "${control_plane_image}" 2>&1)"
 missing_caps_status=$?
 set -e
 printf '%s\n' 'standalone-test: checking cap-drop diagnostics' >&2

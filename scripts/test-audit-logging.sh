@@ -5,6 +5,7 @@ control_plane_image="${1:?usage: scripts/test-audit-logging.sh <control-plane-im
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-podman}"
 workdir="$(mktemp -d)"
 container_name="control-plane-audit-logging-test"
+control_plane_run_user=(--user 0:0)
 startup_caps=(
   --cap-add AUDIT_WRITE
   --cap-add CHOWN
@@ -132,6 +133,7 @@ printf '%s\n' 'test-audit-logging.sh: verifying SQLite-backed audit logging hook
 set +e
 output="$("${container_bin}" run --rm \
   --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
   -i \
   "${startup_caps[@]}" \
   -e CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS=8 \

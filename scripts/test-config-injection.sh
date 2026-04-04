@@ -5,6 +5,7 @@ control_plane_image="${1:?usage: scripts/test-config-injection.sh <control-plane
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-podman}"
 workdir="$(mktemp -d)"
 container_name="control-plane-config-injection-test"
+control_plane_run_user=(--user 0:0)
 startup_caps=(
   --cap-add AUDIT_WRITE
   --cap-add CHOWN
@@ -98,6 +99,7 @@ printf '%s\n' legacy-ecdsa-public > "${workdir}/file-backed/state/ssh-host-keys/
 set +e
 file_backed_output="$("${container_bin}" run --rm \
   --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
   -i \
   "${startup_caps[@]}" \
   -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForConfigInjection control-plane-config-injection' \
@@ -227,6 +229,7 @@ EOF
 set +e
 file_mounted_output="$("${container_bin}" run --rm \
   --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
   -i \
   "${startup_caps[@]}" \
   -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForConfigInjection control-plane-config-injection' \
@@ -276,6 +279,7 @@ EOF
 set +e
 empty_file_mounted_output="$("${container_bin}" run --rm \
   --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
   -i \
   "${startup_caps[@]}" \
   -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForConfigInjection control-plane-config-injection' \
@@ -314,6 +318,7 @@ printf '%s' 'generated-secret-token' > "${workdir}/token-backed/auth/gh-github-t
 set +e
 token_backed_output="$("${container_bin}" run --rm \
   --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
   -i \
   "${startup_caps[@]}" \
   -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForConfigInjection control-plane-config-injection' \

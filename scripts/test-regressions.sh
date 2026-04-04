@@ -7,6 +7,7 @@ control_plane_image="${1:?usage: scripts/test-regressions.sh <control-plane-imag
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-podman}"
 workdir="$(mktemp -d)"
 container_name="control-plane-regression-test"
+control_plane_run_user=(--user 0:0)
 startup_caps=(
   --cap-add AUDIT_WRITE
   --cap-add CHOWN
@@ -78,6 +79,7 @@ ln -s /nonexistent/overlay-target "${workdir}/state/copilot/containers/overlay/s
 set +e
 broken_symlink_output="$("${container_bin}" run --rm \
   --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
   "${startup_caps[@]}" \
   -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForRegressionOnly control-plane-regression' \
   -v "${workdir}/state/copilot:/home/copilot/.copilot" \
@@ -113,6 +115,7 @@ mkdir -p \
 set +e
 skill_output="$("${container_bin}" run --rm \
   --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
   "${startup_caps[@]}" \
   -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForRegressionOnly control-plane-regression' \
   -v "${workdir}/skill-state/copilot:/home/copilot/.copilot" \
@@ -179,6 +182,7 @@ printf '%s' 'sample-secret-access-key' > "${workdir}/runtime-env-state/garage-sc
 set +e
 runtime_env_output="$("${container_bin}" run --rm \
   --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
   "${startup_caps[@]}" \
   -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForRegressionOnly control-plane-regression' \
   -e SCCACHE_BUCKET=control-plane-sccache \
@@ -244,6 +248,7 @@ printf '%s' 'test-token' > "${workdir}/runtime-dhi-auth-state/control-plane-auth
 set +e
 runtime_dhi_auth_output="$("${container_bin}" run --rm \
   --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
   "${startup_caps[@]}" \
   -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForRegressionOnly control-plane-regression' \
   -e DOCKERHUB_USERNAME_FILE=/var/run/control-plane-auth/dockerhub-username \

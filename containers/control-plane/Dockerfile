@@ -169,6 +169,11 @@ RUN /usr/local/bin/install-git-skills-from-manifest /tmp/external-skills.yaml /u
     && chown -R "${CONTROL_PLANE_USER}:${CONTROL_PLANE_USER}" "/home/${CONTROL_PLANE_USER}/.config"
 
 WORKDIR /workspace
+# Supported runtimes still have to override this to root because the entrypoint
+# provisions mounted state, SSH host keys, and the rootful Podman service.
+USER ${CONTROL_PLANE_USER}
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["bash", "-lc", "node --version >/dev/null && gh --version >/dev/null && podman --version >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]
 EXPOSE 2222
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/control-plane-entrypoint"]
 CMD ["/usr/sbin/sshd", "-D", "-e", "-f", "/etc/ssh/sshd_config"]
