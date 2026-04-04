@@ -505,6 +505,16 @@ grep -Fq -- '- CHOWN' "${workdir}/k8s-job-manifest.yaml"
 grep -Fq -- '- FOWNER' "${workdir}/k8s-job-manifest.yaml"
 grep -Fq "chown -R \"\${CONTROL_PLANE_JOB_RUN_AS_UID}:\${CONTROL_PLANE_JOB_RUN_AS_GID}\" \"\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}\"" "${workdir}/k8s-job-manifest.yaml"
 grep -Fq "chmod -R u+rwX \"\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}\"" "${workdir}/k8s-job-manifest.yaml"
+if ! grep -A12 'name: job-transfer-sync' "${workdir}/k8s-job-manifest.yaml" | grep -Fq 'runAsUser: 0'; then
+  printf 'Expected job-transfer-sync to run as root so it can read the 0400 transfer Secret\n' >&2
+  grep -A20 'name: job-transfer-sync' "${workdir}/k8s-job-manifest.yaml" >&2 || true
+  exit 1
+fi
+if ! grep -A12 'name: job-transfer-sync' "${workdir}/k8s-job-manifest.yaml" | grep -Fq 'allowPrivilegeEscalation: false'; then
+  printf 'Expected job-transfer-sync to disable privilege escalation\n' >&2
+  grep -A20 'name: job-transfer-sync' "${workdir}/k8s-job-manifest.yaml" >&2 || true
+  exit 1
+fi
 
 PATH="${workdir}/fake-bin:${control_plane_bin_dir}:${PATH}" \
   HOME="${workdir}/k8s-home" \
