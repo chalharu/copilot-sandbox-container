@@ -10,10 +10,14 @@ RUN python -m venv "${VIRTUAL_ENV}" \
 
 FROM dhi.io/python:3-alpine3.23@sha256:e6aa0c22d51269a8cdefe8077a96e7f3b9eb7cbf49112557f493389de6a43bed
 
-ENV VIRTUAL_ENV=/opt/yamllint
+ENV VIRTUAL_ENV=/opt/yamllint \
+    HOME=/tmp
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 
 COPY --from=builder "${VIRTUAL_ENV}" "${VIRTUAL_ENV}"
 
 WORKDIR /workspace
+USER 65532:65532
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["yamllint", "--version"]
 ENTRYPOINT ["yamllint"]

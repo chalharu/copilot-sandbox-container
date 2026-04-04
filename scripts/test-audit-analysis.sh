@@ -5,6 +5,7 @@ control_plane_image="${1:?usage: scripts/test-audit-analysis.sh <control-plane-i
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-podman}"
 workdir="$(mktemp -d)"
 container_name="control-plane-audit-analysis-test"
+control_plane_run_user=(--user 0:0)
 startup_caps=(
   --cap-add AUDIT_WRITE
   --cap-add CHOWN
@@ -104,6 +105,7 @@ printf '%s\n' 'test-audit-analysis.sh: verifying audit analysis hook and bundled
 set +e
 output="$("${container_bin}" run --rm \
   --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
   -i \
   "${startup_caps[@]}" \
   -v "${workdir}/state/copilot:/home/copilot/.copilot" \

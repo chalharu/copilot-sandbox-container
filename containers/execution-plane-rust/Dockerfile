@@ -32,4 +32,6 @@ ENV SCCACHE_DIR=/workspace/.cache/sccache \
 
 WORKDIR /workspace
 USER ${EXECUTION_PLANE_USER}
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["bash", "-lc", "rustc --version >/dev/null && cargo --version >/dev/null && /usr/local/cargo/bin/sccache --version >/dev/null"]
 CMD ["bash"]

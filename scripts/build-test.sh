@@ -77,6 +77,9 @@ run_regressions_group() {
     "${script_dir}/test-image-maintenance.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
+    "${script_dir}/test-dockerfile-hardening.sh"
+
+  CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-rustfmt-style-edition.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \

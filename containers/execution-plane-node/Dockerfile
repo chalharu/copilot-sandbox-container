@@ -50,4 +50,6 @@ RUN apt-get update -o Acquire::Retries=3 \
 
 WORKDIR /workspace
 USER ${EXECUTION_PLANE_USER}
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["bash", "-lc", "node --version >/dev/null && npm --version >/dev/null && corepack --version >/dev/null"]
 CMD ["bash"]

@@ -456,6 +456,17 @@ EOF
         - name: job-transfer-sync
           image: $(yaml_quote "${job_transfer_image}")
           imagePullPolicy: $(yaml_quote "${job_image_pull_policy}")
+          securityContext:
+            privileged: false
+            runAsUser: 0
+            runAsGroup: ${job_run_as_gid}
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
           env:
             - name: CONTROL_PLANE_TRANSFER_ID
               value: $(yaml_quote "${created_transfer_id}")
