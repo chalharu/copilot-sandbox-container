@@ -17,8 +17,10 @@ command -v node >/dev/null 2>&1 || {
 
 node --test \
   containers/control-plane/hooks/audit/main.test.mjs \
+  containers/control-plane/hooks/preToolUse/exec-forward.test.mjs \
   containers/control-plane/hooks/postToolUse/main.test.mjs \
-  containers/control-plane/hooks/git/main.test.mjs
+  containers/control-plane/hooks/git/main.test.mjs \
+  containers/control-plane/hooks/sessionEnd/cleanup.test.mjs
 
 if [[ -z "${control_plane_image}" ]]; then
   exit 0
@@ -40,6 +42,7 @@ test -f /usr/local/share/control-plane/hooks/hooks.json
 test -f /usr/local/share/control-plane/hooks/audit/main.mjs
 test -f /usr/local/share/control-plane/hooks/auditAnalysis/main.mjs
 test -x /usr/local/share/control-plane/hooks/preToolUse/main
+test -f /usr/local/share/control-plane/hooks/preToolUse/exec-forward.mjs
 test -f /usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml
 test -f /usr/local/lib/libcontrol_plane_exec_policy.so
 test -x /usr/local/share/control-plane/hooks/git/pre-commit
@@ -48,6 +51,10 @@ test -f /usr/local/share/control-plane/hooks/git/lib/common.sh
 test -f /usr/local/share/control-plane/hooks/postToolUse/main.mjs
 test -f /usr/local/share/control-plane/hooks/postToolUse/linters.json
 test -f /usr/local/share/control-plane/hooks/postToolUse/lib/incremental-files.mjs
+test -f /usr/local/share/control-plane/hooks/sessionEnd/cleanup.mjs
+test -f /usr/local/bin/control-plane-exec-api.mjs
+test -x /usr/local/bin/control-plane-exec-api-launcher
+test -x /usr/local/bin/control-plane-session-exec
 test "${COPILOT_HOME}" = /var/lib/control-plane/managed-runtime/copilot-home
 test "${GIT_CONFIG_GLOBAL}" = /var/lib/control-plane/managed-runtime/gitconfig
 test -L /home/copilot/.copilot/hooks
@@ -61,6 +68,7 @@ test -f /home/copilot/.copilot/hooks/hooks.json
 test -f /home/copilot/.copilot/hooks/audit/main.mjs
 test -f /home/copilot/.copilot/hooks/auditAnalysis/main.mjs
 test -x /home/copilot/.copilot/hooks/preToolUse/main
+test -f /home/copilot/.copilot/hooks/preToolUse/exec-forward.mjs
 test -f /home/copilot/.copilot/hooks/preToolUse/deny-rules.yaml
 test -f /usr/local/lib/libcontrol_plane_exec_policy.so
 test -x /home/copilot/.copilot/hooks/git/pre-commit
@@ -69,12 +77,15 @@ test -f /home/copilot/.copilot/hooks/git/lib/common.sh
 test -f /home/copilot/.copilot/hooks/postToolUse/main.mjs
 test -f /home/copilot/.copilot/hooks/postToolUse/linters.json
 test -f /home/copilot/.copilot/hooks/postToolUse/lib/incremental-files.mjs
+test -f /home/copilot/.copilot/hooks/sessionEnd/cleanup.mjs
 git config --global --get core.hooksPath | grep -qx /usr/local/share/control-plane/hooks/git
 grep -Fq "COPILOT_HOME" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/audit/main.mjs" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/auditAnalysis/main.mjs" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/preToolUse/main" /home/copilot/.copilot/hooks/hooks.json
+grep -Fq "hooks/preToolUse/exec-forward.mjs" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/postToolUse/main.mjs" /home/copilot/.copilot/hooks/hooks.json
+grep -Fq "hooks/sessionEnd/cleanup.mjs" /home/copilot/.copilot/hooks/hooks.json
 ! grep -Fq ".github/hooks" /home/copilot/.copilot/hooks/hooks.json
 if su -s /bin/bash copilot -lc "printf tamper >> \"${GIT_CONFIG_GLOBAL}\"" 2>/dev/null; then
   printf "%s\n" "Expected managed git config to be read-only for the copilot user" >&2

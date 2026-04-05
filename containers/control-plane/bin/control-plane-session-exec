@@ -1,0 +1,678 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+runtime_config_file="${CONTROL_PLANE_RUNTIME_ENV_FILE:-${HOME:-/home/${USER:-copilot}}/.config/control-plane/runtime.env}"
+if [[ -f "${runtime_config_file}" ]]; then
+  # shellcheck disable=SC1090
+  source "${runtime_config_file}"
+fi
+
+state_file="${CONTROL_PLANE_SESSION_EXEC_STATE_FILE:-${HOME:-/home/${USER:-copilot}}/.copilot/session-state/session-exec.json}"
+lock_file="${state_file}.lock"
+workspace_mount_path="${CONTROL_PLANE_WORKSPACE_MOUNT_PATH:-${CONTROL_PLANE_WORKSPACE:-/workspace}}"
+workspace_pvc="${CONTROL_PLANE_WORKSPACE_PVC:-}"
+workspace_subpath="${CONTROL_PLANE_WORKSPACE_SUBPATH:-workspace}"
+copilot_session_pvc="${CONTROL_PLANE_COPILOT_SESSION_PVC:-}"
+copilot_session_gh_subpath="${CONTROL_PLANE_COPILOT_SESSION_GH_SUBPATH:-state/gh}"
+copilot_session_ssh_subpath="${CONTROL_PLANE_COPILOT_SESSION_SSH_SUBPATH:-state/ssh}"
+namespace="${CONTROL_PLANE_POD_NAMESPACE:-${CONTROL_PLANE_K8S_NAMESPACE:-default}}"
+owner_pod_name="${CONTROL_PLANE_POD_NAME:-${HOSTNAME:-}}"
+owner_pod_uid="${CONTROL_PLANE_POD_UID:-}"
+node_name="${CONTROL_PLANE_NODE_NAME:-}"
+image="${CONTROL_PLANE_FAST_EXECUTION_IMAGE:-}"
+env_configmap="${CONTROL_PLANE_FAST_EXECUTION_ENV_CONFIGMAP:-}"
+auth_secret="${CONTROL_PLANE_FAST_EXECUTION_AUTH_SECRET:-}"
+config_configmap="${CONTROL_PLANE_FAST_EXECUTION_CONFIG_CONFIGMAP:-}"
+garage_secret="${CONTROL_PLANE_FAST_EXECUTION_GARAGE_SECRET:-}"
+image_pull_policy="${CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY:-IfNotPresent}"
+start_timeout="${CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT:-120s}"
+port="${CONTROL_PLANE_FAST_EXECUTION_PORT:-8080}"
+cpu_request="${CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST:-250m}"
+cpu_limit="${CONTROL_PLANE_FAST_EXECUTION_CPU_LIMIT:-2}"
+memory_request="${CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST:-256Mi}"
+memory_limit="${CONTROL_PLANE_FAST_EXECUTION_MEMORY_LIMIT:-2Gi}"
+control_plane_user="${CONTROL_PLANE_USER:-copilot}"
+request_timeout="${CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC:-3600}"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  control-plane-session-exec prepare --session-key KEY [--refresh]
+  control-plane-session-exec proxy --session-key KEY --cwd PATH --command-base64 BASE64
+  control-plane-session-exec cleanup --session-key KEY
+USAGE
+}
+
+die() {
+  printf 'control-plane-session-exec: %s\n' "$*" >&2
+  exit 64
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+yaml_quote() {
+  local value="$1"
+  value="${value//\'/\'\'}"
+  printf "'%s'" "${value}"
+}
+
+ensure_single_line() {
+  local name="$1"
+  local value="$2"
+
+  [[ "${value}" != *$'\n'* ]] || die "${name} must not contain newlines"
+  [[ "${value}" != *$'\r'* ]] || die "${name} must not contain carriage returns"
+}
+
+ensure_enabled() {
+  [[ "${CONTROL_PLANE_FAST_EXECUTION_ENABLED:-0}" == "1" ]] \
+    || die "session execution pods are disabled (set CONTROL_PLANE_FAST_EXECUTION_ENABLED=1)"
+}
+
+ensure_configuration() {
+  [[ -n "${workspace_pvc}" ]] || die "CONTROL_PLANE_WORKSPACE_PVC is required"
+  [[ -n "${image}" ]] || die "CONTROL_PLANE_FAST_EXECUTION_IMAGE is required"
+  [[ -n "${owner_pod_name}" ]] || die "CONTROL_PLANE_POD_NAME is required"
+  [[ -n "${owner_pod_uid}" ]] || die "CONTROL_PLANE_POD_UID is required"
+  [[ -n "${namespace}" ]] || die "CONTROL_PLANE_POD_NAMESPACE or CONTROL_PLANE_K8S_NAMESPACE is required"
+  [[ -n "${node_name}" ]] || die "CONTROL_PLANE_NODE_NAME is required"
+  [[ "${port}" =~ ^[0-9]+$ ]] || die "CONTROL_PLANE_FAST_EXECUTION_PORT must be numeric"
+  [[ "${request_timeout}" =~ ^[0-9]+$ ]] || die "CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC must be numeric"
+  ensure_single_line "CONTROL_PLANE_FAST_EXECUTION_IMAGE" "${image}"
+  ensure_single_line "CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY" "${image_pull_policy}"
+  ensure_single_line "CONTROL_PLANE_POD_NAME" "${owner_pod_name}"
+  ensure_single_line "CONTROL_PLANE_POD_UID" "${owner_pod_uid}"
+  ensure_single_line "CONTROL_PLANE_POD_NAMESPACE" "${namespace}"
+  ensure_single_line "CONTROL_PLANE_NODE_NAME" "${node_name}"
+}
+
+ensure_state_file() {
+  mkdir -p "$(dirname "${state_file}")"
+  if [[ ! -f "${state_file}" ]]; then
+    printf '{"sessions":{}}\n' > "${state_file}"
+    chmod 600 "${state_file}"
+  fi
+}
+
+pod_name_for_session() {
+  local session_key="$1"
+  local normalized_session_key
+  local checksum
+
+  normalized_session_key="$(
+    printf '%s' "${session_key}" \
+      | tr '[:upper:]_' '[:lower:]-' \
+      | tr -cd 'a-z0-9-'
+  )"
+  normalized_session_key="$(sed -E 's/-+/-/g; s/^-+//; s/-+$//' <<<"${normalized_session_key}")"
+  [[ -n "${normalized_session_key}" ]] || normalized_session_key="session"
+  normalized_session_key="${normalized_session_key:0:33}"
+  checksum="$(printf '%s' "${owner_pod_name}:${session_key}" | sha256sum | awk '{ print $1 }' | cut -c1-10)"
+  printf 'control-plane-exec-%s-%s\n' "${checksum}" "${normalized_session_key}"
+}
+
+session_entry_json() {
+  local session_key="$1"
+
+  jq -c --arg session_key "${session_key}" '.sessions[$session_key] // empty' "${state_file}"
+}
+
+session_entry_field() {
+  local session_key="$1"
+  local field="$2"
+
+  jq -r --arg session_key "${session_key}" --arg field "${field}" '.sessions[$session_key][$field] // empty' "${state_file}"
+}
+
+write_session_entry() {
+  local session_key="$1"
+  local pod_name="$2"
+  local pod_ip="$3"
+  local auth_token="$4"
+  local updated_at_ms
+  local tmp
+
+  updated_at_ms="$(date +%s%3N)"
+  tmp="$(mktemp "${state_file}.XXXXXX")"
+  jq \
+    --arg session_key "${session_key}" \
+    --arg pod_name "${pod_name}" \
+    --arg pod_ip "${pod_ip}" \
+    --arg auth_token "${auth_token}" \
+    --arg namespace "${namespace}" \
+    --arg image "${image}" \
+    --arg owner_pod_name "${owner_pod_name}" \
+    --arg owner_pod_uid "${owner_pod_uid}" \
+    --arg node_name "${node_name}" \
+    --arg updated_at_ms "${updated_at_ms}" \
+    '
+      .sessions[$session_key] = {
+        podName: $pod_name,
+        podIp: $pod_ip,
+        authToken: $auth_token,
+        namespace: $namespace,
+        image: $image,
+        ownerPodName: $owner_pod_name,
+        ownerPodUid: $owner_pod_uid,
+        nodeName: $node_name,
+        updatedAtMs: ($updated_at_ms | tonumber)
+      }
+    ' \
+    "${state_file}" > "${tmp}"
+  mv "${tmp}" "${state_file}"
+  chmod 600 "${state_file}"
+}
+
+generate_session_token() {
+  head -c 32 /dev/urandom | base64 | tr -d '\n'
+}
+
+delete_session_entry() {
+  local session_key="$1"
+  local tmp
+
+  tmp="$(mktemp "${state_file}.XXXXXX")"
+  jq --arg session_key "${session_key}" 'del(.sessions[$session_key])' "${state_file}" > "${tmp}"
+  mv "${tmp}" "${state_file}"
+  chmod 600 "${state_file}"
+}
+
+pod_json() {
+  local pod_name="$1"
+
+  kubectl get pod --namespace "${namespace}" "${pod_name}" -o json 2>/dev/null || true
+}
+
+pod_ready() {
+  local pod_json_text="$1"
+
+  [[ -n "${pod_json_text}" ]] || return 1
+  jq -e '
+    .status.phase == "Running"
+    and (
+      (.status.containerStatuses // [])
+      | any(.name == "execution" and .ready == true)
+    )
+  ' >/dev/null <<<"${pod_json_text}"
+}
+
+pod_ip_from_json() {
+  local pod_json_text="$1"
+
+  jq -r '.status.podIP // empty' <<<"${pod_json_text}"
+}
+
+healthcheck() {
+  local pod_ip="$1"
+
+  [[ -n "${pod_ip}" ]] || return 1
+  curl --silent --show-error --fail --max-time 2 "http://${pod_ip}:${port}/healthz" >/dev/null
+}
+
+wait_for_healthcheck() {
+  local pod_ip="$1"
+
+  for _ in $(seq 1 30); do
+    if healthcheck "${pod_ip}"; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
+render_exec_pod_manifest() {
+  local session_key="$1"
+  local pod_name="$2"
+  local auth_token="$3"
+
+  cat <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $(yaml_quote "${pod_name}")
+  namespace: $(yaml_quote "${namespace}")
+  labels:
+    app.kubernetes.io/name: control-plane-fast-exec
+    control-plane.github.io/session-key: $(yaml_quote "${session_key}")
+  ownerReferences:
+    - apiVersion: v1
+      kind: Pod
+      name: $(yaml_quote "${owner_pod_name}")
+      uid: $(yaml_quote "${owner_pod_uid}")
+      controller: false
+      blockOwnerDeletion: false
+spec:
+  automountServiceAccountToken: false
+  restartPolicy: Always
+  nodeName: $(yaml_quote "${node_name}")
+  securityContext:
+    fsGroup: 1000
+  containers:
+    - name: execution
+      image: $(yaml_quote "${image}")
+      imagePullPolicy: $(yaml_quote "${image_pull_policy}")
+      command:
+        - bash
+        - -lc
+        - |
+          exec su -s /bin/bash ${control_plane_user} -c 'exec /usr/local/bin/control-plane-exec-api-launcher'
+      ports:
+        - name: http
+          containerPort: ${port}
+      readinessProbe:
+        httpGet:
+          path: /healthz
+          port: http
+        periodSeconds: 2
+        failureThreshold: 30
+      livenessProbe:
+        httpGet:
+          path: /healthz
+          port: http
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        failureThreshold: 6
+      resources:
+        requests:
+          cpu: $(yaml_quote "${cpu_request}")
+          memory: $(yaml_quote "${memory_request}")
+        limits:
+          cpu: $(yaml_quote "${cpu_limit}")
+          memory: $(yaml_quote "${memory_limit}")
+      securityContext:
+        privileged: false
+        runAsUser: 0
+        runAsNonRoot: false
+        allowPrivilegeEscalation: true
+        capabilities:
+          drop:
+            - ALL
+          add:
+            - AUDIT_WRITE
+            - CHOWN
+            - DAC_OVERRIDE
+            - FOWNER
+            - KILL
+            - MKNOD
+            - NET_ADMIN
+            - SETFCAP
+            - SETGID
+            - SETPCAP
+            - SETUID
+            - SYS_ADMIN
+            - SYS_CHROOT
+        seccompProfile:
+          type: Unconfined
+        appArmorProfile:
+          type: Unconfined
+      volumeMounts:
+        - name: workspace
+          mountPath: $(yaml_quote "${workspace_mount_path}")
+          subPath: $(yaml_quote "${workspace_subpath}")
+        - name: cache
+          mountPath: /var/lib/control-plane/rootful-podman
+          subPath: rootful-podman
+        - name: cache
+          mountPath: /var/tmp/control-plane
+          subPath: runtime-tmp
+EOF
+  if [[ -n "${copilot_session_pvc}" ]]; then
+    cat <<EOF
+        - name: copilot-session
+          mountPath: /home/${control_plane_user}/.config/gh
+          subPath: $(yaml_quote "${copilot_session_gh_subpath}")
+          readOnly: true
+        - name: copilot-session
+          mountPath: /home/${control_plane_user}/.ssh
+          subPath: $(yaml_quote "${copilot_session_ssh_subpath}")
+          readOnly: true
+EOF
+  fi
+  if [[ -n "${auth_secret}" ]]; then
+    cat <<'EOF'
+        - name: control-plane-auth
+          mountPath: /var/run/control-plane-auth
+          readOnly: true
+EOF
+  fi
+  if [[ -n "${config_configmap}" ]]; then
+    cat <<'EOF'
+        - name: control-plane-config
+          mountPath: /var/run/control-plane-config
+          readOnly: true
+EOF
+  fi
+  if [[ -n "${garage_secret}" ]]; then
+    cat <<'EOF'
+        - name: garage-sccache-auth
+          mountPath: /var/run/garage-sccache-auth
+          readOnly: true
+EOF
+  fi
+  if [[ -n "${env_configmap}" ]]; then
+    cat <<EOF
+      envFrom:
+        - configMapRef:
+            name: $(yaml_quote "${env_configmap}")
+EOF
+  fi
+  cat <<'EOF'
+      env:
+        - name: CONTROL_PLANE_DISABLE_SESSION_PICKER
+          value: "1"
+EOF
+  cat <<EOF
+        - name: CONTROL_PLANE_EXEC_API_TOKEN
+          value: $(yaml_quote "${auth_token}")
+EOF
+  cat <<EOF
+  volumes:
+    - name: workspace
+      persistentVolumeClaim:
+        claimName: $(yaml_quote "${workspace_pvc}")
+    - name: cache
+      emptyDir: {}
+EOF
+  if [[ -n "${copilot_session_pvc}" ]]; then
+    cat <<EOF
+    - name: copilot-session
+      persistentVolumeClaim:
+        claimName: $(yaml_quote "${copilot_session_pvc}")
+EOF
+  fi
+  if [[ -n "${auth_secret}" ]]; then
+    cat <<EOF
+    - name: control-plane-auth
+      secret:
+        secretName: $(yaml_quote "${auth_secret}")
+EOF
+  fi
+  if [[ -n "${config_configmap}" ]]; then
+    cat <<EOF
+    - name: control-plane-config
+      configMap:
+        name: $(yaml_quote "${config_configmap}")
+EOF
+  fi
+  if [[ -n "${garage_secret}" ]]; then
+    cat <<EOF
+    - name: garage-sccache-auth
+      secret:
+        secretName: $(yaml_quote "${garage_secret}")
+EOF
+  fi
+}
+
+ensure_pod_ready() {
+  local session_key="$1"
+  local refresh="${2:-0}"
+  local pod_name
+  local cached_pod_ip=""
+  local cached_auth_token=""
+  local current_entry=""
+  local current_pod_json=""
+  local current_pod_ip=""
+  local current_auth_token=""
+  local create_error=""
+  local session_auth_token=""
+
+  ensure_state_file
+  pod_name="$(pod_name_for_session "${session_key}")"
+
+  if [[ "${refresh}" -eq 0 ]]; then
+    current_entry="$(session_entry_json "${session_key}")"
+    if [[ -n "${current_entry}" ]]; then
+      cached_pod_ip="$(jq -r '.podIp // empty' <<<"${current_entry}")"
+      cached_auth_token="$(jq -r '.authToken // empty' <<<"${current_entry}")"
+      if [[ -n "${cached_auth_token}" ]] && healthcheck "${cached_pod_ip}"; then
+        printf '%s\n' "${cached_pod_ip}"
+        return 0
+      fi
+    fi
+  fi
+
+  current_pod_json="$(pod_json "${pod_name}")"
+  if pod_ready "${current_pod_json}"; then
+    current_pod_ip="$(pod_ip_from_json "${current_pod_json}")"
+    current_auth_token="$(session_entry_field "${session_key}" authToken)"
+    if [[ -n "${current_auth_token}" ]] && wait_for_healthcheck "${current_pod_ip}"; then
+      write_session_entry "${session_key}" "${pod_name}" "${current_pod_ip}" "${current_auth_token}"
+      printf '%s\n' "${current_pod_ip}"
+      return 0
+    fi
+  fi
+
+  if [[ -n "${current_pod_json}" ]]; then
+    kubectl delete pod --namespace "${namespace}" "${pod_name}" --ignore-not-found --wait=true >/dev/null
+  fi
+
+  session_auth_token="$(generate_session_token)"
+  create_error="$(mktemp "${TMPDIR:-/tmp}/control-plane-session-exec-create.XXXXXX")"
+  if ! render_exec_pod_manifest "${session_key}" "${pod_name}" "${session_auth_token}" \
+    | kubectl create -f - > /dev/null 2>"${create_error}"; then
+    if ! grep -Fq 'AlreadyExists' "${create_error}"; then
+      cat "${create_error}" >&2
+      rm -f "${create_error}"
+      die "failed to create execution pod ${pod_name}"
+    fi
+  fi
+  rm -f "${create_error}"
+
+  if ! kubectl wait --namespace "${namespace}" --for=condition=Ready "pod/${pod_name}" --timeout="${start_timeout}" >/dev/null; then
+    kubectl describe pod --namespace "${namespace}" "${pod_name}" >&2 || true
+    kubectl logs --namespace "${namespace}" "${pod_name}" -c execution >&2 || true
+    die "timed out waiting for execution pod ${pod_name} to become ready"
+  fi
+
+  current_pod_json="$(pod_json "${pod_name}")"
+  current_pod_ip="$(pod_ip_from_json "${current_pod_json}")"
+  if ! wait_for_healthcheck "${current_pod_ip}"; then
+    kubectl logs --namespace "${namespace}" "${pod_name}" -c execution >&2 || true
+    die "execution pod ${pod_name} did not pass health checks"
+  fi
+
+  write_session_entry "${session_key}" "${pod_name}" "${current_pod_ip}" "${session_auth_token}"
+  printf '%s\n' "${current_pod_ip}"
+}
+
+prepare_session() {
+  local session_key="$1"
+  local refresh="${2:-0}"
+
+  ensure_enabled
+  ensure_configuration
+  require_command kubectl
+  require_command jq
+  require_command curl
+  require_command sha256sum
+  require_command base64
+
+  ensure_state_file
+  exec 9>"${lock_file}"
+  flock -x 9
+  ensure_pod_ready "${session_key}" "${refresh}" >/dev/null
+}
+
+cleanup_session() {
+  local session_key="$1"
+  local pod_name
+  local pod_namespace
+
+  ensure_enabled
+  require_command kubectl
+  require_command jq
+  ensure_state_file
+
+  exec 9>"${lock_file}"
+  flock -x 9
+
+  pod_name="$(session_entry_field "${session_key}" podName)"
+  pod_namespace="$(session_entry_field "${session_key}" namespace)"
+  if [[ -z "${pod_name}" ]]; then
+    pod_name="$(pod_name_for_session "${session_key}")"
+  fi
+  if [[ -z "${pod_namespace}" ]]; then
+    pod_namespace="${namespace}"
+  fi
+
+  kubectl delete pod --namespace "${pod_namespace}" "${pod_name}" --ignore-not-found >/dev/null 2>&1 || true
+  delete_session_entry "${session_key}"
+}
+
+proxy_command() {
+  local session_key="$1"
+  local cwd="$2"
+  local command_base64="$3"
+  local pod_ip
+  local command
+  local payload
+  local response_file
+  local http_status
+  local exit_code
+  local auth_token
+
+  ensure_enabled
+  ensure_configuration
+  require_command base64
+  require_command curl
+  require_command jq
+  require_command kubectl
+
+  prepare_session "${session_key}" 0
+  pod_ip="$(session_entry_field "${session_key}" podIp)"
+  auth_token="$(session_entry_field "${session_key}" authToken)"
+  [[ -n "${auth_token}" ]] || die "missing execution pod auth token"
+  command="$(printf '%s' "${command_base64}" | base64 -d)"
+  payload="$(jq -cn --arg command "${command}" --arg cwd "${cwd}" '{command: $command, cwd: $cwd}')"
+  response_file="$(mktemp "${TMPDIR:-/tmp}/control-plane-session-exec-response.XXXXXX")"
+
+  set +e
+  http_status="$(
+    curl \
+      --silent \
+      --show-error \
+      --output "${response_file}" \
+      --write-out '%{http_code}' \
+      --max-time "${request_timeout}" \
+      --header 'Content-Type: application/json' \
+      --header "X-Control-Plane-Exec-Token: ${auth_token}" \
+      --data-binary "${payload}" \
+      "http://${pod_ip}:${port}/exec"
+  )"
+  curl_status=$?
+  set -e
+
+  if [[ "${curl_status}" -ne 0 ]] || [[ "${http_status}" != "200" ]]; then
+    prepare_session "${session_key}" 1
+    pod_ip="$(session_entry_field "${session_key}" podIp)"
+    auth_token="$(session_entry_field "${session_key}" authToken)"
+    [[ -n "${auth_token}" ]] || die "missing execution pod auth token"
+    set +e
+    http_status="$(
+      curl \
+        --silent \
+        --show-error \
+        --output "${response_file}" \
+        --write-out '%{http_code}' \
+        --max-time "${request_timeout}" \
+        --header 'Content-Type: application/json' \
+        --header "X-Control-Plane-Exec-Token: ${auth_token}" \
+        --data-binary "${payload}" \
+        "http://${pod_ip}:${port}/exec"
+    )"
+    curl_status=$?
+    set -e
+  fi
+
+  if [[ "${curl_status}" -ne 0 ]]; then
+    rm -f "${response_file}"
+    die "failed to reach execution pod API"
+  fi
+  if [[ "${http_status}" != "200" ]]; then
+    cat "${response_file}" >&2 || true
+    rm -f "${response_file}"
+    die "execution pod API returned HTTP ${http_status}"
+  fi
+
+  jq -e '.exitCode != null and (.exitCode | type == "number")' "${response_file}" >/dev/null \
+    || {
+      cat "${response_file}" >&2 || true
+      rm -f "${response_file}"
+      die "execution pod API returned invalid JSON"
+    }
+
+  jq -j '.stdout // ""' "${response_file}"
+  jq -j '.stderr // ""' "${response_file}" >&2
+  exit_code="$(jq -r '.exitCode' "${response_file}")"
+  rm -f "${response_file}"
+  exit "${exit_code}"
+}
+
+subcommand="${1:-}"
+case "${subcommand}" in
+  prepare|proxy|cleanup)
+    shift
+    ;;
+  --help|-h|'')
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    die "unknown subcommand: ${subcommand}"
+    ;;
+esac
+
+session_key=""
+refresh=0
+cwd=""
+command_base64=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --session-key)
+      session_key="$2"
+      shift 2
+      ;;
+    --refresh)
+      refresh=1
+      shift
+      ;;
+    --cwd)
+      cwd="$2"
+      shift 2
+      ;;
+    --command-base64)
+      command_base64="$2"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      die "unknown option: $1"
+      ;;
+  esac
+done
+
+[[ -n "${session_key}" ]] || die "--session-key is required"
+
+case "${subcommand}" in
+  prepare)
+    prepare_session "${session_key}" "${refresh}"
+    ;;
+  proxy)
+    [[ -n "${cwd}" ]] || die "--cwd is required for proxy"
+    [[ -n "${command_base64}" ]] || die "--command-base64 is required for proxy"
+    proxy_command "${session_key}" "${cwd}" "${command_base64}"
+    ;;
+  cleanup)
+    cleanup_session "${session_key}"
+    ;;
+esac

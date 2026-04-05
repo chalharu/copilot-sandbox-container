@@ -53,7 +53,7 @@ CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 <!-- Major architecture changes MUST trigger a rewrite of this section -->
 
 ```text
-/containers/control-plane         Control Plane image, entrypoints, bundled skills
+/containers/control-plane         Control Plane image, entrypoints, bundled skills, fast-exec helpers
 /containers/execution-plane-*     Reference Execution Plane images
 /deploy/kubernetes                Sample deployment manifests
 /scripts                          Supported lint/build/test entry points

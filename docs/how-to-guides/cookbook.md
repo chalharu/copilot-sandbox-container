@@ -52,6 +52,9 @@ runtime / cache / hook の具体的な path は
 - rootful-service の Podman graphroot が `~/.copilot/containers` ではなく disposable cache volume を使い、runtime dir は `/run` ではなく `/var/tmp/control-plane` 側へ逃がされる
 - rootful-service 下の `podman build` と `podman run` が通る
 - `--mount-file` が SSH/SFTP + `rclone` で大きめのファイルも運べ、競合時は安全に write-back を止める
+- `CONTROL_PLANE_FAST_EXECUTION_ENABLED=1` のとき、Copilot CLI の `bash`
+  tool が session-scoped Execution Pod に委譲され、`sessionEnd` /
+  OwnerReference で cleanup される
 
 ConfigMap / Secret / write-back の具体的な path は
 `docs/reference/control-plane-runtime.md` を参照してください。
@@ -84,10 +87,21 @@ ConfigMap / Secret / write-back の具体的な path は
    へ merge させる
 5. namespace / PVC / Job 既定値や file path などの非機密 env は
    `control-plane-env` ConfigMap にまとめ、Deployment の `envFrom` で読む
-6. `controlPlane.auditAnalysis.targetRepository.url` には skill / agent /
+6. Copilot CLI の `bash` tool を fast execution pod へ委譲する場合は、
+   `CONTROL_PLANE_FAST_EXECUTION_*` と
+   `CONTROL_PLANE_COPILOT_SESSION_{PVC,GH_SUBPATH,SSH_SUBPATH}` も
+   `control-plane-env` に置く
+7. `CONTROL_PLANE_POD_NAME` / `CONTROL_PLANE_POD_NAMESPACE` /
+   `CONTROL_PLANE_POD_UID` / `CONTROL_PLANE_NODE_NAME` は Deployment の
+   downward API `env:` で注入し、Execution Pod の OwnerReference / node pin
+   に使う
+8. control-plane ServiceAccount には同じ namespace の Pod を
+   `create/delete/get/list/watch` できる Role / RoleBinding
+   (`control-plane-exec-pods`) を付ける
+9. `controlPlane.auditAnalysis.targetRepository.url` には skill / agent /
    command の作成先 repo を置き、sample manifest では `example.com`
    の URL を使う
-7. 監査ログ DB の保持件数は `control-plane-env` ConfigMap の
+10. 監査ログ DB の保持件数は `control-plane-env` ConfigMap の
    `CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）で調整する
 
 ### 永続化と storage class を合わせる
@@ -172,7 +186,9 @@ kubectl get pod <pod-name> -n copilot-sandbox -o jsonpath='{.spec.containers[*].
 
 current-cluster では local Podman ではなく Kubernetes Job path が既定です。
 対話性や速度を優先したい短い処理だけ `--execution-hint short` を使い、
-既定運用は Job 側へ寄せてください。
+既定運用は Job 側へ寄せてください。Copilot CLI 自身の `bash` tool は別経路で、
+bundled `preToolUse` hook が session-scoped Execution Pod へ自動委譲します。
+`control-plane-run` は operator が explicit に叩く短命 command の選択面です。
 
 短い処理を local Podman へ寄せる:
 

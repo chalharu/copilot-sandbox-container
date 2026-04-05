@@ -32,9 +32,11 @@ markdown_files=()
 rust_workspace_dirs=()
 shellcheck_targets=(
   /workspace/containers/control-plane/bin/control-plane-copilot
+  /workspace/containers/control-plane/bin/control-plane-exec-api-launcher
   /workspace/containers/control-plane/bin/control-plane-podman
   /workspace/containers/control-plane/bin/control-plane-screen
   /workspace/containers/control-plane/bin/control-plane-entrypoint
+  /workspace/containers/control-plane/bin/control-plane-session-exec
   /workspace/containers/control-plane/hooks/git/pre-commit
   /workspace/containers/control-plane/hooks/git/pre-push
   /workspace/containers/control-plane/hooks/git/lib/common.sh

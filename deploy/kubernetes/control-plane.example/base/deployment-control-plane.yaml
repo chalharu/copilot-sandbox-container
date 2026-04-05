@@ -121,6 +121,23 @@ spec:
           envFrom:
             - configMapRef:
                 name: control-plane-env
+          env:
+            - name: CONTROL_PLANE_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: CONTROL_PLANE_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CONTROL_PLANE_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: CONTROL_PLANE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
           # Keep `drop: ALL`, but re-add the capabilities that SSH startup and
           # the current-cluster rootful Podman remote-service fallback need.
           # This stays `privileged: false`, yet still lets local `podman run`

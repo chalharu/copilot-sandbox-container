@@ -27,8 +27,26 @@ data:
   # TZ: Asia/Tokyo
   CONTROL_PLANE_K8S_NAMESPACE: copilot-sandbox
   CONTROL_PLANE_JOB_NAMESPACE: copilot-sandbox-jobs
+  CONTROL_PLANE_COPILOT_SESSION_PVC: control-plane-copilot-session-pvc
+  CONTROL_PLANE_COPILOT_SESSION_GH_SUBPATH: state/gh
+  CONTROL_PLANE_COPILOT_SESSION_SSH_SUBPATH: state/ssh
   CONTROL_PLANE_WORKSPACE_PVC: control-plane-workspace-pvc
   CONTROL_PLANE_WORKSPACE_SUBPATH: workspace
+  # Enable session-scoped execution pods for Copilot CLI bash commands.
+  CONTROL_PLANE_FAST_EXECUTION_ENABLED: "1"
+  CONTROL_PLANE_FAST_EXECUTION_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha
+  CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: IfNotPresent
+  CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 120s
+  CONTROL_PLANE_FAST_EXECUTION_PORT: "8080"
+  CONTROL_PLANE_FAST_EXECUTION_ENV_CONFIGMAP: control-plane-env
+  CONTROL_PLANE_FAST_EXECUTION_AUTH_SECRET: control-plane-auth
+  CONTROL_PLANE_FAST_EXECUTION_CONFIG_CONFIGMAP: control-plane-config
+  CONTROL_PLANE_FAST_EXECUTION_GARAGE_SECRET: garage-sccache-auth
+  CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST: 250m
+  CONTROL_PLANE_FAST_EXECUTION_CPU_LIMIT: "2"
+  CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST: 256Mi
+  CONTROL_PLANE_FAST_EXECUTION_MEMORY_LIMIT: 2Gi
+  CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC: "3600"
   # Rust Kubernetes jobs keep only ephemeral local sccache state under /var/tmp
   # and store shared cache objects in the in-cluster Garage S3 service.
   SCCACHE_BUCKET: control-plane-sccache

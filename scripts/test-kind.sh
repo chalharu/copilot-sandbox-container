@@ -68,8 +68,8 @@ create_cluster() {
   cat "${create_log}" >&2
 
   if [[ "${kind_provider}" == "podman" ]] \
-    && grep -Eq 'cannot set multiple networks without bridge network mode, selected mode host: invalid argument|failed to enable forwarding: open /proc/sys/net/ipv4/ip_forward: read-only file system' "${create_log}"; then
-    printf '%s\n' 'kind-test: skipping because the current outer runtime does not allow Podman bridge networking for Kind' >&2
+    && grep -Eq 'cannot set multiple networks without bridge network mode, selected mode host: invalid argument|failed to enable forwarding: open /proc/sys/net/ipv4/ip_forward: read-only file system|statfs /lib/modules: no such file or directory' "${create_log}"; then
+    printf '%s\n' 'kind-test: skipping because the current outer runtime lacks the kernel features Kind needs under Podman' >&2
     return 2
   fi
 
@@ -282,6 +282,33 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
+  name: control-plane-exec-pods
+  namespace: ${namespace}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: control-plane-exec-pods
+  namespace: ${namespace}
+subjects:
+  - kind: ServiceAccount
+    name: control-plane
+    namespace: ${namespace}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: control-plane-exec-pods
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
   name: control-plane-jobs
   namespace: ${job_namespace}
 rules:
@@ -295,7 +322,7 @@ rules:
     resources: ["pods/log"]
     verbs: ["get"]
   - apiGroups: [""]
-    resources: ["secrets"]
+    resources: ["secrets", "configmaps"]
     verbs: ["create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -476,8 +503,24 @@ data:
   GH_GITHUB_TOKEN_FILE: /var/run/control-plane-auth/gh-github-token
   CONTROL_PLANE_K8S_NAMESPACE: ${namespace}
   CONTROL_PLANE_JOB_NAMESPACE: ${job_namespace}
+  CONTROL_PLANE_COPILOT_SESSION_PVC: control-plane-copilot-session-pvc
+  CONTROL_PLANE_COPILOT_SESSION_GH_SUBPATH: state/gh
+  CONTROL_PLANE_COPILOT_SESSION_SSH_SUBPATH: state/ssh
   CONTROL_PLANE_WORKSPACE_PVC: control-plane-workspace-pvc
   CONTROL_PLANE_WORKSPACE_SUBPATH: workspace
+  CONTROL_PLANE_FAST_EXECUTION_ENABLED: "1"
+  CONTROL_PLANE_FAST_EXECUTION_IMAGE: ${control_plane_image}
+  CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: Never
+  CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 120s
+  CONTROL_PLANE_FAST_EXECUTION_PORT: "8080"
+  CONTROL_PLANE_FAST_EXECUTION_ENV_CONFIGMAP: control-plane-env
+  CONTROL_PLANE_FAST_EXECUTION_AUTH_SECRET: control-plane-auth
+  CONTROL_PLANE_FAST_EXECUTION_CONFIG_CONFIGMAP: control-plane-config
+  CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST: 250m
+  CONTROL_PLANE_FAST_EXECUTION_CPU_LIMIT: "1"
+  CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST: 256Mi
+  CONTROL_PLANE_FAST_EXECUTION_MEMORY_LIMIT: 1Gi
+  CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC: "3600"
   CONTROL_PLANE_JOB_WORKSPACE_PVC: control-plane-workspace-pvc
   CONTROL_PLANE_JOB_WORKSPACE_SUBPATH: workspace
   CONTROL_PLANE_JOB_SERVICE_ACCOUNT: control-plane-job
@@ -647,6 +690,23 @@ spec:
           envFrom:
             - configMapRef:
                 name: control-plane-env
+          env:
+            - name: CONTROL_PLANE_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: CONTROL_PLANE_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CONTROL_PLANE_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: CONTROL_PLANE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
           # Keep the Kind test on the same current-cluster-compatible profile as
           # the sample manifest: drop: ALL, explicit capability re-adds, and a
           # rootful local Podman remote-service fallback instead of nested
@@ -765,6 +825,7 @@ command -v k8s-job-pod
 command -v k8s-job-logs
 command -v control-plane-copilot
 command -v control-plane-job-transfer
+command -v control-plane-session-exec
 command -v podman
 command -v docker
 command -v kind
@@ -836,6 +897,9 @@ test -d "\${expected_state_dir}/storage/volumes"
 test -d /var/tmp/control-plane/rootful-overlay/runroot
 printf '%s\n' 'kind-test remote: storage paths ok' >&2
 test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
+test "\${CONTROL_PLANE_FAST_EXECUTION_ENABLED}" = "1"
+test "\${CONTROL_PLANE_FAST_EXECUTION_IMAGE}" = "${control_plane_image}"
+test "\${CONTROL_PLANE_COPILOT_SESSION_PVC}" = "control-plane-copilot-session-pvc"
 cat /proc/self/uid_map > /workspace/k8s-pod-uid-map.txt
 printf '%s\n' 'kind-test remote: runtime env and workspace write ok' >&2
 EOF
@@ -872,6 +936,9 @@ ls -la /home/copilot/.copilot /home/copilot/.copilot/containers || true
 ls -la /var/lib/control-plane/rootful-podman || true
 printf '%s\n' '--- runtime env ---'
 printf 'CONTROL_PLANE_JOB_NAMESPACE=%s\n' "${CONTROL_PLANE_JOB_NAMESPACE:-}" || true
+printf 'CONTROL_PLANE_FAST_EXECUTION_ENABLED=%s\n' "${CONTROL_PLANE_FAST_EXECUTION_ENABLED:-}" || true
+printf 'CONTROL_PLANE_FAST_EXECUTION_IMAGE=%s\n' "${CONTROL_PLANE_FAST_EXECUTION_IMAGE:-}" || true
+printf 'CONTROL_PLANE_COPILOT_SESSION_PVC=%s\n' "${CONTROL_PLANE_COPILOT_SESSION_PVC:-}" || true
 cat /proc/self/uid_map || true
 EOF
     dump_control_plane_diagnostics
@@ -929,6 +996,28 @@ if [[ "\${secrets_status}" -ne 0 ]] || [[ "\${secrets_access}" != "yes" ]]; then
   kubectl config current-context >&2 || true
   exit 1
 fi
+set +e
+configmaps_access="\$(kubectl auth can-i create configmaps --namespace ${job_namespace} 2>&1)"
+configmaps_status=\$?
+set -e
+if [[ "\${configmaps_status}" -ne 0 ]] || [[ "\${configmaps_access}" != "yes" ]]; then
+  printf 'Expected control-plane service account to create configmaps in namespace %s\n' "${job_namespace}" >&2
+  printf 'kubectl auth can-i exit status: %s\n' "\${configmaps_status}" >&2
+  printf '%s\n' "\${configmaps_access}" >&2
+  kubectl config current-context >&2 || true
+  exit 1
+fi
+set +e
+pods_access="\$(kubectl auth can-i create pods --namespace ${namespace} 2>&1)"
+pods_status=\$?
+set -e
+if [[ "\${pods_status}" -ne 0 ]] || [[ "\${pods_access}" != "yes" ]]; then
+  printf 'Expected control-plane service account to create pods in namespace %s\n' "${namespace}" >&2
+  printf 'kubectl auth can-i exit status: %s\n' "\${pods_status}" >&2
+  printf '%s\n' "\${pods_access}" >&2
+  kubectl config current-context >&2 || true
+  exit 1
+fi
 EOF
   printf '%s\n' 'kind-test: rbac assertions ok' >&2
 
@@ -939,6 +1028,58 @@ EOF
 )"
   [[ "${utf8_roundtrip}" == "日本語★" ]]
   printf '%s\n' 'kind-test: utf8 roundtrip ok' >&2
+}
+
+run_fast_exec_assertions() {
+  printf '%s\n' 'kind-test: verifying fast execution pod flow' >&2
+  if ! ssh_bash <<'EOF'
+set -euo pipefail
+session_key=kind-fast-exec
+control-plane-session-exec cleanup --session-key "${session_key}" >/dev/null 2>&1 || true
+control-plane-session-exec prepare --session-key "${session_key}" >/dev/null
+jq -e --arg key "${session_key}" '.sessions[$key].podName != null and .sessions[$key].podIp != null' \
+  ~/.copilot/session-state/session-exec.json >/dev/null
+pod_name="$(jq -r --arg key "${session_key}" '.sessions[$key].podName' ~/.copilot/session-state/session-exec.json)"
+pod_ip="$(jq -r --arg key "${session_key}" '.sessions[$key].podIp' ~/.copilot/session-state/session-exec.json)"
+test -n "${pod_name}"
+test -n "${pod_ip}"
+kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${pod_name}" -o json > /workspace/k8s-fast-exec-pod.json
+test "$(jq -r '.metadata.ownerReferences[0].kind' /workspace/k8s-fast-exec-pod.json)" = "Pod"
+test "$(jq -r '.metadata.ownerReferences[0].name' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_POD_NAME}"
+test "$(jq -r '.metadata.ownerReferences[0].uid' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_POD_UID}"
+test "$(jq -r '.spec.nodeName' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_NODE_NAME}"
+test "$(jq -r '.spec.containers[0].image' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_FAST_EXECUTION_IMAGE}"
+test "$(jq -r '.spec.volumes[] | select(.name == "workspace").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "control-plane-workspace-pvc"
+test "$(jq -r '.spec.volumes[] | select(.name == "copilot-session").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "control-plane-copilot-session-pvc"
+command_text=$'printf "fast-exec-stdout\\n"; printf "fast-exec-stderr\\n" >&2; printf "delegated\\n" > /workspace/fast-exec-marker.txt; exit 7'
+command_base64="$(printf '%s' "${command_text}" | base64 | tr -d '\n')"
+set +e
+control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${command_base64}" \
+  > /workspace/k8s-fast-exec-stdout.txt 2> /workspace/k8s-fast-exec-stderr.txt
+proxy_status=$?
+set -e
+test "${proxy_status}" -eq 7
+grep -qx 'fast-exec-stdout' /workspace/k8s-fast-exec-stdout.txt
+grep -qx 'fast-exec-stderr' /workspace/k8s-fast-exec-stderr.txt
+grep -qx 'delegated' /workspace/fast-exec-marker.txt
+control-plane-session-exec cleanup --session-key "${session_key}"
+! kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${pod_name}" >/dev/null 2>&1
+jq -e --arg key "${session_key}" '.sessions[$key] == null' ~/.copilot/session-state/session-exec.json >/dev/null
+EOF
+  then
+    ssh_bash <<'EOF' >&2 || true
+set +e
+printf '%s\n' '--- fast exec debug ---'
+cat ~/.copilot/session-state/session-exec.json || true
+cat /workspace/k8s-fast-exec-pod.json || true
+cat /workspace/k8s-fast-exec-stdout.txt || true
+cat /workspace/k8s-fast-exec-stderr.txt || true
+kubectl get pods --namespace "${CONTROL_PLANE_POD_NAMESPACE:-default}" -o wide || true
+EOF
+    dump_control_plane_diagnostics
+    exit 1
+  fi
+  printf '%s\n' 'kind-test: fast execution pod flow ok' >&2
 }
 
 start_persistence_session_fixtures() {
@@ -1393,8 +1534,11 @@ case "${kind_test_group}" in
 esac
 
 if ! kind_cmd get clusters | grep -qx "${cluster_name}"; then
-  if ! create_cluster; then
-    status=$?
+  set +e
+  create_cluster
+  status=$?
+  set -e
+  if [[ "${status}" -ne 0 ]]; then
     if [[ "${status}" -eq 2 ]]; then
       exit 0
     fi
@@ -1415,6 +1559,9 @@ start_port_forward
 wait_for_ssh
 
 run_shared_remote_assertions
+if [[ "${kind_test_group}" == "all" ]] || [[ "${kind_test_group}" == "session" ]]; then
+  run_fast_exec_assertions
+fi
 
 case "${kind_test_group}" in
   all)
