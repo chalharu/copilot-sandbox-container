@@ -23,7 +23,7 @@
 | Service の `EXTERNAL-IP` が `pending` | [§9](#9-service-の-external-ip-が未割当て) |
 | injected Copilot config が壊れている | [§10](#10-injected-copilot-config-が壊れている) |
 | gh Secret の指定が足りない | [§11](#11-gh-secret-の指定が足りない) |
-| 監査分析 hook の設定が壊れている | [§12](#12-監査分析-hook-の設定が壊れている) |
+| execution image の bootstrap に失敗する | [§12](#12-execution-image-の-bootstrap-に失敗する) |
 | `control-plane-sccache-pvc` が `Pending` のまま | [§13](#13-garage-cache-pvc-が-bound-しない) |
 
 ## 1. bundled skill が読めない
@@ -31,19 +31,19 @@
 ### 代表ログ
 
 ```text
-ls: cannot access '/home/copilot/.copilot/skills/control-plane-operations/references/control-plane-run.md': Permission denied
-ls: cannot access '/home/copilot/.copilot/skills/control-plane-operations/references/skills.md': Permission denied
+cat: /home/copilot/.copilot/skills/repo-change-delivery/SKILL.md: Permission denied
 ```
 
 ### 意味
 
-`references/` directory に execute bit が無く、path traversal が壊れています。symlink 同期と image build 時の mode 崩れが主因です。
+bundled skill directory の mode が壊れ、path traversal ができません。copy 同期後の
+directory / file mode が崩れると発生します。
 
 ### 期待する確認結果
 
-- `~/.copilot/skills/control-plane-operations` が symlink ではない
-- `references/` が `drwxr-xr-x` 相当
-- `control-plane-run.md` と `skills.md` が `-rw-r--r--` 相当
+- `~/.copilot/skills/repo-change-delivery` が symlink ではない
+- skill directory が `drwxr-xr-x` 相当
+- `SKILL.md` が `-rw-r--r--` 相当
 
 ## 2. capability が足りず起動時に止まる
 
@@ -188,23 +188,25 @@ Refusing to install an empty gh hosts source from /var/run/control-plane-auth/gh
 
 `GH_GITHUB_TOKEN_FILE` または `GH_HOSTS_YML_FILE` を env で指定したのに、対応する Secret key が無いか空です。`gh-hosts.yml` を使う場合はその file が優先され、無ければ `gh-github-token` から最小 `~/.config/gh/hosts.yml` を生成する、という順序で動きます。
 
-## 12. 監査分析 hook の設定が壊れている
+## 12. execution image の bootstrap に失敗する
 
 ### 代表ログ
 
 ```text
-control-plane audit analysis: Audit analysis config at /home/copilot/.copilot/config.json must define controlPlane.auditAnalysis as a JSON object.
+unsupported execution image package manager: need apk or apt-get
 ```
 
 ### 意味
 
-`control-plane-config` ConfigMap の `copilot-config.json` overlay で、`controlPlane.auditAnalysis` が JSON object ではないか、壊れた値が入っています。bundled `audit-log-analysis` skill と lifecycle analysis hooks (`agentStop` / `subagentStop` / `sessionEnd` / `errorOccurred`) は同じ設定を読むため、ここが壊れると `~/.copilot/session-state/audit/audit-analysis.db` の更新も止まります。
+Execution Pod の base image が `/bin/sh` を持たないか、bootstrap 時に `apk` / `apt-get`
+のどちらも使えません。現行の session-exec bootstrap は、まず staged Rust gRPC binary
+を起動し、その後 gRPC 経由で `bash` / `git` / `gh` を導入する前提です。
 
 ### 期待する確認結果
 
-- `~/.copilot/config.json` の `controlPlane.auditAnalysis` が JSON object
-- `~/.copilot/session-state/audit/audit-analysis.db` が存在する
-- `node ~/.copilot/skills/audit-log-analysis/scripts/audit-analysis.mjs status --json` が成功する
+- `CONTROL_PLANE_FAST_EXECUTION_IMAGE` が Linux base image を指す
+- image 内に `/bin/sh` がある
+- image 内で `apk` か `apt-get` のどちらかが使える
 
 ## 13. Garage cache PVC が Bound しない
 

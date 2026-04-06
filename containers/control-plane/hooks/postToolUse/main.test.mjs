@@ -179,13 +179,13 @@ function createToolStubs(
 				'printf "bash %s\\n" "$*" >> "$HOOK_LOG"',
 				'printf "NODE_COMPILE_CACHE=%s\\n" "$NODE_COMPILE_CACHE" >> "$HOOK_LOG"',
 				'printf "NPM_CONFIG_CACHE=%s\\n" "$NPM_CONFIG_CACHE" >> "$HOOK_LOG"',
-				'if [ "$1" = "containers/control-plane/skills/containerized-rust-ops/scripts/control-plane-rust.sh" ] && [ "$2" = "fmt" ]; then',
+				'if [ "$1" = "/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh" ] && [ "$2" = "fmt" ]; then',
 				"  exit 0",
 				"fi",
-				'if [ "$1" = "containers/control-plane/skills/containerized-rust-ops/scripts/control-plane-rust.sh" ] && [ "$2" = "clippy-fix" ]; then',
+				'if [ "$1" = "/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh" ] && [ "$2" = "clippy-fix" ]; then',
 				"  exit 0",
 				"fi",
-				'if [ "$1" = "containers/control-plane/skills/containerized-rust-ops/scripts/control-plane-rust.sh" ] && [ "$2" = "clippy" ]; then',
+				'if [ "$1" = "/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh" ] && [ "$2" = "clippy" ]; then',
 				'  printf "clippy unresolved\\n" >&2',
 				"  exit 1",
 				"fi",
@@ -391,7 +391,7 @@ test("linters config defines concrete tools and language pipelines", () => {
 	]);
 	assert.equal(controlPlaneRustFmt.command, "bash");
 	assert.deepEqual(controlPlaneRustFmt.args, [
-		"containers/control-plane/skills/containerized-rust-ops/scripts/control-plane-rust.sh",
+		"/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh",
 		"fmt",
 	]);
 	assert.equal(controlPlaneRustFmt.appendFiles, false);
@@ -518,15 +518,15 @@ test("main hook runs Python Rust YAML and Dockerfile pipelines", (t) => {
 	assert.match(hookLog, /ruff check --fix app\.py/);
 	assert.match(
 		hookLog,
-		/bash containers\/control-plane\/skills\/containerized-rust-ops\/scripts\/control-plane-rust\.sh fmt/,
+		/bash \/usr\/local\/share\/control-plane\/hooks\/postToolUse\/control-plane-rust\.sh fmt/,
 	);
 	assert.match(
 		hookLog,
-		/bash containers\/control-plane\/skills\/containerized-rust-ops\/scripts\/control-plane-rust\.sh clippy-fix/,
+		/bash \/usr\/local\/share\/control-plane\/hooks\/postToolUse\/control-plane-rust\.sh clippy-fix/,
 	);
 	assert.match(
 		hookLog,
-		/bash containers\/control-plane\/skills\/containerized-rust-ops\/scripts\/control-plane-rust\.sh clippy/,
+		/bash \/usr\/local\/share\/control-plane\/hooks\/postToolUse\/control-plane-rust\.sh clippy/,
 	);
 	assert.match(hookLog, /yamllint -c \.yamllint sample\.yaml/);
 	assert.match(hookLog, /hadolint Dockerfile/);

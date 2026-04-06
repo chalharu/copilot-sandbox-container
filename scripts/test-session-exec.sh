@@ -6,8 +6,18 @@ command -v node >/dev/null 2>&1 || {
   exit 1
 }
 
-bash containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh \
-  -- \
-  cargo test --manifest-path containers/control-plane/exec-api/Cargo.toml
+container_bin="${CONTROL_PLANE_CONTAINER_BIN:-docker}"
+control_plane_image="${CONTROL_PLANE_IMAGE_TAG:-localhost/control-plane:test}"
+
+command -v "${container_bin}" >/dev/null 2>&1 || {
+  printf 'test-session-exec.sh: %s is required\n' "${container_bin}" >&2
+  exit 1
+}
+
+"${container_bin}" run --rm --user 0:0 \
+  -v "${PWD}:/workspace" \
+  -w /workspace \
+  "${control_plane_image}" \
+  bash -lc 'cargo test --manifest-path containers/control-plane/exec-api/Cargo.toml'
 
 node --test containers/control-plane/bin/control-plane-session-exec.test.mjs

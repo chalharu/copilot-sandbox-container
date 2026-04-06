@@ -168,6 +168,12 @@ import fs from "node:fs";
 const args = process.argv.slice(2);
 const argsFile = process.env.EXEC_API_TEST_ARGS_FILE;
 const execResponse = process.env.EXEC_API_TEST_RESPONSE || '{"stdout":"","stderr":"","exitCode":0}';
+const bootstrapResponse = process.env.EXEC_API_TEST_BOOTSTRAP_RESPONSE || '{"stdout":"","stderr":"","exitCode":0}';
+
+function argAfter(flag) {
+  const index = args.indexOf(flag);
+  return index === -1 ? "" : args[index + 1];
+}
 
 if (argsFile) {
   fs.appendFileSync(argsFile, \`\${JSON.stringify(args)}\\n\`, "utf8");
@@ -178,7 +184,13 @@ if (args[0] === "health") {
 }
 
 if (args[0] === "exec") {
-  process.stdout.write(execResponse);
+  const commandBase64 = argAfter("--command-base64");
+  const command = commandBase64
+    ? Buffer.from(commandBase64, "base64").toString("utf8")
+    : "";
+  process.stdout.write(
+    command.includes("runtime-ready") ? bootstrapResponse : execResponse,
+  );
   process.exit(0);
 }
 
@@ -198,6 +210,11 @@ process.exit(1);
 			KUBECTL_TEST_POD_IP: "10.20.30.40",
 			EXEC_API_TEST_ARGS_FILE: execApiArgsFile,
 			EXEC_API_TEST_RESPONSE: JSON.stringify(execResponse),
+			EXEC_API_TEST_BOOTSTRAP_RESPONSE: JSON.stringify({
+				stdout: "",
+				stderr: "",
+				exitCode: 0,
+			}),
 			CONTROL_PLANE_FAST_EXECUTION_ENABLED: "1",
 			CONTROL_PLANE_WORKSPACE_PVC: "control-plane-workspace-pvc",
 			CONTROL_PLANE_WORKSPACE_SUBPATH: "workspace",
@@ -209,11 +226,13 @@ process.exit(1);
 			CONTROL_PLANE_POD_NAMESPACE: "copilot-sandbox",
 			CONTROL_PLANE_NODE_NAME: "kind-control-plane",
 			CONTROL_PLANE_FAST_EXECUTION_IMAGE: "ghcr.io/example/control-plane:test",
-			CONTROL_PLANE_FAST_EXECUTION_ENV_CONFIGMAP: "control-plane-env",
-			CONTROL_PLANE_FAST_EXECUTION_AUTH_SECRET: "control-plane-auth",
-			CONTROL_PLANE_FAST_EXECUTION_CONFIG_CONFIGMAP: "control-plane-config",
-			CONTROL_PLANE_FAST_EXECUTION_GARAGE_SECRET: "garage-sccache-auth",
+			CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE:
+				"ghcr.io/example/control-plane-bootstrap:test",
 			CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: "Never",
+			CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: "IfNotPresent",
+			CONTROL_PLANE_FAST_EXECUTION_HOME: "/root",
+			CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_ROOT:
+				"/var/run/control-plane-bootstrap",
 			CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST: "250m",
 			CONTROL_PLANE_FAST_EXECUTION_CPU_LIMIT: "1",
 			CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST: "256Mi",
@@ -297,19 +316,35 @@ test("prepare renders the execution pod manifest and caches the pod state", (t) 
 	assert.match(manifest, /uid: 'pod-uid-1'/);
 	assert.match(manifest, /nodeName: 'kind-control-plane'/);
 	assert.match(manifest, /image: 'ghcr.io\/example\/control-plane:test'/);
+	assert.match(
+		manifest,
+		/image: 'ghcr.io\/example\/control-plane-bootstrap:test'/,
+	);
 	assert.match(manifest, /imagePullPolicy: 'Never'/);
+	assert.match(manifest, /initContainers:/);
+	assert.match(manifest, /name: bootstrap-assets/);
+	assert.match(
+		manifest,
+		/cp \/usr\/local\/bin\/control-plane-exec-api \/var\/run\/control-plane-bootstrap\/bin\/control-plane-exec-api/,
+	);
 	assert.match(manifest, /grpc:/);
 	assert.doesNotMatch(manifest, /httpGet:/);
 	assert.match(manifest, /- name: workspace/);
 	assert.match(manifest, /claimName: 'control-plane-workspace-pvc'/);
 	assert.match(manifest, /- name: copilot-session/);
 	assert.match(manifest, /claimName: 'control-plane-copilot-session-pvc'/);
-	assert.match(manifest, /- name: control-plane-auth/);
-	assert.match(manifest, /secretName: 'control-plane-auth'/);
-	assert.match(manifest, /- name: control-plane-config/);
-	assert.match(manifest, /- name: garage-sccache-auth/);
-	assert.match(manifest, /envFrom:/);
-	assert.match(manifest, /name: 'control-plane-env'/);
+	assert.match(manifest, /- name: bootstrap/);
+	assert.match(manifest, /mountPath: '\/var\/run\/control-plane-bootstrap'/);
+	assert.match(manifest, /mountPath: '\/root\/.config\/gh'/);
+	assert.match(manifest, /mountPath: '\/root\/.ssh'/);
+	assert.match(manifest, /name: HOME/);
+	assert.match(manifest, /value: '\/root'/);
+	assert.match(manifest, /name: GIT_CONFIG_GLOBAL/);
+	assert.match(manifest, /value: '\/root\/.gitconfig'/);
+	assert.doesNotMatch(manifest, /control-plane-auth/);
+	assert.doesNotMatch(manifest, /control-plane-config/);
+	assert.doesNotMatch(manifest, /garage-sccache-auth/);
+	assert.doesNotMatch(manifest, /envFrom:/);
 	assert.match(manifest, /name: CONTROL_PLANE_EXEC_API_TOKEN/);
 	assert.match(
 		manifest,
@@ -351,7 +386,12 @@ test("proxy reuses the cached execution pod and cleanup removes it", (t) => {
 	assert.equal(proxyResult.stderr, "proxy stderr\n");
 
 	const execApiCalls = readJsonLines(harness.execApiArgsFile);
-	const execArgs = execApiCalls.find((args) => args[0] === "exec");
+	const execArgs = execApiCalls.find(
+		(args) =>
+			args[0] === "exec" &&
+			args.includes("--command-base64") &&
+			args[args.indexOf("--command-base64") + 1] === commandBase64,
+	);
 	assert.ok(execArgs);
 	assert.deepEqual(execArgs, [
 		"exec",

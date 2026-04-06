@@ -95,9 +95,10 @@ ConfigMap / Secret / write-back の具体的な path は
 8. control-plane ServiceAccount には同じ namespace の Pod を
    `create/delete/get/list/watch` できる Role / RoleBinding
    (`control-plane-exec-pods`) を付ける
-9. `controlPlane.auditAnalysis.targetRepository.url` には skill / agent /
-   command の作成先 repo を置き、sample manifest では `example.com`
-   の URL を使う
+9. `CONTROL_PLANE_FAST_EXECUTION_IMAGE` には delegated bash を実行したい
+   任意の Linux image（例: `ubuntu:24.04` や `alpine:3.22`）を置き、
+   `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` には Rust 製 exec-plane
+   binary と bundled Git hook を持つ control-plane image を置く
 10. 監査ログ DB の保持件数は `control-plane-env` ConfigMap の
    `CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）で調整する
 

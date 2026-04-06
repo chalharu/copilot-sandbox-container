@@ -74,7 +74,7 @@ assert_file_contains "${build_test_path}" 'run_kind_group session'
 assert_file_contains "${build_test_path}" 'run_kind_group jobs'
 assert_file_contains "${build_test_path}" 'run_kind_group jobs-core'
 assert_file_contains "${build_test_path}" 'run_kind_group jobs-transfer'
-assert_file_contains "${kind_test_path}" 'if [[ "${kind_test_group}" == "all" ]] || [[ "${kind_test_group}" == "session" ]]; then'
+assert_file_contains "${kind_test_path}" "if [[ \"\${kind_test_group}\" == \"all\" ]] || [[ \"\${kind_test_group}\" == \"session\" ]]; then"
 assert_file_contains "${kind_test_path}" '  all|session|jobs|jobs-core|jobs-transfer)'
 
 printf '%s\n' 'ci-workflow-test: verifying workflow fan-out wiring' >&2

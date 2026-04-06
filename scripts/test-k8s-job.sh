@@ -119,10 +119,6 @@ kubectl create configmap "${configmap_name}" \
   --from-file=job-ssh-public-key="${ssh_key}.pub" \
   --from-file=profile-control-plane-env.sh=/workspace/containers/control-plane/config/profile-control-plane-env.sh \
   --from-file=profile-control-plane-session.sh=/workspace/containers/control-plane/config/profile-control-plane-session.sh \
-  --from-file=control-plane-skill.md=/workspace/containers/control-plane/skills/control-plane-operations/SKILL.md \
-  --from-file=control-plane-run.md=/workspace/containers/control-plane/skills/control-plane-operations/references/control-plane-run.md \
-  --from-file=skills-reference.md=/workspace/containers/control-plane/skills/control-plane-operations/references/skills.md \
-  --from-file=containerized-yamllint-ops-skill.md=/workspace/containers/control-plane/skills/containerized-yamllint-ops/SKILL.md \
   --from-file=repo-change-delivery-skill.md=/workspace/containers/control-plane/skills/repo-change-delivery/SKILL.md \
   --from-file=git-commit-skill.md=/workspace/containers/control-plane/skills/git-commit/SKILL.md \
   --from-file=pull-request-workflow-skill.md=/workspace/containers/control-plane/skills/pull-request-workflow/SKILL.md
@@ -167,18 +163,12 @@ ${service_account_yaml}
                 install -m 0755 /var/run/control-plane-test/control-plane-ssh-shell /usr/local/bin/control-plane-ssh-shell
                  install -m 0644 /var/run/control-plane-test/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
                  install -m 0644 /var/run/control-plane-test/profile-control-plane-session.sh /etc/profile.d/control-plane-session.sh
-                 install -d -m 0755 /usr/local/share/control-plane/skills/control-plane-operations/references
-                 install -d -m 0755 /usr/local/share/control-plane/skills/containerized-yamllint-ops
                  install -d -m 0755 /usr/local/share/control-plane/skills/repo-change-delivery
                  install -d -m 0755 /usr/local/share/control-plane/skills/git-commit
                  install -d -m 0755 /usr/local/share/control-plane/skills/pull-request-workflow
-                  install -m 0644 /var/run/control-plane-test/control-plane-skill.md /usr/local/share/control-plane/skills/control-plane-operations/SKILL.md
-                  install -m 0644 /var/run/control-plane-test/control-plane-run.md /usr/local/share/control-plane/skills/control-plane-operations/references/control-plane-run.md
-                  install -m 0644 /var/run/control-plane-test/skills-reference.md /usr/local/share/control-plane/skills/control-plane-operations/references/skills.md
-                  install -m 0644 /var/run/control-plane-test/containerized-yamllint-ops-skill.md /usr/local/share/control-plane/skills/containerized-yamllint-ops/SKILL.md
-                   install -m 0644 /var/run/control-plane-test/repo-change-delivery-skill.md /usr/local/share/control-plane/skills/repo-change-delivery/SKILL.md
-                   install -m 0644 /var/run/control-plane-test/git-commit-skill.md /usr/local/share/control-plane/skills/git-commit/SKILL.md
-                   install -m 0644 /var/run/control-plane-test/pull-request-workflow-skill.md /usr/local/share/control-plane/skills/pull-request-workflow/SKILL.md
+                  install -m 0644 /var/run/control-plane-test/repo-change-delivery-skill.md /usr/local/share/control-plane/skills/repo-change-delivery/SKILL.md
+                  install -m 0644 /var/run/control-plane-test/git-commit-skill.md /usr/local/share/control-plane/skills/git-commit/SKILL.md
+                  install -m 0644 /var/run/control-plane-test/pull-request-workflow-skill.md /usr/local/share/control-plane/skills/pull-request-workflow/SKILL.md
                  ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen
                  usermod --shell /usr/local/bin/control-plane-ssh-shell copilot
                 exec /usr/local/bin/control-plane-entrypoint /bin/bash -lc '
@@ -193,7 +183,7 @@ ${service_account_yaml}
                  [[ "\${runtime_line}" == *"CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target"* ]]
                  [[ "\${runtime_line}" == *"RUSTUP_HOME=/usr/local/rustup"* ]]
 
-                  su -s /bin/bash copilot -c '"'"'set -euo pipefail; skill_root="\$HOME/.copilot/skills/control-plane-operations"; yamllint_skill_root="\$HOME/.copilot/skills/containerized-yamllint-ops"; doc_coauthor_skill_root="\$HOME/.copilot/skills/doc-coauthoring"; delivery_skill_root="\$HOME/.copilot/skills/repo-change-delivery"; commit_skill_root="\$HOME/.copilot/skills/git-commit"; pull_request_skill_root="\$HOME/.copilot/skills/pull-request-workflow"; skill_creator_skill_root="\$HOME/.copilot/skills/skill-creator"; test ! -L "\$skill_root"; test -r "\$skill_root/SKILL.md"; test -x "\$skill_root/references"; test -r "\$skill_root/references/control-plane-run.md"; test -r "\$skill_root/references/skills.md"; test ! -L "\$yamllint_skill_root"; test -r "\$yamllint_skill_root/SKILL.md"; grep -Fqx "name: containerized-yamllint-ops" "\$yamllint_skill_root/SKILL.md"; test ! -L "\$doc_coauthor_skill_root"; test -r "\$doc_coauthor_skill_root/SKILL.md"; grep -Fqx "name: doc-coauthoring" "\$doc_coauthor_skill_root/SKILL.md"; test ! -L "\$delivery_skill_root"; test -r "\$delivery_skill_root/SKILL.md"; grep -Fqx "name: repo-change-delivery" "\$delivery_skill_root/SKILL.md"; test ! -L "\$commit_skill_root"; test -r "\$commit_skill_root/SKILL.md"; grep -Fqx "name: git-commit" "\$commit_skill_root/SKILL.md"; test ! -L "\$pull_request_skill_root"; test -r "\$pull_request_skill_root/SKILL.md"; grep -Fqx "name: pull-request-workflow" "\$pull_request_skill_root/SKILL.md"; test ! -L "\$skill_creator_skill_root"; test -r "\$skill_creator_skill_root/SKILL.md"; test -r "\$skill_creator_skill_root/LICENSE.txt"; grep -Fqx "name: skill-creator" "\$skill_creator_skill_root/SKILL.md"'"'"'
+                  su -s /bin/bash copilot -c '"'"'set -euo pipefail; doc_coauthor_skill_root="\$HOME/.copilot/skills/doc-coauthoring"; delivery_skill_root="\$HOME/.copilot/skills/repo-change-delivery"; commit_skill_root="\$HOME/.copilot/skills/git-commit"; pull_request_skill_root="\$HOME/.copilot/skills/pull-request-workflow"; skill_creator_skill_root="\$HOME/.copilot/skills/skill-creator"; test ! -L "\$doc_coauthor_skill_root"; test -r "\$doc_coauthor_skill_root/SKILL.md"; grep -Fqx "name: doc-coauthoring" "\$doc_coauthor_skill_root/SKILL.md"; test ! -L "\$delivery_skill_root"; test -r "\$delivery_skill_root/SKILL.md"; grep -Fqx "name: repo-change-delivery" "\$delivery_skill_root/SKILL.md"; test ! -L "\$commit_skill_root"; test -r "\$commit_skill_root/SKILL.md"; grep -Fqx "name: git-commit" "\$commit_skill_root/SKILL.md"; test ! -L "\$pull_request_skill_root"; test -r "\$pull_request_skill_root/SKILL.md"; grep -Fqx "name: pull-request-workflow" "\$pull_request_skill_root/SKILL.md"; test ! -L "\$skill_creator_skill_root"; test -r "\$skill_creator_skill_root/SKILL.md"; test -r "\$skill_creator_skill_root/LICENSE.txt"; grep -Fqx "name: skill-creator" "\$skill_creator_skill_root/SKILL.md"'"'"'
                   printf "%s\n" "job-check: skill-read=ok"
 
                  term_report="\$(TERM=xterm-color bash -lc '"'"'printf "%s %s" "\$TERM" "\$(tput colors)"'"'"')"

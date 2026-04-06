@@ -233,8 +233,12 @@ mod tests {
             Some("hooks path blocked")
         );
         assert_eq!(
-            match_file_access_rule(&config, &["/usr/bin/bash"], "/run/user/1000/containers/auth.json")
-                .as_deref(),
+            match_file_access_rule(
+                &config,
+                &["/usr/bin/bash"],
+                "/run/user/1000/containers/auth.json"
+            )
+            .as_deref(),
             Some("registry auth blocked")
         );
         assert_eq!(
@@ -243,7 +247,7 @@ mod tests {
                 &["/usr/bin/bash", "/usr/bin/docker"],
                 "/run/user/1000/containers/auth.json",
             ),
-            Some("registry auth blocked")
+            Some(String::from("registry auth blocked"))
         );
         assert_eq!(
             match_file_access_rule(

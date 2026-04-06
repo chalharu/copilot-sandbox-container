@@ -140,7 +140,8 @@ grep -Fxq 'HostKey /etc/ssh/ssh_host_ed25519_key' /etc/ssh/sshd_config
 grep -Fqx 'CONTROL_PLANE_EXEC_POLICY_LIBRARY=/usr/local/lib/libcontrol_plane_exec_policy.so' /home/copilot/.config/control-plane/runtime.env
 grep -Fqx 'CONTROL_PLANE_EXEC_POLICY_RULES_FILE=/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml' /home/copilot/.config/control-plane/runtime.env
 grep -Fqx 'LD_PRELOAD=/usr/local/lib/libcontrol_plane_exec_policy.so' /home/copilot/.config/control-plane/runtime.env
-git config --global --get core.hooksPath | grep -qx '/usr/local/share/control-plane/hooks/git'
+grep -Fqx '    hooksPath = /usr/local/share/control-plane/hooks/git' "${GIT_CONFIG_GLOBAL}"
+test "$(grep -Fc '    helper = !gh auth git-credential' "${GIT_CONFIG_GLOBAL}")" -eq 2
 if su -s /bin/bash copilot -lc "printf tamper >> \"${GIT_CONFIG_GLOBAL}\"" 2>/dev/null; then
   printf '%s\n' 'Expected managed global git config to be read-only for the Copilot user' >&2
   exit 1
@@ -171,7 +172,7 @@ jq -e '.nested.keep == 1' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.nested.replace.fromBase == true and .nested.replace.fromOverlay == true' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.nested.array == ["overlay"]' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.topLevelOverlay == "configmap"' /home/copilot/.copilot/config.json >/dev/null
-su -s /bin/bash copilot -lc 'gh config get git_protocol --host github.com' | grep -qx 'ssh'
+grep -Fqx '  git_protocol: ssh' /home/copilot/.config/gh/hosts.yml
 printf '%s\n' file-backed-ok
 EOF
 )"
@@ -333,7 +334,7 @@ token_backed_output="$("${container_bin}" run --rm \
   bash -l -se 2>&1 <<'EOF'
 set -euo pipefail
 test "$(stat -c '%a %U %G' /home/copilot/.config/gh/hosts.yml)" = '600 copilot copilot'
-su -s /bin/bash copilot -lc 'gh config get git_protocol --host github.com' | grep -qx 'https'
+grep -Fqx '    git_protocol: https' /home/copilot/.config/gh/hosts.yml
 printf '%s\n' token-backed-ok
 EOF
 )"

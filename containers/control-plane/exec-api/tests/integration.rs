@@ -1,6 +1,4 @@
-use control_plane_exec_api::{
-    check_health, execute_remote, serve_with_listener, ServerConfig,
-};
+use control_plane_exec_api::{ServerConfig, check_health, execute_remote, serve_with_listener};
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
@@ -71,8 +69,7 @@ async fn exec_api_rejects_requests_without_the_session_token_and_runs_authorized
     assert_eq!(allowed.stderr, "api stderr\n");
     assert_eq!(allowed.exit_code, 0);
     assert_eq!(
-        std::fs::read_to_string(workspace_dir.path().join("api-marker.txt"))
-            .expect("marker file"),
+        std::fs::read_to_string(workspace_dir.path().join("api-marker.txt")).expect("marker file"),
         "ok"
     );
 

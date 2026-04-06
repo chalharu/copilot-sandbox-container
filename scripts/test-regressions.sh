@@ -126,21 +126,11 @@ skill_output="$("${container_bin}" run --rm \
   "${control_plane_image}" \
   bash -lc "set -euo pipefail
 su -s /bin/bash copilot -c 'set -euo pipefail
-control_skill_root=\"\$HOME/.copilot/skills/control-plane-operations\"
-yamllint_skill_root=\"\$HOME/.copilot/skills/containerized-yamllint-ops\"
 doc_coauthor_skill_root=\"\$HOME/.copilot/skills/doc-coauthoring\"
 delivery_skill_root=\"\$HOME/.copilot/skills/repo-change-delivery\"
 commit_skill_root=\"\$HOME/.copilot/skills/git-commit\"
 pull_request_skill_root=\"\$HOME/.copilot/skills/pull-request-workflow\"
 skill_creator_skill_root=\"\$HOME/.copilot/skills/skill-creator\"
-test ! -L \"\$control_skill_root\"
-test -r \"\$control_skill_root/SKILL.md\"
-test -x \"\$control_skill_root/references\"
-test -r \"\$control_skill_root/references/control-plane-run.md\"
-test -r \"\$control_skill_root/references/skills.md\"
-test ! -L \"\$yamllint_skill_root\"
-test -r \"\$yamllint_skill_root/SKILL.md\"
-grep -Fqx \"name: containerized-yamllint-ops\" \"\$yamllint_skill_root/SKILL.md\"
 test ! -L \"\$doc_coauthor_skill_root\"
 test -r \"\$doc_coauthor_skill_root/SKILL.md\"
 grep -Fqx \"name: doc-coauthoring\" \"\$doc_coauthor_skill_root/SKILL.md\"
@@ -232,8 +222,6 @@ if [[ "${runtime_env_status}" -ne 0 ]]; then
 fi
 grep -qx 'runtime-env-sccache-ok' <<<"${runtime_env_output}"
 
-expected_dhi_auth="$(printf '%s' 'test-user:test-token' | base64 | tr -d '\n')"
-
 printf '%s\n' 'regression-test: verifying startup materializes DHI auth without exposing secret files' >&2
 mkdir -p \
   "${workdir}/runtime-dhi-auth-state/copilot" \
@@ -265,9 +253,16 @@ runtime_env=/home/copilot/.config/control-plane/runtime.env
 auth_file=\"/run/user/\$(id -u copilot)/containers/auth.json\"
 ! grep -q '^DOCKERHUB_' \"\$runtime_env\"
 ! grep -q '^REGISTRY_AUTH_FILE=' \"\$runtime_env\"
-test -r \"\$auth_file\"
-grep -Fq '\"dhi.io\"' \"\$auth_file\"
-grep -Fq '\"auth\":\"${expected_dhi_auth}\"' \"\$auth_file\"
+test -s \"\$auth_file\"
+test \"\$(stat -c '%U %G %a' \"\$auth_file\")\" = 'copilot copilot 600'
+stderr_file=\"\$(mktemp)\"
+if cat \"\$auth_file\" >/dev/null 2>\"\${stderr_file}\"; then
+  printf \"%s\n\" \"Expected direct registry auth.json read to be denied\" >&2
+  exit 1
+fi
+grep -Fq \"control-plane exec policy:\" \"\${stderr_file}\"
+grep -Fq \"registry auth.json\" \"\${stderr_file}\"
+rm -f \"\${stderr_file}\"
 su -l -s /bin/bash copilot -c 'set -euo pipefail
 set -a
 source \"\$HOME/.config/control-plane/runtime.env\"
@@ -298,6 +293,9 @@ cat > "${workdir}/fake-bin/docker" <<'EOF'
 set -euo pipefail
 log_dir="${TEST_REGRESSION_LOG_DIR:?}"
 case "${1:-}" in
+  info)
+    exit 0
+    ;;
   run)
     printf '%s\n' "$*" >> "${log_dir}/run.args"
     shift
@@ -354,8 +352,19 @@ koalaman/shellcheck
 markdownlint-cli2
 mozilla/sccache
 yamllint
+ERROR: lookupUpdates error (repository=local, packageFile=containers/control-plane/config/external-skills.yaml)
+       "packageName": "https://github.com/anthropics/skills",
+       "message": "fatal: unable to access 'https://github.com/anthropics/skills/': Recv failure: Connection reset by peer\n",
+ERROR: lookupUpdates error (repository=local, packageFile=containers/control-plane/config/external-skills.yaml)
+       "packageName": "https://github.com/anthropics/skills",
+       "message": "timeout while waiting for mutex to become available",
+ WARN: Package lookup failures (repository=local)
+       "warnings": ["Failed to look up docker package dhi.io/python: no-result"],
+DEBUG: Request failed with status code 401 (Unauthorized): GET https://dhi.io/token?scope=repository%3Apython%3Apull&service=registry.docker.io (repository=local)
+DEBUG: Failed to look up docker package dhi.io/python: no-result (repository=local, packageFile=containers/yamllint/Dockerfile, dependency=dhi.io/python)
+ERROR: Cannot sync git when platform=local
 RENOVATE
-        exit 0
+        exit 1
         ;;
       sh)
         exit 0

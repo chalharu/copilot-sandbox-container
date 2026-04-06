@@ -8,15 +8,5 @@ data:
   # ~/.copilot/config.json stored on the PVC.
   copilot-config.json: |
     {
-      "telemetry": false,
-      "controlPlane": {
-        "auditAnalysis": {
-          "enabled": true,
-          "targetRepository": {
-            "url": "https://example.com/chalharu/copilot-sandbox-container"
-          },
-          "minimumEvidenceCount": 3,
-          "repeatThreshold": 3
-        }
-      }
+      "telemetry": false
     }

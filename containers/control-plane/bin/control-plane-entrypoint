@@ -519,32 +519,10 @@ install_bundled_control_plane_hooks() {
   chown -h root:root "${managed_copilot_hooks_dir}" "${copilot_hooks_dir}"
 }
 
-configure_git_credential_helper() {
-  local hostname="$1"
-  local helper_key="credential.https://${hostname}.helper"
-  local gh_bin="$2"
-
-  git config --file "${git_config_path}" --replace-all "${helper_key}" ""
-  git config --file "${git_config_path}" --add "${helper_key}" "!${gh_bin} auth git-credential"
-}
-
 configure_git() {
-  local gh_bin
-
   if [[ -e "${git_config_path}" ]] && [[ ! -f "${git_config_path}" ]]; then
     printf 'Refusing to use non-file git config path at %s\n' "${git_config_path}" >&2
     exit 1
-  fi
-
-  touch "${git_config_path}"
-  gh_bin="$(command -v gh)"
-
-  if [[ -n "${git_user_name}" ]]; then
-    git config --file "${git_config_path}" --replace-all user.name "${git_user_name}"
-  fi
-
-  if [[ -n "${git_user_email}" ]]; then
-    git config --file "${git_config_path}" --replace-all user.email "${git_user_email}"
   fi
 
   if [[ ! -d "${bundled_git_hooks_dir}" ]]; then
@@ -552,9 +530,27 @@ configure_git() {
     exit 1
   fi
 
-  git config --file "${git_config_path}" --replace-all core.hooksPath "${bundled_git_hooks_dir}"
-  configure_git_credential_helper github.com "${gh_bin}"
-  configure_git_credential_helper gist.github.com "${gh_bin}"
+  {
+    printf '[core]\n'
+    printf '    hooksPath = %s\n' "${bundled_git_hooks_dir}"
+
+    if [[ -n "${git_user_name}" ]] || [[ -n "${git_user_email}" ]]; then
+      printf '[user]\n'
+      if [[ -n "${git_user_name}" ]]; then
+        printf '    name = %s\n' "${git_user_name}"
+      fi
+      if [[ -n "${git_user_email}" ]]; then
+        printf '    email = %s\n' "${git_user_email}"
+      fi
+    fi
+
+    printf '[credential "https://github.com"]\n'
+    printf '    helper =\n'
+    printf '    helper = !gh auth git-credential\n'
+    printf '[credential "https://gist.github.com"]\n'
+    printf '    helper =\n'
+    printf '    helper = !gh auth git-credential\n'
+  } > "${git_config_path}"
 
   chown root:root "${git_config_path}"
   chmod 644 "${git_config_path}"
@@ -663,6 +659,7 @@ export CARGO_TARGET_DIR="${cargo_target_dir}"
 export RUSTUP_HOME="${rustup_home_dir}"
 export COPILOT_HOME="${managed_copilot_home}"
 export GIT_CONFIG_GLOBAL="${git_config_path}"
+export CONTROL_PLANE_RUNTIME_ENV_FILE="${runtime_config_path}"
 
 touch "${authorized_keys_path}"
 chmod 600 "${authorized_keys_path}"
@@ -731,6 +728,7 @@ EOF
   export KUBECONFIG="${kubeconfig_path}"
 fi
 
+runtime_config_tmp="$(mktemp "${runtime_config_path}.XXXXXX")"
 {
   write_runtime_var CONTROL_PLANE_K8S_NAMESPACE "${CONTROL_PLANE_K8S_NAMESPACE:-default}"
   write_runtime_var CONTROL_PLANE_JOB_NAMESPACE "${job_namespace}"
@@ -776,25 +774,25 @@ fi
     write_runtime_var CONTROL_PLANE_FAST_EXECUTION_IMAGE "${CONTROL_PLANE_FAST_EXECUTION_IMAGE}"
   fi
   write_runtime_var CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY "${CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY:-IfNotPresent}"
+  if [[ -n "${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE:-}" ]]; then
+    write_runtime_var CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE "${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE}"
+  fi
+  write_runtime_var CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY "${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY:-IfNotPresent}"
   write_runtime_var CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT "${CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT:-120s}"
   write_runtime_var CONTROL_PLANE_FAST_EXECUTION_PORT "${CONTROL_PLANE_FAST_EXECUTION_PORT:-8080}"
-  if [[ -n "${CONTROL_PLANE_FAST_EXECUTION_ENV_CONFIGMAP:-}" ]]; then
-    write_runtime_var CONTROL_PLANE_FAST_EXECUTION_ENV_CONFIGMAP "${CONTROL_PLANE_FAST_EXECUTION_ENV_CONFIGMAP}"
-  fi
-  if [[ -n "${CONTROL_PLANE_FAST_EXECUTION_AUTH_SECRET:-}" ]]; then
-    write_runtime_var CONTROL_PLANE_FAST_EXECUTION_AUTH_SECRET "${CONTROL_PLANE_FAST_EXECUTION_AUTH_SECRET}"
-  fi
-  if [[ -n "${CONTROL_PLANE_FAST_EXECUTION_CONFIG_CONFIGMAP:-}" ]]; then
-    write_runtime_var CONTROL_PLANE_FAST_EXECUTION_CONFIG_CONFIGMAP "${CONTROL_PLANE_FAST_EXECUTION_CONFIG_CONFIGMAP}"
-  fi
-  if [[ -n "${CONTROL_PLANE_FAST_EXECUTION_GARAGE_SECRET:-}" ]]; then
-    write_runtime_var CONTROL_PLANE_FAST_EXECUTION_GARAGE_SECRET "${CONTROL_PLANE_FAST_EXECUTION_GARAGE_SECRET}"
-  fi
+  write_runtime_var CONTROL_PLANE_FAST_EXECUTION_HOME "${CONTROL_PLANE_FAST_EXECUTION_HOME:-/root}"
+  write_runtime_var CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_ROOT "${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_ROOT:-/var/run/control-plane-bootstrap}"
   write_runtime_var CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST "${CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST:-250m}"
   write_runtime_var CONTROL_PLANE_FAST_EXECUTION_CPU_LIMIT "${CONTROL_PLANE_FAST_EXECUTION_CPU_LIMIT:-2}"
   write_runtime_var CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST "${CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST:-256Mi}"
   write_runtime_var CONTROL_PLANE_FAST_EXECUTION_MEMORY_LIMIT "${CONTROL_PLANE_FAST_EXECUTION_MEMORY_LIMIT:-2Gi}"
   write_runtime_var CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC "${CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC:-3600}"
+  if [[ -n "${git_user_name}" ]]; then
+    write_runtime_var CONTROL_PLANE_GIT_USER_NAME "${git_user_name}"
+  fi
+  if [[ -n "${git_user_email}" ]]; then
+    write_runtime_var CONTROL_PLANE_GIT_USER_EMAIL "${git_user_email}"
+  fi
   write_runtime_var CONTROL_PLANE_COPILOT_WORKSPACE "${CONTROL_PLANE_COPILOT_WORKSPACE:-${CONTROL_PLANE_WORKSPACE:-/workspace}}"
   if [[ -n "${CONTROL_PLANE_COPILOT_BIN:-}" ]]; then
     write_runtime_var CONTROL_PLANE_COPILOT_BIN "${CONTROL_PLANE_COPILOT_BIN}"
@@ -824,12 +822,14 @@ fi
   write_runtime_var CONTROL_PLANE_AUDIT_LOG_DB_PATH "${audit_log_db_path}"
   write_runtime_var CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS "${audit_log_max_records}"
   write_runtime_var GIT_CONFIG_GLOBAL "${git_config_path}"
+  write_runtime_var CONTROL_PLANE_RUNTIME_ENV_FILE "${runtime_config_path}"
   write_runtime_var XDG_RUNTIME_DIR "${runtime_dir}"
   write_runtime_var TMPDIR "${tmp_dir}"
   write_runtime_var LD_PRELOAD "${effective_ld_preload}"
   write_runtime_var NODE_COMPILE_CACHE "${node_compile_cache_dir}"
   write_runtime_var NPM_CONFIG_CACHE "${npm_cache_dir}"
   write_runtime_var SCREENDIR "${screen_dir}"
+  write_runtime_var PATH "${PATH}"
   write_runtime_var CARGO_HOME "${cargo_home_dir}"
   write_runtime_var CARGO_TARGET_DIR "${cargo_target_dir}"
   write_runtime_var RUSTUP_HOME "${rustup_home_dir}"
@@ -856,7 +856,8 @@ fi
   if [[ -n "${copilot_github_token}" ]]; then
     write_runtime_var CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE "${copilot_token_path}"
   fi
-} > "${runtime_config_path}"
+} > "${runtime_config_tmp}"
+mv "${runtime_config_tmp}" "${runtime_config_path}"
 chown "${control_plane_user}:${control_plane_user}" "${runtime_config_path}"
 chmod 600 "${runtime_config_path}"
 

@@ -40,7 +40,6 @@ printf '%s\n' 'test-github-hooks.sh: verifying bundled hooks in control-plane im
 set -euo pipefail
 test -f /usr/local/share/control-plane/hooks/hooks.json
 test -f /usr/local/share/control-plane/hooks/audit/main.mjs
-test -f /usr/local/share/control-plane/hooks/auditAnalysis/main.mjs
 test -x /usr/local/share/control-plane/hooks/preToolUse/main
 test -f /usr/local/share/control-plane/hooks/preToolUse/exec-forward.mjs
 test -f /usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml
@@ -49,6 +48,7 @@ test -x /usr/local/share/control-plane/hooks/git/pre-commit
 test -x /usr/local/share/control-plane/hooks/git/pre-push
 test -f /usr/local/share/control-plane/hooks/git/lib/common.sh
 test -f /usr/local/share/control-plane/hooks/postToolUse/main.mjs
+test -x /usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh
 test -f /usr/local/share/control-plane/hooks/postToolUse/linters.json
 test -f /usr/local/share/control-plane/hooks/postToolUse/lib/incremental-files.mjs
 test -f /usr/local/share/control-plane/hooks/sessionEnd/cleanup.mjs
@@ -66,7 +66,6 @@ test "$(stat -c '%a %U %G' "${COPILOT_HOME}/hooks/hooks.json")" = "644 root root
 test "$(stat -c '%a %U %G' "${GIT_CONFIG_GLOBAL}")" = "644 root root"
 test -f /home/copilot/.copilot/hooks/hooks.json
 test -f /home/copilot/.copilot/hooks/audit/main.mjs
-test -f /home/copilot/.copilot/hooks/auditAnalysis/main.mjs
 test -x /home/copilot/.copilot/hooks/preToolUse/main
 test -f /home/copilot/.copilot/hooks/preToolUse/exec-forward.mjs
 test -f /home/copilot/.copilot/hooks/preToolUse/deny-rules.yaml
@@ -75,17 +74,21 @@ test -x /home/copilot/.copilot/hooks/git/pre-commit
 test -x /home/copilot/.copilot/hooks/git/pre-push
 test -f /home/copilot/.copilot/hooks/git/lib/common.sh
 test -f /home/copilot/.copilot/hooks/postToolUse/main.mjs
+test -x /home/copilot/.copilot/hooks/postToolUse/control-plane-rust.sh
 test -f /home/copilot/.copilot/hooks/postToolUse/linters.json
 test -f /home/copilot/.copilot/hooks/postToolUse/lib/incremental-files.mjs
 test -f /home/copilot/.copilot/hooks/sessionEnd/cleanup.mjs
-git config --global --get core.hooksPath | grep -qx /usr/local/share/control-plane/hooks/git
+grep -Fqx '    hooksPath = /usr/local/share/control-plane/hooks/git' "${GIT_CONFIG_GLOBAL}"
+test "$(grep -Fc '    helper = !gh auth git-credential' "${GIT_CONFIG_GLOBAL}")" -eq 2
 grep -Fq "COPILOT_HOME" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/audit/main.mjs" /home/copilot/.copilot/hooks/hooks.json
-grep -Fq "hooks/auditAnalysis/main.mjs" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/preToolUse/main" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/preToolUse/exec-forward.mjs" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/postToolUse/main.mjs" /home/copilot/.copilot/hooks/hooks.json
+grep -Fq "hooks/postToolUse/control-plane-rust.sh" /usr/local/share/control-plane/hooks/postToolUse/linters.json
 grep -Fq "hooks/sessionEnd/cleanup.mjs" /home/copilot/.copilot/hooks/hooks.json
+! grep -Fq "powershell" /home/copilot/.copilot/hooks/hooks.json
+! grep -Fq "auditAnalysis" /home/copilot/.copilot/hooks/hooks.json
 ! grep -Fq ".github/hooks" /home/copilot/.copilot/hooks/hooks.json
 if su -s /bin/bash copilot -lc "printf tamper >> \"${GIT_CONFIG_GLOBAL}\"" 2>/dev/null; then
   printf "%s\n" "Expected managed git config to be read-only for the copilot user" >&2

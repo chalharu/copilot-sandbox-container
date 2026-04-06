@@ -27,6 +27,149 @@ json_escape() {
   printf '%s' "${value}"
 }
 
+request_failures_are_tolerated() {
+  local log_path="$1"
+  local failures
+
+  failures="$(grep -F 'Request failed with status code' "${log_path}" | grep -Fv 'node_modules/got/' || true)"
+  if [[ -z "${failures}" ]]; then
+    return 0
+  fi
+
+  if grep -Fv 'GET https://dhi.io/token?scope=repository%3Apython%3Apull&service=registry.docker.io' <<<"${failures}" >/dev/null; then
+    return 1
+  fi
+
+  return 0
+}
+
+docker_lookup_failures_are_tolerated() {
+  local log_path="$1"
+  local failures
+
+  failures="$(grep -F 'Failed to look up docker package' "${log_path}" || true)"
+  if [[ -z "${failures}" ]]; then
+    return 0
+  fi
+
+  if grep -Fv 'Failed to look up docker package dhi.io/python: no-result' <<<"${failures}" >/dev/null; then
+    return 1
+  fi
+
+  return 0
+}
+
+package_lookup_warnings_are_tolerated() {
+  local log_path="$1"
+
+  if ! grep -Fq 'WARN: Package lookup failures' "${log_path}"; then
+    return 0
+  fi
+
+  awk '
+    BEGIN {
+      in_block = 0
+      block_count = 0
+      saw_expected_warning = 0
+      ok = 1
+    }
+    function finish_block() {
+      if (!in_block) {
+        return
+      }
+      if (!saw_expected_warning) {
+        ok = 0
+      }
+      in_block = 0
+      saw_expected_warning = 0
+    }
+    /^ WARN: Package lookup failures/ {
+      finish_block()
+      in_block = 1
+      block_count++
+      next
+    }
+    in_block && /"warnings": / {
+      if ($0 ~ /^[[:space:]]*"warnings": \["Failed to look up docker package dhi\.io\/python: no-result"\],?$/) {
+        saw_expected_warning = 1
+      } else {
+        ok = 0
+      }
+      next
+    }
+    in_block && /^(DEBUG:| INFO:| WARN:|ERROR:)/ {
+      finish_block()
+      next
+    }
+    END {
+      finish_block()
+      if (block_count > 0 && ok == 0) {
+        exit 1
+      }
+    }
+  ' "${log_path}"
+}
+
+lookup_update_errors_are_tolerated() {
+  local log_path="$1"
+
+  if ! grep -Eq '^ERROR: lookupUpdates error' "${log_path}"; then
+    return 0
+  fi
+
+  awk '
+    BEGIN {
+      in_block = 0
+      block_count = 0
+      package = ""
+      message = ""
+      ok = 1
+    }
+    function finish_block() {
+      if (!in_block) {
+        return
+      }
+      block_count++
+      if (package != "https://github.com/anthropics/skills" || (message !~ /timeout while waiting for mutex to become available/ && index(message, "fatal: unable to access '\''https://github.com/anthropics/skills/'\''") == 0)) {
+        ok = 0
+      }
+      in_block = 0
+      package = ""
+      message = ""
+    }
+    /^ERROR: lookupUpdates error/ {
+      finish_block()
+      in_block = 1
+      next
+    }
+    in_block && /"packageName": / {
+      package = $0
+      sub(/^.*"packageName": "/, "", package)
+      sub(/".*$/, "", package)
+      next
+    }
+    in_block && /"message": / {
+      message = $0
+      sub(/^.*"message": "/, "", message)
+      sub(/".*$/, "", message)
+      next
+    }
+    in_block && /^(DEBUG:| INFO:| WARN:|ERROR:)/ {
+      finish_block()
+      if ($0 ~ /^ERROR: lookupUpdates error/) {
+        in_block = 1
+      }
+      next
+    }
+    END {
+      finish_block()
+      if (block_count == 0 || ok == 0) {
+        exit 1
+      }
+    }
+  ' "${log_path}"
+}
+
 cleanup() {
   local cleanup_container_bin="${container_bin:-}"
   local cleanup_renovate_image="${renovate_image:-}"
@@ -104,10 +247,23 @@ set -e
 
 if [[ "${renovate_status}" -ne 0 ]]; then
   if grep -Fq 'Cannot sync git when platform=local' "${log_file}" \
-    && ! grep -Eq 'Package lookup failures|Request failed with status code|Failed to look up docker package' "${log_file}"; then
+    && request_failures_are_tolerated "${log_file}" \
+    && docker_lookup_failures_are_tolerated "${log_file}" \
+    && package_lookup_warnings_are_tolerated "${log_file}" \
+    && lookup_update_errors_are_tolerated "${log_file}"; then
     printf '%s\n' \
       'Renovate local dry-run hit the known platform=local git sync limitation; validating the captured dependency report instead.' \
       >&2
+    if grep -Fq 'ERROR: lookupUpdates error' "${log_file}"; then
+      printf '%s\n' \
+        'Ignoring transient git-refs lookup failures for the pinned external skills repository during local dry-run.' \
+        >&2
+    fi
+    if grep -Fq 'Failed to look up docker package dhi.io/python: no-result' "${log_file}"; then
+      printf '%s\n' \
+        'Ignoring expected dhi.io/python lookup failures during local dry-run.' \
+        >&2
+    fi
   else
     cat "${log_file}" >&2
     exit 1

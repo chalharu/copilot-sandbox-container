@@ -1,6 +1,6 @@
 use base64::Engine as _;
 use control_plane_exec_api::{
-    check_health, execute_remote, load_server_config_from_env, serve, DynError,
+    DynError, check_health, execute_remote, load_server_config_from_env, serve,
 };
 use std::time::Duration;
 
@@ -35,9 +35,8 @@ async fn run() -> Result<(), DynError> {
     let command = parse_args(std::env::args().skip(1))?;
     match command {
         Command::Serve => {
-            let config = load_server_config_from_env().map_err(|error| -> DynError {
-                error.into()
-            })?;
+            let config =
+                load_server_config_from_env().map_err(|error| -> DynError { error.into() })?;
             serve(config).await?;
         }
         Command::Health { addr, timeout_sec } => {
@@ -93,7 +92,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Command, DynError> {
                     timeout_sec = value.parse()?;
                     Ok(())
                 }
-                _ => return Err(format!("unknown option: {flag}").into()),
+                _ => Err(format!("unknown option: {flag}").into()),
             })?;
 
             if addr.is_empty() {
@@ -129,7 +128,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Command, DynError> {
                     timeout_sec = value.parse()?;
                     Ok(())
                 }
-                _ => return Err(format!("unknown option: {flag}").into()),
+                _ => Err(format!("unknown option: {flag}").into()),
             })?;
 
             if addr.is_empty() {
@@ -161,7 +160,7 @@ fn parse_named_options<F>(arguments: &[String], mut assign: F) -> Result<(), Dyn
 where
     F: FnMut(&str, &str) -> Result<(), DynError>,
 {
-    if arguments.len() % 2 != 0 {
+    if !arguments.len().is_multiple_of(2) {
         return Err(usage().into());
     }
 

@@ -44,9 +44,6 @@ run_regressions_group() {
     "${script_dir}/test-k8s-sample-storage-layout.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
-    "${script_dir}/test-k8s-rust-s3-backend.sh"
-
-  CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-k8s-job-wait.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
@@ -54,6 +51,9 @@ run_regressions_group() {
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-session-exec.sh"
+
+  CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
+    "${script_dir}/test-kind-prereqs.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-kind-image-loading.sh"
@@ -69,9 +69,6 @@ run_regressions_group() {
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-audit-logging.sh" "${control_plane_image}"
-
-  CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
-    "${script_dir}/test-audit-analysis.sh" "${control_plane_image}"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-image-maintenance.sh"

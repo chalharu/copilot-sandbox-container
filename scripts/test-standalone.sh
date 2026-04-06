@@ -194,8 +194,8 @@ set -euo pipefail
 command -v node
 command -v npm
 npm ls -g @github/copilot --depth=0 | grep -q "@github/copilot@"
-command -v git
-command -v gh
+! command -v git >/dev/null 2>&1
+! command -v gh >/dev/null 2>&1
 command -v kubectl
 command -v kind
 command -v yamllint
@@ -219,8 +219,6 @@ locale -a | grep -Eqi '^ja_JP\.utf-?8$'
 test "${EDITOR}" = "vim"
 test "${VISUAL}" = "vim"
 test "${GH_PAGER}" = "cat"
-test -f /home/copilot/.copilot/skills/control-plane-operations/SKILL.md
-test -f /home/copilot/.copilot/skills/control-plane-operations/references/control-plane-run.md
 test -f /home/copilot/.copilot/skills/repo-change-delivery/SKILL.md
 EOF
 
@@ -465,16 +463,11 @@ printf '%s\n' 'standalone-test: preparing copilot picker state' >&2
 if ! ssh_bash <<'EOF'
 set -euo pipefail
 test -z "${COPILOT_GITHUB_TOKEN:-}"
-test "$(git config --global user.name)" = "Picker Test User"
-test "$(git config --global user.email)" = "picker@example.com"
-mapfile -t github_helpers < <(git config --global --get-all credential.https://github.com.helper)
-test "${#github_helpers[@]}" -eq 2
-test -z "${github_helpers[0]}"
-test "${github_helpers[1]}" = "!/usr/bin/gh auth git-credential"
-mapfile -t gist_helpers < <(git config --global --get-all credential.https://gist.github.com.helper)
-test "${#gist_helpers[@]}" -eq 2
-test -z "${gist_helpers[0]}"
-test "${gist_helpers[1]}" = "!/usr/bin/gh auth git-credential"
+test -f "${GIT_CONFIG_GLOBAL}"
+grep -Fqx '    hooksPath = /usr/local/share/control-plane/hooks/git' "${GIT_CONFIG_GLOBAL}"
+grep -Fqx '    name = Picker Test User' "${GIT_CONFIG_GLOBAL}"
+grep -Fqx '    email = picker@example.com' "${GIT_CONFIG_GLOBAL}"
+test "$(grep -Fc '    helper = !gh auth git-credential' "${GIT_CONFIG_GLOBAL}")" -eq 2
 cat > /workspace/test-copilot <<'INNER'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -511,7 +504,7 @@ EOF
 then
   ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
-git config --global --list || true
+cat "${GIT_CONFIG_GLOBAL}" || true
 screen -list || true
 control-plane-session --list || true
 ls -la /workspace || true

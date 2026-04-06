@@ -12,7 +12,6 @@ Options:
   --job-namespace NAME            Alias of --namespace
   --job-name NAME                 Kubernetes Job name
   --timeout DURATION              Kubernetes Job wait timeout (default: 300s)
-  --workspace PATH                Host or mounted workspace path (default: /workspace)
   --mount-file SRC[:DEST]         Mount a local file under the shared job input dir
   --input-mount-path PATH         Mount path used for --mount-file (default: /var/run/control-plane/job-inputs)
   --image IMAGE                   Execution Plane image to run
@@ -101,7 +100,6 @@ mode="${CONTROL_PLANE_RUN_MODE:-k8s-job}"
 namespace="${CONTROL_PLANE_JOB_NAMESPACE:-${CONTROL_PLANE_K8S_NAMESPACE:-default}}"
 job_name=""
 timeout="${CONTROL_PLANE_K8S_TIMEOUT:-300s}"
-workspace="${CONTROL_PLANE_WORKSPACE:-/workspace}"
 image=""
 k8s_runner_bin="${CONTROL_PLANE_K8S_RUNNER_BIN:-k8s-job-run}"
 input_mount_path="${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH:-/var/run/control-plane/job-inputs}"
@@ -127,10 +125,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --timeout)
       timeout="$2"
-      shift 2
-      ;;
-    --workspace)
-      workspace="$2"
       shift 2
       ;;
     --mount-file)

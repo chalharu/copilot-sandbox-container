@@ -34,14 +34,18 @@ data:
   CONTROL_PLANE_WORKSPACE_SUBPATH: workspace
   # Enable session-scoped execution pods for Copilot CLI bash commands.
   CONTROL_PLANE_FAST_EXECUTION_ENABLED: "1"
-  CONTROL_PLANE_FAST_EXECUTION_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha
+  # Choose the runtime image that should actually execute delegated bash
+  # commands. Alpine / Ubuntu both work as long as they provide /bin/sh and
+  # either apk or apt-get so the bootstrap step can install bash, git, and gh.
+  CONTROL_PLANE_FAST_EXECUTION_IMAGE: docker.io/library/ubuntu:24.04
   CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: IfNotPresent
+  # The bootstrap image provides the Rust exec-plane binary and bundled git hooks.
+  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha
+  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: IfNotPresent
   CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 120s
   CONTROL_PLANE_FAST_EXECUTION_PORT: "8080"
-  CONTROL_PLANE_FAST_EXECUTION_ENV_CONFIGMAP: control-plane-env
-  CONTROL_PLANE_FAST_EXECUTION_AUTH_SECRET: control-plane-auth
-  CONTROL_PLANE_FAST_EXECUTION_CONFIG_CONFIGMAP: control-plane-config
-  CONTROL_PLANE_FAST_EXECUTION_GARAGE_SECRET: garage-sccache-auth
+  CONTROL_PLANE_FAST_EXECUTION_HOME: /root
+  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_ROOT: /var/run/control-plane-bootstrap
   CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST: 250m
   CONTROL_PLANE_FAST_EXECUTION_CPU_LIMIT: "2"
   CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST: 256Mi
@@ -73,10 +77,6 @@ data:
   # on the shared copilot session PVC. Tune the retained row cap to
   # adjust history depth; when a tool hook sees more than this many
   # rows, it deletes the oldest rows until roughly 3/4 of the cap remains.
-  # A bundled postToolUse analysis hook also writes derived findings to
-  # ~/.copilot/session-state/audit/audit-analysis.db and reads its
-  # target repository / thresholds from controlPlane.auditAnalysis in
-  # copilot-config.json.
   CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS: "10000"
   # `cpulimit` treats 100 as roughly one CPU core, which keeps an
   # interactive Copilot session from monopolizing the node.

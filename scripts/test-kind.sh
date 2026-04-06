@@ -12,6 +12,7 @@ kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-docker}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-${kind_provider}}"
 control_plane_selector="app.kubernetes.io/name=control-plane"
 kind_image_archive="${CONTROL_PLANE_KIND_IMAGE_ARCHIVE:-}"
+kind_required_host_path="${CONTROL_PLANE_KIND_REQUIRED_HOST_PATH:-/lib/modules}"
 workdir="$(mktemp -d)"
 ssh_key="${workdir}/id_ed25519"
 kubeconfig_path="${workdir}/kubeconfig"
@@ -59,6 +60,11 @@ enable_kind_sudo() {
 
 create_cluster() {
   local create_log="${workdir}/kind-create.log"
+
+  if [[ ! -d "${kind_required_host_path}" ]]; then
+    printf 'Skipping Kind cluster tests: required host path is unavailable: %s\n' "${kind_required_host_path}" >&2
+    return 2
+  fi
 
   if kind_cmd create cluster --name "${cluster_name}" >"${create_log}" 2>&1; then
     cat "${create_log}"
@@ -505,11 +511,12 @@ data:
   CONTROL_PLANE_FAST_EXECUTION_ENABLED: "1"
   CONTROL_PLANE_FAST_EXECUTION_IMAGE: ${control_plane_image}
   CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: Never
+  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ${control_plane_image}
+  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: Never
   CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 120s
   CONTROL_PLANE_FAST_EXECUTION_PORT: "8080"
-  CONTROL_PLANE_FAST_EXECUTION_ENV_CONFIGMAP: control-plane-env
-  CONTROL_PLANE_FAST_EXECUTION_AUTH_SECRET: control-plane-auth
-  CONTROL_PLANE_FAST_EXECUTION_CONFIG_CONFIGMAP: control-plane-config
+  CONTROL_PLANE_FAST_EXECUTION_HOME: /root
+  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_ROOT: /var/run/control-plane-bootstrap
   CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST: 250m
   CONTROL_PLANE_FAST_EXECUTION_CPU_LIMIT: "1"
   CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST: 256Mi
@@ -785,8 +792,8 @@ set -euo pipefail
 command -v node
 command -v npm
 npm ls -g @github/copilot --depth=0 | grep -q '@github/copilot@'
-command -v git
-command -v gh
+! command -v git >/dev/null 2>&1
+! command -v gh >/dev/null 2>&1
 command -v kubectl
 command -v k8s-job-start
 command -v k8s-job-wait
@@ -817,8 +824,6 @@ test "\${EDITOR}" = "vim"
 test "\${VISUAL}" = "vim"
 test "\${GH_PAGER}" = "cat"
 printf '%s\n' 'kind-test remote: locale and editor env ok' >&2
-test -f ~/.copilot/skills/control-plane-operations/SKILL.md
-test -f ~/.copilot/skills/containerized-yamllint-ops/SKILL.md
 test -f ~/.copilot/skills/repo-change-delivery/SKILL.md
 test -f ~/.copilot/config.json
 test -f ~/.copilot/command-history-state.json
@@ -837,7 +842,7 @@ jq -e '.nested.replace.fromBase == true and .nested.replace.fromOverlay == true'
 jq -e '.nested.array == ["overlay"]' ~/.copilot/config.json >/dev/null
 jq -e '.topLevelOverlay == "kind"' ~/.copilot/config.json >/dev/null
 printf '%s\n' 'kind-test remote: config merge ok' >&2
-gh config get git_protocol --host github.com | grep -qx 'ssh'
+grep -Fqx '  git_protocol: ssh' ~/.config/gh/hosts.yml
 printf '%s\n' 'kind-test remote: gh hosts ok' >&2
 grep -Fqx 'CARGO_HOME=/home/copilot/.cargo' ~/.config/control-plane/runtime.env
 grep -Fqx 'CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target' ~/.config/control-plane/runtime.env
@@ -847,6 +852,7 @@ printf '%s\n' 'kind-test remote: runtime tmp ok' >&2
 test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
 test "\${CONTROL_PLANE_FAST_EXECUTION_ENABLED}" = "1"
 test "\${CONTROL_PLANE_FAST_EXECUTION_IMAGE}" = "${control_plane_image}"
+test "\${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE}" = "${control_plane_image}"
 test "\${CONTROL_PLANE_COPILOT_SESSION_PVC}" = "control-plane-copilot-session-pvc"
 cat /proc/self/uid_map > /workspace/k8s-pod-uid-map.txt
 printf '%s\n' 'kind-test remote: runtime env and workspace write ok' >&2
@@ -873,14 +879,14 @@ ls -l ~/.copilot/config.json ~/.copilot/command-history-state.json ~/.config/gh/
 stat -c '%n %a %U %G' ~/.copilot/config.json ~/.copilot/command-history-state.json ~/.config/gh/hosts.yml || true
 printf '%s\n' '--- config and gh hosts ---'
 cat ~/.copilot/config.json || true
-gh auth status --hostname github.com || true
-gh config get git_protocol --host github.com || true
+cat ~/.config/gh/hosts.yml || true
 printf '%s\n' '--- runtime tmp ---'
 ls -la /var/tmp/control-plane || true
 printf '%s\n' '--- runtime env ---'
 printf 'CONTROL_PLANE_JOB_NAMESPACE=%s\n' "${CONTROL_PLANE_JOB_NAMESPACE:-}" || true
 printf 'CONTROL_PLANE_FAST_EXECUTION_ENABLED=%s\n' "${CONTROL_PLANE_FAST_EXECUTION_ENABLED:-}" || true
 printf 'CONTROL_PLANE_FAST_EXECUTION_IMAGE=%s\n' "${CONTROL_PLANE_FAST_EXECUTION_IMAGE:-}" || true
+printf 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE=%s\n' "${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE:-}" || true
 printf 'CONTROL_PLANE_COPILOT_SESSION_PVC=%s\n' "${CONTROL_PLANE_COPILOT_SESSION_PVC:-}" || true
 cat /proc/self/uid_map || true
 EOF
@@ -966,8 +972,12 @@ test "$(jq -r '.metadata.ownerReferences[0].name' /workspace/k8s-fast-exec-pod.j
 test "$(jq -r '.metadata.ownerReferences[0].uid' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_POD_UID}"
 test "$(jq -r '.spec.nodeName' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_NODE_NAME}"
 test "$(jq -r '.spec.containers[0].image' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_FAST_EXECUTION_IMAGE}"
+test "$(jq -r '.spec.initContainers[0].image' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE}"
 test "$(jq -r '.spec.volumes[] | select(.name == "workspace").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "control-plane-workspace-pvc"
 test "$(jq -r '.spec.volumes[] | select(.name == "copilot-session").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "control-plane-copilot-session-pvc"
+test "$(jq -r '.spec.volumes[] | select(.name == "bootstrap").emptyDir | type' /workspace/k8s-fast-exec-pod.json)" = "object"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "bootstrap").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/var/run/control-plane-bootstrap"
+test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOME").value' /workspace/k8s-fast-exec-pod.json)" = "/root"
 command_text=$'printf "fast-exec-stdout\\n"; printf "fast-exec-stderr\\n" >&2; printf "delegated\\n" > /workspace/fast-exec-marker.txt; exit 7'
 command_base64="$(printf '%s' "${command_text}" | base64 | tr -d '\n')"
 set +e

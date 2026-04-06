@@ -147,7 +147,7 @@
       "id": "control-plane-rust-fmt",
       "command": "bash",
       "args": [
-        "containers/control-plane/skills/containerized-rust-ops/scripts/control-plane-rust.sh",
+        "/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh",
         "fmt"
       ],
       "appendFiles": false
@@ -156,7 +156,7 @@
       "id": "control-plane-rust-clippy-fix",
       "command": "bash",
       "args": [
-        "containers/control-plane/skills/containerized-rust-ops/scripts/control-plane-rust.sh",
+        "/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh",
         "clippy-fix"
       ],
       "appendFiles": false
@@ -165,7 +165,7 @@
       "id": "control-plane-rust-clippy-check",
       "command": "bash",
       "args": [
-        "containers/control-plane/skills/containerized-rust-ops/scripts/control-plane-rust.sh",
+        "/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh",
         "clippy"
       ],
       "appendFiles": false

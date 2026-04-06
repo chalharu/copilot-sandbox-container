@@ -32,8 +32,45 @@ require_command() {
 require_command "${container_bin}"
 
 mkdir -p \
+  "${workdir}/fake-bin" \
   "${workdir}/state/copilot/session-state" \
   "${workdir}/workspace"
+
+cat > "${workdir}/fake-bin/git" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "${1:-}" in
+  init)
+    mkdir -p .git
+    ;;
+  config)
+    ;;
+  rev-parse)
+    if [[ "${2:-}" == "--git-dir" ]]; then
+      printf '%s\n' .git
+    fi
+    ;;
+  push)
+    if [[ " $* " == *" --force-with-lease "* ]]; then
+      printf '%s\n' 'fatal: No configured push destination.' >&2
+      exit 1
+    fi
+    ;;
+esac
+EOF
+chmod 755 "${workdir}/fake-bin/git"
+
+cat > "${workdir}/fake-bin/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "auth" ]] && [[ "${2:-}" == "token" ]]; then
+  printf '%s\n' 'gh auth token should have been denied before executing gh' >&2
+  exit 99
+fi
+while IFS= read -r _; do :; done < "${HOME}/.config/gh/hosts.yml"
+EOF
+chmod 755 "${workdir}/fake-bin/gh"
 
 cat > "${workdir}/pre-tool-use-check.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -69,12 +106,9 @@ test "${LD_PRELOAD}" = "${exec_policy_library}"
 mkdir -p "${HOME}/.config/gh"
 export CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE="${copilot_token_path}"
 test -f "${registry_auth_path}"
-test -f "${ssh_public_key_mount_path}"
-test -f "${gh_github_token_mount_path}"
-test -f "${gh_hosts_mount_path}"
-test -f "${copilot_token_mount_path}"
-test -f "${dockerhub_username_mount_path}"
-test -f "${dockerhub_token_mount_path}"
+
+# Raw secret mounts stay present, but direct reads are intentionally denied by
+# the exec policy. The explicit deny assertions below verify that contract.
 
 run_hook() {
   local payload="$1"
@@ -96,7 +130,11 @@ assert_denied_exec() {
     CONTROL_PLANE_EXEC_POLICY_LIBRARY="${CONTROL_PLANE_EXEC_POLICY_LIBRARY}" \
     CONTROL_PLANE_EXEC_POLICY_RULES_FILE="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE}" \
     GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL}" \
-    bash -lc "${command}" > /dev/null 2>"${stderr_file}"
+    CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE="${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}" \
+    XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
+    HOME="${HOME}" \
+    PATH="${PATH}" \
+    bash -c "${command}" > /dev/null 2>"${stderr_file}"
   status=$?
   set -e
 
@@ -126,7 +164,7 @@ assert_denied_shell() {
     XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
     HOME="${HOME}" \
     PATH="${PATH}" \
-    bash -lc "${shell_command}" > /dev/null 2>"${stderr_file}"
+    bash -c "${shell_command}" > /dev/null 2>"${stderr_file}"
   status=$?
   set -e
 
@@ -155,7 +193,7 @@ assert_allowed_shell() {
     XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
     HOME="${HOME}" \
     PATH="${PATH}" \
-    bash -lc "${shell_command}" > /dev/null 2>"${stderr_file}"
+    bash -c "${shell_command}" > /dev/null 2>"${stderr_file}"
   status=$?
   set -e
 
@@ -283,9 +321,9 @@ assert_denied_shell '/run/control-plane-auth' 'cat "/run/control-plane-auth/dock
 assert_denied_shell '/run/control-plane-auth' 'cat "/run/control-plane-auth/dockerhub-token"'
 assert_denied_shell '/run/control-plane-auth' 'cat "/run/control-plane-auth/..data/dockerhub-token"'
 assert_allowed_shell '/usr/local/bin/control-plane-copilot'
-assert_allowed_shell '/usr/bin/gh auth status'
-assert_allowed_shell '/usr/bin/gh pr view 123'
-assert_allowed_shell '/usr/bin/gh api repos/octo-org/octo-repo/pulls/123'
+assert_allowed_shell 'gh auth status'
+assert_allowed_shell 'gh pr view 123'
+assert_allowed_shell 'gh api repos/octo-org/octo-repo/pulls/123'
 
 cat > /tmp/force-push-wrapper.sh <<'WRAPPER'
 #!/usr/bin/env bash
@@ -300,7 +338,7 @@ set +e
 node <<'NODE' > /dev/null 2>"${node_stderr}"
 const { spawnSync } = require("node:child_process");
 
-const result = spawnSync("bash", ["-lc", "git push -f origin HEAD"], {
+const result = spawnSync("bash", ["-c", "git push -f origin HEAD"], {
   encoding: "utf8",
   stdio: ["ignore", "ignore", "inherit"],
 });
@@ -328,7 +366,10 @@ env \
   CONTROL_PLANE_EXEC_POLICY_LIBRARY="${CONTROL_PLANE_EXEC_POLICY_LIBRARY}" \
   CONTROL_PLANE_EXEC_POLICY_RULES_FILE="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE}" \
   GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL}" \
-  bash -lc 'git rev-parse --git-dir' > /dev/null 2>"${allow_env_stderr}"
+  XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
+  HOME="${HOME}" \
+  PATH="${PATH}" \
+  bash -c 'git rev-parse --git-dir' > /dev/null 2>"${allow_env_stderr}"
 allow_env_status=$?
 set -e
 if grep -Fq 'control-plane exec policy:' "${allow_env_stderr}"; then
@@ -350,7 +391,10 @@ env \
   CONTROL_PLANE_EXEC_POLICY_LIBRARY="${CONTROL_PLANE_EXEC_POLICY_LIBRARY}" \
   CONTROL_PLANE_EXEC_POLICY_RULES_FILE="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE}" \
   GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL}" \
-  bash -lc 'git push --force-with-lease origin HEAD' > /dev/null 2>"${allow_stderr}"
+  XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
+  HOME="${HOME}" \
+  PATH="${PATH}" \
+  bash -c 'git push --force-with-lease origin HEAD' > /dev/null 2>"${allow_stderr}"
 allow_status=$?
 set -e
 if grep -Fq 'control-plane exec policy:' "${allow_stderr}"; then
@@ -378,8 +422,11 @@ output="$("${container_bin}" run --rm \
   -v "${workdir}/state/copilot:/home/copilot/.copilot" \
   -v "${workdir}/workspace:/workspace" \
   -v "${workdir}/pre-tool-use-check.sh:/tmp/pre-tool-use-check.sh:ro" \
-  "${control_plane_image}" \
+  -v "${workdir}/fake-bin:/tmp/fake-bin:ro" \
+"${control_plane_image}" \
   bash -l -se 2>&1 <<'EOF'
+set -euo pipefail
+env -u LD_PRELOAD bash -se <<'EOF_SETUP'
 set -euo pipefail
 install -d -o copilot -g copilot /home/copilot/.config/gh
 install -d -o copilot -g copilot /home/copilot/.config/control-plane
@@ -448,8 +495,9 @@ EOF_GH
 chmod 755 \
   /usr/local/bin/control-plane-copilot \
   /usr/bin/gh
+EOF_SETUP
 source /home/copilot/.config/control-plane/runtime.env
-su -s /bin/bash copilot -lc /tmp/pre-tool-use-check.sh
+su -s /bin/bash copilot -lc 'export PATH="${PATH}:/tmp/fake-bin"; /tmp/pre-tool-use-check.sh'
 EOF
 )"
 status=$?

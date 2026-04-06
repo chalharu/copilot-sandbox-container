@@ -32,8 +32,41 @@ require_command() {
 require_command "${container_bin}"
 
 mkdir -p \
+  "${workdir}/fake-bin" \
   "${workdir}/state/copilot/session-state" \
   "${workdir}/workspace"
+
+cat > "${workdir}/fake-bin/git" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "${1:-}" in
+  init)
+    mkdir -p .git
+    ;;
+  config)
+    if [[ "${2:-}" == "--get-regexp" ]] && [[ "${3:-}" == "^remote\\..*\\.url$" ]]; then
+      if [[ -f .git/test-remote-origin ]]; then
+        printf 'remote.origin.url %s\n' "$(cat .git/test-remote-origin)"
+      fi
+    fi
+    ;;
+  remote)
+    if [[ "${2:-}" == "add" ]] && [[ -n "${3:-}" ]] && [[ -n "${4:-}" ]]; then
+      mkdir -p .git
+      printf '%s\n' "${4}" > ".git/test-remote-${3}"
+    fi
+    ;;
+  rev-parse)
+    if [[ "${2:-}" == "--show-toplevel" ]]; then
+      pwd
+    elif [[ "${2:-}" == "--git-dir" ]]; then
+      printf '%s\n' .git
+    fi
+    ;;
+esac
+EOF
+chmod 755 "${workdir}/fake-bin/git"
 
 cat > "${workdir}/audit-check.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -140,13 +173,15 @@ output="$("${container_bin}" run --rm \
   -v "${workdir}/state/copilot:/home/copilot/.copilot" \
   -v "${workdir}/workspace:/workspace" \
   -v "${workdir}/audit-check.sh:/tmp/audit-check.sh:ro" \
+  -v "${workdir}/fake-bin:/tmp/fake-bin:ro" \
   "${control_plane_image}" \
   bash -l -se 2>&1 <<'EOF'
 set -euo pipefail
+export PATH="/tmp/fake-bin:${PATH}"
 source /home/copilot/.config/control-plane/runtime.env
 test "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" = "/home/copilot/.copilot/session-state/audit/audit-log.db"
 test "${CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS}" = "8"
-su -s /bin/bash copilot -lc /tmp/audit-check.sh
+su -s /bin/bash copilot -lc 'export PATH="/tmp/fake-bin:${PATH}"; /tmp/audit-check.sh'
 EOF
 )"
 status=$?

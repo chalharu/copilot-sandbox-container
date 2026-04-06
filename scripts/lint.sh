@@ -24,7 +24,6 @@ control_plane_image="${CONTROL_PLANE_IMAGE_TAG:-localhost/control-plane:test}"
 yamllint_config="${CONTROL_PLANE_YAMLLINT_CONFIG:-/workspace/.yamllint}"
 # Use container root so restrictive workspace mounts remain readable.
 workspace_access_user="0:0"
-rust_lint_script="${script_dir}/../containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh"
 dockerfiles=()
 yaml_files=()
 markdown_files=()
@@ -65,11 +64,12 @@ run_rust_lint() {
   shift
 
   for workspace_dir in "$@"; do
-    (
-      cd "${workspace_dir}"
-      CONTAINERIZED_RUST_CONTAINER_BIN="${runtime}" bash "${rust_lint_script}" fmt-check
-      CONTAINERIZED_RUST_CONTAINER_BIN="${runtime}" bash "${rust_lint_script}" clippy
-    )
+    local container_workspace_dir="/workspace/${workspace_dir#"${repo_root}/"}"
+    "${runtime}" run --rm --user "${workspace_access_user}" \
+      -v "${PWD}:/workspace" \
+      -w "${container_workspace_dir}" \
+      "${control_plane_image}" \
+      bash -lc 'cargo fmt --all --check && cargo clippy --all-targets -- -D warnings'
   done
 }
 

@@ -9,14 +9,43 @@ RUN cargo test --locked --release \
 
 FROM docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895 AS exec-api-builder
 
+# hadolint ignore=DL3008
+RUN apt-get update -o Acquire::Retries=3 \
+    && apt-get install -y --no-install-recommends \
+        musl-tools \
+        protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /build/control-plane-exec-api
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 COPY exec-api/Cargo.toml exec-api/Cargo.lock exec-api/build.rs ./
 COPY exec-api/proto ./proto
 COPY exec-api/src ./src
-RUN cargo test --locked --release \
-    && cargo build --locked --release
+RUN target="$(rustc -vV | awk '/^host:/ { print $2 }' | sed 's/-unknown-linux-gnu/-unknown-linux-musl/')" \
+    && rustup target add "${target}" \
+    && cargo test --locked --release --target "${target}" \
+    && cargo build --locked --release --target "${target}" \
+    && cp "target/${target}/release/control-plane-exec-api" "target/release/control-plane-exec-api"
 
 FROM docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895 AS rust-toolchain
+
+RUN rustup component add clippy rustfmt
+
+FROM node:24.14.1-bookworm-slim@sha256:06e5c9f86bfa0aaa7163cf37a5eaa8805f16b9acb48e3f85645b09d459fc2a9f AS skills-builder
+
+# hadolint ignore=DL3008
+RUN apt-get update -o Acquire::Retries=3 \
+    && apt-get install -y --no-install-recommends \
+        bash \
+        ca-certificates \
+        git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --chmod=755 bin/install-git-skills-from-manifest /usr/local/bin/install-git-skills-from-manifest
+COPY --chmod=644 bin/external-skills-manifest-to-tsv.mjs /usr/local/bin/external-skills-manifest-to-tsv.mjs
+COPY --chmod=644 config/external-skills.yaml /tmp/external-skills.yaml
+
+RUN /usr/local/bin/install-git-skills-from-manifest /tmp/external-skills.yaml /opt/control-plane/external-skills
 
 FROM node:24.14.1-bookworm-slim@sha256:06e5c9f86bfa0aaa7163cf37a5eaa8805f16b9acb48e3f85645b09d459fc2a9f
 
@@ -44,16 +73,16 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # hadolint ignore=DL3008
 RUN apt-get update -o Acquire::Retries=3 \
-    && apt-get install -y --no-install-recommends \
-        bash \
-        ca-certificates \
-        cpulimit \
-        curl \
-        gh \
-        git \
-        jq \
-        kubernetes-client \
-        locales \
+     && apt-get install -y --no-install-recommends \
+         bash \
+         ca-certificates \
+         cpulimit \
+         curl \
+         gcc \
+         libc6-dev \
+         jq \
+         kubernetes-client \
+         locales \
         ncurses-term \
         openssh-client \
         openssh-server \
@@ -140,8 +169,8 @@ COPY --chmod=644 config/sshd_config /etc/ssh/sshd_config
 COPY --chmod=644 config/screenrc /etc/screenrc
 COPY --chmod=644 config/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
 COPY --chmod=644 config/profile-control-plane-session.sh /etc/profile.d/control-plane-session.sh
-COPY --chmod=644 config/external-skills.yaml /tmp/external-skills.yaml
 COPY skills/ /usr/local/share/control-plane/skills/
+COPY --from=skills-builder /opt/control-plane/external-skills/ /usr/local/share/control-plane/skills/
 COPY hooks/ /usr/local/share/control-plane/hooks/
 COPY --from=rust-toolchain /usr/local/cargo/bin /usr/local/cargo/bin
 COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
@@ -153,8 +182,6 @@ COPY --chmod=755 bin/control-plane-exec-api-launcher /usr/local/bin/control-plan
 COPY --chmod=755 bin/control-plane-session-exec /usr/local/bin/control-plane-session-exec
 COPY --chmod=755 bin/control-plane-copilot /usr/local/bin/control-plane-copilot
 COPY --from=exec-api-builder /build/control-plane-exec-api/target/release/control-plane-exec-api /usr/local/bin/control-plane-exec-api
-COPY --chmod=755 bin/install-git-skills-from-manifest /usr/local/bin/install-git-skills-from-manifest
-COPY --chmod=644 bin/external-skills-manifest-to-tsv.mjs /usr/local/bin/external-skills-manifest-to-tsv.mjs
 COPY --chmod=755 bin/control-plane-job-transfer /usr/local/bin/control-plane-job-transfer
 COPY --chmod=755 bin/control-plane-run /usr/local/bin/control-plane-run
 COPY --chmod=755 bin/control-plane-session /usr/local/bin/control-plane-session
@@ -166,18 +193,14 @@ COPY --chmod=755 bin/k8s-job-pod /usr/local/bin/k8s-job-pod
 COPY --chmod=755 bin/k8s-job-logs /usr/local/bin/k8s-job-logs
 COPY --chmod=755 bin/k8s-job-run /usr/local/bin/k8s-job-run
 
-RUN /usr/local/bin/install-git-skills-from-manifest /tmp/external-skills.yaml /usr/local/share/control-plane/skills \
-    && rm -f \
-        /tmp/external-skills.yaml \
-        /usr/local/bin/install-git-skills-from-manifest \
-        /usr/local/bin/external-skills-manifest-to-tsv.mjs \
-    && ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen \
+RUN ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen \
     && usermod --shell /usr/local/bin/control-plane-ssh-shell "${CONTROL_PLANE_USER}" \
     && find /usr/local/share/control-plane/skills -type d -exec chmod 755 {} + \
     && find /usr/local/share/control-plane/skills -type f -exec chmod 644 {} + \
     && find /usr/local/share/control-plane/hooks -type d -exec chmod 755 {} + \
     && find /usr/local/share/control-plane/hooks -type f -exec chmod 644 {} + \
     && chmod 755 /usr/local/share/control-plane/hooks/preToolUse/main \
+    && chmod 755 /usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh \
     && for git_hook in pre-commit pre-push; do \
          if [ -f "/usr/local/share/control-plane/hooks/git/${git_hook}" ]; then chmod 755 "/usr/local/share/control-plane/hooks/git/${git_hook}"; fi; \
        done \
@@ -189,7 +212,7 @@ WORKDIR /workspace
 # provisions mounted state and SSH host keys.
 USER ${CONTROL_PLANE_USER}
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["bash", "-lc", "node --version >/dev/null && gh --version >/dev/null && cargo --version >/dev/null && yamllint --version >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]
+    CMD ["bash", "-lc", "node --version >/dev/null && cargo --version >/dev/null && yamllint --version >/dev/null && control-plane-exec-api --help >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]
 EXPOSE 2222
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/control-plane-entrypoint"]
 CMD ["/usr/sbin/sshd", "-D", "-e", "-f", "/etc/ssh/sshd_config"]

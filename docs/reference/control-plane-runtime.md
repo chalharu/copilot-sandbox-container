@@ -10,14 +10,13 @@
 entrypoint は `~/.config/control-plane/runtime.env` を生成し、login shell へ
 少なくとも次を渡します。
 
-- rootful Podman remote service 関連の env
 - `TZ` で指定した IANA timezone
 - Copilot CPU cap
 - 監査ログ SQLite DB の path と record cap
 - `sccache` S3 backend の endpoint / bucket / credential file path（設定時）
 - Secret / ConfigMap 由来の file path
 - Job 実行先 namespace と mode の既定値
-- fast execution pod の enable flag、image、timeout、resource limit、関連 ConfigMap / Secret 名
+- fast execution pod の enable flag、runtime image、bootstrap image、timeout、resource limit
 - 現在の Control Plane Pod 名 / namespace / UID / node 名
 - exec policy 用の `LD_PRELOAD` と rule path
 
@@ -36,19 +35,12 @@ copilot session PVC へまとめるもの:
 - `~/.copilot/session-state`
 - `~/.copilot/session-state/session-exec.json`
 - `~/.copilot/session-state/audit/audit-log.db`
-- `~/.copilot/session-state/audit/audit-analysis.db`
 - `~/.config/gh`
 - `~/.ssh`
 - `/var/lib/control-plane/ssh-host-keys`
 
-`control-plane-config` の `copilot-config.json` overlay に
-`controlPlane.auditAnalysis` を入れると、bundled
-`audit-log-analysis` skill と lifecycle analysis hooks
-(`agentStop` / `subagentStop` / `sessionEnd` / `errorOccurred`) が
-同じ永続 state を参照します。
-
 `session-exec.json` には、hook rewrite が使う session key ごとの Execution Pod
-名 / Pod IP / owner metadata / node 名 / image が入ります。
+名 / Pod IP / auth token / owner metadata / node 名 / runtime image が入ります。
 
 dedicated sccache PVC は current-cluster の long-running Rust Job 向け
 standalone Garage Deployment 用です。sample manifest では
@@ -116,11 +108,13 @@ bootstrap-managed Garage credential を再初期化したいときだけ delete/
 
 `control-plane-auth` 配下の mounted file は entrypoint が起動時に消費し、interactive shell からの direct read は exec policy が拒否します。`GH_HOSTS_YML_FILE` があればその file を優先し、無ければ `GH_GITHUB_TOKEN_FILE` から最小 `~/.config/gh/hosts.yml` を生成します。`COPILOT_GITHUB_TOKEN_FILE` は private runtime token file へ、DockerHub credential は managed registry auth へ移し、以後は raw mount を読ませません。
 
-sample manifest の fast execution pod では、`control-plane-env` の
-`CONTROL_PLANE_FAST_EXECUTION_{ENV_CONFIGMAP,AUTH_SECRET,CONFIG_CONFIGMAP,GARAGE_SECRET}`
-を使って、必要な ConfigMap / Secret を再 mount できます。Pod 自体の
-OwnerReference / node pin には Deployment の downward API env
-(`CONTROL_PLANE_POD_*`, `CONTROL_PLANE_NODE_NAME`) を使います。
+sample manifest の fast execution pod では、runtime image とは別に
+`CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` を指定し、initContainer が
+Rust 製 `control-plane-exec-api` と bundled Git hook を `emptyDir` へ展開します。
+本体 container はその staged binary を起動し、gRPC 経由の bootstrap で
+`bash` / `git` / `gh` を必要に応じて導入します。Pod 自体の OwnerReference /
+node pin には Deployment の downward API env (`CONTROL_PLANE_POD_*`,
+`CONTROL_PLANE_NODE_NAME`) を使います。
 
 ## 5. Hook と Git policy surface
 
@@ -153,9 +147,11 @@ bundled `preToolUse/exec-forward.mjs` は、`CONTROL_PLANE_FAST_EXECUTION_ENABLE
 のとき Copilot CLI の `bash` tool を `control-plane-session-exec proxy` へ
 書き換えます。helper は same-namespace / same-node の Execution Pod を
 on-demand で作成または再利用し、`/workspace` PVC を共有したまま
-HTTP `/exec` に転送します。bundled `sessionEnd/cleanup.mjs` は同じ session key
-で明示 cleanup を行い、Control Plane Pod 側の OwnerReference でも Pod 漏れを
-抑えます。bash hook では `CONTROL_PLANE_HOOK_SESSION_KEY="$PPID"` を渡し、
+gRPC 経由で転送します。Execution Pod は任意の Linux image を起点にしつつ、
+bootstrap image から受け取った Rust binary と Git hook を使って初期化されます。
+bundled `sessionEnd/cleanup.mjs` は同じ session key で明示 cleanup を行い、
+Control Plane Pod 側の OwnerReference でも Pod 漏れを抑えます。bash hook では
+`CONTROL_PLANE_HOOK_SESSION_KEY="$PPID"` を渡し、
 transient shell PID ではなく Copilot session 側の親プロセスを key に使います。
 
 sample manifest では、この経路のために control-plane ServiceAccount へ
@@ -164,13 +160,10 @@ same-namespace Pod の `create/delete/get/list/watch` 権限を付けます。
 ## 6. Bundled skill surface
 
 bundled skill は image に同梱し、起動時に `~/.copilot/skills/` へ copy 同期
-します。
-
-- `control-plane-operations` や `audit-log-analysis` を `/workspace` と
-  無関係に参照できる
-- symlink ではなく copy 同期を使う
-- `references/` を含む directory / file mode を明示的に整える
-- current-cluster smoke では `references/` の可読性も確認する
+します。現在は repo change delivery 系の補助 skill だけを残し、runtime / hook
+まわりは image 内の script と binary に寄せています。symlink ではなく copy 同期を
+使い、directory / file mode を明示的に整えることで current-cluster smoke でも
+安定して参照できます。
 
 ## 7. Kubernetes Job file transfer
 

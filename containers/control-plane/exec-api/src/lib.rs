@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::env;
 use std::future::Future;
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
@@ -9,8 +10,8 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::metadata::MetadataValue;
 use tonic::transport::{Channel, Endpoint, Server};
 use tonic::{Code, Request, Response, Status};
-use tonic_health::pb::health_client::HealthClient;
 use tonic_health::ServingStatus;
+use tonic_health::pb::health_client::HealthClient;
 
 pub mod proto {
     tonic::include_proto!("controlplane.exec.v1");
@@ -75,10 +76,13 @@ impl proto::exec_service_server::ExecService for ExecApiService {
 
         let request = request.into_inner();
         if request.command.is_empty() {
-            return Err(Status::invalid_argument("command must be a non-empty string"));
+            return Err(Status::invalid_argument(
+                "command must be a non-empty string",
+            ));
         }
 
-        let cwd = normalize_cwd(&self.workspace_root, &request.cwd)?;
+        let cwd =
+            normalize_cwd(&self.workspace_root, &request.cwd).map_err(Status::invalid_argument)?;
         let result = run_shell_command(&request.command, &cwd).await?;
 
         Ok(Response::new(proto::ExecuteResponse {
@@ -90,19 +94,19 @@ impl proto::exec_service_server::ExecService for ExecApiService {
 }
 
 pub fn load_server_config_from_env() -> Result<ServerConfig, String> {
-    let raw_port = std::env::var("CONTROL_PLANE_FAST_EXECUTION_PORT")
-        .unwrap_or_else(|_| String::from("8080"));
-    let port = raw_port.parse::<u16>().map_err(|_| {
-        format!("invalid CONTROL_PLANE_FAST_EXECUTION_PORT: {raw_port}")
-    })?;
+    let raw_port =
+        std::env::var("CONTROL_PLANE_FAST_EXECUTION_PORT").unwrap_or_else(|_| String::from("8080"));
+    let port = raw_port
+        .parse::<u16>()
+        .map_err(|_| format!("invalid CONTROL_PLANE_FAST_EXECUTION_PORT: {raw_port}"))?;
     if port == 0 {
         return Err(format!(
             "invalid CONTROL_PLANE_FAST_EXECUTION_PORT: {raw_port}"
         ));
     }
 
-    let raw_workspace = std::env::var("CONTROL_PLANE_WORKSPACE")
-        .unwrap_or_else(|_| String::from("/workspace"));
+    let raw_workspace =
+        std::env::var("CONTROL_PLANE_WORKSPACE").unwrap_or_else(|_| String::from("/workspace"));
     let workspace_root = normalize_workspace_root(Path::new(&raw_workspace))?;
     let exec_api_token = std::env::var("CONTROL_PLANE_EXEC_API_TOKEN").unwrap_or_default();
 
@@ -122,10 +126,7 @@ where
     F: Future<Output = ()> + Send + 'static,
 {
     let local_addr = listener.local_addr()?;
-    let service = ExecApiService::new(
-        config.workspace_root.clone(),
-        config.exec_api_token.clone(),
-    );
+    let service = ExecApiService::new(config.workspace_root.clone(), config.exec_api_token.clone());
     let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
         .set_service_status(HEALTH_SERVICE_NAME, ServingStatus::Serving)
@@ -210,7 +211,7 @@ fn normalize_workspace_root(raw_workspace: &Path) -> Result<PathBuf, String> {
     Ok(normalize_path(&absolute_workspace))
 }
 
-fn normalize_cwd(workspace_root: &Path, raw_cwd: &str) -> Result<PathBuf, Status> {
+fn normalize_cwd(workspace_root: &Path, raw_cwd: &str) -> Result<PathBuf, String> {
     let target = if raw_cwd.trim().is_empty() {
         workspace_root.to_path_buf()
     } else {
@@ -225,11 +226,11 @@ fn normalize_cwd(workspace_root: &Path, raw_cwd: &str) -> Result<PathBuf, Status
     if target == workspace_root || target.starts_with(workspace_root) {
         Ok(target)
     } else {
-        Err(Status::invalid_argument(format!(
+        Err(format!(
             "cwd must stay within {}: {}",
             workspace_root.display(),
             target.display()
-        )))
+        ))
     }
 }
 
@@ -280,8 +281,34 @@ async fn connect(addr: &str, timeout: Duration) -> Result<Channel, DynError> {
         .await?)
 }
 
+fn resolve_shell() -> Option<PathBuf> {
+    for candidate in ["bash", "/bin/bash", "sh", "/bin/sh"] {
+        if let Some(path) = resolve_shell_candidate(candidate) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn resolve_shell_candidate(candidate: &str) -> Option<PathBuf> {
+    let candidate_path = Path::new(candidate);
+    if candidate_path.is_absolute() {
+        return candidate_path
+            .is_file()
+            .then(|| candidate_path.to_path_buf());
+    }
+
+    let path_env = env::var_os("PATH")?;
+    env::split_paths(&path_env)
+        .map(|segment| segment.join(candidate))
+        .find(|path| path.is_file())
+}
+
 async fn run_shell_command(command: &str, cwd: &Path) -> Result<ExecResult, Status> {
-    let output = Command::new("bash")
+    let shell = resolve_shell().ok_or_else(|| {
+        Status::failed_precondition("no supported shell found (tried bash and sh variants)")
+    })?;
+    let output = Command::new(shell)
         .arg("-lc")
         .arg(command)
         .current_dir(cwd)
@@ -331,6 +358,6 @@ mod tests {
     fn normalize_cwd_rejects_paths_outside_workspace() {
         let error = normalize_cwd(Path::new("/workspace"), "/workspace/../tmp")
             .expect_err("path should be rejected");
-        assert_eq!(error.code(), tonic::Code::InvalidArgument);
+        assert_eq!(error, "cwd must stay within /workspace: /tmp");
     }
 }
