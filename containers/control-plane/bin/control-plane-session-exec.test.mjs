@@ -345,6 +345,19 @@ test("prepare renders the execution pod manifest and caches the pod state", (t) 
 	assert.match(manifest, /value: '\/root'/);
 	assert.match(manifest, /name: GIT_CONFIG_GLOBAL/);
 	assert.match(manifest, /value: '\/root\/.gitconfig'/);
+	assert.match(manifest, /mkdir -p '\/root' '\/root\/.config'/);
+	assert.ok(
+		manifest.indexOf("chown 0:0 '/root' '/root/.config'") <
+			manifest.indexOf("chmod 700 '/root' '/root/.config'"),
+	);
+	assert.ok(
+		manifest.indexOf("chmod 700 '/root' '/root/.config'") <
+			manifest.indexOf("chown 1000:1000 '/root' '/root/.config'"),
+	);
+	assert.ok(
+		manifest.indexOf("chown 0:0 '/root/.gitconfig'") <
+			manifest.indexOf("chmod 600 '/root/.gitconfig'"),
+	);
 	assert.ok(
 		manifest.indexOf("chmod 600 '/root/.gitconfig'") <
 			manifest.indexOf("chown 1000:1000 '/root/.gitconfig'"),
