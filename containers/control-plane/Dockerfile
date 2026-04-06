@@ -229,7 +229,8 @@ COPY --chmod=755 bin/control-plane-ssh-shell /usr/local/bin/control-plane-ssh-sh
 COPY --chmod=755 bin/k8s-job-start /usr/local/bin/k8s-job-start
 COPY --chmod=755 bin/k8s-job-run /usr/local/bin/k8s-job-run
 
-RUN ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen \
+RUN mkdir -p /usr/local/share/control-plane/hooks/sessionEnd \
+    && ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen \
     && ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/share/control-plane/hooks/audit/main \
     && ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/share/control-plane/hooks/preToolUse/exec-forward \
     && ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/share/control-plane/hooks/postToolUse/main \
