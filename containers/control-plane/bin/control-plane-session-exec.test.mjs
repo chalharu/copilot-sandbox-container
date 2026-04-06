@@ -335,12 +335,21 @@ test("prepare renders the execution pod manifest and caches the pod state", (t) 
 	assert.match(manifest, /claimName: 'control-plane-copilot-session-pvc'/);
 	assert.match(manifest, /- name: bootstrap/);
 	assert.match(manifest, /mountPath: '\/var\/run\/control-plane-bootstrap'/);
-	assert.match(manifest, /mountPath: '\/root\/.config\/gh'/);
-	assert.match(manifest, /mountPath: '\/root\/.ssh'/);
+	const volumeMountsSection = manifest.match(
+		/ {6}volumeMounts:\n([\s\S]*?)\n {6}env:/,
+	);
+	assert.ok(volumeMountsSection);
+	assert.match(volumeMountsSection[1], /mountPath: '\/root\/.config\/gh'/);
+	assert.match(volumeMountsSection[1], /mountPath: '\/root\/.ssh'/);
 	assert.match(manifest, /name: HOME/);
 	assert.match(manifest, /value: '\/root'/);
 	assert.match(manifest, /name: GIT_CONFIG_GLOBAL/);
 	assert.match(manifest, /value: '\/root\/.gitconfig'/);
+	const envSection = manifest.match(/ {6}env:\n([\s\S]*?)\n {2}volumes:/);
+	assert.ok(envSection);
+	assert.doesNotMatch(envSection[1], /mountPath:/);
+	assert.doesNotMatch(envSection[1], /subPath:/);
+	assert.doesNotMatch(envSection[1], /readOnly:/);
 	assert.doesNotMatch(manifest, /control-plane-auth/);
 	assert.doesNotMatch(manifest, /control-plane-config/);
 	assert.doesNotMatch(manifest, /garage-sccache-auth/);

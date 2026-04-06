@@ -500,17 +500,6 @@ spec:
           subPath: $(yaml_quote "${workspace_subpath}")
         - name: bootstrap
           mountPath: $(yaml_quote "${bootstrap_root}")
-      env:
-        - name: CONTROL_PLANE_FAST_EXECUTION_PORT
-          value: $(yaml_quote "${port}")
-        - name: CONTROL_PLANE_EXEC_API_TOKEN
-          value: $(yaml_quote "${auth_token}")
-        - name: CONTROL_PLANE_WORKSPACE
-          value: $(yaml_quote "${workspace_mount_path}")
-        - name: HOME
-          value: $(yaml_quote "${remote_home}")
-        - name: GIT_CONFIG_GLOBAL
-          value: $(yaml_quote "${remote_home}/.gitconfig")
 EOF
   if [[ -n "${copilot_session_pvc}" ]]; then
     cat <<EOF
@@ -525,6 +514,17 @@ EOF
 EOF
   fi
   cat <<EOF
+      env:
+        - name: CONTROL_PLANE_FAST_EXECUTION_PORT
+          value: $(yaml_quote "${port}")
+        - name: CONTROL_PLANE_EXEC_API_TOKEN
+          value: $(yaml_quote "${auth_token}")
+        - name: CONTROL_PLANE_WORKSPACE
+          value: $(yaml_quote "${workspace_mount_path}")
+        - name: HOME
+          value: $(yaml_quote "${remote_home}")
+        - name: GIT_CONFIG_GLOBAL
+          value: $(yaml_quote "${remote_home}/.gitconfig")
   volumes:
     - name: workspace
       persistentVolumeClaim:
