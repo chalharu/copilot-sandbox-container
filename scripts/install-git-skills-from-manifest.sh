@@ -8,10 +8,12 @@ container_bin="${CONTROL_PLANE_CONTAINER_BIN:-docker}"
 manifest_path="$(realpath "${1:?usage: scripts/install-git-skills-from-manifest.sh <manifest-path> <destination-root>}")"
 destination_root="$(realpath -m "${2:?usage: scripts/install-git-skills-from-manifest.sh <manifest-path> <destination-root>}")"
 runtime_tools_target_dir="$(mktemp -d)"
+runtime_tools_home_dir="$(mktemp -d)"
 runtime_tools_bin="${runtime_tools_target_dir}/release/control-plane-runtime-tool"
 
 cleanup() {
   rm -rf "${runtime_tools_target_dir}"
+  rm -rf "${runtime_tools_home_dir}"
 }
 
 trap cleanup EXIT
@@ -23,8 +25,11 @@ command -v "${container_bin}" >/dev/null 2>&1 || {
 
 "${container_bin}" run --rm \
   --user "$(id -u):$(id -g)" \
+  -e HOME=/runtime-tools-home \
+  -e CARGO_HOME=/runtime-tools-home/.cargo \
   -e CARGO_TARGET_DIR=/runtime-tools-target \
   -v "${repo_root}:/workspace" \
+  -v "${runtime_tools_home_dir}:/runtime-tools-home" \
   -v "${runtime_tools_target_dir}:/runtime-tools-target" \
   -w /workspace/containers/control-plane/runtime-tools \
   --entrypoint sh \
