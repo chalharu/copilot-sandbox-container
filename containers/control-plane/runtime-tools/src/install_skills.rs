@@ -27,7 +27,11 @@ pub fn run(args: &[String]) -> ToolResult<i32> {
         return Ok(0);
     }
     let [manifest_path, destination_root] = args else {
-        return Err(ToolError::new(64, "install-git-skills-from-manifest", USAGE));
+        return Err(ToolError::new(
+            64,
+            "install-git-skills-from-manifest",
+            USAGE,
+        ));
     };
 
     install_from_manifest(Path::new(manifest_path), Path::new(destination_root))
@@ -89,8 +93,8 @@ struct SkillInstaller {
 
 impl SkillInstaller {
     fn new(destination_root: &Path) -> Result<Self, String> {
-        let checkout_root =
-            TempDir::new().map_err(|error| format!("failed to create checkout directory: {error}"))?;
+        let checkout_root = TempDir::new()
+            .map_err(|error| format!("failed to create checkout directory: {error}"))?;
         Ok(Self {
             checkout_root,
             destination_root: destination_root.to_path_buf(),
@@ -143,7 +147,12 @@ impl SkillInstaller {
         reject_duplicate_skill(&self.installed_skills, &skill_name, &installed_from)?;
 
         let source_skill_dir = checkout_dir.join(normalized_skill_path);
-        require_skill_manifest(&source_skill_dir, repository, git_ref, normalized_skill_path)?;
+        require_skill_manifest(
+            &source_skill_dir,
+            repository,
+            git_ref,
+            normalized_skill_path,
+        )?;
         let destination_dir = self.destination_root.join(&skill_name);
         replace_skill_dir(&source_skill_dir, &destination_dir)?;
 
@@ -244,7 +253,11 @@ fn replace_skill_dir(source_skill_dir: &Path, destination_dir: &Path) -> Result<
 }
 
 fn clone_checkout(repository: &str, git_ref: &str, checkout_dir: &Path) -> Result<(), String> {
-    run_git(["clone", repository, checkout_dir.to_str().unwrap()], repository, "clone")?;
+    run_git(
+        ["clone", repository, checkout_dir.to_str().unwrap()],
+        repository,
+        "clone",
+    )?;
     run_git(
         [
             "-C",
@@ -258,11 +271,7 @@ fn clone_checkout(repository: &str, git_ref: &str, checkout_dir: &Path) -> Resul
     )
 }
 
-fn run_git<const N: usize>(
-    args: [&str; N],
-    target: &str,
-    action: &str,
-) -> Result<(), String> {
+fn run_git<const N: usize>(args: [&str; N], target: &str, action: &str) -> Result<(), String> {
     let output = Command::new("git")
         .args(args)
         .stdout(Stdio::null())
@@ -281,8 +290,12 @@ fn run_git<const N: usize>(
 }
 
 fn copy_dir_recursive(source: &Path, destination: &Path) -> Result<(), String> {
-    let metadata = fs::symlink_metadata(source)
-        .map_err(|error| format!("failed to inspect source directory {}: {error}", source.display()))?;
+    let metadata = fs::symlink_metadata(source).map_err(|error| {
+        format!(
+            "failed to inspect source directory {}: {error}",
+            source.display()
+        )
+    })?;
     if !metadata.is_dir() {
         return Err(format!("source is not a directory: {}", source.display()));
     }

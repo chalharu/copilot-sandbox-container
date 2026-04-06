@@ -52,9 +52,7 @@ pub fn ensure_command(command_name: &str) -> io::Result<()> {
         return not_found(command_name);
     };
 
-    if env::split_paths(&path)
-        .any(|directory| directory.join(command_name).is_file())
-    {
+    if env::split_paths(&path).any(|directory| directory.join(command_name).is_file()) {
         Ok(())
     } else {
         not_found(command_name)

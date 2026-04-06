@@ -217,12 +217,13 @@ fn table_has_column(
         .query([])
         .map_err(|error| format!("failed to read sqlite table info for {table_name}: {error}"))?;
 
-    while let Some(row) = rows.next().map_err(|error| {
-        format!("failed to iterate sqlite table info for {table_name}: {error}")
-    })? {
-        let name: String = row
-            .get(1)
-            .map_err(|error| format!("failed to decode sqlite table info for {table_name}: {error}"))?;
+    while let Some(row) = rows
+        .next()
+        .map_err(|error| format!("failed to iterate sqlite table info for {table_name}: {error}"))?
+    {
+        let name: String = row.get(1).map_err(|error| {
+            format!("failed to decode sqlite table info for {table_name}: {error}")
+        })?;
         if name == column_name {
             return Ok(true);
         }
@@ -333,10 +334,7 @@ fn tool_args_json(event_type: &str, payload: &Map<String, Value>) -> Option<Stri
     }
 }
 
-fn tool_result_type(
-    event_type: &str,
-    tool_result: Option<&Map<String, Value>>,
-) -> Option<String> {
+fn tool_result_type(event_type: &str, tool_result: Option<&Map<String, Value>>) -> Option<String> {
     if event_type == "postToolUse" {
         tool_result.and_then(|value| normalize_text(value.get("resultType")))
     } else {
@@ -344,10 +342,7 @@ fn tool_result_type(
     }
 }
 
-fn tool_result_text(
-    event_type: &str,
-    tool_result: Option<&Map<String, Value>>,
-) -> Option<String> {
+fn tool_result_text(event_type: &str, tool_result: Option<&Map<String, Value>>) -> Option<String> {
     if event_type == "postToolUse" {
         tool_result.and_then(|value| normalize_text(value.get("textResultForLlm")))
     } else {
@@ -539,7 +534,9 @@ fn prune_candidate_ids(
         )
         .map_err(|error| format!("failed to prepare audit prune query: {error}"))?;
     let rows = statement
-        .query_map(params![protected_id, delete_count], |row| row.get::<_, i64>(0))
+        .query_map(params![protected_id, delete_count], |row| {
+            row.get::<_, i64>(0)
+        })
         .map_err(|error| format!("failed to select audit prune rows: {error}"))?;
 
     let mut ids = Vec::new();
@@ -567,8 +564,11 @@ mod tests {
             EnvRestore::set("CONTROL_PLANE_AUDIT_LOG_DB_PATH", db_path.to_str().unwrap());
         let _max_records = EnvRestore::set("CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS", "4");
 
-        handle("sessionStart", r#"{"source":"test","initialPrompt":"hello","timestamp":1}"#)
-            .unwrap();
+        handle(
+            "sessionStart",
+            r#"{"source":"test","initialPrompt":"hello","timestamp":1}"#,
+        )
+        .unwrap();
         handle(
             "preToolUse",
             r#"{"toolName":"bash","toolArgs":{"command":"echo one"},"timestamp":10}"#,

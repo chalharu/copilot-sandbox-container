@@ -35,7 +35,10 @@ pub fn run_wait(args: &[String]) -> ToolResult<i32> {
             Ok(1)
         }
         JobWaitStatus::TimedOut => {
-            eprintln!("k8s-job-wait: timed out waiting for job {}", parsed.job_name);
+            eprintln!(
+                "k8s-job-wait: timed out waiting for job {}",
+                parsed.job_name
+            );
             Ok(124)
         }
     }
@@ -71,7 +74,10 @@ fn require_kubectl(command_name: &'static str) -> ToolResult<()> {
     ensure_command("kubectl").map_err(|error| ToolError::new(64, command_name, error.to_string()))
 }
 
-fn parse_job_command_args(command_name: &'static str, args: &[String]) -> ToolResult<JobCommandArgs> {
+fn parse_job_command_args(
+    command_name: &'static str,
+    args: &[String],
+) -> ToolResult<JobCommandArgs> {
     let mut namespace = "default".to_string();
     let mut job_name = String::new();
     let mut timeout = Duration::from_secs(300);
@@ -136,9 +142,8 @@ fn require_value<'a>(
     index: usize,
     flag: &str,
 ) -> ToolResult<&'a String> {
-    args.get(index + 1).ok_or_else(|| {
-        ToolError::new(64, command_name, format!("{flag} requires a value"))
-    })
+    args.get(index + 1)
+        .ok_or_else(|| ToolError::new(64, command_name, format!("{flag} requires a value")))
 }
 
 fn print_usage(command_name: &str) {
@@ -177,7 +182,11 @@ fn parse_timeout_duration(raw_value: &str) -> Result<Duration, String> {
     Ok(Duration::from_secs(seconds))
 }
 
-fn wait_for_job(namespace: &str, job_name: &str, timeout: Duration) -> Result<JobWaitStatus, String> {
+fn wait_for_job(
+    namespace: &str,
+    job_name: &str,
+    timeout: Duration,
+) -> Result<JobWaitStatus, String> {
     let started = Instant::now();
     loop {
         let conditions = read_job_conditions(namespace, job_name)?;

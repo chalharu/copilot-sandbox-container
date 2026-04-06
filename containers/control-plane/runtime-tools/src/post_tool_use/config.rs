@@ -71,9 +71,13 @@ struct RawPipeline {
 
 pub fn load(repo_root: &Path, bundled_config_path: &Path) -> Result<Config, String> {
     let bundled = read_config_file(bundled_config_path, false)?.unwrap_or_default();
-    let repo_config = read_config_file(&repo_root.join(".github/linters.json"), true)?.unwrap_or_default();
+    let repo_config =
+        read_config_file(&repo_root.join(".github/linters.json"), true)?.unwrap_or_default();
     let tools = normalize_tools(merge_tools(bundled.tools, repo_config.tools))?;
-    let pipelines = normalize_pipelines(merge_pipelines(bundled.pipelines, repo_config.pipelines), &tools)?;
+    let pipelines = normalize_pipelines(
+        merge_pipelines(bundled.pipelines, repo_config.pipelines),
+        &tools,
+    )?;
     Ok(Config { tools, pipelines })
 }
 
@@ -111,7 +115,10 @@ fn merge_tools(mut base: Vec<RawTool>, overrides: Vec<RawTool>) -> Vec<RawTool> 
 
 fn merge_pipelines(mut base: Vec<RawPipeline>, overrides: Vec<RawPipeline>) -> Vec<RawPipeline> {
     for override_pipeline in overrides {
-        if let Some(index) = base.iter().position(|pipeline| pipeline.id == override_pipeline.id) {
+        if let Some(index) = base
+            .iter()
+            .position(|pipeline| pipeline.id == override_pipeline.id)
+        {
             base[index] = override_pipeline;
         } else {
             base.push(override_pipeline);
@@ -192,7 +199,9 @@ fn validate_pipeline(pipeline: &RawPipeline, tools: &HashMap<String, Tool>) -> R
 
 fn validate_id(id: &str, entry_label: &str) -> Result<(), String> {
     if id.is_empty() {
-        Err(format!("Each {entry_label} in config must define a non-empty string id."))
+        Err(format!(
+            "Each {entry_label} in config must define a non-empty string id."
+        ))
     } else {
         Ok(())
     }
@@ -216,9 +225,7 @@ fn compile_matcher(pipeline_id: &str, matcher: &[String]) -> Result<Regex, Strin
         .collect::<Vec<_>>()
         .join("|");
     Regex::new(&joined).map_err(|error| {
-        format!(
-            "Failed to compile matcher for pipeline \"{pipeline_id}\": {error}"
-        )
+        format!("Failed to compile matcher for pipeline \"{pipeline_id}\": {error}")
     })
 }
 

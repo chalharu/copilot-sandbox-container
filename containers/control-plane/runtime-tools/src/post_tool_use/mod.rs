@@ -18,8 +18,9 @@ pub fn run(args: &[String]) -> ToolResult<i32> {
         return Ok(0);
     }
 
-    let raw_input = read_stdin_string()
-        .map_err(|error| ToolError::new(1, "control-plane post-tool-use hook", error.to_string()))?;
+    let raw_input = read_stdin_string().map_err(|error| {
+        ToolError::new(1, "control-plane post-tool-use hook", error.to_string())
+    })?;
     handle(&raw_input)
         .map_err(|message| ToolError::new(1, "control-plane post-tool-use hook", message))
 }
@@ -40,18 +41,29 @@ fn handle(raw_input: &str) -> Result<i32, String> {
     let state_path = state::resolve_state_file_path(&repo_root);
     let previous_signatures = state::load_state(&state_path)?;
     let current_relevant_files = pipeline::current_relevant_files(&config, &repo_root)?;
-    let changed_files =
-        state::get_changed_files(&repo_root, &current_relevant_files.matched_files, &previous_signatures)?;
+    let changed_files = state::get_changed_files(
+        &repo_root,
+        &current_relevant_files.matched_files,
+        &previous_signatures,
+    )?;
 
     if changed_files.is_empty() {
-        state::save_state(&state_path, &repo_root, &current_relevant_files.matched_files)?;
+        state::save_state(
+            &state_path,
+            &repo_root,
+            &current_relevant_files.matched_files,
+        )?;
         return Ok(0);
     }
 
     let changed_files = pipeline::classify_files_by_pipeline(&config, &repo_root, &changed_files);
     let exit_code = executor::run_pipelines(&config, &repo_root, &changed_files.files_by_pipeline)?;
     let current_relevant_files = pipeline::current_relevant_files(&config, &repo_root)?;
-    state::save_state(&state_path, &repo_root, &current_relevant_files.matched_files)?;
+    state::save_state(
+        &state_path,
+        &repo_root,
+        &current_relevant_files.matched_files,
+    )?;
     Ok(exit_code)
 }
 
@@ -94,7 +106,9 @@ impl HookInput {
 
     fn is_denied(&self) -> bool {
         matches!(
-            self.tool_result.as_ref().map(|value| value.result_type.as_str()),
+            self.tool_result
+                .as_ref()
+                .map(|value| value.result_type.as_str()),
             Some("denied")
         )
     }

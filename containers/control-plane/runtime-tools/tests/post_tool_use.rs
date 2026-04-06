@@ -46,7 +46,11 @@ fn setup_repo(prefix: &str) -> TempDir {
     let repo = tempfile::Builder::new().prefix(prefix).tempdir().unwrap();
     run_checked("git", &["init", "--quiet"], repo.path());
     run_checked("git", &["config", "user.name", "test"], repo.path());
-    run_checked("git", &["config", "user.email", "test@example.com"], repo.path());
+    run_checked(
+        "git",
+        &["config", "user.email", "test@example.com"],
+        repo.path(),
+    );
 
     let hook_dir = repo.path().join(".copilot/hooks/postToolUse");
     fs::create_dir_all(repo.path().join(".github")).unwrap();
@@ -192,24 +196,47 @@ fn make_files_dirty(repo: &Path) {
 
 fn change_dirty_files_again(repo: &Path) {
     sleep(Duration::from_millis(20));
-    fs::write(repo.join("README.md"), "# Title\n\nchanged\n\nchanged again\n").unwrap();
-    fs::write(repo.join("index.ts"), "export const value=1\nconsole.log(value)\n").unwrap();
+    fs::write(
+        repo.join("README.md"),
+        "# Title\n\nchanged\n\nchanged again\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.join("index.ts"),
+        "export const value=1\nconsole.log(value)\n",
+    )
+    .unwrap();
 }
 
 fn seed_python_rust_docker_repo(repo: &Path) {
     fs::create_dir_all(repo.join("src")).unwrap();
     fs::write(repo.join("app.py"), "value = 1\n").unwrap();
-    fs::write(repo.join("sample.yaml"), "kind: Config\nmetadata:\n  name: demo\n").unwrap();
+    fs::write(
+        repo.join("sample.yaml"),
+        "kind: Config\nmetadata:\n  name: demo\n",
+    )
+    .unwrap();
     fs::write(
         repo.join("Cargo.toml"),
         "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
     )
     .unwrap();
     fs::write(repo.join("src/lib.rs"), "pub fn value() -> i32 { 1 }\n").unwrap();
-    fs::write(repo.join("Dockerfile"), "FROM alpine:3.20\nRUN echo hello\n").unwrap();
+    fs::write(
+        repo.join("Dockerfile"),
+        "FROM alpine:3.20\nRUN echo hello\n",
+    )
+    .unwrap();
     run_checked(
         "git",
-        &["add", "app.py", "sample.yaml", "Cargo.toml", "src/lib.rs", "Dockerfile"],
+        &[
+            "add",
+            "app.py",
+            "sample.yaml",
+            "Cargo.toml",
+            "src/lib.rs",
+            "Dockerfile",
+        ],
         repo,
     );
     run_checked("git", &["commit", "-m", "init"], repo);
@@ -217,9 +244,17 @@ fn seed_python_rust_docker_repo(repo: &Path) {
 
 fn make_python_rust_docker_dirty(repo: &Path) {
     fs::write(repo.join("app.py"), "value=1\n").unwrap();
-    fs::write(repo.join("sample.yaml"), "kind Config\nmetadata:\n name demo\n").unwrap();
+    fs::write(
+        repo.join("sample.yaml"),
+        "kind Config\nmetadata:\n name demo\n",
+    )
+    .unwrap();
     fs::write(repo.join("src/lib.rs"), "pub fn value()->i32{1}\n").unwrap();
-    fs::write(repo.join("Dockerfile"), "FROM alpine:3.20\nRUN apk add curl\n").unwrap();
+    fs::write(
+        repo.join("Dockerfile"),
+        "FROM alpine:3.20\nRUN apk add curl\n",
+    )
+    .unwrap();
 }
 
 fn run_hook(repo: &Path, hook_env: &HookEnv, tool_result_type: &str) -> Output {
@@ -238,7 +273,12 @@ fn run_hook(repo: &Path, hook_env: &HookEnv, tool_result_type: &str) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child.stdin.as_mut().unwrap().write_all(input.as_bytes()).unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
     child.wait_with_output().unwrap()
 }
 
@@ -249,14 +289,38 @@ fn linters_config_defines_language_pipelines() {
     let tools = linters_config["tools"].as_array().unwrap();
     let pipelines = linters_config["pipelines"].as_array().unwrap();
 
-    let markdownlint_fix_npx = tools.iter().find(|tool| tool["id"] == "markdownlint-fix-npx").unwrap();
-    let control_plane_rust_fmt = tools.iter().find(|tool| tool["id"] == "control-plane-rust-fmt").unwrap();
-    let yamllint_check = tools.iter().find(|tool| tool["id"] == "yamllint-check").unwrap();
-    let markdown_pipeline = pipelines.iter().find(|pipeline| pipeline["id"] == "markdown").unwrap();
-    let scripts_pipeline = pipelines.iter().find(|pipeline| pipeline["id"] == "scripts").unwrap();
-    let yaml_pipeline = pipelines.iter().find(|pipeline| pipeline["id"] == "yaml").unwrap();
-    let rust_pipeline = pipelines.iter().find(|pipeline| pipeline["id"] == "rust").unwrap();
-    let docker_pipeline = pipelines.iter().find(|pipeline| pipeline["id"] == "dockerfile").unwrap();
+    let markdownlint_fix_npx = tools
+        .iter()
+        .find(|tool| tool["id"] == "markdownlint-fix-npx")
+        .unwrap();
+    let control_plane_rust_fmt = tools
+        .iter()
+        .find(|tool| tool["id"] == "control-plane-rust-fmt")
+        .unwrap();
+    let yamllint_check = tools
+        .iter()
+        .find(|tool| tool["id"] == "yamllint-check")
+        .unwrap();
+    let markdown_pipeline = pipelines
+        .iter()
+        .find(|pipeline| pipeline["id"] == "markdown")
+        .unwrap();
+    let scripts_pipeline = pipelines
+        .iter()
+        .find(|pipeline| pipeline["id"] == "scripts")
+        .unwrap();
+    let yaml_pipeline = pipelines
+        .iter()
+        .find(|pipeline| pipeline["id"] == "yaml")
+        .unwrap();
+    let rust_pipeline = pipelines
+        .iter()
+        .find(|pipeline| pipeline["id"] == "rust")
+        .unwrap();
+    let docker_pipeline = pipelines
+        .iter()
+        .find(|pipeline| pipeline["id"] == "dockerfile")
+        .unwrap();
 
     assert_eq!(markdownlint_fix_npx["command"], "npx");
     assert_eq!(control_plane_rust_fmt["command"], "bash");
@@ -265,11 +329,11 @@ fn linters_config_defines_language_pipelines() {
     assert_eq!(markdown_pipeline["matcher"][0], "\\.(?:md|markdown)$");
     assert_eq!(scripts_pipeline["steps"][1]["tools"][0], "oxlint-fix");
     assert_eq!(yaml_pipeline["steps"][0]["tools"][0], "yamllint-check");
-    assert_eq!(rust_pipeline["steps"][0]["tools"][0], "control-plane-rust-fmt");
     assert_eq!(
-        docker_pipeline["matcher"][1],
-        "(?:^|/)[^/]+\\.Dockerfile$"
+        rust_pipeline["steps"][0]["tools"][0],
+        "control-plane-rust-fmt"
     );
+    assert_eq!(docker_pipeline["matcher"][1], "(?:^|/)[^/]+\\.Dockerfile$");
     assert_eq!(pipelines.len(), 6);
 }
 
@@ -357,9 +421,18 @@ fn hook_runs_python_rust_yaml_and_dockerfile_pipelines() {
     assert_eq!(result.status.code(), Some(1));
     assert!(hook_log.contains("ruff format app.py"));
     assert!(hook_log.contains("ruff check --fix app.py"));
-    assert!(hook_log.contains("/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh fmt"));
-    assert!(hook_log.contains("/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh clippy-fix"));
-    assert!(hook_log.contains("/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh clippy"));
+    assert!(
+        hook_log
+            .contains("/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh fmt")
+    );
+    assert!(hook_log.contains(
+        "/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh clippy-fix"
+    ));
+    assert!(
+        hook_log.contains(
+            "/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh clippy"
+        )
+    );
     assert!(hook_log.contains("yamllint -c .yamllint sample.yaml"));
     assert!(hook_log.contains("hadolint Dockerfile"));
     assert!(hook_log.contains("NODE_COMPILE_CACHE="));

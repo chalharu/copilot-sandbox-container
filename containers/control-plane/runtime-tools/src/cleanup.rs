@@ -2,11 +2,14 @@ use std::env;
 use std::process::{Command, Stdio};
 
 use crate::error::{ToolError, ToolResult};
-use crate::support::{DEFAULT_SESSION_EXEC_BIN, output_message, parent_process_id, read_stdin_string};
+use crate::support::{
+    DEFAULT_SESSION_EXEC_BIN, output_message, parent_process_id, read_stdin_string,
+};
 
 pub fn run(_args: &[String]) -> ToolResult<i32> {
-    let raw_input = read_stdin_string()
-        .map_err(|error| ToolError::new(1, "control-plane session cleanup hook", error.to_string()))?;
+    let raw_input = read_stdin_string().map_err(|error| {
+        ToolError::new(1, "control-plane session cleanup hook", error.to_string())
+    })?;
     handle(&raw_input)
         .map_err(|message| ToolError::new(1, "control-plane session cleanup hook", message))?;
     Ok(0)
@@ -38,7 +41,9 @@ pub fn handle(_raw_input: &str) -> Result<(), String> {
 
 fn fast_execution_enabled() -> bool {
     matches!(
-        env::var("CONTROL_PLANE_FAST_EXECUTION_ENABLED").ok().as_deref(),
+        env::var("CONTROL_PLANE_FAST_EXECUTION_ENABLED")
+            .ok()
+            .as_deref(),
         Some("1")
     )
 }
@@ -81,8 +86,10 @@ mod tests {
         );
 
         let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _session_exec =
-            EnvRestore::set("CONTROL_PLANE_SESSION_EXEC_BIN", helper_path.to_str().unwrap());
+        let _session_exec = EnvRestore::set(
+            "CONTROL_PLANE_SESSION_EXEC_BIN",
+            helper_path.to_str().unwrap(),
+        );
         let _session_key = EnvRestore::set("CONTROL_PLANE_HOOK_SESSION_KEY", "cleanup-key");
 
         handle("").unwrap();

@@ -43,7 +43,12 @@ pub fn handle(raw_input: &str) -> Option<String> {
 
     tool_args.insert(
         "command".to_string(),
-        Value::String(rewritten_command(&input, &session_exec_bin, &session_key, command)),
+        Value::String(rewritten_command(
+            &input,
+            &session_exec_bin,
+            &session_key,
+            command,
+        )),
     );
 
     Some(
@@ -61,7 +66,9 @@ fn should_rewrite(input: &Map<String, Value>) -> bool {
 
 fn fast_execution_enabled() -> bool {
     matches!(
-        env::var("CONTROL_PLANE_FAST_EXECUTION_ENABLED").ok().as_deref(),
+        env::var("CONTROL_PLANE_FAST_EXECUTION_ENABLED")
+            .ok()
+            .as_deref(),
         Some("1")
     )
 }
@@ -189,8 +196,10 @@ mod tests {
         );
 
         let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _session_exec =
-            EnvRestore::set("CONTROL_PLANE_SESSION_EXEC_BIN", helper_path.to_str().unwrap());
+        let _session_exec = EnvRestore::set(
+            "CONTROL_PLANE_SESSION_EXEC_BIN",
+            helper_path.to_str().unwrap(),
+        );
         let _session_key = EnvRestore::set("CONTROL_PLANE_HOOK_SESSION_KEY", "session-123");
 
         let output = handle(
@@ -218,12 +227,15 @@ mod tests {
         );
 
         let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _session_exec =
-            EnvRestore::set("CONTROL_PLANE_SESSION_EXEC_BIN", helper_path.to_str().unwrap());
+        let _session_exec = EnvRestore::set(
+            "CONTROL_PLANE_SESSION_EXEC_BIN",
+            helper_path.to_str().unwrap(),
+        );
 
-        let output =
-            handle(r#"{"toolName":"bash","toolArgs":{"command":"echo hello","description":"demo"}}"#)
-                .unwrap();
+        let output = handle(
+            r#"{"toolName":"bash","toolArgs":{"command":"echo hello","description":"demo"}}"#,
+        )
+        .unwrap();
         let value: Value = serde_json::from_str(&output).unwrap();
 
         assert_eq!(value["permissionDecision"], "deny");

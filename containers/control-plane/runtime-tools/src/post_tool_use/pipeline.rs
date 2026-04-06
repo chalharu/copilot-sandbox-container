@@ -9,7 +9,10 @@ pub struct ClassifiedFiles {
     pub files_by_pipeline: HashMap<String, Vec<String>>,
 }
 
-pub fn current_relevant_files(config: &Config, repo_root: &Path) -> Result<ClassifiedFiles, String> {
+pub fn current_relevant_files(
+    config: &Config,
+    repo_root: &Path,
+) -> Result<ClassifiedFiles, String> {
     let dirty_files = git::list_dirty_files(repo_root)?;
     Ok(classify_files_by_pipeline(config, repo_root, &dirty_files))
 }

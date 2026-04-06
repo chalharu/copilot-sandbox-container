@@ -76,7 +76,10 @@ pub fn save_state(
 fn signatures(repo_root: &Path, files: &[PathBuf]) -> Result<HashMap<String, String>, String> {
     let mut signatures = HashMap::new();
     for file in files {
-        signatures.insert(git::to_relative_repo_path(repo_root, file), file_signature(file)?);
+        signatures.insert(
+            git::to_relative_repo_path(repo_root, file),
+            file_signature(file)?,
+        );
     }
     Ok(signatures)
 }
@@ -104,7 +107,12 @@ fn file_signature(file_path: &Path) -> Result<String, String> {
         .map_err(|error| format!("failed to read mtime for {}: {error}", file_path.display()))?;
     let modified_ms = modified
         .duration_since(UNIX_EPOCH)
-        .map_err(|error| format!("failed to normalize mtime for {}: {error}", file_path.display()))?
+        .map_err(|error| {
+            format!(
+                "failed to normalize mtime for {}: {error}",
+                file_path.display()
+            )
+        })?
         .as_millis();
     Ok(format!("{}:{modified_ms}", metadata.len()))
 }

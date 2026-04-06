@@ -16,7 +16,10 @@ pub fn run_pipelines(
     let mut has_reported_failure = false;
 
     for pipeline in &config.pipelines {
-        let files = files_by_pipeline.get(&pipeline.id).cloned().unwrap_or_default();
+        let files = files_by_pipeline
+            .get(&pipeline.id)
+            .cloned()
+            .unwrap_or_default();
         if files.is_empty() {
             continue;
         }
@@ -86,8 +89,12 @@ fn build_tool_env() -> Result<HashMap<OsString, OsString>, String> {
     let hook_cache_root = hook_cache_root();
     let npm_cache = hook_cache_root.join("npm-cache");
     let node_compile_cache = hook_cache_root.join("node-compile-cache");
-    std::fs::create_dir_all(&npm_cache)
-        .map_err(|error| format!("failed to create npm cache {}: {error}", npm_cache.display()))?;
+    std::fs::create_dir_all(&npm_cache).map_err(|error| {
+        format!(
+            "failed to create npm cache {}: {error}",
+            npm_cache.display()
+        )
+    })?;
     std::fs::create_dir_all(&node_compile_cache).map_err(|error| {
         format!(
             "failed to create node compile cache {}: {error}",

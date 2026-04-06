@@ -44,15 +44,34 @@ fn parse_git_dir_output(repo_root: &Path, stdout: &[u8]) -> PathBuf {
     if git_dir.is_empty() {
         repo_root.join(".git")
     } else {
-        repo_root.join(git_dir).canonicalize().unwrap_or_else(|_| repo_root.join(".git"))
+        repo_root
+            .join(git_dir)
+            .canonicalize()
+            .unwrap_or_else(|_| repo_root.join(".git"))
     }
 }
 
 pub fn list_dirty_files(repo_root: &Path) -> Result<Vec<PathBuf>, String> {
     let candidates = [
-        list_git_paths(repo_root, ["diff", "--name-only", "-z", "--diff-filter=ACMRTUXB"].as_slice())?,
-        list_git_paths(repo_root, ["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMRTUXB"].as_slice())?,
-        list_git_paths(repo_root, ["ls-files", "--others", "--exclude-standard", "-z"].as_slice())?,
+        list_git_paths(
+            repo_root,
+            ["diff", "--name-only", "-z", "--diff-filter=ACMRTUXB"].as_slice(),
+        )?,
+        list_git_paths(
+            repo_root,
+            [
+                "diff",
+                "--cached",
+                "--name-only",
+                "-z",
+                "--diff-filter=ACMRTUXB",
+            ]
+            .as_slice(),
+        )?,
+        list_git_paths(
+            repo_root,
+            ["ls-files", "--others", "--exclude-standard", "-z"].as_slice(),
+        )?,
     ]
     .concat();
 
