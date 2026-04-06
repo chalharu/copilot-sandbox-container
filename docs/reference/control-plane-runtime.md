@@ -76,27 +76,24 @@ bootstrap-managed Garage credential を再初期化したいときだけ delete/
 上限を超えた場合は次の tool hook 実行時に古いレコードから削除して
 おおむね上限の 3/4 件まで戻します。
 
-## 3. 永続化しない state と Podman cache
+## 3. 永続化しない state と runtime cache
 
 次は emptyDir などの再生成可能な領域へ逃がします。
 
 - `~/.copilot/tmp`
 - Screen socket
-- rootless Podman の graphroot / runtime dir / runroot
-- rootful-service の graphroot cache と runtime dir
+- `/var/tmp/control-plane`
+- Rust の `cargo-target` など再生成可能な cache
 
 代表 path:
 
-- rootless graphroot: `/var/tmp/control-plane/rootless-podman/<driver>/storage`
-- rootful-service graphroot:
-  `/var/lib/control-plane/rootful-podman/rootful-<driver>/storage`
-- rootful-service runtime dir / runroot:
-  `/var/tmp/control-plane/rootful-<driver>`
+- temp / runtime cache root: `/var/tmp/control-plane`
+- bundled Rust target dir: `/var/tmp/control-plane/cargo-target`
+- containerized Rust ephemeral state:
+  `/var/tmp/containerized-rust/<repo>/<branch>/...`
 
-互換用に `~/.copilot/containers` を残す場合もありますが、実体の graphroot は
-上記の disposable path 側です。current-cluster の rootful-service は既定
-driver を `overlay` にし、`/dev/fuse` がある場合だけ `fuse-overlayfs` を
-使います。
+再生成可能な cache は上記の disposable path 側へ寄せ、session PVC と
+`/workspace` PVC には再開に必要な state だけを残します。
 
 ## 4. ConfigMap / Secret の注入面
 

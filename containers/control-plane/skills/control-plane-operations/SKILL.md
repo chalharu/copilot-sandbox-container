@@ -16,10 +16,8 @@ Read `references/control-plane-run.md` when you need command-routing guidance. R
 1. Confirm whether the task belongs in the current SSH/Screen session or a separate execution plane.
 2. Pick the command path:
    - Use plain shell work in the control plane for interactive investigation, editing, or Git work.
-   - Use `control-plane-run --mode auto --execution-hint short` for quick containerized commands that should stay local to the control plane host.
-   - Use `control-plane-run --mode auto --execution-hint long` for commands that should become Kubernetes Jobs.
-   - In the sample least-privilege Kubernetes deployment, `CONTROL_PLANE_RUN_MODE=k8s-job` makes Job execution the default even without explicit `--mode`, so use `--mode podman` only when you intentionally opt back into local Podman.
-   - Override with `--mode podman` or `--mode k8s-job` only when the destination must be forced.
+   - Use `control-plane-run --mode k8s-job` for explicit execution-plane work that should run as a Kubernetes Job.
+   - Short-lived interactive work now stays in the control plane shell or the session-scoped fast-execution pod path; `control-plane-run` no longer routes to local Podman.
 3. Keep long-lived or resumable work inside GNU Screen sessions.
 4. When the task needs extra repository-specific agent behavior, combine this bundled skill with repo-local skills from the mounted repository.
 

@@ -301,8 +301,7 @@ EOF2
 
 CONTROL_PLANE_RUNTIME_ENV_FILE="${tmpenv}" \
 control-plane-run \
-  --mode auto \
-  --execution-hint long \
+  --mode k8s-job \
   --namespace "${namespace}" \
   --timeout "${timeout}" \
   --image "${image}" \

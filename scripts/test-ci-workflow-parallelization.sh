@@ -74,8 +74,8 @@ assert_file_contains "${build_test_path}" 'run_kind_group session'
 assert_file_contains "${build_test_path}" 'run_kind_group jobs'
 assert_file_contains "${build_test_path}" 'run_kind_group jobs-core'
 assert_file_contains "${build_test_path}" 'run_kind_group jobs-transfer'
-assert_file_contains "${kind_test_path}" 'kind-test: skipping duplicate rootful local podman smoke for group %s'
-assert_file_contains "${kind_test_path}" "[[ \"\${kind_test_group}\" == \"session\" ]] || [[ \"\${kind_test_group}\" == \"jobs-core\" ]]"
+assert_file_contains "${kind_test_path}" 'if [[ "${kind_test_group}" == "all" ]] || [[ "${kind_test_group}" == "session" ]]; then'
+assert_file_contains "${kind_test_path}" '  all|session|jobs|jobs-core|jobs-transfer)'
 
 printf '%s\n' 'ci-workflow-test: verifying workflow fan-out wiring' >&2
 integration_block="$(job_block integration)"
@@ -117,9 +117,9 @@ publish_block="$(job_block publish-architecture-images)"
 
 assert_block_not_contains "${integration_block}" 'needs: lint' 'integration job block'
 assert_block_contains "${integration_smoke_block}" 'Load integration images' 'integration-smoke job block'
-assert_block_contains "${integration_smoke_block}" 'podman load -i downloaded-images/control-plane-images.tar' 'integration-smoke job block'
+assert_block_contains "${integration_smoke_block}" 'docker load -i downloaded-images/control-plane-images.tar' 'integration-smoke job block'
 assert_block_contains "${integration_regressions_block}" 'Load integration images' 'integration-regressions job block'
-assert_block_contains "${integration_regressions_block}" 'podman load -i downloaded-images/control-plane-images.tar' 'integration-regressions job block'
+assert_block_contains "${integration_regressions_block}" 'docker load -i downloaded-images/control-plane-images.tar' 'integration-regressions job block'
 assert_block_contains "${integration_kind_session_block}" 'skipClusterCreation: true' 'integration-kind-session job block'
 assert_block_not_contains "${integration_kind_session_block}" 'Load integration images' 'integration-kind-session job block'
 assert_block_contains "${integration_kind_session_block}" 'CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar' 'integration-kind-session job block'

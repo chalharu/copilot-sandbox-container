@@ -2,7 +2,7 @@
 set -euo pipefail
 
 control_plane_image="${1:?usage: scripts/test-audit-logging.sh <control-plane-image>}"
-container_bin="${CONTROL_PLANE_CONTAINER_BIN:-podman}"
+container_bin="${CONTROL_PLANE_CONTAINER_BIN:-docker}"
 workdir="$(mktemp -d)"
 container_name="control-plane-audit-logging-test"
 control_plane_run_user=(--user 0:0)

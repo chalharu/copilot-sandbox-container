@@ -42,7 +42,6 @@ assert_healthcheck_cmd() {
 printf '%s\n' 'dockerfile-hardening-test: verifying non-root defaults and healthchecks' >&2
 
 control_plane_dockerfile="${repo_root}/containers/control-plane/Dockerfile"
-yamllint_dockerfile="${repo_root}/containers/yamllint/Dockerfile"
 sccache_dockerfile="${repo_root}/containers/sccache/Dockerfile"
 execution_plane_go_dockerfile="${repo_root}/containers/execution-plane-go/Dockerfile"
 execution_plane_node_dockerfile="${repo_root}/containers/execution-plane-node/Dockerfile"
@@ -52,11 +51,7 @@ execution_plane_smoke_dockerfile="${repo_root}/containers/execution-plane-smoke/
 
 assert_file_contains "${control_plane_dockerfile}" "USER \${CONTROL_PLANE_USER}"
 assert_file_not_matches "${control_plane_dockerfile}" '^USER root$'
-assert_healthcheck_cmd "${control_plane_dockerfile}" '    CMD ["bash", "-lc", "node --version >/dev/null && gh --version >/dev/null && podman --version >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]'
-
-assert_file_contains "${yamllint_dockerfile}" 'HOME=/tmp'
-assert_file_contains "${yamllint_dockerfile}" 'USER 65532:65532'
-assert_healthcheck_cmd "${yamllint_dockerfile}" '    CMD ["yamllint", "--version"]'
+assert_healthcheck_cmd "${control_plane_dockerfile}" '    CMD ["bash", "-lc", "node --version >/dev/null && gh --version >/dev/null && cargo --version >/dev/null && yamllint --version >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]'
 
 assert_healthcheck_cmd "${sccache_dockerfile}" '    CMD ["/usr/local/bin/sccache", "--version"]'
 assert_healthcheck_cmd "${execution_plane_go_dockerfile}" '    CMD ["bash", "-lc", "go version >/dev/null && dlv version >/dev/null"]'

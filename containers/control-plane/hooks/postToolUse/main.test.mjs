@@ -179,21 +179,26 @@ function createToolStubs(
 				'printf "bash %s\\n" "$*" >> "$HOOK_LOG"',
 				'printf "NODE_COMPILE_CACHE=%s\\n" "$NODE_COMPILE_CACHE" >> "$HOOK_LOG"',
 				'printf "NPM_CONFIG_CACHE=%s\\n" "$NPM_CONFIG_CACHE" >> "$HOOK_LOG"',
-				'if [ "$1" = "containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh" ] && [ "$2" = "fmt" ]; then',
+				'if [ "$1" = "containers/control-plane/skills/containerized-rust-ops/scripts/control-plane-rust.sh" ] && [ "$2" = "fmt" ]; then',
 				"  exit 0",
 				"fi",
-				'if [ "$1" = "containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh" ] && [ "$2" = "clippy-fix" ]; then',
+				'if [ "$1" = "containers/control-plane/skills/containerized-rust-ops/scripts/control-plane-rust.sh" ] && [ "$2" = "clippy-fix" ]; then',
 				"  exit 0",
 				"fi",
-				'if [ "$1" = "containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh" ] && [ "$2" = "clippy" ]; then',
+				'if [ "$1" = "containers/control-plane/skills/containerized-rust-ops/scripts/control-plane-rust.sh" ] && [ "$2" = "clippy" ]; then',
 				'  printf "clippy unresolved\\n" >&2',
 				"  exit 1",
 				"fi",
-				'if [ "$1" = "containers/control-plane/skills/containerized-yamllint-ops/scripts/podman-yamllint.sh" ]; then',
-				'  printf "yamllint unresolved in %s\\n" "$2" >&2',
-				"  exit 1",
-				"fi",
 				'exec /usr/bin/bash "$@"',
+			].join("\n"),
+		);
+		writeExecutable(
+			path.join(binDir, "yamllint"),
+			[
+				"#!/bin/sh",
+				'printf "yamllint %s\\n" "$*" >> "$HOOK_LOG"',
+				'printf "yamllint unresolved in %s\\n" "$3" >&2',
+				"exit 1",
 			].join("\n"),
 		);
 	}
@@ -353,11 +358,11 @@ test("linters config defines concrete tools and language pipelines", () => {
 	const markdownlintFixNpx = lintersConfig.tools.find(
 		(tool) => tool.id === "markdownlint-fix-npx",
 	);
-	const containerizedRustFmt = lintersConfig.tools.find(
-		(tool) => tool.id === "containerized-rust-fmt",
+	const controlPlaneRustFmt = lintersConfig.tools.find(
+		(tool) => tool.id === "control-plane-rust-fmt",
 	);
-	const containerizedYamllint = lintersConfig.tools.find(
-		(tool) => tool.id === "containerized-yamllint-check",
+	const yamllintCheck = lintersConfig.tools.find(
+		(tool) => tool.id === "yamllint-check",
 	);
 	const markdownPipeline = lintersConfig.pipelines.find(
 		(pipeline) => pipeline.id === "markdown",
@@ -384,13 +389,14 @@ test("linters config defines concrete tools and language pipelines", () => {
 		"markdownlint-cli2",
 		"--fix",
 	]);
-	assert.equal(containerizedRustFmt.command, "bash");
-	assert.deepEqual(containerizedRustFmt.args, [
-		"containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh",
+	assert.equal(controlPlaneRustFmt.command, "bash");
+	assert.deepEqual(controlPlaneRustFmt.args, [
+		"containers/control-plane/skills/containerized-rust-ops/scripts/control-plane-rust.sh",
 		"fmt",
 	]);
-	assert.equal(containerizedRustFmt.appendFiles, false);
-	assert.equal(containerizedYamllint.command, "bash");
+	assert.equal(controlPlaneRustFmt.appendFiles, false);
+	assert.equal(yamllintCheck.command, "yamllint");
+	assert.deepEqual(yamllintCheck.args, ["-c", ".yamllint"]);
 	assert.equal(markdownPipeline.id, "markdown");
 	assert.deepEqual(markdownPipeline.matcher, ["\\.(?:md|markdown)$"]);
 	assert.deepEqual(markdownPipeline.steps[0].tools, [
@@ -407,17 +413,15 @@ test("linters config defines concrete tools and language pipelines", () => {
 	]);
 	assert.equal(yamlPipeline.id, "yaml");
 	assert.deepEqual(yamlPipeline.matcher, ["\\.(?:ya?ml)$"]);
-	assert.deepEqual(yamlPipeline.steps[0].tools, [
-		"containerized-yamllint-check",
-	]);
+	assert.deepEqual(yamlPipeline.steps[0].tools, ["yamllint-check"]);
 	assert.deepEqual(pythonPipeline.matcher, ["\\.(?:py|pyi|pyw)$"]);
 	assert.deepEqual(rustPipeline.matcher, ["\\.rs$"]);
-	assert.deepEqual(rustPipeline.steps[0].tools, ["containerized-rust-fmt"]);
+	assert.deepEqual(rustPipeline.steps[0].tools, ["control-plane-rust-fmt"]);
 	assert.deepEqual(rustPipeline.steps[1].tools, [
-		"containerized-rust-clippy-fix",
+		"control-plane-rust-clippy-fix",
 	]);
 	assert.deepEqual(rustPipeline.steps[3].tools, [
-		"containerized-rust-clippy-check",
+		"control-plane-rust-clippy-check",
 	]);
 	assert.deepEqual(dockerPipeline.matcher, [
 		"(?:^|/)Dockerfile(?:\\.[^/]+)?$",
@@ -514,28 +518,22 @@ test("main hook runs Python Rust YAML and Dockerfile pipelines", (t) => {
 	assert.match(hookLog, /ruff check --fix app\.py/);
 	assert.match(
 		hookLog,
-		/bash containers\/control-plane\/skills\/containerized-rust-ops\/scripts\/podman-rust\.sh fmt/,
+		/bash containers\/control-plane\/skills\/containerized-rust-ops\/scripts\/control-plane-rust\.sh fmt/,
 	);
 	assert.match(
 		hookLog,
-		/bash containers\/control-plane\/skills\/containerized-rust-ops\/scripts\/podman-rust\.sh clippy-fix/,
+		/bash containers\/control-plane\/skills\/containerized-rust-ops\/scripts\/control-plane-rust\.sh clippy-fix/,
 	);
 	assert.match(
 		hookLog,
-		/bash containers\/control-plane\/skills\/containerized-rust-ops\/scripts\/podman-rust\.sh clippy/,
+		/bash containers\/control-plane\/skills\/containerized-rust-ops\/scripts\/control-plane-rust\.sh clippy/,
 	);
-	assert.match(
-		hookLog,
-		/bash containers\/control-plane\/skills\/containerized-yamllint-ops\/scripts\/podman-yamllint\.sh sample\.yaml/,
-	);
+	assert.match(hookLog, /yamllint -c \.yamllint sample\.yaml/);
 	assert.match(hookLog, /hadolint Dockerfile/);
 	assert.match(hookLog, /NODE_COMPILE_CACHE=.+node-compile-cache/);
 	assert.match(hookLog, /NPM_CONFIG_CACHE=.+npm-cache/);
 	assert.match(result.stderr, /Ruff reported unresolved issues:/);
-	assert.match(
-		result.stderr,
-		/Containerized Rust linter reported unresolved issues:/,
-	);
+	assert.match(result.stderr, /Rust linter reported unresolved issues:/);
 	assert.match(result.stderr, /Yamllint reported unresolved issues:/);
 	assert.match(result.stderr, /Hadolint reported unresolved issues:/);
 	assert.match(result.stderr, /ruff unresolved in app\.py/);

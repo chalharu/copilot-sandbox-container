@@ -98,8 +98,8 @@ Pod 内設定ではなく outer runtime / CRI / host 側が nested user namespac
 ### 代表ログ
 
 ```text
-control-plane-podman: detected stale rootless Podman state; attempting `podman system migrate` once.
-control-plane-podman: `podman system migrate` repaired the local Podman state.
+legacy local runtime wrapper: detected stale rootless Podman state; attempting `podman system migrate` once.
+legacy local runtime wrapper: `podman system migrate` repaired the local Podman state.
 ```
 
 ### 意味
@@ -147,7 +147,7 @@ unable to retrieve auth token: invalid username/password: unauthorized: authenti
 
 ### 意味
 
-`dockerhub-username` / `dockerhub-token` Secret が無いか、Control Plane 起動時の Podman auth 生成ができていません。`scripts/prepare-dhi-images.sh` は既存の Podman auth か明示的な `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` を使い、`scripts/validate-renovate-config.sh` は secret file fallback を前提にしません。`${XDG_RUNTIME_DIR}/containers/auth.json` の直読は policy で止まるので、疎通確認は `podman login --get-login dhi.io` で行ってください。
+`dockerhub-username` / `dockerhub-token` Secret が無いか、DHI 用の Docker auth が不足しています。`scripts/prepare-dhi-images.sh` は既存の Docker auth か明示的な `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` を使い、`scripts/validate-renovate-config.sh` は secret file fallback を前提にしません。疎通確認は `docker login dhi.io` で行ってください。
 
 ## 9. Service の `EXTERNAL-IP` が未割当て
 

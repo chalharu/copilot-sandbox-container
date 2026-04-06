@@ -2,7 +2,7 @@
 set -euo pipefail
 
 control_plane_image="${1:?usage: scripts/test-pre-tool-use-policy.sh <control-plane-image>}"
-container_bin="${CONTROL_PLANE_CONTAINER_BIN:-podman}"
+container_bin="${CONTROL_PLANE_CONTAINER_BIN:-docker}"
 workdir="$(mktemp -d)"
 container_name="control-plane-pre-tool-use-policy-test"
 control_plane_run_user=(--user 0:0)
@@ -49,7 +49,6 @@ hook_config="${HOME}/.copilot/hooks/preToolUse/deny-rules.yaml"
 exec_policy_library="${CONTROL_PLANE_EXEC_POLICY_LIBRARY:-}"
 exec_policy_rules="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE:-}"
 copilot_token_path="${HOME}/.config/control-plane/copilot-github-token"
-dockerhub_token_path="${HOME}/.config/control-plane/dockerhub-token"
 registry_auth_path="${XDG_RUNTIME_DIR}/containers/auth.json"
 mounted_auth_dir="/run/control-plane-auth"
 ssh_public_key_mount_path="${mounted_auth_dir}/ssh-public-key"
@@ -69,8 +68,6 @@ test "${LD_PRELOAD}" = "${exec_policy_library}"
 
 mkdir -p "${HOME}/.config/gh"
 export CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE="${copilot_token_path}"
-export DOCKERHUB_TOKEN_FILE="${dockerhub_token_path}"
-export REGISTRY_AUTH_PATH="${registry_auth_path}"
 test -f "${registry_auth_path}"
 test -f "${ssh_public_key_mount_path}"
 test -f "${gh_github_token_mount_path}"
@@ -126,8 +123,6 @@ assert_denied_shell() {
     CONTROL_PLANE_EXEC_POLICY_RULES_FILE="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE}" \
     GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL}" \
     CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE="${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}" \
-    DOCKERHUB_TOKEN_FILE="${DOCKERHUB_TOKEN_FILE}" \
-    REGISTRY_AUTH_PATH="${REGISTRY_AUTH_PATH}" \
     XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
     HOME="${HOME}" \
     PATH="${PATH}" \
@@ -157,8 +152,6 @@ assert_allowed_shell() {
     CONTROL_PLANE_EXEC_POLICY_RULES_FILE="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE}" \
     GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL}" \
     CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE="${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}" \
-    DOCKERHUB_TOKEN_FILE="${DOCKERHUB_TOKEN_FILE}" \
-    REGISTRY_AUTH_PATH="${REGISTRY_AUTH_PATH}" \
     XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
     HOME="${HOME}" \
     PATH="${PATH}" \
@@ -279,7 +272,6 @@ assert_denied_exec 'pull request merge endpoints are blocked' gh api repos/octo-
 assert_denied_exec 'Protected environment overrides are blocked' env GIT_CONFIG_GLOBAL=/tmp/evil git status --short
 assert_denied_exec 'repo-local policy' git status --short
 assert_denied_shell 'CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE' 'while IFS= read -r _; do :; done < "${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}"'
-assert_denied_shell 'DOCKERHUB_TOKEN_FILE' 'while IFS= read -r _; do :; done < "${DOCKERHUB_TOKEN_FILE}"'
 assert_denied_shell 'registry auth.json' 'while IFS= read -r _; do :; done < "${XDG_RUNTIME_DIR}/containers/auth.json"'
 assert_denied_shell 'registry auth.json' 'cat "${XDG_RUNTIME_DIR}/containers/auth.json"'
 assert_denied_shell '~/.config/gh/hosts.yml' 'while IFS= read -r _; do :; done < "${HOME}/.config/gh/hosts.yml"'
@@ -291,9 +283,6 @@ assert_denied_shell '/run/control-plane-auth' 'cat "/run/control-plane-auth/dock
 assert_denied_shell '/run/control-plane-auth' 'cat "/run/control-plane-auth/dockerhub-token"'
 assert_denied_shell '/run/control-plane-auth' 'cat "/run/control-plane-auth/..data/dockerhub-token"'
 assert_allowed_shell '/usr/local/bin/control-plane-copilot'
-assert_allowed_shell '/usr/local/bin/podman'
-assert_allowed_shell '/usr/local/bin/control-plane-podman'
-assert_allowed_shell '/usr/local/bin/docker'
 assert_allowed_shell '/usr/bin/gh auth status'
 assert_allowed_shell '/usr/bin/gh pr view 123'
 assert_allowed_shell '/usr/bin/gh api repos/octo-org/octo-repo/pulls/123'
@@ -397,7 +386,6 @@ install -d -o copilot -g copilot /home/copilot/.config/control-plane
 install -d -o copilot -g copilot /run/user/1000/containers
 install -d -o copilot -g copilot /run/control-plane-auth/..data
 printf '%s\n' 'copilot-secret-token' > /home/copilot/.config/control-plane/copilot-github-token
-printf '%s\n' 'dockerhub-secret-token' > /home/copilot/.config/control-plane/dockerhub-token
 printf '%s\n' '{"auths":{"dhi.io":{"auth":"test-auth"}}}' > /run/user/1000/containers/auth.json
 cat > /home/copilot/.config/gh/hosts.yml <<'YAML'
 github.com:
@@ -422,7 +410,6 @@ ln -s ..data/dockerhub-username /run/control-plane-auth/dockerhub-username
 ln -s ..data/dockerhub-token /run/control-plane-auth/dockerhub-token
 chown copilot:copilot \
   /home/copilot/.config/control-plane/copilot-github-token \
-  /home/copilot/.config/control-plane/dockerhub-token \
   /run/user/1000/containers/auth.json \
   /run/control-plane-auth/..data/ssh-public-key \
   /run/control-plane-auth/..data/gh-github-token \
@@ -432,7 +419,6 @@ chown copilot:copilot \
   /run/control-plane-auth/..data/dockerhub-token
 chmod 600 \
   /home/copilot/.config/control-plane/copilot-github-token \
-  /home/copilot/.config/control-plane/dockerhub-token \
   /run/user/1000/containers/auth.json \
   /run/control-plane-auth/..data/ssh-public-key \
   /run/control-plane-auth/..data/gh-github-token \
@@ -443,9 +429,6 @@ chmod 600 \
 chown copilot:copilot /home/copilot/.config/gh/hosts.yml
 chmod 600 /home/copilot/.config/gh/hosts.yml
 rm -f \
-  /usr/local/bin/podman \
-  /usr/local/bin/docker \
-  /usr/local/bin/control-plane-podman \
   /usr/local/bin/control-plane-copilot \
   /usr/bin/gh
 cat > /usr/local/bin/control-plane-copilot <<'EOF_COPILOT'
@@ -453,23 +436,6 @@ cat > /usr/local/bin/control-plane-copilot <<'EOF_COPILOT'
 set -euo pipefail
 while IFS= read -r _; do :; done < "${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}"
 EOF_COPILOT
-cat > /usr/local/bin/control-plane-podman <<'EOF_CONTROL_PLANE_PODMAN'
-#!/usr/bin/env bash
-set -euo pipefail
-while IFS= read -r _; do :; done < "${DOCKERHUB_TOKEN_FILE}"
-while IFS= read -r _; do :; done < "${REGISTRY_AUTH_PATH}"
-EOF_CONTROL_PLANE_PODMAN
-cat > /usr/local/bin/podman <<'EOF_PODMAN'
-#!/usr/bin/env bash
-set -euo pipefail
-while IFS= read -r _; do :; done < "${DOCKERHUB_TOKEN_FILE}"
-while IFS= read -r _; do :; done < "${REGISTRY_AUTH_PATH}"
-EOF_PODMAN
-cat > /usr/local/bin/docker <<'EOF_DOCKER'
-#!/usr/bin/env bash
-set -euo pipefail
-while IFS= read -r _; do :; done < "${REGISTRY_AUTH_PATH}"
-EOF_DOCKER
 cat > /usr/bin/gh <<'EOF_GH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -481,9 +447,6 @@ while IFS= read -r _; do :; done < "${HOME}/.config/gh/hosts.yml"
 EOF_GH
 chmod 755 \
   /usr/local/bin/control-plane-copilot \
-  /usr/local/bin/control-plane-podman \
-  /usr/local/bin/podman \
-  /usr/local/bin/docker \
   /usr/bin/gh
 source /home/copilot/.config/control-plane/runtime.env
 su -s /bin/bash copilot -lc /tmp/pre-tool-use-check.sh

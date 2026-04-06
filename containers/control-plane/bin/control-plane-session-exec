@@ -208,7 +208,11 @@ healthcheck() {
   local pod_ip="$1"
 
   [[ -n "${pod_ip}" ]] || return 1
-  curl --silent --show-error --fail --max-time 2 "http://${pod_ip}:${port}/healthz" >/dev/null
+  control-plane-exec-api \
+    health \
+    --addr "http://${pod_ip}:${port}" \
+    --timeout-sec 2 \
+    >/dev/null
 }
 
 wait_for_healthcheck() {
@@ -261,18 +265,16 @@ spec:
         - |
           exec su -s /bin/bash ${control_plane_user} -c 'exec /usr/local/bin/control-plane-exec-api-launcher'
       ports:
-        - name: http
+        - name: grpc
           containerPort: ${port}
       readinessProbe:
-        httpGet:
-          path: /healthz
-          port: http
+        grpc:
+          port: ${port}
         periodSeconds: 2
         failureThreshold: 30
       livenessProbe:
-        httpGet:
-          path: /healthz
-          port: http
+        grpc:
+          port: ${port}
         initialDelaySeconds: 5
         periodSeconds: 10
         failureThreshold: 6
@@ -487,7 +489,7 @@ prepare_session() {
   ensure_configuration
   require_command kubectl
   require_command jq
-  require_command curl
+  require_command control-plane-exec-api
   require_command sha256sum
   require_command base64
 
@@ -528,17 +530,13 @@ proxy_command() {
   local cwd="$2"
   local command_base64="$3"
   local pod_ip
-  local command
-  local payload
   local response_file
-  local http_status
   local exit_code
   local auth_token
 
   ensure_enabled
   ensure_configuration
-  require_command base64
-  require_command curl
+  require_command control-plane-exec-api
   require_command jq
   require_command kubectl
 
@@ -546,56 +544,41 @@ proxy_command() {
   pod_ip="$(session_entry_field "${session_key}" podIp)"
   auth_token="$(session_entry_field "${session_key}" authToken)"
   [[ -n "${auth_token}" ]] || die "missing execution pod auth token"
-  command="$(printf '%s' "${command_base64}" | base64 -d)"
-  payload="$(jq -cn --arg command "${command}" --arg cwd "${cwd}" '{command: $command, cwd: $cwd}')"
   response_file="$(mktemp "${TMPDIR:-/tmp}/control-plane-session-exec-response.XXXXXX")"
 
   set +e
-  http_status="$(
-    curl \
-      --silent \
-      --show-error \
-      --output "${response_file}" \
-      --write-out '%{http_code}' \
-      --max-time "${request_timeout}" \
-      --header 'Content-Type: application/json' \
-      --header "X-Control-Plane-Exec-Token: ${auth_token}" \
-      --data-binary "${payload}" \
-      "http://${pod_ip}:${port}/exec"
-  )"
-  curl_status=$?
+  control-plane-exec-api \
+    exec \
+    --addr "http://${pod_ip}:${port}" \
+    --timeout-sec "${request_timeout}" \
+    --token "${auth_token}" \
+    --cwd "${cwd}" \
+    --command-base64 "${command_base64}" \
+    > "${response_file}"
+  exec_api_status=$?
   set -e
 
-  if [[ "${curl_status}" -ne 0 ]] || [[ "${http_status}" != "200" ]]; then
+  if [[ "${exec_api_status}" -ne 0 ]]; then
     prepare_session "${session_key}" 1
     pod_ip="$(session_entry_field "${session_key}" podIp)"
     auth_token="$(session_entry_field "${session_key}" authToken)"
     [[ -n "${auth_token}" ]] || die "missing execution pod auth token"
     set +e
-    http_status="$(
-      curl \
-        --silent \
-        --show-error \
-        --output "${response_file}" \
-        --write-out '%{http_code}' \
-        --max-time "${request_timeout}" \
-        --header 'Content-Type: application/json' \
-        --header "X-Control-Plane-Exec-Token: ${auth_token}" \
-        --data-binary "${payload}" \
-        "http://${pod_ip}:${port}/exec"
-    )"
-    curl_status=$?
+    control-plane-exec-api \
+      exec \
+      --addr "http://${pod_ip}:${port}" \
+      --timeout-sec "${request_timeout}" \
+      --token "${auth_token}" \
+      --cwd "${cwd}" \
+      --command-base64 "${command_base64}" \
+      > "${response_file}"
+    exec_api_status=$?
     set -e
   fi
 
-  if [[ "${curl_status}" -ne 0 ]]; then
+  if [[ "${exec_api_status}" -ne 0 ]]; then
     rm -f "${response_file}"
     die "failed to reach execution pod API"
-  fi
-  if [[ "${http_status}" != "200" ]]; then
-    cat "${response_file}" >&2 || true
-    rm -f "${response_file}"
-    die "execution pod API returned HTTP ${http_status}"
   fi
 
   jq -e '.exitCode != null and (.exitCode | type == "number")' "${response_file}" >/dev/null \

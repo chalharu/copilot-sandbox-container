@@ -7,12 +7,25 @@ COPY hooks/preToolUse/deny-rules.yaml ./hooks/preToolUse/deny-rules.yaml
 RUN cargo test --locked --release \
     && cargo build --locked --release
 
+FROM docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895 AS exec-api-builder
+
+WORKDIR /build/control-plane-exec-api
+COPY exec-api/Cargo.toml exec-api/Cargo.lock exec-api/build.rs ./
+COPY exec-api/proto ./proto
+COPY exec-api/src ./src
+RUN cargo test --locked --release \
+    && cargo build --locked --release
+
+FROM docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895 AS rust-toolchain
+
 FROM node:24.14.1-bookworm-slim@sha256:06e5c9f86bfa0aaa7163cf37a5eaa8805f16b9acb48e3f85645b09d459fc2a9f
 
 # renovate: datasource=npm depName=@github/copilot
 ARG COPILOT_CLI_VERSION=1.0.18
 # renovate: datasource=github-releases depName=kubernetes-sigs/kind
 ARG KIND_VERSION=v0.31.0
+# renovate: datasource=pypi depName=yamllint
+ARG YAMLLINT_VERSION=1.38.0
 ARG CONTROL_PLANE_UID=1000
 ARG CONTROL_PLANE_GID=1000
 ARG CONTROL_PLANE_USER=copilot
@@ -22,6 +35,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CONTROL_PLANE_USER=${CONTROL_PLANE_USER} \
     CONTROL_PLANE_HOME=/home/${CONTROL_PLANE_USER} \
     CONTROL_PLANE_WORKSPACE=/workspace
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/home/${CONTROL_PLANE_USER}/.cargo \
+    CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target \
+    PATH=/usr/local/cargo/bin:${PATH}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -32,7 +49,6 @@ RUN apt-get update -o Acquire::Retries=3 \
         ca-certificates \
         cpulimit \
         curl \
-        fuse-overlayfs \
         gh \
         git \
         jq \
@@ -41,14 +57,13 @@ RUN apt-get update -o Acquire::Retries=3 \
         ncurses-term \
         openssh-client \
         openssh-server \
-        podman \
+        python3 \
+        python3-pip \
         procps \
          rclone \
          screen \
-         slirp4netns \
          sqlite3 \
          tini \
-         uidmap \
          vim \
     && printf '%s\n' \
         'en_US.UTF-8 UTF-8' \
@@ -74,6 +89,8 @@ RUN arch="$(dpkg --print-architecture)" \
 
 RUN npm install --global "@github/copilot@${COPILOT_CLI_VERSION}" \
     && npm cache clean --force
+
+RUN python3 -m pip install --break-system-packages --no-cache-dir "yamllint==${YAMLLINT_VERSION}"
 
 RUN existing_group="$(getent group "${CONTROL_PLANE_GID}" | cut -d: -f1 || true)" \
     && if [ -n "${existing_group}" ] && [ "${existing_group}" != "${CONTROL_PLANE_USER}" ]; then \
@@ -108,13 +125,11 @@ RUN existing_group="$(getent group "${CONTROL_PLANE_GID}" | cut -d: -f1 || true)
     && passwd -d "${CONTROL_PLANE_USER}" \
     && mkdir -p \
         "/home/${CONTROL_PLANE_USER}/.copilot" \
-        "/home/${CONTROL_PLANE_USER}/.config/containers" \
+        "/home/${CONTROL_PLANE_USER}/.cargo" \
         "/home/${CONTROL_PLANE_USER}/.config/gh" \
         "/home/${CONTROL_PLANE_USER}/.ssh" \
         /run/sshd \
         /workspace \
-    && if ! grep -q "^${CONTROL_PLANE_USER}:" /etc/subuid; then printf '%s:%s:65536\n' "${CONTROL_PLANE_USER}" 100000 >> /etc/subuid; fi \
-    && if ! grep -q "^${CONTROL_PLANE_USER}:" /etc/subgid; then printf '%s:%s:65536\n' "${CONTROL_PLANE_USER}" 100000 >> /etc/subgid; fi \
     && chown -R "${CONTROL_PLANE_USER}:${CONTROL_PLANE_USER}" \
         "/home/${CONTROL_PLANE_USER}" \
         /workspace \
@@ -123,21 +138,21 @@ RUN existing_group="$(getent group "${CONTROL_PLANE_GID}" | cut -d: -f1 || true)
 
 COPY --chmod=644 config/sshd_config /etc/ssh/sshd_config
 COPY --chmod=644 config/screenrc /etc/screenrc
-COPY --chmod=644 config/storage.conf /home/${CONTROL_PLANE_USER}/.config/containers/storage.conf
 COPY --chmod=644 config/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
 COPY --chmod=644 config/profile-control-plane-session.sh /etc/profile.d/control-plane-session.sh
 COPY --chmod=644 config/external-skills.yaml /tmp/external-skills.yaml
 COPY skills/ /usr/local/share/control-plane/skills/
 COPY hooks/ /usr/local/share/control-plane/hooks/
+COPY --from=rust-toolchain /usr/local/cargo/bin /usr/local/cargo/bin
+COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
 COPY --from=exec-policy-builder /build/control-plane-exec-policy/target/release/libcontrol_plane_exec_policy.so /usr/local/lib/libcontrol_plane_exec_policy.so
 COPY --from=exec-policy-builder /build/control-plane-exec-policy/target/release/control-plane-pre-tool-use-hook /usr/local/share/control-plane/hooks/preToolUse/main
-COPY --chmod=755 bin/control-plane-podman /usr/local/bin/control-plane-podman
 COPY --chmod=755 bin/control-plane-screen /usr/local/bin/control-plane-screen
 COPY --chmod=755 bin/control-plane-entrypoint /usr/local/bin/control-plane-entrypoint
 COPY --chmod=755 bin/control-plane-exec-api-launcher /usr/local/bin/control-plane-exec-api-launcher
 COPY --chmod=755 bin/control-plane-session-exec /usr/local/bin/control-plane-session-exec
 COPY --chmod=755 bin/control-plane-copilot /usr/local/bin/control-plane-copilot
-COPY --chmod=755 bin/control-plane-exec-api.mjs /usr/local/bin/control-plane-exec-api.mjs
+COPY --from=exec-api-builder /build/control-plane-exec-api/target/release/control-plane-exec-api /usr/local/bin/control-plane-exec-api
 COPY --chmod=755 bin/install-git-skills-from-manifest /usr/local/bin/install-git-skills-from-manifest
 COPY --chmod=644 bin/external-skills-manifest-to-tsv.mjs /usr/local/bin/external-skills-manifest-to-tsv.mjs
 COPY --chmod=755 bin/control-plane-job-transfer /usr/local/bin/control-plane-job-transfer
@@ -156,8 +171,6 @@ RUN /usr/local/bin/install-git-skills-from-manifest /tmp/external-skills.yaml /u
         /tmp/external-skills.yaml \
         /usr/local/bin/install-git-skills-from-manifest \
         /usr/local/bin/external-skills-manifest-to-tsv.mjs \
-    && ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/podman \
-    && ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/docker \
     && ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen \
     && usermod --shell /usr/local/bin/control-plane-ssh-shell "${CONTROL_PLANE_USER}" \
     && find /usr/local/share/control-plane/skills -type d -exec chmod 755 {} + \
@@ -173,10 +186,10 @@ RUN /usr/local/bin/install-git-skills-from-manifest /tmp/external-skills.yaml /u
 
 WORKDIR /workspace
 # Supported runtimes still have to override this to root because the entrypoint
-# provisions mounted state, SSH host keys, and the rootful Podman service.
+# provisions mounted state and SSH host keys.
 USER ${CONTROL_PLANE_USER}
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["bash", "-lc", "node --version >/dev/null && gh --version >/dev/null && podman --version >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]
+    CMD ["bash", "-lc", "node --version >/dev/null && gh --version >/dev/null && cargo --version >/dev/null && yamllint --version >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]
 EXPOSE 2222
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/control-plane-entrypoint"]
 CMD ["/usr/sbin/sshd", "-D", "-e", "-f", "/etc/ssh/sshd_config"]

@@ -19,12 +19,12 @@ printf '%s\n' "$*" >> "${TEST_KIND_KIND_LOG:?}"
 EOF
 chmod +x "${workdir}/bin/kind"
 
-cat > "${workdir}/bin/podman" <<'EOF'
+cat > "${workdir}/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "$*" >> "${TEST_KIND_PODMAN_LOG:?}"
+printf '%s\n' "$*" >> "${TEST_KIND_DOCKER_LOG:?}"
 if [[ "${1:-}" != "save" ]]; then
-  printf 'unexpected fake podman command: %s\n' "$*" >&2
+  printf 'unexpected fake docker command: %s\n' "$*" >&2
   exit 1
 fi
 shift
@@ -41,12 +41,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "${output_path}" ]] || {
-  printf 'fake podman did not receive --output\n' >&2
+printf 'fake docker did not receive --output\n' >&2
   exit 1
 }
 : > "${output_path}"
 EOF
-chmod +x "${workdir}/bin/podman"
+chmod +x "${workdir}/bin/docker"
 
 cat > "${workdir}/bin/sudo" <<'EOF'
 #!/usr/bin/env bash
@@ -71,7 +71,7 @@ EOF
 chmod +x "${workdir}/bin/sudo"
 
 kind_log="${workdir}/kind.log"
-podman_log="${workdir}/podman.log"
+docker_log="${workdir}/docker.log"
 sudo_log="${workdir}/sudo.log"
 archive_path="${workdir}/control-plane-images.tar"
 : > "${archive_path}"
@@ -79,29 +79,29 @@ archive_path="${workdir}/control-plane-images.tar"
 printf '%s\n' 'kind-image-loading-test: verifying direct archive import' >&2
 PATH="${workdir}/bin:${PATH}" \
 TEST_KIND_KIND_LOG="${kind_log}" \
-TEST_KIND_PODMAN_LOG="${podman_log}" \
+TEST_KIND_DOCKER_LOG="${docker_log}" \
 TEST_KIND_SUDO_LOG="${sudo_log}" \
   "${script_dir}/load-kind-images.sh" \
   --cluster-name control-plane-ci \
   --image-archive "${archive_path}"
 
 grep -Fqx "load image-archive ${archive_path} --name control-plane-ci" "${kind_log}"
-test ! -e "${podman_log}"
+test ! -e "${docker_log}"
 test ! -e "${sudo_log}"
 
 : > "${kind_log}"
-rm -f "${podman_log}" "${sudo_log}"
+rm -f "${docker_log}" "${sudo_log}"
 
 printf '%s\n' 'kind-image-loading-test: verifying fallback image export with sudo-aware kind load' >&2
 PATH="${workdir}/bin:${PATH}" \
 CONTROL_PLANE_KIND_USE_SUDO=1 \
-KIND_EXPERIMENTAL_PROVIDER=podman \
+KIND_EXPERIMENTAL_PROVIDER=docker \
 TEST_KIND_KIND_LOG="${kind_log}" \
-TEST_KIND_PODMAN_LOG="${podman_log}" \
+TEST_KIND_DOCKER_LOG="${docker_log}" \
 TEST_KIND_SUDO_LOG="${sudo_log}" \
   "${script_dir}/load-kind-images.sh" \
   --cluster-name control-plane-ci \
-  --container-bin podman \
+  --container-bin docker \
   --image localhost/control-plane:test \
   --image localhost/execution-plane-smoke:test
 
@@ -110,9 +110,9 @@ expected_execution_archive="$(printf '%s' 'localhost/execution-plane-smoke:test'
 control_archive_path="$(sed -n "s|^load image-archive \\(.*/${expected_control_archive}\\.tar\\) --name control-plane-ci$|\\1|p" "${kind_log}" | head -n 1)"
 execution_archive_path="$(sed -n "s|^load image-archive \\(.*/${expected_execution_archive}\\.tar\\) --name control-plane-ci$|\\1|p" "${kind_log}" | head -n 1)"
 
-grep -Eq "^save --output .*/${expected_control_archive}\.tar localhost/control-plane:test$" "${podman_log}"
-grep -Eq "^save --output .*/${expected_execution_archive}\.tar localhost/execution-plane-smoke:test$" "${podman_log}"
+grep -Eq "^save --output .*/${expected_control_archive}\.tar localhost/control-plane:test$" "${docker_log}"
+grep -Eq "^save --output .*/${expected_execution_archive}\.tar localhost/execution-plane-smoke:test$" "${docker_log}"
 grep -Eq "^load image-archive .*/${expected_control_archive}\.tar --name control-plane-ci$" "${kind_log}"
 grep -Eq "^load image-archive .*/${expected_execution_archive}\.tar --name control-plane-ci$" "${kind_log}"
-grep -Fqx -- "-n env KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive ${control_archive_path} --name control-plane-ci" "${sudo_log}"
-grep -Fqx -- "-n env KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive ${execution_archive_path} --name control-plane-ci" "${sudo_log}"
+grep -Fqx -- "-n env KIND_EXPERIMENTAL_PROVIDER=docker kind load image-archive ${control_archive_path} --name control-plane-ci" "${sudo_log}"
+grep -Fqx -- "-n env KIND_EXPERIMENTAL_PROVIDER=docker kind load image-archive ${execution_archive_path} --name control-plane-ci" "${sudo_log}"

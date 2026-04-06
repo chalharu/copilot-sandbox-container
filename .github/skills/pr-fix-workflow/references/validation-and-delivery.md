@@ -9,10 +9,10 @@
 
 ## Local validation baseline
 
-Run the repository baseline with Podman:
+Run the repository baseline with Docker:
 
-- `CONTROL_PLANE_TOOLCHAIN=podman ./scripts/lint.sh`
-- `CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh`
+- `./scripts/lint.sh`
+- `./scripts/build-test.sh`
 
 Add a focused `scripts/test-*.sh` regression check for the behavior you changed and run it directly during iteration. Wire it into `scripts/build-test.sh` when it is deterministic and worth covering in the standard regression path.
 
@@ -42,10 +42,10 @@ That script:
 
 - validates the repo-local `pr-fix-workflow` skill
 - validates the bundled `repo-change-delivery`, `git-commit`, and `pull-request-workflow` skills
-- packages each skill through the repository `containers/yamllint` image without depending on host Python
+- packages each skill through the bundled control-plane image without depending on host Python
 - checks that the control-plane image and runtime tests still expose bundled skills correctly
 
-`CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh` also includes the same regression script in the standard baseline.
+`./scripts/build-test.sh` also includes the same regression script in the standard baseline.
 
 ## CI surfaces
 

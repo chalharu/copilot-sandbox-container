@@ -3,8 +3,8 @@ set -euo pipefail
 
 cluster_name=""
 image_archive=""
-container_bin="${CONTROL_PLANE_CONTAINER_BIN:-podman}"
-kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-podman}"
+container_bin="${CONTROL_PLANE_CONTAINER_BIN:-docker}"
+kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-docker}"
 kind_use_sudo="${CONTROL_PLANE_KIND_USE_SUDO:-0}"
 workdir=""
 declare -a images=()

@@ -17,14 +17,12 @@ toolchain を固定したい場合:
 
 ```bash
 CONTROL_PLANE_TOOLCHAIN=docker ./scripts/build-test.sh
-CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 ```
 
 ### current-cluster で詰まりやすい点
 
-- Podman build は rootful-service で remote Podman socket と `--isolation=chroot` を既定に使う
-- rootful-service image store は `/var/lib/control-plane/rootful-podman/rootful-overlay` の disposable emptyDir cache へ置き、runtime dir は `/var/tmp/control-plane/rootful-overlay` の disk-backed emptyDir へ逃がす
-- `yamllint` image の DHI base image は `scripts/prepare-dhi-images.sh` で事前 pull する
+- `lint.sh` は bundled control-plane image を使って `yamllint` を実行する
+- `control-plane-run` は Kubernetes Job 専用で、Copilot CLI の `bash` tool delegation とは別経路
 - `hadolint` と `shellcheck` は fully-qualified image 名で pull する
 
 runtime / cache / hook の具体的な path は
@@ -47,10 +45,9 @@ runtime / cache / hook の具体的な path は
 この 2 本で、少なくとも次を確認できます。
 
 - bundled skill の `references/` が読める
-- `COPILOT_CONFIG_JSON_FILE` と `GH_HOSTS_YML_FILE` / `GH_GITHUB_TOKEN_FILE` による設定注入が podman / Kubernetes の両方で効く
+- `COPILOT_CONFIG_JSON_FILE` と `GH_HOSTS_YML_FILE` / `GH_GITHUB_TOKEN_FILE` による設定注入が効く
 - `drop: ALL` 系 capability 構成で interactive SSH login が接続維持後も入力を受け付ける
-- rootful-service の Podman graphroot が `~/.copilot/containers` ではなく disposable cache volume を使い、runtime dir は `/run` ではなく `/var/tmp/control-plane` 側へ逃がされる
-- rootful-service 下の `podman build` と `podman run` が通る
+- bundled toolchain と runtime.env が期待どおり生成される
 - `--mount-file` が SSH/SFTP + `rclone` で大きめのファイルも運べ、競合時は安全に write-back を止める
 - `CONTROL_PLANE_FAST_EXECUTION_ENABLED=1` のとき、Copilot CLI の `bash`
   tool が session-scoped Execution Pod に委譲され、`sessionEnd` /
@@ -184,28 +181,14 @@ kubectl get pod <pod-name> -n copilot-sandbox -o jsonpath='{.spec.containers[*].
 
 ## 5. `control-plane-run` の経路を選ぶ
 
-current-cluster では local Podman ではなく Kubernetes Job path が既定です。
-対話性や速度を優先したい短い処理だけ `--execution-hint short` を使い、
-既定運用は Job 側へ寄せてください。Copilot CLI 自身の `bash` tool は別経路で、
-bundled `preToolUse` hook が session-scoped Execution Pod へ自動委譲します。
-`control-plane-run` は operator が explicit に叩く短命 command の選択面です。
+`control-plane-run` は Kubernetes Job 専用です。Copilot CLI 自身の `bash`
+tool は別経路で、bundled `preToolUse` hook が session-scoped Execution Pod
+へ自動委譲します。`control-plane-run` は operator が explicit に叩く短命
+command の Job 経路です。
 
-短い処理を local Podman へ寄せる:
-
-```bash
-control-plane-run --mode auto --execution-hint short --workspace /workspace --image <image> -- <command>
-```
-
-長い処理を Kubernetes Job へ寄せる:
+基本形:
 
 ```bash
-control-plane-run --mode auto --execution-hint long --namespace copilot-sandbox-jobs --job-name <name> --image <image> -- <command>
-```
-
-経路を固定したい場合:
-
-```bash
-control-plane-run --mode podman ...
 control-plane-run --mode k8s-job ...
 ```
 
@@ -228,8 +211,8 @@ session picker を一時的に避けたい場合だけ、Pod の env に `CONTRO
 ## 7. 典型的なデバッグの入口
 
 - `ls: cannot access ... Permission denied`: bundled skill の同期結果と directory execute bit を確認する
-- `cannot clone: Operation not permitted`: rootless 前提の説明を見直し、Job 経路へ寄せる
-- `cgroup.subtree_control: Read-only file system`: rootful-service build では `chroot` isolation を使う
+- `cannot clone: Operation not permitted`: rootless 前提の説明を見直し、Execution Pod / Job 経路へ寄せる
+- `cgroup.subtree_control: Read-only file system`: nested container 実行を前提にせず Job 経路を優先する
 - `cleanup_exit: kill(`: SSH capability 構成を見直す
 
 失敗ログの意味は `docs/reference/debug-log.md` を参照してください。

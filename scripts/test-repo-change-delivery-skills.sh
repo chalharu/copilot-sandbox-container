@@ -64,7 +64,6 @@ source "${script_dir}/lib-container-toolchain.sh"
 
 toolchain="$(detect_build_test_toolchain)"
 container_bin="$(container_runtime_for_toolchain "${toolchain}")"
-yamllint_image="${CONTROL_PLANE_YAMLLINT_IMAGE_TAG:-localhost/yamllint:test}"
 sccache_image="${CONTROL_PLANE_SCCACHE_IMAGE_TAG:-localhost/sccache:test}"
 
 cleanup() {
@@ -117,7 +116,7 @@ run_skill_creator_python() {
     -v "${external_skill_dir}:/opt/external-skills:ro" \
     -w /opt/external-skills/skill-creator \
     --entrypoint python3 \
-    "${yamllint_image}" \
+    "${control_plane_image}" \
     -m "$@"
 }
 
@@ -131,7 +130,7 @@ package_skill_to_host() {
     -v "${external_skill_dir}:/opt/external-skills:ro" \
     -w /opt/external-skills/skill-creator \
     --entrypoint python3 \
-    "${yamllint_image}" \
+    "${control_plane_image}" \
     -c 'import pathlib, subprocess, sys
 skill_dir = pathlib.Path(sys.argv[1])
 out_dir = pathlib.Path("/tmp") / f"{skill_dir.name}-package"
@@ -148,6 +147,7 @@ sys.stdout.buffer.write((out_dir / f"{skill_dir.name}.skill").read_bytes())' \
 }
 
 require_command "${container_bin}"
+build_image_for_toolchain "${toolchain}" "${control_plane_image}" containers/control-plane
 
 printf '%s\n' 'repo-change-delivery-skills-test: fetching pinned upstream skills' >&2
 "${git_skills_manifest_installer}" "${external_skills_manifest}" "${external_skill_dir}"
@@ -203,7 +203,6 @@ assert_file_contains "${git_skills_manifest_installer_bin}" "npm exec --yes --pa
 assert_file_not_contains "${git_skills_manifest_installer_bin}" "awk '"
 assert_file_contains "${yamllint_skill_file}" 'name: containerized-yamllint-ops'
 assert_file_contains "${yamllint_skill_file}" 'containers/control-plane/skills/containerized-yamllint-ops/scripts/podman-yamllint.sh'
-assert_file_contains "${yamllint_skill_file}" 'localhost/yamllint:test'
 assert_file_contains "${skill_creator_skill_file}" 'name: skill-creator'
 assert_file_contains "${generic_skill_file}" 'name: repo-change-delivery'
 assert_file_contains "${generic_skill_file}" 'full implementation loop'
@@ -249,14 +248,17 @@ assert_file_contains "${pull_request_skill_file}" 'Prefer non-interactive GitHub
 
 assert_file_contains "${repo_skill_file}" 'name: pr-fix-workflow'
 assert_file_contains "${repo_skill_file}" 'repo-change-delivery'
-assert_file_contains "${repo_skill_file}" 'CONTROL_PLANE_TOOLCHAIN=podman'
+assert_file_contains "${repo_skill_file}" './scripts/lint.sh'
+assert_file_contains "${repo_skill_file}" './scripts/build-test.sh'
 assert_file_contains "${repo_skill_file}" 'references/validation-and-delivery.md'
+assert_file_not_contains "${repo_skill_file}" 'CONTROL_PLANE_TOOLCHAIN=podman'
 assert_file_not_contains "${repo_skill_file}" 'Commit only on a non-main branch'
 assert_file_not_contains "${repo_skill_file}" "After each commit, \`git fetch origin main\`"
 
 assert_file_contains "${repo_reference_file}" './scripts/test-repo-change-delivery-skills.sh'
-assert_file_contains "${repo_reference_file}" 'CONTROL_PLANE_TOOLCHAIN=podman ./scripts/lint.sh'
-assert_file_contains "${repo_reference_file}" 'CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh'
+assert_file_contains "${repo_reference_file}" './scripts/lint.sh'
+assert_file_contains "${repo_reference_file}" './scripts/build-test.sh'
+assert_file_not_contains "${repo_reference_file}" 'CONTROL_PLANE_TOOLCHAIN=podman'
 assert_file_contains "${repo_reference_file}" './scripts/test-k8s-job.sh'
 assert_file_contains "${repo_reference_file}" './scripts/test-current-cluster-regressions.sh'
 assert_file_contains "${repo_reference_file}" '.github/workflows/control-plane-ci.yml'
@@ -289,9 +291,7 @@ assert_file_contains "${entrypoint_path}" 'install_bundled_control_plane_skills'
 assert_file_contains "${entrypoint_path}" "for source_dir in \"\${bundled_skills_dir}\"/*; do"
 
 printf '%s\n' 'repo-change-delivery-skills-test: validating and packaging skills' >&2
-build_image_for_toolchain "${toolchain}" "${yamllint_image}" containers/yamllint
 build_image_for_toolchain "${toolchain}" "${sccache_image}" containers/sccache
-build_image_for_toolchain "${toolchain}" "${control_plane_image}" containers/control-plane
 
 run_skill_creator_python scripts.quick_validate /opt/external-skills/doc-coauthoring
 run_skill_creator_python scripts.quick_validate /workspace/containers/control-plane/skills/containerized-yamllint-ops
@@ -326,10 +326,13 @@ assert_file_present "${skill_creator_package_file}"
 printf '%s\n' 'repo-change-delivery-skills-test: smoke testing out-of-tree yamllint helper' >&2
 install -d -m 0755 "${yamllint_smoke_dir}/scripts"
 install -m 0644 "${yamllint_script_file}" "${yamllint_smoke_dir}/scripts/podman-yamllint.sh"
-(
-  cd "${repo_root}"
-  bash "${yamllint_smoke_dir}/scripts/podman-yamllint.sh" .github/workflows/control-plane-ci.yml
-)
+"${container_bin}" run --rm \
+  --entrypoint bash \
+  -v "${repo_root}:/workspace" \
+  -v "${yamllint_smoke_dir}:/yamllint-smoke" \
+  -w /workspace \
+  "${control_plane_image}" \
+  -lc 'set -euo pipefail; bash /yamllint-smoke/scripts/podman-yamllint.sh .github/workflows/control-plane-ci.yml'
 
 # shellcheck disable=SC2016
 "${container_bin}" run --rm \

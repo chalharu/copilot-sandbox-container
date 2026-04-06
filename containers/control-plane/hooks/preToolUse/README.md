@@ -25,6 +25,6 @@ fileAccessRules:
 
 `protectedEnvironments` は command rule とは独立した global deny list です。exec 側では親プロセス環境との差分だけを override とみなすため、control plane が管理する既定の `GIT_CONFIG_GLOBAL` はそのまま通しつつ、上書き・追加・unset は拒否できます。`git push --force-with-lease` は引き続き許可します。
 
-`fileAccessRules` は exact path ベースの read blocker で、`${VAR}` 展開後の path が空なら rule 自体を無効化します。候補 path は canonical path まで展開されるので、directory path を rule に置くとその配下もまとめて保護できます。`allowedExecutables` も absolute path 必須で、exec 側は実行中 binary の実 path と、`bash /usr/local/bin/podman` のような shell wrapper では script path 自体を照合します。basename-only allowlist は受け付けないので、`/usr/local/bin/podman` や `/usr/local/bin/control-plane-copilot` のように managed wrapper の full path を明示してください。
+`fileAccessRules` は exact path ベースの read blocker で、`${VAR}` 展開後の path が空なら rule 自体を無効化します。候補 path は canonical path まで展開されるので、directory path を rule に置くとその配下もまとめて保護できます。`allowedExecutables` も absolute path 必須で、exec 側は実行中 binary の実 path と、`bash /usr/local/bin/control-plane-copilot` のような shell wrapper では script path 自体を照合します。basename-only allowlist は受け付けないので、`/usr/local/bin/control-plane-copilot` や `/usr/bin/gh` のように managed executable の full path を明示してください。
 
 `/run/control-plane-auth` のような Secret mount は startup 専用 input として扱い、interactive shell からの direct read は directory rule でその配下ごと防ぐのが基本です。entrypoint が起動時にそれらを `authorized_keys`、`~/.config/gh/hosts.yml`、private runtime token file、`$XDG_RUNTIME_DIR/containers/auth.json` のような managed surface へ移したあとで、user-facing process はそちらだけを使います。

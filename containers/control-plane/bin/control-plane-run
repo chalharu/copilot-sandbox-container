@@ -7,8 +7,7 @@ Usage:
   control-plane-run --image IMAGE [options] -- COMMAND [ARG...]
 
 Options:
-  --mode auto|podman|k8s-job      Execution mode (default: auto)
-  --execution-hint short|long     Hint used when --mode=auto (default: short)
+  --mode k8s-job                  Execution mode (default: k8s-job)
   --namespace NAME                Kubernetes Job namespace
   --job-namespace NAME            Alias of --namespace
   --job-name NAME                 Kubernetes Job name
@@ -98,13 +97,12 @@ if [[ -f "${runtime_config_file}" ]]; then
 fi
 
 mode="${CONTROL_PLANE_RUN_MODE:-auto}"
-execution_hint="${CONTROL_PLANE_EXECUTION_HINT:-short}"
+mode="${CONTROL_PLANE_RUN_MODE:-k8s-job}"
 namespace="${CONTROL_PLANE_JOB_NAMESPACE:-${CONTROL_PLANE_K8S_NAMESPACE:-default}}"
 job_name=""
 timeout="${CONTROL_PLANE_K8S_TIMEOUT:-300s}"
 workspace="${CONTROL_PLANE_WORKSPACE:-/workspace}"
 image=""
-podman_bin="${CONTROL_PLANE_PODMAN_BIN:-podman}"
 k8s_runner_bin="${CONTROL_PLANE_K8S_RUNNER_BIN:-k8s-job-run}"
 input_mount_path="${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH:-/var/run/control-plane/job-inputs}"
 mount_files=()
@@ -113,10 +111,6 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --mode)
       mode="$2"
-      shift 2
-      ;;
-    --execution-hint)
-      execution_hint="$2"
       shift 2
       ;;
     --namespace)
@@ -169,57 +163,12 @@ done
 [[ $# -gt 0 ]] || die "a command must be provided after --"
 
 case "${mode}" in
-  auto|podman|k8s-job)
+  k8s-job)
     ;;
   *)
     die "invalid mode: ${mode}"
     ;;
 esac
-
-case "${execution_hint}" in
-  short|long)
-    ;;
-  *)
-    die "invalid execution hint: ${execution_hint}"
-    ;;
-esac
-
-if [[ "${mode}" == "auto" ]]; then
-  if [[ "${execution_hint}" == "long" ]]; then
-    mode="k8s-job"
-  else
-    mode="podman"
-  fi
-fi
-
-if [[ "${mode}" == "podman" ]]; then
-  local_mount_dir=""
-  podman_args=(run --rm -v "${workspace}:/workspace")
-  control_plane_tmp_root="${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane-$(id -u)}"
-
-  mkdir -p "${workspace}"
-  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-${control_plane_tmp_root}/run-$(id -u)}"
-  export TMPDIR="${TMPDIR:-${control_plane_tmp_root}/tmp-$(id -u)}"
-  mkdir -p "${XDG_RUNTIME_DIR}"
-  mkdir -p "${TMPDIR}"
-  chmod 700 "${XDG_RUNTIME_DIR}"
-  chmod 700 "${TMPDIR}"
-
-  if [[ ${#mount_files[@]} -gt 0 ]]; then
-    local_mount_dir="$(mktemp -d "${TMPDIR%/}/control-plane-run-inputs.XXXXXX")"
-    copy_mount_files_to_dir "${local_mount_dir}" "${mount_files[@]}"
-    podman_args+=(-v "${local_mount_dir}:${input_mount_path}:ro")
-    trap 'rm -rf "${local_mount_dir}"' EXIT
-  fi
-
-  podman_args+=("${image}" "$@")
-  if [[ -n "${local_mount_dir}" ]]; then
-    "${podman_bin}" "${podman_args[@]}"
-    exit $?
-  fi
-
-  exec "${podman_bin}" "${podman_args[@]}"
-fi
 
 runner_args=(
   --namespace "${namespace}"

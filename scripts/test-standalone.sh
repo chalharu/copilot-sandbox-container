@@ -2,18 +2,16 @@
 set -euo pipefail
 
 control_plane_image="${1:?usage: scripts/test-standalone.sh <control-plane-image> <execution-plane-image>}"
-execution_plane_image="${2:?usage: scripts/test-standalone.sh <control-plane-image> <execution-plane-image>}"
+: "${2:?usage: scripts/test-standalone.sh <control-plane-image> <execution-plane-image>}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ssh_port="${CONTROL_PLANE_TEST_SSH_PORT:-2222}"
-container_bin="${CONTROL_PLANE_CONTAINER_BIN:-podman}"
+container_bin="${CONTROL_PLANE_CONTAINER_BIN:-docker}"
 container_name="control-plane-standalone-test"
 workdir="$(mktemp -d)"
 state_root="${workdir}/state"
 ssh_key="${workdir}/id_ed25519"
 control_plane_run_user=(--user 0:0)
 container_env=()
-host_network_ssh=0
-custom_sshd_config=""
 ssh_opts=()
 
 cleanup() {
@@ -35,29 +33,6 @@ read_runtime_var() {
 
   [[ -f "${runtime_env_file}" ]] || return 1
   sed -n "s/^${var_name}=//p" "${runtime_env_file}" | head -n 1
-}
-
-prepare_host_network_ssh() {
-  local runtime_mode=""
-  local default_network=""
-
-  runtime_mode="$(read_runtime_var CONTROL_PLANE_LOCAL_PODMAN_MODE || true)"
-  default_network="$(read_runtime_var CONTROL_PLANE_PODMAN_DEFAULT_NETWORK || true)"
-
-  [[ "${container_bin}" == "podman" ]] || return 0
-  [[ "${runtime_mode}" == "rootful-service" ]] || return 0
-  [[ "${default_network}" == "host" ]] || return 0
-
-  host_network_ssh=1
-  if [[ "${ssh_port}" == "2222" ]]; then
-    ssh_port="${CONTROL_PLANE_TEST_HOST_NETWORK_SSH_PORT:-22222}"
-  fi
-  custom_sshd_config="${workdir}/sshd_config"
-  sed \
-    -e "s/^Port .*/Port ${ssh_port}/" \
-    "${script_dir}/../containers/control-plane/config/sshd_config" \
-    > "${custom_sshd_config}"
-  printf 'standalone-test: using host-network SSH fallback on port %s\n' "${ssh_port}" >&2
 }
 
 set_ssh_opts() {
@@ -182,16 +157,8 @@ start_container() {
     --name "${container_name}"
     --cap-add AUDIT_WRITE
     -e SSH_PUBLIC_KEY="$(cat "${ssh_key}.pub")"
+    --network bridge -p "127.0.0.1:${ssh_port}:2222"
   )
-
-  if [[ "${host_network_ssh}" -eq 1 ]]; then
-    # The host-network fallback only activates when the outer podman wrapper already
-    # defaults local runs to `--network=host`; adding it again makes raw Podman reject
-    # the run as multiple network selections.
-    :
-  else
-    run_args+=(--network bridge -p "127.0.0.1:${ssh_port}:2222")
-  fi
 
   if ((${#container_env[@]} > 0)); then
     run_args+=("${container_env[@]}")
@@ -205,10 +172,6 @@ start_container() {
     -v "${state_root}/workspace:/workspace"
   )
 
-  if [[ "${host_network_ssh}" -eq 1 ]]; then
-    run_args+=(-v "${custom_sshd_config}:/etc/ssh/sshd_config:ro")
-  fi
-
   run_args+=("${control_plane_image}")
 
   "${container_bin}" "${run_args[@]}" >/dev/null
@@ -221,7 +184,6 @@ require_command ssh-keyscan
 
 mkdir -p "${state_root}/copilot" "${state_root}/gh" "${state_root}/ssh" "${state_root}/ssh-host-keys" "${state_root}/workspace"
 ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"
-prepare_host_network_ssh
 set_ssh_opts
 
 start_container
@@ -235,10 +197,9 @@ npm ls -g @github/copilot --depth=0 | grep -q "@github/copilot@"
 command -v git
 command -v gh
 command -v kubectl
-command -v podman
-command -v docker
 command -v kind
-docker --version >/dev/null
+command -v yamllint
+command -v control-plane-exec-api
 command -v sshd
 command -v screen
 command -v vim
@@ -260,34 +221,7 @@ test "${VISUAL}" = "vim"
 test "${GH_PAGER}" = "cat"
 test -f /home/copilot/.copilot/skills/control-plane-operations/SKILL.md
 test -f /home/copilot/.copilot/skills/control-plane-operations/references/control-plane-run.md
-test -f /home/copilot/.copilot/skills/containerized-yamllint-ops/SKILL.md
 test -f /home/copilot/.copilot/skills/repo-change-delivery/SKILL.md
-grep -q "^copilot:" /etc/subuid
-grep -q "^copilot:" /etc/subgid
-grep -qx 'cgroup_manager = "cgroupfs"' /home/copilot/.config/containers/containers.conf
-grep -qx 'events_logger = "file"' /home/copilot/.config/containers/containers.conf
-expected_driver=""
-expected_state_dir=""
-expected_state_root="/var/tmp/control-plane/rootless-podman"
-if [[ -e /dev/fuse ]]; then
-  expected_driver=overlay
-else
-  expected_driver=vfs
-fi
-expected_state_dir="${expected_state_root}/${expected_driver}"
-test "$(readlink /home/copilot/.copilot/containers)" = "${expected_state_root}"
-test "$(readlink /home/copilot/.local/share/containers)" = "${expected_state_dir}"
-grep -qx "graphroot = \"${expected_state_dir}/storage\"" /home/copilot/.config/containers/storage.conf
-grep -qx "runroot = \"/run/user/1000/${expected_driver}/containers/storage\"" /home/copilot/.config/containers/storage.conf
-if [[ "${expected_driver}" == "overlay" ]]; then
-  grep -qx 'driver = "overlay"' /home/copilot/.config/containers/storage.conf
-  grep -qx 'mount_program = "/usr/bin/fuse-overlayfs"' /home/copilot/.config/containers/storage.conf
-else
-  grep -qx 'driver = "vfs"' /home/copilot/.config/containers/storage.conf
-  ! grep -q 'mount_program' /home/copilot/.config/containers/storage.conf
-fi
-test -d "${expected_state_dir}/storage/${expected_driver}"
-test -d "${expected_state_dir}/storage/volumes"
 EOF
 
 ssh_bash <<'EOF'
@@ -440,152 +374,6 @@ if ! grep -Fq 'Copilot (/workspace, --yolo)' "${workdir}/ssh-picker-menu.log"; t
   exit 1
 fi
 printf '%s\n' 'standalone-test: picker menu shows Copilot option' >&2
-
-printf '%s\n' 'standalone-test: starting fake podman checks' >&2
-if ! ssh_bash <<EOF
-set -euo pipefail
-printf 'small input\n' > /workspace/job-input.txt
-printf 'colon input\n' > '/workspace/job:input.txt'
-cat > /tmp/fake-podman-success <<'INNER'
-#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' 'fake success stderr' >&2
-printf '%s\n' "\$@" > /tmp/fake-podman-success.log
-INNER
-chmod +x /tmp/fake-podman-success
-timeout 10s bash -lc 'CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman-success control-plane-podman info' \
-  >/tmp/fake-podman-success.stdout 2>/tmp/fake-podman-success.stderr
-grep -qx 'info' /tmp/fake-podman-success.log
-grep -q 'fake success stderr' /tmp/fake-podman-success.stderr
-cat > /tmp/fake-podman <<'INNER'
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ "\${1:-}" == "pull" ]]; then
-  printf '%s\n' 'WARN[0000] "/" is not a shared mount, this could cause issues or missing mounts with rootless containers' >&2
-  printf '%s\n' 'cannot clone: Operation not permitted' >&2
-  printf '%s\n' 'ERRO[0000] invalid internal status, try resetting the pause process with "/usr/bin/podman system migrate": cannot re-exec process' >&2
-  exit 125
-fi
-printf '%s\n' "\$@" > /tmp/fake-podman.log
-INNER
-chmod +x /tmp/fake-podman
-CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-run --mode auto --execution-hint short --workspace /workspace --mount-file /workspace/job-input.txt:inputs/job-input.txt --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/podman-auto.txt short
-grep -q '^run$' /tmp/fake-podman.log
-grep -q '${execution_plane_image}' /tmp/fake-podman.log
-grep -q '/workspace:/workspace' /tmp/fake-podman.log
-grep -Eq ':/var/run/control-plane/job-inputs:ro$' /tmp/fake-podman.log
-CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-run --mode auto --execution-hint short --workspace /workspace --mount-file '/workspace/job:input.txt' --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/podman-auto-colon.txt short
-grep -Eq ':/var/run/control-plane/job-inputs:ro$' /tmp/fake-podman.log
-set +e
-fake_podman_output="\$(CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-podman pull quay.io/example/test:latest 2>&1)"
-fake_podman_status=\$?
-set -e
-printf '%s\n' "\${fake_podman_output}" > /tmp/fake-podman-pull.log
-if [[ "\${fake_podman_status}" -eq 0 ]]; then
-  printf 'Expected fake control-plane-podman pull to fail\n' >&2
-  exit 1
-fi
-grep -q 'cannot clone: Operation not permitted' /tmp/fake-podman-pull.log
-grep -q 'rootless Podman is blocked by the outer runtime' /tmp/fake-podman-pull.log
-grep -q 'SETFCAP' /tmp/fake-podman-pull.log
-grep -q 'CONTROL_PLANE_RUN_MODE=k8s-job' /tmp/fake-podman-pull.log
-cat > /tmp/fake-podman-migrate <<'INNER'
-#!/usr/bin/env bash
-set -euo pipefail
-state_file=/tmp/fake-podman-migrate-state
-if [[ "\${1:-}" == "system" ]] && [[ "\${2:-}" == "migrate" ]]; then
-  : > "\${state_file}"
-  exit 0
-fi
-if [[ "\${1:-}" == "pull" ]]; then
-  if [[ ! -f "\${state_file}" ]]; then
-    printf '%s\n' 'ERRO[0000] invalid internal status, try resetting the pause process with "/usr/bin/podman system migrate": cannot re-exec process' >&2
-    exit 125
-  fi
-  printf '%s\n' "\$@" > /tmp/fake-podman-migrate.log
-  exit 0
-fi
-printf '%s\n' "\$@" > /tmp/fake-podman-migrate.log
-INNER
-chmod +x /tmp/fake-podman-migrate
-set +e
-fake_migrate_output="\$(CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman-migrate control-plane-podman pull quay.io/example/test:latest 2>&1)"
-fake_migrate_status=\$?
-set -e
-printf '%s\n' "\${fake_migrate_output}" > /tmp/fake-podman-migrate-output.log
-if [[ "\${fake_migrate_status}" -ne 0 ]]; then
-  printf 'Expected control-plane-podman to recover after podman system migrate\n' >&2
-  exit 1
-fi
-grep -q '^pull$' /tmp/fake-podman-migrate.log
-grep -q '^quay.io/example/test:latest$' /tmp/fake-podman-migrate.log
-grep -q 'detected stale rootless Podman state' /tmp/fake-podman-migrate-output.log
-grep -q 'repaired the local Podman state' /tmp/fake-podman-migrate-output.log
-EOF
-then
-  ssh_bash <<'EOF' >&2 || true
-set -euo pipefail
-cat /tmp/fake-podman.log || true
-cat /tmp/fake-podman-success.log || true
-cat /tmp/fake-podman-success.stderr || true
-cat /tmp/fake-podman-pull.log || true
-cat /tmp/fake-podman-migrate.log || true
-cat /tmp/fake-podman-migrate-output.log || true
-ls -l /workspace || true
-EOF
-  printf 'Expected fake podman control-plane-run checks to succeed\n' >&2
-  exit 1
-fi
-printf '%s\n' 'standalone-test: fake podman checks done' >&2
-
-printf '%s\n' 'standalone-test: verifying actual podman run returns' >&2
-if ! ssh_bash <<'EOF'
-set -euo pipefail
-actual_podman_status=success
-set +e
-timeout 20s podman info --format '{{.Store.GraphDriverName}}' >/tmp/actual-podman-info.log 2>&1
-info_status=$?
-timeout 20s podman unshare true >/tmp/actual-podman-unshare.log 2>&1
-unshare_status=$?
-set -e
-if [[ "${info_status}" -ne 0 ]] || [[ "${unshare_status}" -ne 0 ]]; then
-  if grep -Eiq 'cannot clone: Operation not permitted|cannot re-exec process|cannot set user namespace|creating new namespace.*Operation not permitted|newuidmap.*Operation not permitted|newgidmap.*Operation not permitted' /tmp/actual-podman-info.log /tmp/actual-podman-unshare.log; then
-    actual_podman_status=blocked
-  else
-    exit 1
-  fi
-fi
-if [[ "${actual_podman_status}" == "success" ]]; then
-  timeout 30s podman pull docker.io/library/hello-world:latest >/tmp/actual-podman-pull.log 2>&1
-  timeout 20s podman run --rm --network=none docker.io/library/hello-world:latest >/tmp/actual-podman-run.log 2>&1
-  grep -q 'Hello from Docker!' /tmp/actual-podman-run.log
-fi
-printf '%s\n' "${actual_podman_status}" > /tmp/actual-podman-status.txt
-EOF
-then
-  ssh_bash <<'EOF' >&2 || true
-set -euo pipefail
-cat /tmp/actual-podman-status.txt || true
-cat /tmp/actual-podman-info.log || true
-cat /tmp/actual-podman-unshare.log || true
-cat /tmp/actual-podman-pull.log || true
-cat /tmp/actual-podman-run.log || true
-podman ps -a || true
-EOF
-  printf 'Expected actual podman pull/run to complete without hanging in standalone mode\n' >&2
-  exit 1
-fi
-actual_podman_status="$(ssh_bash <<'EOF'
-set -euo pipefail
-cat /tmp/actual-podman-status.txt
-EOF
-)"
-actual_podman_status="$(printf '%s' "${actual_podman_status}" | tr -d '\r\n')"
-if [[ "${actual_podman_status}" == "success" ]]; then
-  printf '%s\n' 'standalone-test: actual podman run returns' >&2
-else
-  printf '%s\n' 'standalone-test: local podman is blocked by the outer runtime; skipping attached run regression in standalone mode' >&2
-fi
 
 first_host_fingerprint="$(ssh_host_fingerprint)"
 

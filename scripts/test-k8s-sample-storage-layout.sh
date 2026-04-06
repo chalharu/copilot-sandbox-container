@@ -243,8 +243,6 @@ assert_resource_contains Role garage-bootstrap-secret-writer '- update'
 assert_resource_contains ConfigMap control-plane-env 'SSH_PUBLIC_KEY_FILE: /var/run/control-plane-auth/ssh-public-key'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS: "10000"'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha'
-assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER: overlay'
-assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR: /var/tmp/control-plane/rootful-overlay'
 assert_resource_contains ConfigMap control-plane-env 'SCCACHE_BUCKET: control-plane-sccache'
 assert_resource_contains ConfigMap control-plane-env 'SCCACHE_ENDPOINT: http://garage-s3.copilot-sandbox.svc.cluster.local:3900'
 assert_resource_contains ConfigMap control-plane-env 'SCCACHE_REGION: garage'
@@ -278,14 +276,11 @@ assert_deployment_contains 'mountPath: /var/run/garage-sccache-auth'
 assert_deployment_contains 'secretName: garage-sccache-auth'
 assert_deployment_contains 'chown 1000:1000 /workspace-state/workspace'
 assert_deployment_contains 'chmod 700 /workspace-state/workspace'
-assert_deployment_contains 'mountPath: /var/lib/control-plane/rootful-podman'
-assert_deployment_contains 'subPath: rootful-podman'
 assert_deployment_contains 'mountPath: /var/tmp/control-plane'
 assert_deployment_contains 'subPath: runtime-tmp'
 assert_deployment_contains 'name: cache'
 assert_deployment_contains 'emptyDir: {}'
-assert_deployment_contains 'rm -rf /cache/rootful-podman/*'
-assert_deployment_contains 'mkdir -p /cache/rootful-podman/rootful-overlay /cache/runtime-tmp/rootful-overlay'
+assert_deployment_contains '/cache/runtime-tmp'
 assert_deployment_absent 'mountPath: /workspace/cache/sccache'
 assert_deployment_absent '/workspace-state/workspace/cache'
 assert_deployment_absent 'claimName: control-plane-sccache-pvc'
@@ -333,15 +328,7 @@ assert_resource_not_contains Job garage-bootstrap 'AWS_SECRET_ACCESS_KEY_FILE'
 assert_resource_not_contains Job garage-bootstrap 'mountPath: /var/run/garage-sccache-auth'
 assert_resource_not_contains Job garage-bootstrap 'defaultMode: 384'
 
-printf '%s\n' 'k8s-sample-storage-layout-test: checking Podman defaults and legacy PVC removal' >&2
-if grep -Fq '/run/control-plane/podman' "${manifest_path}"; then
-  printf 'Expected sample manifest to avoid /run/control-plane/podman for Podman state\n' >&2
-  exit 1
-fi
-if grep -Fq 'rootful-vfs' "${manifest_path}"; then
-  printf 'Expected sample manifest to stop defaulting rootful Podman to vfs\n' >&2
-  exit 1
-fi
+printf '%s\n' 'k8s-sample-storage-layout-test: checking legacy runtime removal' >&2
 if grep -Fq 'CONTROL_PLANE_SCCACHE_PVC' "${manifest_path}"; then
   printf 'Expected sample manifest to stop wiring direct sccache PVC mounts into jobs\n' >&2
   exit 1
@@ -352,6 +339,14 @@ if grep -Fq 'SCCACHE_DIST_' "${manifest_path}"; then
 fi
 if grep -Fq 'control-plane-local-storage' "${manifest_path}"; then
   printf 'Expected sample manifest to stop depending on the bespoke local-storage class\n' >&2
+  exit 1
+fi
+if grep -Fq 'CONTROL_PLANE_LOCAL_PODMAN_MODE' "${manifest_path}"; then
+  printf 'Expected sample manifest to stop carrying local Podman mode settings\n' >&2
+  exit 1
+fi
+if grep -Fq 'rootful-podman' "${manifest_path}"; then
+  printf 'Expected sample manifest to stop mounting rootful Podman cache paths\n' >&2
   exit 1
 fi
 

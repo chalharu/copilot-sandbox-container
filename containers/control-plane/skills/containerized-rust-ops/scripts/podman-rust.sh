@@ -75,7 +75,7 @@ build_context_hash() {
 }
 
 image="${RUST_CONTAINER_IMAGE:-docker.io/rust:1.94.0-bookworm}"
-container_bin="${CONTAINERIZED_RUST_CONTAINER_BIN:-podman}"
+container_bin="${CONTAINERIZED_RUST_CONTAINER_BIN:-docker}"
 case "${container_bin}" in
   podman)
     container_cmd=(env -u CONTAINER_HOST -u DOCKER_HOST podman)

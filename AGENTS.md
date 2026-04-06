@@ -15,7 +15,7 @@
 
 **Project type:** Container image and shell-script repository for a Copilot Control Plane and reference Execution Planes
 **Primary language:** Bash with Dockerfiles and Kubernetes manifests
-**Key dependencies:** Podman/Buildah, Docker Buildx, kubectl, Kind, gh, GNU Screen
+**Key dependencies:** Docker Buildx, kubectl, Kind, gh, GNU Screen
 
 ---
 
@@ -33,7 +33,6 @@
 
 # Build
 CONTROL_PLANE_TOOLCHAIN=docker ./scripts/build-test.sh
-CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh
 ```
 
 ---

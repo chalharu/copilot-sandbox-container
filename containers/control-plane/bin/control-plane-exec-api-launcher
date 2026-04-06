@@ -9,4 +9,4 @@ if [[ -f "${runtime_config_file}" ]]; then
   set +a
 fi
 
-exec node /usr/local/bin/control-plane-exec-api.mjs
+exec /usr/local/bin/control-plane-exec-api serve

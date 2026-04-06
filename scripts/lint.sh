@@ -20,10 +20,9 @@ markdownlint_node_image="${CONTROL_PLANE_MARKDOWNLINT_NODE_IMAGE:-docker.io/libr
 # renovate: datasource=npm depName=markdownlint-cli2
 markdownlint_version="${CONTROL_PLANE_MARKDOWNLINT_VERSION:-0.22.0}"
 markdownlint_cache_volume="${CONTROL_PLANE_MARKDOWNLINT_CACHE_VOLUME:-control-plane-markdownlint-cache}"
-yamllint_image="${CONTROL_PLANE_YAMLLINT_IMAGE_TAG:-localhost/yamllint:test}"
+control_plane_image="${CONTROL_PLANE_IMAGE_TAG:-localhost/control-plane:test}"
 yamllint_config="${CONTROL_PLANE_YAMLLINT_CONFIG:-/workspace/.yamllint}"
-# Use container root so restrictive workspace mounts remain readable across
-# Docker, rootful Podman, and rootless Podman.
+# Use container root so restrictive workspace mounts remain readable.
 workspace_access_user="0:0"
 rust_lint_script="${script_dir}/../containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh"
 dockerfiles=()
@@ -33,7 +32,6 @@ rust_workspace_dirs=()
 shellcheck_targets=(
   /workspace/containers/control-plane/bin/control-plane-copilot
   /workspace/containers/control-plane/bin/control-plane-exec-api-launcher
-  /workspace/containers/control-plane/bin/control-plane-podman
   /workspace/containers/control-plane/bin/control-plane-screen
   /workspace/containers/control-plane/bin/control-plane-entrypoint
   /workspace/containers/control-plane/bin/control-plane-session-exec
@@ -146,10 +144,7 @@ printf 'Using %s toolchain for lint\n' "${toolchain}"
 # through stdin and discard the normalized output once parsing succeeds.
 "${container_bin}" run --rm -i --entrypoint biome "${biome_image}" check --formatter-enabled=false --write --stdin-file-path=renovate.json5 < renovate.json5 >/dev/null
 CONTROL_PLANE_CONTAINER_BIN="${container_bin}" "${script_dir}/validate-renovate-config.sh"
-if [[ "${toolchain}" == "podman" ]]; then
-  "${script_dir}/prepare-dhi-images.sh"
-fi
-build_image_for_toolchain "${toolchain}" "${yamllint_image}" containers/yamllint
+build_image_for_toolchain "${toolchain}" "${control_plane_image}" containers/control-plane
 if [[ "${#rust_workspace_dirs[@]}" -gt 0 ]]; then
   printf '%s\n' 'Running hadolint, shellcheck, yamllint, markdownlint, and Rust fmt/clippy in parallel' >&2
 else
@@ -163,7 +158,8 @@ run_lint_job shellcheck \
   "${container_bin}" run --rm --user "${workspace_access_user}" -v "${PWD}:/workspace:ro" "${shellcheck_image}" -x -P /workspace "${shellcheck_targets[@]}"
 
 run_lint_job yamllint \
-  "${container_bin}" run --rm --user "${workspace_access_user}" -v "${PWD}:/workspace:ro" "${yamllint_image}" -c "${yamllint_config}" "${yaml_files[@]}"
+  "${container_bin}" run --rm --user "${workspace_access_user}" --entrypoint yamllint \
+    -v "${PWD}:/workspace:ro" "${control_plane_image}" -c "${yamllint_config}" "${yaml_files[@]}"
 
 run_lint_job markdownlint \
   "${container_bin}" run --rm --user "${workspace_access_user}" \

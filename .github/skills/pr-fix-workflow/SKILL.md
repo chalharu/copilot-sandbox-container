@@ -1,6 +1,6 @@
 ---
 name: pr-fix-workflow
-description: Repository-specific delivery supplement for the copilot-sandbox-container repository. Use with a generic repo-change-delivery workflow when working here and you need the exact Podman, kubectl, skill-packaging, and GitHub Actions commands for this repository.
+description: Repository-specific delivery supplement for the copilot-sandbox-container repository. Use with a generic repo-change-delivery workflow when working here and you need the exact Docker, kubectl, skill-packaging, and GitHub Actions commands for this repository.
 ---
 
 # PR Fix Workflow
@@ -24,7 +24,7 @@ Use this repo-local skill as the repository-specific companion to the bundled `r
 
 ## Repository anchors
 
-- Use `CONTROL_PLANE_TOOLCHAIN=podman` for the standard lint/build/test baseline in this repository.
+- Use `./scripts/lint.sh` and `./scripts/build-test.sh` for the standard validation baseline in this repository.
 - When the change touches `.github/skills/` or `containers/control-plane/skills/`, validate every changed skill and the control-plane runtime surfaces that expose bundled skills.
 - Use `./scripts/test-k8s-job.sh` or the current-cluster checks when runtime or Kubernetes behavior changes.
 - Read `references/validation-and-delivery.md` for the exact commands and CI surfaces in this repository.

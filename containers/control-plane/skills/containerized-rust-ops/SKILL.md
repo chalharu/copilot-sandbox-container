@@ -1,21 +1,22 @@
 ---
 name: containerized-rust-ops
-description: Run Rust fmt/check/clippy/build/test through the bundled container helpers instead of relying on a host Rust toolchain. Use when validating Rust worktrees locally with Podman, rerunning long Rust builds on the control plane, or debugging this containerized Rust workflow across repositories.
+description: Run Rust fmt/check/clippy/build/test through the bundled helpers instead of relying on a host Rust toolchain. Use when validating Rust worktrees locally with Docker or Podman, rerunning long Rust builds on the control plane, or debugging this containerized Rust workflow across repositories.
 ---
 
 # Containerized Rust Ops
 
-Use the bundled helper scripts instead of rebuilding `podman` or `control-plane-run` commands by hand.
+Use the bundled helper scripts instead of rebuilding container or `control-plane-run` commands by hand.
 
 ## Choose the workflow
 
 1. Need local lint, check, clippy, build, or test against the current worktree? Run `~/.copilot/skills/containerized-rust-ops/scripts/podman-rust.sh`.
 2. Need a long-running build or test on the control plane? Run `~/.copilot/skills/containerized-rust-ops/scripts/k8s-rust.sh`.
-3. When editing this repository itself, the source-path equivalents live under `containers/control-plane/skills/containerized-rust-ops/scripts/`.
-4. Need to understand why a containerized run is behaving strangely? Read `references/runtime-quirks.md` before changing the commands.
-5. Need `cargo llvm-cov`? Use the bundled release-bootstrap path instead of `cargo install`; the helper installs `cargo-llvm-cov` from pinned releases, and custom archives or versions must also provide `CARGO_LLVM_COV_ARCHIVE_SHA256`.
+3. Need the control-plane image's bundled Rust toolchain for this repository's hook flow? Run `bash containers/control-plane/skills/containerized-rust-ops/scripts/control-plane-rust.sh <preset>`.
+4. When editing this repository itself, the source-path equivalents live under `containers/control-plane/skills/containerized-rust-ops/scripts/`.
+5. Need to understand why a containerized run is behaving strangely? Read `references/runtime-quirks.md` before changing the commands.
+6. Need `cargo llvm-cov`? Use the bundled release-bootstrap path instead of `cargo install`; the helper installs `cargo-llvm-cov` from pinned releases, and custom archives or versions must also provide `CARGO_LLVM_COV_ARCHIVE_SHA256`.
 
-## Run local Podman validation
+## Run local containerized validation
 
 Examples:
 

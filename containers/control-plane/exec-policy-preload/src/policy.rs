@@ -131,12 +131,9 @@ mod tests {
             protected_environments: vec![Regex::new("^(?:GIT_CONFIG_GLOBAL)$").unwrap()],
             file_access_rules: vec![
                 CompiledFileAccessRule {
-                    path: "/run/secrets/dockerhub-token".to_string(),
-                    reason: "dockerhub token blocked".to_string(),
-                    allowed_executables: vec![
-                        "/usr/local/bin/podman".to_string(),
-                        "/usr/local/bin/control-plane-podman".to_string(),
-                    ],
+                    path: "/run/user/1000/containers/auth.json".to_string(),
+                    reason: "registry auth blocked".to_string(),
+                    allowed_executables: Vec::new(),
                 },
                 CompiledFileAccessRule {
                     path: "/home/copilot/.config/gh/hosts.yml".to_string(),
@@ -236,21 +233,17 @@ mod tests {
             Some("hooks path blocked")
         );
         assert_eq!(
-            match_file_access_rule(&config, &["/usr/bin/bash"], "/run/secrets/dockerhub-token")
+            match_file_access_rule(&config, &["/usr/bin/bash"], "/run/user/1000/containers/auth.json")
                 .as_deref(),
-            Some("dockerhub token blocked")
+            Some("registry auth blocked")
         );
         assert_eq!(
             match_file_access_rule(
                 &config,
-                &["/usr/bin/bash", "/usr/local/bin/control-plane-podman"],
-                "/run/secrets/dockerhub-token",
+                &["/usr/bin/bash", "/usr/bin/docker"],
+                "/run/user/1000/containers/auth.json",
             ),
-            None
-        );
-        assert_eq!(
-            match_file_access_rule(&config, &["podman"], "/run/secrets/dockerhub-token").as_deref(),
-            Some("dockerhub token blocked")
+            Some("registry auth blocked")
         );
         assert_eq!(
             match_file_access_rule(

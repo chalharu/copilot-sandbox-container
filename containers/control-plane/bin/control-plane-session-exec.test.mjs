@@ -44,8 +44,7 @@ function setupHarness(
 	const kubectlStateFile = path.join(tempDir, "kubectl-state.json");
 	const kubectlCommandsLog = path.join(tempDir, "kubectl-commands.log");
 	const kubectlManifestFile = path.join(tempDir, "kubectl-create.yaml");
-	const curlPayloadFile = path.join(tempDir, "curl-payload.json");
-	const curlArgsFile = path.join(tempDir, "curl-args.json");
+	const execApiArgsFile = path.join(tempDir, "exec-api-args.log");
 
 	fs.mkdirSync(homeDir, { recursive: true });
 	fs.mkdirSync(fakeBinDir, { recursive: true });
@@ -162,40 +161,28 @@ process.exit(1);
 	);
 
 	writeExecutable(
-		path.join(fakeBinDir, "curl"),
+		path.join(fakeBinDir, "control-plane-exec-api"),
 		`#!/usr/bin/env node
 import fs from "node:fs";
 
 const args = process.argv.slice(2);
-const payloadFile = process.env.CURL_TEST_PAYLOAD_FILE;
-const argsFile = process.env.CURL_TEST_ARGS_FILE;
-const execResponse = process.env.CURL_TEST_EXEC_RESPONSE || '{"stdout":"","stderr":"","exitCode":0}';
-const execHttpStatus = process.env.CURL_TEST_EXEC_HTTP_STATUS || "200";
-const outputIndex = args.indexOf("--output");
-const outputPath = outputIndex === -1 ? "" : args[outputIndex + 1];
-const dataIndex = args.indexOf("--data-binary");
-const payload = dataIndex === -1 ? "" : args[dataIndex + 1];
-const url = args.at(-1) || "";
+const argsFile = process.env.EXEC_API_TEST_ARGS_FILE;
+const execResponse = process.env.EXEC_API_TEST_RESPONSE || '{"stdout":"","stderr":"","exitCode":0}';
 
-if (url.endsWith("/healthz")) {
+if (argsFile) {
+  fs.appendFileSync(argsFile, \`\${JSON.stringify(args)}\\n\`, "utf8");
+}
+
+if (args[0] === "health") {
   process.exit(0);
 }
 
-if (url.endsWith("/exec")) {
-  if (argsFile) {
-    fs.writeFileSync(argsFile, JSON.stringify(args), "utf8");
-  }
-  if (payloadFile) {
-    fs.writeFileSync(payloadFile, payload, "utf8");
-  }
-  if (outputPath) {
-    fs.writeFileSync(outputPath, execResponse, "utf8");
-  }
-  process.stdout.write(execHttpStatus);
+if (args[0] === "exec") {
+  process.stdout.write(execResponse);
   process.exit(0);
 }
 
-console.error(\`unexpected curl invocation: \${JSON.stringify(args)}\`);
+console.error(\`unexpected control-plane-exec-api invocation: \${JSON.stringify(args)}\`);
 process.exit(1);
 `,
 	);
@@ -209,9 +196,8 @@ process.exit(1);
 			KUBECTL_TEST_COMMANDS_LOG: kubectlCommandsLog,
 			KUBECTL_TEST_MANIFEST_FILE: kubectlManifestFile,
 			KUBECTL_TEST_POD_IP: "10.20.30.40",
-			CURL_TEST_PAYLOAD_FILE: curlPayloadFile,
-			CURL_TEST_ARGS_FILE: curlArgsFile,
-			CURL_TEST_EXEC_RESPONSE: JSON.stringify(execResponse),
+			EXEC_API_TEST_ARGS_FILE: execApiArgsFile,
+			EXEC_API_TEST_RESPONSE: JSON.stringify(execResponse),
 			CONTROL_PLANE_FAST_EXECUTION_ENABLED: "1",
 			CONTROL_PLANE_WORKSPACE_PVC: "control-plane-workspace-pvc",
 			CONTROL_PLANE_WORKSPACE_SUBPATH: "workspace",
@@ -237,8 +223,7 @@ process.exit(1);
 		kubectlCommandsLog,
 		kubectlManifestFile,
 		kubectlStateFile,
-		curlPayloadFile,
-		curlArgsFile,
+		execApiArgsFile,
 		homeDir,
 	};
 }
@@ -313,6 +298,8 @@ test("prepare renders the execution pod manifest and caches the pod state", (t) 
 	assert.match(manifest, /nodeName: 'kind-control-plane'/);
 	assert.match(manifest, /image: 'ghcr.io\/example\/control-plane:test'/);
 	assert.match(manifest, /imagePullPolicy: 'Never'/);
+	assert.match(manifest, /grpc:/);
+	assert.doesNotMatch(manifest, /httpGet:/);
 	assert.match(manifest, /- name: workspace/);
 	assert.match(manifest, /claimName: 'control-plane-workspace-pvc'/);
 	assert.match(manifest, /- name: copilot-session/);
@@ -363,29 +350,32 @@ test("proxy reuses the cached execution pod and cleanup removes it", (t) => {
 	assert.equal(proxyResult.stdout, "proxy stdout\n");
 	assert.equal(proxyResult.stderr, "proxy stderr\n");
 
-	const payload = JSON.parse(fs.readFileSync(harness.curlPayloadFile, "utf8"));
-	assert.deepEqual(payload, {
-		command,
-		cwd: "/workspace/subdir",
-	});
-	const curlArgs = JSON.parse(fs.readFileSync(harness.curlArgsFile, "utf8"));
-	assert.ok(
-		curlArgs.includes(
-			`X-Control-Plane-Exec-Token: ${
-				JSON.parse(
-					fs.readFileSync(
-						path.join(
-							harness.homeDir,
-							".copilot",
-							"session-state",
-							"session-exec.json",
-						),
-						"utf8",
-					),
-				).sessions[sessionKey].authToken
-			}`,
-		),
-	);
+	const execApiCalls = readJsonLines(harness.execApiArgsFile);
+	const execArgs = execApiCalls.find((args) => args[0] === "exec");
+	assert.ok(execArgs);
+	assert.deepEqual(execArgs, [
+		"exec",
+		"--addr",
+		"http://10.20.30.40:8080",
+		"--timeout-sec",
+		"3600",
+		"--token",
+		JSON.parse(
+			fs.readFileSync(
+				path.join(
+					harness.homeDir,
+					".copilot",
+					"session-state",
+					"session-exec.json",
+				),
+				"utf8",
+			),
+		).sessions[sessionKey].authToken,
+		"--cwd",
+		"/workspace/subdir",
+		"--command-base64",
+		commandBase64,
+	]);
 
 	const commandLog = readJsonLines(harness.kubectlCommandsLog);
 	assert.equal(commandLog.filter((args) => args[0] === "create").length, 1);

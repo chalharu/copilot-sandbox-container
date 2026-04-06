@@ -2,7 +2,7 @@
 set -euo pipefail
 
 control_plane_image="${1:-}"
-container_bin="${CONTROL_PLANE_CONTAINER_BIN:-podman}"
+container_bin="${CONTROL_PLANE_CONTAINER_BIN:-docker}"
 control_plane_run_user=(--user 0:0)
 
 command -v node >/dev/null 2>&1 || {
@@ -52,7 +52,7 @@ test -f /usr/local/share/control-plane/hooks/postToolUse/main.mjs
 test -f /usr/local/share/control-plane/hooks/postToolUse/linters.json
 test -f /usr/local/share/control-plane/hooks/postToolUse/lib/incremental-files.mjs
 test -f /usr/local/share/control-plane/hooks/sessionEnd/cleanup.mjs
-test -f /usr/local/bin/control-plane-exec-api.mjs
+test -x /usr/local/bin/control-plane-exec-api
 test -x /usr/local/bin/control-plane-exec-api-launcher
 test -x /usr/local/bin/control-plane-session-exec
 test "${COPILOT_HOME}" = /var/lib/control-plane/managed-runtime/copilot-home

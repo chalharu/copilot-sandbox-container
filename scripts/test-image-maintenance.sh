@@ -99,8 +99,8 @@ assert_block_contains() {
 
 context_dir="${workdir}/context"
 fake_bin_dir="${workdir}/fake-bin"
-podman_log="${workdir}/podman.log"
-label_store="${workdir}/podman-label"
+docker_log="${workdir}/docker.log"
+label_store="${workdir}/docker-label"
 workflow_path="${repo_root}/.github/workflows/control-plane-ci.yml"
 renovate_config_path="${repo_root}/renovate.json5"
 sccache_dockerfile_path="${repo_root}/containers/sccache/Dockerfile"
@@ -111,11 +111,11 @@ FROM docker.io/library/busybox:1.37.0
 RUN printf '%s\n' base > /image.txt
 EOF
 
-cat > "${fake_bin_dir}/podman" <<'EOF'
+cat > "${fake_bin_dir}/docker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-printf '%s\n' "$*" >> "${TEST_IMAGE_MAINTENANCE_PODMAN_LOG:?}"
+printf '%s\n' "$*" >> "${TEST_IMAGE_MAINTENANCE_DOCKER_LOG:?}"
 
 if [[ "$#" -ge 2 ]] && [[ "$1" == "image" ]] && [[ "$2" == "inspect" ]]; then
   if [[ -f "${TEST_IMAGE_MAINTENANCE_LABEL_STORE:?}" ]]; then
@@ -125,7 +125,7 @@ if [[ "$#" -ge 2 ]] && [[ "$1" == "image" ]] && [[ "$2" == "inspect" ]]; then
   exit 1
 fi
 
-if [[ "$#" -ge 1 ]] && [[ "$1" == "build" ]]; then
+if [[ "$#" -ge 2 ]] && [[ "$1" == "buildx" ]] && [[ "$2" == "build" ]]; then
   label_value=""
   previous=""
   for arg in "$@"; do
@@ -136,39 +136,38 @@ if [[ "$#" -ge 1 ]] && [[ "$1" == "build" ]]; then
     previous="${arg}"
   done
   [[ -n "${label_value}" ]] || {
-    printf 'missing --label in fake podman build\n' >&2
+    printf 'missing --label in fake docker buildx build\n' >&2
     exit 1
   }
   printf '%s\n' "${label_value}" > "${TEST_IMAGE_MAINTENANCE_LABEL_STORE:?}"
   exit 0
 fi
 
-printf 'unexpected fake podman invocation: %s\n' "$*" >&2
+printf 'unexpected fake docker invocation: %s\n' "$*" >&2
 exit 1
 EOF
-chmod +x "${fake_bin_dir}/podman"
+chmod +x "${fake_bin_dir}/docker"
 
 export PATH="${fake_bin_dir}:${PATH}"
-export TEST_IMAGE_MAINTENANCE_PODMAN_LOG="${podman_log}"
+export TEST_IMAGE_MAINTENANCE_DOCKER_LOG="${docker_log}"
 export TEST_IMAGE_MAINTENANCE_LABEL_STORE="${label_store}"
-export CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service
 
 printf '%s\n' 'image-maintenance-test: verifying unchanged build contexts are reused' >&2
 first_hash="$(build_context_hash "${context_dir}")"
-build_image_for_toolchain podman localhost/image-maintenance:test "${context_dir}"
-grep -Fq "build --isolation=chroot --label $(build_context_hash_label_key)=${first_hash} --tag localhost/image-maintenance:test ${context_dir}" "${podman_log}"
+build_image_for_toolchain docker localhost/image-maintenance:test "${context_dir}"
+grep -Fq "buildx build --load --label $(build_context_hash_label_key)=${first_hash} -t localhost/image-maintenance:test ${context_dir}" "${docker_log}"
 
-build_lines_before="$(grep -c '^build ' "${podman_log}")"
-build_image_for_toolchain podman localhost/image-maintenance:test "${context_dir}"
-build_lines_after="$(grep -c '^build ' "${podman_log}")"
+build_lines_before="$(grep -c '^buildx build ' "${docker_log}")"
+build_image_for_toolchain docker localhost/image-maintenance:test "${context_dir}"
+build_lines_after="$(grep -c '^buildx build ' "${docker_log}")"
 [[ "${build_lines_before}" -eq "${build_lines_after}" ]]
 
 printf '%s\n' 'image-maintenance-test: verifying changed build contexts trigger rebuilds' >&2
 printf '%s\n' 'RUN printf "%s\n" changed >> /image.txt' >> "${context_dir}/Dockerfile"
 second_hash="$(build_context_hash "${context_dir}")"
-build_image_for_toolchain podman localhost/image-maintenance:test "${context_dir}"
+build_image_for_toolchain docker localhost/image-maintenance:test "${context_dir}"
 [[ "${first_hash}" != "${second_hash}" ]]
-grep -Fq "build --isolation=chroot --label $(build_context_hash_label_key)=${second_hash} --tag localhost/image-maintenance:test ${context_dir}" "${podman_log}"
+grep -Fq "buildx build --load --label $(build_context_hash_label_key)=${second_hash} -t localhost/image-maintenance:test ${context_dir}" "${docker_log}"
 
 printf '%s\n' 'image-maintenance-test: verifying helper image release wiring' >&2
 assert_file_contains "${sccache_dockerfile_path}" 'FROM docker.io/library/alpine:3.23.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659 AS fetcher'
@@ -183,12 +182,12 @@ assert_file_contains "${execution_plane_rust_dockerfile_path}" 'RUSTC_WRAPPER=/u
 assert_file_contains "${execution_plane_rust_dockerfile_path}" 'CARGO_INCREMENTAL=0'
 assert_line_order "${execution_plane_rust_dockerfile_path}" 'cargo install --locked sccache' 'RUSTC_WRAPPER=/usr/local/cargo/bin/sccache'
 
-helper_image_changes_block="$(job_block helper-image-changes)"
+sccache_changes_block="$(job_block sccache-changes)"
 publish_block="$(job_block publish-architecture-images)"
 manifest_block="$(job_block publish-manifests)"
 
-[[ -n "${helper_image_changes_block}" ]] || {
-  printf 'Expected helper-image-changes job in %s\n' "${workflow_path}" >&2
+[[ -n "${sccache_changes_block}" ]] || {
+  printf 'Expected sccache-changes job in %s\n' "${workflow_path}" >&2
   exit 1
 }
 [[ -n "${publish_block}" ]] || {
@@ -200,40 +199,29 @@ manifest_block="$(job_block publish-manifests)"
   exit 1
 }
 
-assert_block_contains "${helper_image_changes_block}" 'fetch-depth: 0' 'helper-image-changes job block'
-assert_block_contains "${helper_image_changes_block}" "yamllint_changed=\"\$(changed_in_range containers/yamllint)\"" 'helper-image-changes job block'
-assert_block_contains "${helper_image_changes_block}" "sccache_changed=\"\$(changed_in_range containers/sccache)\"" 'helper-image-changes job block'
-assert_block_contains "${helper_image_changes_block}" '{' 'helper-image-changes job block'
-assert_block_contains "${helper_image_changes_block}" "printf 'yamllint_changed=%s\\n' \"\${yamllint_changed}\"" 'helper-image-changes job block'
-assert_block_contains "${helper_image_changes_block}" "printf 'sccache_changed=%s\\n' \"\${sccache_changed}\"" 'helper-image-changes job block'
-assert_block_contains "${helper_image_changes_block}" "} >> \"\${GITHUB_OUTPUT}\"" 'helper-image-changes job block'
+assert_block_contains "${sccache_changes_block}" 'fetch-depth: 0' 'sccache-changes job block'
+assert_block_contains "${sccache_changes_block}" "sccache_changed=\"\$(changed_in_range containers/sccache)\"" 'sccache-changes job block'
+assert_block_contains "${sccache_changes_block}" "printf 'sccache_changed=%s\\n' \"\${sccache_changed}\"" 'sccache-changes job block'
 
-assert_block_contains "${publish_block}" '- helper-image-changes' 'publish-architecture-images job block'
-assert_block_contains "${publish_block}" "if: needs.helper-image-changes.outputs.yamllint_changed == 'true'" 'publish-architecture-images job block'
-assert_block_contains "${publish_block}" "if: needs.helper-image-changes.outputs.sccache_changed == 'true'" 'publish-architecture-images job block'
-assert_block_contains "${publish_block}" "PUBLISH_YAMLLINT: \${{ needs.helper-image-changes.outputs.yamllint_changed }}" 'publish-architecture-images job block'
-assert_block_contains "${publish_block}" "PUBLISH_SCCACHE: \${{ needs.helper-image-changes.outputs.sccache_changed }}" 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" '- sccache-changes' 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" "if: needs.sccache-changes.outputs.sccache_changed == 'true'" 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" "PUBLISH_SCCACHE: \${{ needs.sccache-changes.outputs.sccache_changed }}" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "CONTROL_PLANE_COMPONENT_TAG: \${{ steps.image_versions.outputs.control_plane_component_tag }}" 'publish-architecture-images job block'
-assert_block_contains "${publish_block}" "YAMLLINT_COMPONENT_TAG: \${{ steps.image_versions.outputs.yamllint_component_tag }}" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "SCCACHE_COMPONENT_TAG: \${{ steps.image_versions.outputs.sccache_component_tag }}" 'publish-architecture-images job block'
-assert_block_contains "${publish_block}" "if [[ \"\${PUBLISH_YAMLLINT}\" == \"true\" ]]; then" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "if [[ \"\${PUBLISH_SCCACHE}\" == \"true\" ]]; then" 'publish-architecture-images job block'
 
-assert_block_contains "${manifest_block}" '- helper-image-changes' 'publish-manifests job block'
-assert_block_contains "${manifest_block}" "PUBLISH_YAMLLINT: \${{ needs.helper-image-changes.outputs.yamllint_changed }}" 'publish-manifests job block'
-assert_block_contains "${manifest_block}" "PUBLISH_SCCACHE: \${{ needs.helper-image-changes.outputs.sccache_changed }}" 'publish-manifests job block'
+assert_block_contains "${manifest_block}" '- sccache-changes' 'publish-manifests job block'
+assert_block_contains "${manifest_block}" "PUBLISH_SCCACHE: \${{ needs.sccache-changes.outputs.sccache_changed }}" 'publish-manifests job block'
 assert_block_contains "${manifest_block}" "CONTROL_PLANE_COMPONENT_TAG: \${{ steps.image_versions.outputs.control_plane_component_tag }}" 'publish-manifests job block'
-assert_block_contains "${manifest_block}" "YAMLLINT_COMPONENT_TAG: \${{ steps.image_versions.outputs.yamllint_component_tag }}" 'publish-manifests job block'
 assert_block_contains "${manifest_block}" "SCCACHE_COMPONENT_TAG: \${{ steps.image_versions.outputs.sccache_component_tag }}" 'publish-manifests job block'
-assert_block_contains "${manifest_block}" "if [[ \"\${PUBLISH_YAMLLINT}\" == \"true\" ]]; then" 'publish-manifests job block'
 assert_block_contains "${manifest_block}" "if [[ \"\${PUBLISH_SCCACHE}\" == \"true\" ]]; then" 'publish-manifests job block'
 
-assert_file_contains "${workflow_path}" 'podman build --tag localhost/sccache:test containers/sccache'
+assert_file_contains "${workflow_path}" 'docker buildx build --load --tag localhost/sccache:test containers/sccache'
 assert_file_contains "${workflow_path}" "GHCR_SCCACHE_IMAGE: ghcr.io/\${{ github.repository }}/sccache"
-assert_file_contains "${workflow_path}" "podman tag localhost/sccache:test \"\${GHCR_SCCACHE_IMAGE}:\${GITHUB_SHA}-\${IMAGE_ARCH}\""
-assert_file_contains "${workflow_path}" "podman push \"\${GHCR_SCCACHE_IMAGE}:\${SCCACHE_COMPONENT_TAG}-\${IMAGE_ARCH}\""
-assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache:manifest-latest\" \"\${GHCR_SCCACHE_IMAGE}:latest\""
-assert_file_contains "${workflow_path}" "create_manifest \"localhost/sccache:manifest-version\" \"\${GHCR_SCCACHE_IMAGE}:\${SCCACHE_COMPONENT_TAG}\""
+assert_file_contains "${workflow_path}" "docker tag localhost/sccache:test \"\${GHCR_SCCACHE_IMAGE}:\${GITHUB_SHA}-\${IMAGE_ARCH}\""
+assert_file_contains "${workflow_path}" "docker push \"\${GHCR_SCCACHE_IMAGE}:\${SCCACHE_COMPONENT_TAG}-\${IMAGE_ARCH}\""
+assert_file_contains "${workflow_path}" "create_manifest \"\${GHCR_SCCACHE_IMAGE}:latest\""
+assert_file_contains "${workflow_path}" "create_manifest \"\${GHCR_SCCACHE_IMAGE}:\${SCCACHE_COMPONENT_TAG}\""
 assert_file_matches "${workflow_path}" '^[[:space:]]+- sccache$'
 assert_file_contains "${renovate_config_path}" '/^containers\\/(control-plane|yamllint|sccache)\\/Dockerfile$/'
 assert_file_contains "${renovate_config_path}" 'separateMultipleMajor: true'
@@ -255,6 +243,10 @@ assert_file_not_contains "${workflow_path}" 'localhost/garage-bootstrap:test'
 assert_file_not_matches "${workflow_path}" '^[[:space:]]+- garage$'
 assert_file_not_matches "${workflow_path}" '^[[:space:]]+- garage-bootstrap$'
 assert_file_not_contains "${renovate_config_path}" 'garage-bootstrap'
+assert_file_not_contains "${workflow_path}" 'helper-image-changes'
+assert_file_not_contains "${workflow_path}" 'yamllint_changed'
+assert_file_not_contains "${workflow_path}" 'GHCR_YAMLLINT_IMAGE'
+assert_file_not_contains "${workflow_path}" 'localhost/yamllint:test'
 
 printf '%s\n' 'image-maintenance-test: verifying GHCR cleanup keeps tagged images' >&2
 assert_file_contains "${workflow_path}" 'delete-only-untagged-versions: '\''true'\'''

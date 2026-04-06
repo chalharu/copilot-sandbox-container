@@ -26,21 +26,13 @@ fileAccessRules:
     reason: Direct reads of CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE are blocked by control-plane policy. Use control-plane-copilot so the managed launcher injects the token without exposing the file contents.
     allowedExecutables:
       - /usr/local/bin/control-plane-copilot
-  - path: '${HOME}/.config/control-plane/dockerhub-token'
-    reason: Direct reads of DOCKERHUB_TOKEN_FILE are blocked by control-plane policy. Use startup-managed Podman auth or explicit DOCKERHUB_* env instead of reading the token file directly.
-    allowedExecutables:
-      - /usr/local/bin/podman
-      - /usr/local/bin/control-plane-podman
   - path: '${XDG_RUNTIME_DIR}/containers/auth.json'
-    reason: Direct reads of registry auth.json are blocked by control-plane policy. Use podman or docker so the runtime consumes the managed auth without exposing the file contents.
-    allowedExecutables:
-      - /usr/local/bin/podman
-      - /usr/local/bin/docker
-      - /usr/local/bin/control-plane-podman
+    reason: Direct reads of registry auth.json are blocked by control-plane policy. The entrypoint materializes managed registry auth for tool invocations without exposing the file contents.
+    allowedExecutables: []
   - path: '${HOME}/.config/gh/hosts.yml'
     reason: Direct reads of ~/.config/gh/hosts.yml are blocked by control-plane policy. Use gh so hosts.yml stays confined to the GitHub CLI.
     allowedExecutables:
       - /usr/bin/gh
   - path: /run/control-plane-auth
-    reason: Direct reads of /run/control-plane-auth are blocked by control-plane policy. Startup consumes mounted auth Secrets and stages them into managed runtime surfaces; use ssh, gh, control-plane-copilot, or podman instead of reading the Secret mount directly.
+    reason: Direct reads of /run/control-plane-auth are blocked by control-plane policy. Startup consumes mounted auth Secrets and stages them into managed runtime surfaces; use ssh, gh, or control-plane-copilot instead of reading the Secret mount directly.
     allowedExecutables: []

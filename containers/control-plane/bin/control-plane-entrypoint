@@ -13,18 +13,16 @@ audit_log_db_path="${copilot_session_state_dir}/audit/audit-log.db"
 audit_log_db_dir="$(dirname "${audit_log_db_path}")"
 gh_config_dir="${control_plane_home}/.config/gh"
 gh_hosts_path="${gh_config_dir}/hosts.yml"
-containers_config_dir="${control_plane_home}/.config/containers"
-containers_storage_config_path="${containers_config_dir}/storage.conf"
-containers_engine_config_path="${containers_config_dir}/containers.conf"
-legacy_podman_state_root="${control_plane_home}/.copilot/containers"
 runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${control_plane_uid}}"
 tmp_root="${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane}"
-podman_state_root="${CONTROL_PLANE_PODMAN_STATE_ROOT:-${tmp_root}/rootless-podman}"
 hook_tmp_root="${CONTROL_PLANE_HOOK_TMP_ROOT:-${tmp_root}/hooks}"
 tmp_dir="${TMPDIR:-${tmp_root}/tmp-${control_plane_uid}}"
 node_compile_cache_dir="${CONTROL_PLANE_NODE_COMPILE_CACHE_DIR:-${hook_tmp_root}/node-compile-cache}"
 npm_cache_dir="${CONTROL_PLANE_NPM_CACHE_DIR:-${hook_tmp_root}/npm-cache}"
 screen_dir="${SCREENDIR:-${runtime_dir}/screen}"
+cargo_home_dir="${CARGO_HOME:-${control_plane_home}/.cargo}"
+cargo_target_dir="${CARGO_TARGET_DIR:-${tmp_root}/cargo-target}"
+rustup_home_dir="${RUSTUP_HOME:-/usr/local/rustup}"
 host_key_dir="${CONTROL_PLANE_HOST_KEY_DIR:-/var/lib/control-plane/ssh-host-keys}"
 bundled_skills_dir="/usr/local/share/control-plane/skills"
 copilot_skills_dir="${copilot_state_dir}/skills"
@@ -62,29 +60,6 @@ git_user_email="${CONTROL_PLANE_GIT_USER_EMAIL:-}"
 audit_log_max_records="${CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS:-10000}"
 copilot_cpu_limit_percent="${CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT:-100}"
 copilot_nice_level="${CONTROL_PLANE_COPILOT_NICE_LEVEL:-10}"
-
-if [[ "$(id -u)" -ne 0 ]]; then
-  printf '%s\n' \
-    'control-plane-entrypoint must start as root to prepare mounted state, SSH host keys, and the rootful Podman service.' \
-    'Rerun the container with --user 0:0, or set runAsUser: 0 in Kubernetes.' \
-    >&2
-  exit 1
-fi
-
-podman_storage_driver="${CONTROL_PLANE_PODMAN_STORAGE_DRIVER:-}"
-local_podman_mode="${CONTROL_PLANE_LOCAL_PODMAN_MODE:-rootless}"
-rootful_podman_storage_driver="${CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER:-overlay}"
-rootful_podman_state_root="${CONTROL_PLANE_ROOTFUL_PODMAN_STATE_ROOT:-/var/lib/control-plane/rootful-podman/rootful-${rootful_podman_storage_driver}}"
-rootful_podman_runtime_dir="${CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR:-/var/tmp/control-plane/rootful-${rootful_podman_storage_driver}}"
-rootful_podman_socket="${CONTROL_PLANE_ROOTFUL_PODMAN_SOCKET:-${rootful_podman_runtime_dir}/podman-root.sock}"
-rootful_podman_graphroot="${rootful_podman_state_root}/storage"
-rootful_podman_runroot="${rootful_podman_runtime_dir}/runroot"
-rootful_podman_storage_config_path="${rootful_podman_runtime_dir}/storage.conf"
-rootful_podman_log_path="${rootful_podman_runtime_dir}/podman-root.log"
-rootful_podman_default_cgroups="${CONTROL_PLANE_ROOTFUL_PODMAN_DEFAULT_CGROUPS:-disabled}"
-rootful_podman_default_network="${CONTROL_PLANE_ROOTFUL_PODMAN_DEFAULT_NETWORK:-host}"
-rootful_podman_build_isolation="${CONTROL_PLANE_ROOTFUL_PODMAN_BUILD_ISOLATION:-chroot}"
-podman_bin="${CONTROL_PLANE_PODMAN_BIN:-/usr/bin/podman}"
 job_namespace="${CONTROL_PLANE_JOB_NAMESPACE:-${CONTROL_PLANE_K8S_NAMESPACE:-default}}"
 job_workspace_pvc="${CONTROL_PLANE_JOB_WORKSPACE_PVC:-}"
 job_workspace_mount_path="${CONTROL_PLANE_JOB_WORKSPACE_MOUNT_PATH:-${CONTROL_PLANE_WORKSPACE_MOUNT_PATH:-/workspace}}"
@@ -96,40 +71,13 @@ job_transfer_host="${CONTROL_PLANE_JOB_TRANSFER_HOST:-control-plane.${CONTROL_PL
 job_transfer_port="${CONTROL_PLANE_JOB_TRANSFER_PORT:-2222}"
 job_transfer_user="${CONTROL_PLANE_JOB_TRANSFER_USER:-${control_plane_user}}"
 
-if [[ -z "${podman_storage_driver}" ]]; then
-  if [[ -e /dev/fuse ]]; then
-    podman_storage_driver="overlay"
-  else
-    podman_storage_driver="vfs"
-  fi
+if [[ "$(id -u)" -ne 0 ]]; then
+  printf '%s\n' \
+    'control-plane-entrypoint must start as root to prepare mounted state and SSH host keys.' \
+    'Rerun the container with --user 0:0, or set runAsUser: 0 in Kubernetes.' \
+    >&2
+  exit 1
 fi
-
-case "${podman_storage_driver}" in
-  overlay|vfs)
-    ;;
-  *)
-    printf 'Unsupported CONTROL_PLANE_PODMAN_STORAGE_DRIVER: %s\n' "${podman_storage_driver}" >&2
-    exit 1
-    ;;
-esac
-
-case "${local_podman_mode}" in
-  rootless|rootful-service)
-    ;;
-  *)
-    printf 'Unsupported CONTROL_PLANE_LOCAL_PODMAN_MODE: %s\n' "${local_podman_mode}" >&2
-    exit 1
-    ;;
-esac
-
-case "${rootful_podman_storage_driver}" in
-  overlay|vfs)
-    ;;
-  *)
-    printf 'Unsupported CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER: %s\n' "${rootful_podman_storage_driver}" >&2
-    exit 1
-    ;;
-esac
 
 case ":${effective_ld_preload}:" in
   *":${exec_policy_library_path}:"*)
@@ -147,52 +95,15 @@ if [[ ! "${audit_log_max_records}" =~ ^[0-9]+$ ]] || (( audit_log_max_records <=
   exit 1
 fi
 
-podman_state_dir="${podman_state_root}/${podman_storage_driver}"
-podman_graphroot="${podman_state_dir}/storage"
-podman_runroot="${runtime_dir}/${podman_storage_driver}/containers/storage"
-
 write_runtime_var() {
   printf '%s=%q\n' "$1" "$2"
-}
-
-write_storage_conf() {
-  {
-    printf '%s\n' '[storage]'
-    printf 'driver = "%s"\n' "${podman_storage_driver}"
-    printf 'graphroot = "%s"\n' "${podman_graphroot}"
-    printf 'runroot = "%s"\n' "${podman_runroot}"
-    if [[ "${podman_storage_driver}" == "overlay" ]]; then
-      printf '\n%s\n' '[storage.options]'
-      printf '%s\n' 'mount_program = "/usr/bin/fuse-overlayfs"'
-    fi
-  } > "${containers_storage_config_path}"
-}
-
-write_containers_conf() {
-  cat > "${containers_engine_config_path}" <<'EOF'
-[engine]
-cgroup_manager = "cgroupfs"
-events_logger = "file"
-EOF
-}
-
-write_rootful_storage_conf() {
-  {
-    printf '%s\n' '[storage]'
-    printf 'driver = "%s"\n' "${rootful_podman_storage_driver}"
-    printf 'graphroot = "%s"\n' "${rootful_podman_graphroot}"
-    printf 'runroot = "%s"\n' "${rootful_podman_runroot}"
-    if [[ "${rootful_podman_storage_driver}" == "overlay" ]] && [[ -e /dev/fuse ]]; then
-      printf '\n%s\n' '[storage.options]'
-      printf '%s\n' 'mount_program = "/usr/bin/fuse-overlayfs"'
-    fi
-  } > "${rootful_podman_storage_config_path}"
 }
 
 safe_chown_tree() {
   local owner="$1"
   shift
   local target
+
   for target in "$@"; do
     [[ -e "${target}" ]] || continue
     find "${target}" \( -type l -o -type s \) -prune -o -exec chown "${owner}" {} +
@@ -226,26 +137,15 @@ ensure_symlink_path() {
   ln -s "${target_path}" "${link_path}"
 }
 
-directory_has_entries() {
-  local target="$1"
-  find "${target}" -mindepth 1 -maxdepth 1 -print -quit | grep -q .
-}
-
 capability_bit() {
   case "$1" in
     CHOWN) printf '0\n' ;;
     AUDIT_WRITE) printf '29\n' ;;
     DAC_OVERRIDE) printf '1\n' ;;
     FOWNER) printf '3\n' ;;
-    KILL) printf '5\n' ;;
     SETGID) printf '6\n' ;;
-    SETPCAP) printf '8\n' ;;
     SETUID) printf '7\n' ;;
-    NET_ADMIN) printf '12\n' ;;
     SYS_CHROOT) printf '18\n' ;;
-    SYS_ADMIN) printf '21\n' ;;
-    MKNOD) printf '27\n' ;;
-    SETFCAP) printf '31\n' ;;
     *)
       printf 'Unsupported capability name: %s\n' "$1" >&2
       exit 1
@@ -277,15 +177,10 @@ require_container_capabilities() {
   local capability_mask
   local missing=()
   local capability_name
-  local ssh_command=0
 
   [[ "$(id -u)" -eq 0 ]] || return 0
   capability_mask="$(awk '/^CapEff:/ { print $2 }' /proc/self/status)"
   [[ -n "${capability_mask}" ]] || return 0
-
-  if command_uses_sshd "$@"; then
-    ssh_command=1
-  fi
 
   for capability_name in CHOWN DAC_OVERRIDE FOWNER; do
     if ! has_effective_capability "${capability_name}" "${capability_mask}"; then
@@ -293,16 +188,8 @@ require_container_capabilities() {
     fi
   done
 
-  if [[ "${ssh_command}" -eq 1 ]]; then
+  if command_uses_sshd "$@"; then
     for capability_name in AUDIT_WRITE SETGID SETUID SYS_CHROOT; do
-      if ! has_effective_capability "${capability_name}" "${capability_mask}"; then
-        missing+=("${capability_name}")
-      fi
-    done
-  fi
-
-  if [[ "${local_podman_mode}" == "rootful-service" ]]; then
-    for capability_name in KILL MKNOD NET_ADMIN SETFCAP SETPCAP SYS_ADMIN; do
       if ! has_effective_capability "${capability_name}" "${capability_mask}"; then
         missing+=("${capability_name}")
       fi
@@ -311,64 +198,18 @@ require_container_capabilities() {
 
   if [[ ${#missing[@]} -gt 0 ]]; then
     printf 'Missing Linux capabilities for control-plane startup: %s\n' "${missing[*]}" >&2
-    if [[ "${ssh_command}" -eq 1 ]]; then
+    if command_uses_sshd "$@"; then
       printf '%s\n' \
         'Keep drop: ALL only when you re-add AUDIT_WRITE,CHOWN,DAC_OVERRIDE,FOWNER,SETGID,SETUID,SYS_CHROOT, or run the container privileged.' \
-        'When CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service, also re-add KILL,MKNOD,NET_ADMIN,SETFCAP,SETPCAP,SYS_ADMIN so the nested Podman service can launch containers on clusters that block Pod user namespaces.' \
         'SSH requires AUDIT_WRITE plus SETUID/SETGID and SYS_CHROOT for privilege separation and PTY login accounting, and the entrypoint still needs ownership-related capabilities on mounted state.' \
         >&2
     else
       printf '%s\n' \
         'Non-SSH startup still needs CHOWN,DAC_OVERRIDE,FOWNER on mounted state. Direct sshd startup adds AUDIT_WRITE,SETGID,SETUID,SYS_CHROOT on top of that.' \
-        'When CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service, also re-add KILL,MKNOD,NET_ADMIN,SETFCAP,SETPCAP,SYS_ADMIN so the nested Podman service can launch containers on clusters that block Pod user namespaces.' \
         >&2
     fi
     exit 1
   fi
-}
-
-detect_legacy_podman_storage_driver() {
-  local legacy_state_root="$1"
-  local storage_root="${legacy_state_root}/storage"
-
-  if [[ ! -d "${storage_root}" ]]; then
-    return 1
-  fi
-
-  if [[ -d "${storage_root}/overlay" ]] || compgen -G "${storage_root}/overlay-*" >/dev/null; then
-    printf 'overlay\n'
-    return 0
-  fi
-
-  if [[ -d "${storage_root}/vfs" ]] || compgen -G "${storage_root}/vfs-*" >/dev/null; then
-    printf 'vfs\n'
-    return 0
-  fi
-
-  return 1
-}
-
-migrate_legacy_podman_state() {
-  local legacy_state_root="$1"
-  local detected_driver
-
-  [[ -d "${legacy_state_root}/storage" ]] || return 0
-
-  detected_driver="$(detect_legacy_podman_storage_driver "${legacy_state_root}" || true)"
-  if [[ -z "${detected_driver}" ]] || [[ "${detected_driver}" != "${podman_storage_driver}" ]]; then
-    return 0
-  fi
-
-  if [[ -e "${podman_graphroot}" ]]; then
-    if [[ -d "${podman_graphroot}" ]] && ! directory_has_entries "${podman_graphroot}"; then
-      rmdir "${podman_graphroot}"
-    else
-      return 0
-    fi
-  fi
-
-  mkdir -p "${podman_state_dir}"
-  mv "${legacy_state_root}/storage" "${podman_graphroot}"
 }
 
 write_private_file() {
@@ -563,172 +404,6 @@ configure_copilot() {
   merge_json_object_file "${copilot_config_path}" "${copilot_config_json_file}" "${control_plane_user}:${control_plane_user}"
 }
 
-start_rootful_podman_service() {
-  local service_pid
-  local wait_count=0
-
-  [[ "${local_podman_mode}" == "rootful-service" ]] || return 0
-
-  mkdir -p "${rootful_podman_runtime_dir}" "${rootful_podman_graphroot}" "${rootful_podman_runroot}"
-  chmod 755 "${rootful_podman_runtime_dir}"
-  write_rootful_storage_conf
-  rm -f "${rootful_podman_socket}"
-
-  env -u CONTAINER_HOST -u DOCKER_HOST -u _CONTAINERS_USERNS_CONFIGURED \
-    XDG_RUNTIME_DIR="${rootful_podman_runtime_dir}" \
-    CONTAINERS_STORAGE_CONF="${rootful_podman_storage_config_path}" \
-    "${podman_bin}" \
-      --storage-driver "${rootful_podman_storage_driver}" \
-      --root "${rootful_podman_graphroot}" \
-      --runroot "${rootful_podman_runroot}" \
-      system service --time=0 "unix://${rootful_podman_socket}" \
-      > "${rootful_podman_log_path}" 2>&1 &
-  service_pid=$!
-
-  while [[ ! -S "${rootful_podman_socket}" ]]; do
-    if ! kill -0 "${service_pid}" 2>/dev/null; then
-      printf 'control-plane-entrypoint: failed to start rootful Podman service.\n' >&2
-      cat "${rootful_podman_log_path}" >&2 || true
-      exit 1
-    fi
-    wait_count=$((wait_count + 1))
-    if [[ "${wait_count}" -ge 100 ]]; then
-      printf 'control-plane-entrypoint: timed out waiting for rootful Podman socket %s\n' "${rootful_podman_socket}" >&2
-      cat "${rootful_podman_log_path}" >&2 || true
-      exit 1
-    fi
-    sleep 0.1
-  done
-
-  chown "${control_plane_user}:${control_plane_user}" "${rootful_podman_socket}"
-  chmod 660 "${rootful_podman_socket}"
-}
-
-ensure_podman_storage_link() {
-  local link_path="$1"
-  local state_path="$2"
-  local entries=()
-
-  mkdir -p "${state_path}"
-
-  if [[ -L "${link_path}" ]]; then
-    if [[ "$(readlink "${link_path}")" == "${state_path}" ]]; then
-      return
-    fi
-
-    rm -f "${link_path}"
-    ln -s "${state_path}" "${link_path}"
-    return
-  fi
-
-  if [[ -e "${link_path}" ]] && [[ ! -d "${link_path}" ]]; then
-    printf 'Refusing to replace non-directory path at %s\n' "${link_path}" >&2
-    exit 1
-  fi
-
-  if [[ -d "${link_path}" ]] && directory_has_entries "${link_path}"; then
-    if directory_has_entries "${state_path}"; then
-      printf 'Refusing to overwrite existing Podman storage; migrate %s into %s manually\n' "${link_path}" "${state_path}" >&2
-      exit 1
-    fi
-
-    shopt -s dotglob nullglob
-    entries=("${link_path}"/*)
-    shopt -u dotglob nullglob
-    if [[ ${#entries[@]} -gt 0 ]]; then
-      mv -n "${entries[@]}" "${state_path}/"
-      if directory_has_entries "${link_path}"; then
-        printf 'Refusing to continue after partial Podman storage migration from %s into %s\n' "${link_path}" "${state_path}" >&2
-        exit 1
-      fi
-    fi
-  fi
-
-  rm -rf "${link_path}"
-  ln -s "${state_path}" "${link_path}"
-}
-
-ensure_legacy_rootless_podman_state() {
-  local legacy_root="$1"
-  local state_root="$2"
-  local entries=()
-  local rootless_entries=()
-  local flat_storage_path=""
-  local entry_basename
-  local entry_path
-
-  mkdir -p "${state_root}"
-
-  if [[ -L "${legacy_root}" ]]; then
-    if [[ "$(readlink "${legacy_root}")" == "${state_root}" ]]; then
-      return
-    fi
-
-    rm -f "${legacy_root}"
-    ln -s "${state_root}" "${legacy_root}"
-    return
-  fi
-
-  if [[ -e "${legacy_root}" ]] && [[ ! -d "${legacy_root}" ]]; then
-    printf 'Refusing to replace non-directory path at %s\n' "${legacy_root}" >&2
-    exit 1
-  fi
-
-  if [[ -d "${legacy_root}" ]] && directory_has_entries "${legacy_root}"; then
-    shopt -s dotglob nullglob
-    entries=("${legacy_root}"/*)
-    shopt -u dotglob nullglob
-
-    for entry_path in "${entries[@]}"; do
-      entry_basename="$(basename -- "${entry_path}")"
-      case "${entry_basename}" in
-        overlay|vfs)
-          rootless_entries+=("${entry_path}")
-          ;;
-        storage)
-          flat_storage_path="${entry_path}"
-          ;;
-      esac
-    done
-
-    if [[ -n "${flat_storage_path}" ]] && directory_has_entries "${flat_storage_path}"; then
-      printf 'Refusing to continue with legacy flat Podman storage at %s; migrate it into %s manually\n' "${flat_storage_path}" "${podman_graphroot}" >&2
-      exit 1
-    fi
-
-    if [[ ${#rootless_entries[@]} -gt 0 ]]; then
-      if directory_has_entries "${state_root}"; then
-        printf 'Refusing to overwrite existing Podman storage; migrate %s into %s manually\n' "${legacy_root}" "${state_root}" >&2
-        exit 1
-      fi
-
-      mv -n "${rootless_entries[@]}" "${state_root}/"
-      for entry_path in "${rootless_entries[@]}"; do
-        if [[ -e "${entry_path}" ]] || [[ -L "${entry_path}" ]]; then
-          printf 'Refusing to continue after partial Podman storage migration from %s into %s\n' "${legacy_root}" "${state_root}" >&2
-          exit 1
-        fi
-      done
-    fi
-
-    if [[ -n "${flat_storage_path}" ]]; then
-      rm -rf "${flat_storage_path}"
-    fi
-  fi
-
-  if [[ ! -e "${legacy_root}" ]]; then
-    ln -s "${state_root}" "${legacy_root}"
-    return
-  fi
-
-  if directory_has_entries "${legacy_root}"; then
-    return
-  fi
-
-  rm -rf "${legacy_root}"
-  ln -s "${state_root}" "${legacy_root}"
-}
-
 ensure_ssh_host_key() {
   local key_type="$1"
   local key_basename="$2"
@@ -891,8 +566,8 @@ require_container_capabilities "$@"
 
 mkdir -p \
   "${copilot_state_dir}" \
-  "${containers_config_dir}" \
   "${gh_config_dir}" \
+  "${control_plane_home}/.config" \
   "${control_plane_home}/.local/share" \
   "${runtime_config_dir}" \
   "${kube_dir}" \
@@ -901,7 +576,6 @@ mkdir -p \
   "${copilot_logs_dir}" \
   "${copilot_agents_dir}" \
   "${control_plane_workspace}" \
-  "${podman_state_root}" \
   "${copilot_session_state_dir}" \
   "${audit_log_db_dir}" \
   "${screen_dir}" \
@@ -910,21 +584,14 @@ mkdir -p \
   "${tmp_dir}" \
   "${node_compile_cache_dir}" \
   "${npm_cache_dir}" \
+  "${cargo_home_dir}" \
+  "${cargo_target_dir}" \
   "${job_transfer_root}" \
   "${host_key_dir}" \
+  "$(dirname "${registry_auth_path}")" \
   "/run/user/${control_plane_uid}" \
-  "${rootful_podman_runtime_dir}" \
   /run/sshd \
   "${runtime_dir}"
-migrate_legacy_podman_state "${legacy_podman_state_root}"
-ensure_legacy_rootless_podman_state "${legacy_podman_state_root}" "${podman_state_root}"
-
-mkdir -p \
-  "${podman_state_dir}" \
-  "${podman_graphroot}" \
-  "${podman_graphroot}/${podman_storage_driver}" \
-  "${podman_graphroot}/volumes" \
-  "${podman_runroot}"
 
 safe_chown_tree "${control_plane_user}:${control_plane_user}" \
   "${control_plane_home}/.config" \
@@ -934,13 +601,14 @@ safe_chown_tree "${control_plane_user}:${control_plane_user}" \
   "${control_plane_workspace}" \
   "${audit_log_db_dir}" \
   "${job_transfer_root}" \
-  "${podman_state_dir}" \
   "${screen_dir}" \
   "${tmp_root}" \
   "${hook_tmp_root}" \
   "${tmp_dir}" \
   "${node_compile_cache_dir}" \
   "${npm_cache_dir}" \
+  "${cargo_home_dir}" \
+  "${cargo_target_dir}" \
   "${runtime_dir}"
 ensure_path_ownership "${control_plane_user}:${control_plane_user}" \
   "${copilot_state_dir}" \
@@ -949,18 +617,14 @@ ensure_path_ownership "${control_plane_user}:${control_plane_user}" \
   "${copilot_logs_dir}" \
   "${copilot_agents_dir}" \
   "${audit_log_db_dir}" \
-  "${podman_state_root}" \
-  "${podman_state_dir}" \
-  "${podman_graphroot}" \
-  "${podman_graphroot}/${podman_storage_driver}" \
-  "${podman_graphroot}/volumes" \
-  "${podman_runroot}" \
   "${screen_dir}" \
   "${tmp_root}" \
   "${hook_tmp_root}" \
   "${tmp_dir}" \
   "${node_compile_cache_dir}" \
   "${npm_cache_dir}" \
+  "${cargo_home_dir}" \
+  "${cargo_target_dir}" \
   "${job_transfer_root}" \
   "${runtime_dir}"
 chown "${control_plane_user}:${control_plane_user}" \
@@ -968,11 +632,6 @@ chown "${control_plane_user}:${control_plane_user}" \
   "${control_plane_home}" \
   "${control_plane_home}/.local" \
   "${control_plane_home}/.local/share"
-
-ensure_podman_storage_link "${control_plane_home}/.local/share/containers" "${podman_state_dir}"
-
-chown -h "${control_plane_user}:${control_plane_user}" "${legacy_podman_state_root}"
-chown -h "${control_plane_user}:${control_plane_user}" "${control_plane_home}/.local/share/containers"
 chown root:root "${host_key_dir}"
 chown root:root /run/sshd
 chmod 755 "${control_plane_home}"
@@ -984,12 +643,14 @@ chmod 700 \
   "${tmp_dir}" \
   "${node_compile_cache_dir}" \
   "${npm_cache_dir}" \
+  "${cargo_home_dir}" \
   "${audit_log_db_dir}" \
   "${job_transfer_root}" \
   "${screen_dir}"
 # Jobs need to read the public SSH host key from an unprivileged shell to seed known_hosts.
 chmod 711 "${host_key_dir}"
 chmod 755 /run/sshd
+
 export XDG_RUNTIME_DIR="${runtime_dir}"
 export CONTROL_PLANE_TMP_ROOT="${tmp_root}"
 export CONTROL_PLANE_HOOK_TMP_ROOT="${hook_tmp_root}"
@@ -997,8 +658,12 @@ export TMPDIR="${tmp_dir}"
 export NODE_COMPILE_CACHE="${node_compile_cache_dir}"
 export NPM_CONFIG_CACHE="${npm_cache_dir}"
 export SCREENDIR="${screen_dir}"
+export CARGO_HOME="${cargo_home_dir}"
+export CARGO_TARGET_DIR="${cargo_target_dir}"
+export RUSTUP_HOME="${rustup_home_dir}"
 export COPILOT_HOME="${managed_copilot_home}"
 export GIT_CONFIG_GLOBAL="${git_config_path}"
+
 touch "${authorized_keys_path}"
 chmod 600 "${authorized_keys_path}"
 chown "${control_plane_user}:${control_plane_user}" "${authorized_keys_path}"
@@ -1130,10 +795,6 @@ fi
   write_runtime_var CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST "${CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST:-256Mi}"
   write_runtime_var CONTROL_PLANE_FAST_EXECUTION_MEMORY_LIMIT "${CONTROL_PLANE_FAST_EXECUTION_MEMORY_LIMIT:-2Gi}"
   write_runtime_var CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC "${CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC:-3600}"
-  write_runtime_var CONTROL_PLANE_LOCAL_PODMAN_MODE "${local_podman_mode}"
-  if [[ -n "${CONTROL_PLANE_EXECUTION_HINT:-}" ]]; then
-    write_runtime_var CONTROL_PLANE_EXECUTION_HINT "${CONTROL_PLANE_EXECUTION_HINT}"
-  fi
   write_runtime_var CONTROL_PLANE_COPILOT_WORKSPACE "${CONTROL_PLANE_COPILOT_WORKSPACE:-${CONTROL_PLANE_WORKSPACE:-/workspace}}"
   if [[ -n "${CONTROL_PLANE_COPILOT_BIN:-}" ]]; then
     write_runtime_var CONTROL_PLANE_COPILOT_BIN "${CONTROL_PLANE_COPILOT_BIN}"
@@ -1169,6 +830,9 @@ fi
   write_runtime_var NODE_COMPILE_CACHE "${node_compile_cache_dir}"
   write_runtime_var NPM_CONFIG_CACHE "${npm_cache_dir}"
   write_runtime_var SCREENDIR "${screen_dir}"
+  write_runtime_var CARGO_HOME "${cargo_home_dir}"
+  write_runtime_var CARGO_TARGET_DIR "${cargo_target_dir}"
+  write_runtime_var RUSTUP_HOME "${rustup_home_dir}"
   if [[ -n "${TZ:-}" ]]; then
     write_runtime_var TZ "${TZ}"
   fi
@@ -1188,17 +852,6 @@ fi
       write_runtime_var "${runtime_var}" "${!runtime_var}"
     fi
   done
-  if [[ "${local_podman_mode}" == "rootful-service" ]]; then
-    write_runtime_var CONTAINER_HOST "unix://${rootful_podman_socket}"
-    write_runtime_var DOCKER_HOST "unix://${rootful_podman_socket}"
-    write_runtime_var CONTROL_PLANE_PODMAN_DEFAULT_CGROUPS "${rootful_podman_default_cgroups}"
-    write_runtime_var CONTROL_PLANE_PODMAN_DEFAULT_NETWORK "${rootful_podman_default_network}"
-    write_runtime_var CONTROL_PLANE_PODMAN_BUILD_ISOLATION "${rootful_podman_build_isolation}"
-    write_runtime_var CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER "${rootful_podman_storage_driver}"
-    write_runtime_var CONTROL_PLANE_ROOTFUL_PODMAN_STATE_ROOT "${rootful_podman_state_root}"
-    write_runtime_var CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR "${rootful_podman_runtime_dir}"
-  fi
-  write_runtime_var CONTROL_PLANE_PODMAN_STATE_ROOT "${podman_state_root}"
   write_runtime_var KUBECONFIG "${KUBECONFIG:-}"
   if [[ -n "${copilot_github_token}" ]]; then
     write_runtime_var CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE "${copilot_token_path}"
@@ -1206,13 +859,6 @@ fi
 } > "${runtime_config_path}"
 chown "${control_plane_user}:${control_plane_user}" "${runtime_config_path}"
 chmod 600 "${runtime_config_path}"
-
-write_storage_conf
-write_containers_conf
-chown "${control_plane_user}:${control_plane_user}" "${containers_storage_config_path}"
-chmod 644 "${containers_storage_config_path}"
-chown "${control_plane_user}:${control_plane_user}" "${containers_engine_config_path}"
-chmod 644 "${containers_engine_config_path}"
 
 configure_managed_copilot_home
 install_bundled_control_plane_hooks
@@ -1223,7 +869,6 @@ configure_git
 remove_ssh_host_key ssh_host_rsa_key
 remove_ssh_host_key ssh_host_ecdsa_key
 ensure_ssh_host_key ed25519 ssh_host_ed25519_key
-start_rootful_podman_service
 
 if [[ $# -eq 0 ]]; then
   set -- /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config

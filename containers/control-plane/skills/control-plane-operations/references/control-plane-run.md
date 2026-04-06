@@ -2,27 +2,15 @@
 
 ## Decision table
 
-- Use `--mode auto --execution-hint short` for quick commands that should run through the local rootless Podman/Docker wrapper.
-- Use `--mode auto --execution-hint long` for commands that should become Kubernetes Jobs.
-- Use `--mode podman` when the command must stay local even if it looks long-running.
-- Use `--mode k8s-job` when the command must become a Job even if it looks short.
+- Use `--mode k8s-job` for commands that should run in an execution-plane Kubernetes Job.
 - Use `--mount-file SRC[:DEST]` for helper files that should appear under `/var/run/control-plane/job-inputs/DEST` in either execution path.
 
 ## Common patterns
 
-### Run a short local command
-
-```bash
-control-plane-run --mode auto --execution-hint short \
-  --workspace /workspace \
-  --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:replace-me-with-commit-sha \
-  -- /usr/local/bin/execution-plane-smoke write-marker /workspace/short.txt short
-```
-
 ### Run a Kubernetes Job
 
 ```bash
-control-plane-run --mode auto --execution-hint long \
+control-plane-run --mode k8s-job \
   --namespace copilot-sandbox-jobs \
   --job-name smoke-job \
   --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:replace-me-with-commit-sha \
@@ -44,15 +32,13 @@ control-plane-run --mode k8s-job \
 
 ```bash
 control-plane-session --command \
-  'control-plane-run --mode auto --execution-hint long --namespace copilot-sandbox-jobs --job-name smoke-job --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:replace-me-with-commit-sha -- /usr/local/bin/execution-plane-smoke write-marker /workspace/long.txt long'
+  'control-plane-run --mode k8s-job --namespace copilot-sandbox-jobs --job-name smoke-job --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:replace-me-with-commit-sha -- /usr/local/bin/execution-plane-smoke write-marker /workspace/long.txt long'
 ```
 
 ## Notes
 
-- The sample least-privilege Kubernetes deployment exports `CONTROL_PLANE_RUN_MODE=k8s-job`, so plain `control-plane-run ...` defaults to the Job path unless you override it.
+- `control-plane-run` is now Kubernetes-Job-only; use the control plane shell itself or the session-scoped fast-execution pod path for short local work.
 - The sample deployment also sets `CONTROL_PLANE_JOB_NAMESPACE=copilot-sandbox-jobs`, so `--namespace` defaults to the Job namespace rather than the Control Plane namespace.
-- Pass `--workspace /workspace` when the local execution path must mount the repository workspace.
 - In the Kubernetes Job path, `--mount-file` stages files over SSH/SFTP via `rclone` and writes back modified files when the Job completes.
 - Write-back is conflict-safe: if the source changed outside the Job while the Job was running, the control plane keeps the conflicting output in the transfer staging area instead of overwriting the source file.
-- Keep Kubernetes-specific flags (`--namespace`, `--job-name`) ready even in `auto` mode when the command may route to a Job.
 - Prefer explicit image references. Use commit SHA tags for reproducible automation.

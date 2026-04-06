@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
-container_bin="${CONTROL_PLANE_CONTAINER_BIN:-podman}"
+container_bin="${CONTROL_PLANE_CONTAINER_BIN:-docker}"
 rust_lint_script="${repo_root}/containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh"
 
 printf '%s\n' 'rustfmt-style-edition-test: verifying repository-root rustfmt picks up style_edition 2024' >&2

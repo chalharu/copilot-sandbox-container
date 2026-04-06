@@ -8,7 +8,7 @@ cluster_name="${3:-control-plane-ci}"
 namespace="${CONTROL_PLANE_TEST_NAMESPACE:-control-plane-ci}"
 job_namespace="${CONTROL_PLANE_TEST_JOB_NAMESPACE:-${namespace}-jobs}"
 ssh_port="${CONTROL_PLANE_TEST_SSH_PORT:-32222}"
-kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-podman}"
+kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-docker}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-${kind_provider}}"
 control_plane_selector="app.kubernetes.io/name=control-plane"
 kind_image_archive="${CONTROL_PLANE_KIND_IMAGE_ARCHIVE:-}"
@@ -67,13 +67,7 @@ create_cluster() {
 
   cat "${create_log}" >&2
 
-  if [[ "${kind_provider}" == "podman" ]] \
-    && grep -Eq 'cannot set multiple networks without bridge network mode, selected mode host: invalid argument|failed to enable forwarding: open /proc/sys/net/ipv4/ip_forward: read-only file system|statfs /lib/modules: no such file or directory' "${create_log}"; then
-    printf '%s\n' 'kind-test: skipping because the current outer runtime lacks the kernel features Kind needs under Podman' >&2
-    return 2
-  fi
-
-  if [[ "${kind_provider}" != "podman" ]] || [[ "${kind_uses_sudo}" -eq 1 ]] || [[ "${kind_sudo_mode}" == "never" ]]; then
+  if [[ "${kind_uses_sudo}" -eq 1 ]] || [[ "${kind_sudo_mode}" == "never" ]]; then
     return 1
   fi
 
@@ -525,9 +519,6 @@ data:
   CONTROL_PLANE_JOB_WORKSPACE_SUBPATH: workspace
   CONTROL_PLANE_JOB_SERVICE_ACCOUNT: control-plane-job
   CONTROL_PLANE_RUN_MODE: k8s-job
-  CONTROL_PLANE_LOCAL_PODMAN_MODE: rootful-service
-  CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER: overlay
-  CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR: /var/tmp/control-plane/rootful-overlay
   CONTROL_PLANE_JOB_TRANSFER_IMAGE: ${control_plane_image}
   CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane.${namespace}.svc.cluster.local
   CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"
@@ -588,7 +579,6 @@ spec:
                 /copilot-session/state/ssh-host-keys \
                 /copilot-session/session-state \
                 /workspace-state/workspace \
-                /cache/rootful-podman \
                 /cache/runtime-tmp
               touch /copilot-session/state/copilot-config.json /copilot-session/state/command-history-state.json
               chown -R 1000:1000 /copilot-session/state /copilot-session/session-state
@@ -598,18 +588,9 @@ spec:
               # back to UID/GID 1000 so the control-plane session can use it.
               chown 1000:1000 /workspace-state/workspace
               chmod 700 /workspace-state/workspace
-              # Keep graphroot root-only, but leave the runtime tmp path traversable
-              # so the copilot user can reach the rootful Podman socket later.
-              chown 0:0 /cache/rootful-podman
-              chmod 700 /cache/rootful-podman
+              # Keep the shared tmp/cache root traversable for the copilot user.
               chown 0:1000 /cache/runtime-tmp
               chmod 755 /cache/runtime-tmp
-              rm -rf /cache/rootful-podman/*
-              mkdir -p /cache/rootful-podman/rootful-overlay /cache/runtime-tmp/rootful-overlay
-              chown 0:0 /cache/rootful-podman/rootful-overlay
-              chmod 700 /cache/rootful-podman/rootful-overlay
-              chown 0:1000 /cache/runtime-tmp/rootful-overlay
-              chmod 755 /cache/runtime-tmp/rootful-overlay
           securityContext:
             privileged: false
             # Fresh PVC roots start out owned by root, so create the shared
@@ -707,10 +688,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-          # Keep the Kind test on the same current-cluster-compatible profile as
-          # the sample manifest: drop: ALL, explicit capability re-adds, and a
-          # rootful local Podman remote-service fallback instead of nested
-          # rootless Podman.
+          # Keep the Kind test on the same SSH-focused capability profile as the
+          # sample manifest.
           securityContext:
             privileged: false
             runAsUser: 0
@@ -725,18 +704,11 @@ spec:
                 - DAC_OVERRIDE
                 - FOWNER
                 - KILL
-                - MKNOD
-                - NET_ADMIN
-                - SETFCAP
                 - SETGID
-                - SETPCAP
                 - SETUID
-                - SYS_ADMIN
                 - SYS_CHROOT
             seccompProfile:
-              type: Unconfined
-            appArmorProfile:
-              type: Unconfined
+              type: RuntimeDefault
           ports:
             - containerPort: 2222
               name: ssh
@@ -781,9 +753,6 @@ spec:
               mountPath: /workspace
               subPath: workspace
             - name: cache
-              mountPath: /var/lib/control-plane/rootful-podman
-              subPath: rootful-podman
-            - name: cache
               mountPath: /var/tmp/control-plane
               subPath: runtime-tmp
             - name: control-plane-auth
@@ -824,12 +793,13 @@ command -v k8s-job-wait
 command -v k8s-job-pod
 command -v k8s-job-logs
 command -v control-plane-copilot
+command -v control-plane-run
 command -v control-plane-job-transfer
+command -v control-plane-exec-api
 command -v control-plane-session-exec
-command -v podman
-command -v docker
 command -v kind
-docker --version >/dev/null
+command -v cargo
+command -v yamllint
 command -v sshd
 command -v screen
 command -v vim
@@ -869,33 +839,11 @@ jq -e '.topLevelOverlay == "kind"' ~/.copilot/config.json >/dev/null
 printf '%s\n' 'kind-test remote: config merge ok' >&2
 gh config get git_protocol --host github.com | grep -qx 'ssh'
 printf '%s\n' 'kind-test remote: gh hosts ok' >&2
-grep -qx 'cgroup_manager = "cgroupfs"' ~/.config/containers/containers.conf
-grep -qx 'events_logger = "file"' ~/.config/containers/containers.conf
-printf '%s\n' 'kind-test remote: containers.conf ok' >&2
-expected_driver=""
-expected_state_dir=""
-expected_state_root="/var/tmp/control-plane/rootless-podman"
-if [[ -e /dev/fuse ]]; then
-  expected_driver=overlay
-else
-  expected_driver=vfs
-fi
-expected_state_dir="\${expected_state_root}/\${expected_driver}"
-test "\$(readlink /home/copilot/.copilot/containers)" = "\${expected_state_root}"
-test "\$(readlink /home/copilot/.local/share/containers)" = "\${expected_state_dir}"
-grep -qx "graphroot = \"\${expected_state_dir}/storage\"" ~/.config/containers/storage.conf
-grep -qx "runroot = \"/run/user/1000/\${expected_driver}/containers/storage\"" ~/.config/containers/storage.conf
-if [[ "\${expected_driver}" == "overlay" ]]; then
-  grep -qx 'driver = "overlay"' ~/.config/containers/storage.conf
-  grep -qx 'mount_program = "/usr/bin/fuse-overlayfs"' ~/.config/containers/storage.conf
-else
-  grep -qx 'driver = "vfs"' ~/.config/containers/storage.conf
-  ! grep -q 'mount_program' ~/.config/containers/storage.conf
-fi
-test -d "\${expected_state_dir}/storage/\${expected_driver}"
-test -d "\${expected_state_dir}/storage/volumes"
-test -d /var/tmp/control-plane/rootful-overlay/runroot
-printf '%s\n' 'kind-test remote: storage paths ok' >&2
+grep -Fqx 'CARGO_HOME=/home/copilot/.cargo' ~/.config/control-plane/runtime.env
+grep -Fqx 'CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target' ~/.config/control-plane/runtime.env
+test -d /var/tmp/control-plane
+test -d /var/tmp/control-plane/cargo-target
+printf '%s\n' 'kind-test remote: runtime tmp ok' >&2
 test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
 test "\${CONTROL_PLANE_FAST_EXECUTION_ENABLED}" = "1"
 test "\${CONTROL_PLANE_FAST_EXECUTION_IMAGE}" = "${control_plane_image}"
@@ -927,13 +875,8 @@ printf '%s\n' '--- config and gh hosts ---'
 cat ~/.copilot/config.json || true
 gh auth status --hostname github.com || true
 gh config get git_protocol --host github.com || true
-printf '%s\n' '--- containers config ---'
-cat ~/.config/containers/containers.conf || true
-cat ~/.config/containers/storage.conf || true
-printf '%s\n' '--- storage paths ---'
-readlink /home/copilot/.local/share/containers || true
-ls -la /home/copilot/.copilot /home/copilot/.copilot/containers || true
-ls -la /var/lib/control-plane/rootful-podman || true
+printf '%s\n' '--- runtime tmp ---'
+ls -la /var/tmp/control-plane || true
 printf '%s\n' '--- runtime env ---'
 printf 'CONTROL_PLANE_JOB_NAMESPACE=%s\n' "${CONTROL_PLANE_JOB_NAMESPACE:-}" || true
 printf 'CONTROL_PLANE_FAST_EXECUTION_ENABLED=%s\n' "${CONTROL_PLANE_FAST_EXECUTION_ENABLED:-}" || true
@@ -945,32 +888,6 @@ EOF
     exit 1
   fi
   printf '%s\n' 'kind-test: initial remote assertions ok' >&2
-
-  if [[ "${kind_test_group}" == "session" ]] || [[ "${kind_test_group}" == "jobs-core" ]]; then
-    printf 'kind-test: skipping duplicate rootful local podman smoke for group %s\n' "${kind_test_group}" >&2
-  elif ! ssh_bash <<'EOF'
-set -euo pipefail
-podman info --format '{{.Store.GraphRoot}} {{.Store.GraphDriverName}} {{.Host.Security.Rootless}}' > /workspace/k8s-podman-info-summary.txt 2> /workspace/k8s-podman-info.log
-grep -qx '/var/lib/control-plane/rootful-podman/rootful-overlay/storage overlay false' /workspace/k8s-podman-info-summary.txt
-timeout 30s podman pull docker.io/library/hello-world:latest > /workspace/k8s-actual-podman-pull.log 2>&1
-timeout 20s podman run --rm docker.io/library/hello-world:latest > /workspace/k8s-actual-podman-run.log 2>&1
-grep -q 'Hello from Docker!' /workspace/k8s-actual-podman-run.log
-EOF
-  then
-    ssh_bash <<'EOF' >&2 || true
-set -euo pipefail
-cat /workspace/k8s-podman-info.log || true
-cat /workspace/k8s-podman-info-summary.txt || true
-cat /workspace/k8s-actual-podman-pull.log || true
-cat /workspace/k8s-actual-podman-run.log || true
-podman info || true
-podman ps -a || true
-EOF
-    dump_control_plane_diagnostics
-    exit 1
-  else
-    printf '%s\n' 'kind-test: rootful local podman smoke ok' >&2
-  fi
 
   ssh_bash <<EOF
 set -euo pipefail
@@ -1326,18 +1243,6 @@ set -euo pipefail
 test -f /workspace/manual-job.txt
 EOF
 
-  auto_output="$(ssh_bash <<EOF
-set -euo pipefail
-control-plane-run --mode auto --execution-hint long --namespace ${job_namespace} --job-name ci-auto-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/auto-job.txt auto
-EOF
-)"
-  grep -q 'auto' <<<"${auto_output}"
-
-  ssh_bash <<'EOF'
-set -euo pipefail
-test -f /workspace/auto-job.txt
-EOF
-
   default_mode_output="$(ssh_bash <<EOF
 set -euo pipefail
 control-plane-run --job-name ci-default-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/default-job.txt default
@@ -1350,85 +1255,6 @@ set -euo pipefail
 test -f /workspace/default-job.txt
 EOF
 
-  ssh_bash <<EOF
-set -euo pipefail
-printf 'job input from transfer\n' > /workspace/job-input.txt
-printf 'colon input\n' > '/workspace/job:input.txt'
-cat > /tmp/fake-podman-success <<'INNER'
-#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' 'fake success stderr' >&2
-printf '%s\n' "\$@" > /tmp/fake-podman-success.log
-INNER
-chmod +x /tmp/fake-podman-success
-timeout 10s bash -lc 'CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman-success control-plane-podman info' \
-  >/tmp/fake-podman-success.stdout 2>/tmp/fake-podman-success.stderr
-grep -qx 'info' /tmp/fake-podman-success.log
-grep -q 'fake success stderr' /tmp/fake-podman-success.stderr
-cat > /tmp/fake-podman <<'INNER'
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ "\${1:-}" == "pull" ]]; then
-  printf '%s\n' 'WARN[0000] "/" is not a shared mount, this could cause issues or missing mounts with rootless containers' >&2
-  printf '%s\n' 'cannot clone: Operation not permitted' >&2
-  printf '%s\n' 'ERRO[0000] invalid internal status, try resetting the pause process with "/usr/bin/podman system migrate": cannot re-exec process' >&2
-  exit 125
-fi
-printf '%s\n' "\$@" > /tmp/fake-podman.log
-INNER
-chmod +x /tmp/fake-podman
-CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-run --mode auto --execution-hint short --workspace /workspace --mount-file /workspace/job-input.txt:inputs/job-input.txt --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/short-auto.txt short
-grep -q '^run$' /tmp/fake-podman.log
-grep -q '${execution_plane_image}' /tmp/fake-podman.log
-grep -Eq ':/var/run/control-plane/job-inputs:ro$' /tmp/fake-podman.log
-CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-run --mode auto --execution-hint short --workspace /workspace --mount-file '/workspace/job:input.txt' --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/short-auto-colon.txt short
-grep -Eq ':/var/run/control-plane/job-inputs:ro$' /tmp/fake-podman.log
-set +e
-fake_podman_output="\$(CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-podman pull quay.io/example/test:latest 2>&1)"
-fake_podman_status=\$?
-set -e
-printf '%s\n' "\${fake_podman_output}" > /tmp/fake-podman-pull.log
-if [[ "\${fake_podman_status}" -eq 0 ]]; then
-  printf 'Expected fake control-plane-podman pull to fail in kind\n' >&2
-  exit 1
-fi
-grep -q 'cannot clone: Operation not permitted' /tmp/fake-podman-pull.log
-grep -q 'rootless Podman is blocked by the outer runtime' /tmp/fake-podman-pull.log
-grep -q 'SETFCAP' /tmp/fake-podman-pull.log
-grep -q 'CONTROL_PLANE_RUN_MODE=k8s-job' /tmp/fake-podman-pull.log
-cat > /tmp/fake-podman-migrate <<'INNER'
-#!/usr/bin/env bash
-set -euo pipefail
-state_file=/tmp/fake-podman-migrate-state
-if [[ "\${1:-}" == "system" ]] && [[ "\${2:-}" == "migrate" ]]; then
-  : > "\${state_file}"
-  exit 0
-fi
-if [[ "\${1:-}" == "pull" ]]; then
-  if [[ ! -f "\${state_file}" ]]; then
-    printf '%s\n' 'ERRO[0000] invalid internal status, try resetting the pause process with "/usr/bin/podman system migrate": cannot re-exec process' >&2
-    exit 125
-  fi
-  printf '%s\n' "\$@" > /tmp/fake-podman-migrate.log
-  exit 0
-fi
-printf '%s\n' "\$@" > /tmp/fake-podman-migrate.log
-INNER
-chmod +x /tmp/fake-podman-migrate
-set +e
-fake_migrate_output="\$(CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman-migrate control-plane-podman pull quay.io/example/test:latest 2>&1)"
-fake_migrate_status=\$?
-set -e
-printf '%s\n' "\${fake_migrate_output}" > /tmp/fake-podman-migrate-output.log
-if [[ "\${fake_migrate_status}" -ne 0 ]]; then
-  printf 'Expected control-plane-podman to recover after podman system migrate\n' >&2
-  exit 1
-fi
-  grep -q '^pull$' /tmp/fake-podman-migrate.log
-  grep -q '^quay.io/example/test:latest$' /tmp/fake-podman-migrate.log
-  grep -q 'detected stale rootless Podman state' /tmp/fake-podman-migrate-output.log
-  grep -q 'repaired the local Podman state' /tmp/fake-podman-migrate-output.log
-EOF
 }
 
 run_job_transfer_assertions() {
@@ -1451,7 +1277,7 @@ printf '%s\n' 'tmp-ok' > "${TMPDIR}/k8s-tmp.txt"
 EOF
 
   kubectl exec --namespace "${namespace}" "$(control_plane_pod_name)" -c control-plane -- bash -lc \
-    "set -euo pipefail; printf '%s\n' 'rootful-reset' > /var/lib/control-plane/rootful-podman/rootful-overlay/should-disappear.txt"
+    "set -euo pipefail; printf '%s\n' 'runtime-reset' > /var/tmp/control-plane/should-disappear.txt"
 
   first_host_fingerprint="$(ssh_host_fingerprint)"
 
@@ -1472,11 +1298,10 @@ test -f ~/.copilot/session-state/k8s-session-state.txt
 test -f ~/.config/gh/state.txt
 test -f ~/.ssh/state.txt
 test -f /workspace/manual-job.txt
-test -f /workspace/auto-job.txt
 test -f /workspace/default-job.txt
 test -f /workspace/k8s-screen.txt
 test ! -e "${TMPDIR}/k8s-tmp.txt"
-test ! -e /var/lib/control-plane/rootful-podman/rootful-overlay/should-disappear.txt
+test ! -e /var/tmp/control-plane/should-disappear.txt
 test ! -e ~/.copilot/tmp
 EOF
 }
