@@ -117,7 +117,7 @@ build_context_hash() {
   require_command sha256sum
 
   (
-    cd "${context_dir}"
+    cd "${context_dir}" || exit
     find . \
       \( -path './.git' -o -path '*/target' \) -prune -o \
       \( -type f -o -type l \) -print0 \
