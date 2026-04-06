@@ -33,7 +33,6 @@ jobs:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: ./scripts/lint.sh
-
   integration:
     name: Integration Images (${{ matrix.architecture_label }})
     runs-on: ${{ matrix.runner }}
@@ -68,7 +67,6 @@ jobs:
           path: control-plane-images.tar
           retention-days: 1
           compression-level: 0
-
   integration-smoke:
     name: Integration Smoke (${{ matrix.architecture_label }})
     runs-on: ${{ matrix.runner }}
@@ -102,7 +100,6 @@ jobs:
         env:
           CONTROL_PLANE_TOOLCHAIN: docker
         run: ./scripts/build-test.sh --skip-image-build --group smoke
-
   integration-regressions:
     name: Integration Regressions (${{ matrix.architecture_label }})
     runs-on: ${{ matrix.runner }}
@@ -136,7 +133,6 @@ jobs:
         env:
           CONTROL_PLANE_TOOLCHAIN: docker
         run: ./scripts/build-test.sh --skip-image-build --group regressions
-
   integration-kind-session:
     name: Integration Kind Session (${{ matrix.architecture_label }})
     runs-on: ${{ matrix.runner }}
@@ -177,7 +173,6 @@ jobs:
           CONTROL_PLANE_TOOLCHAIN: docker
           CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar
         run: ./scripts/build-test.sh --skip-image-build --group kind-session
-
   integration-kind-jobs:
     name: Integration Kind Jobs Core (${{ matrix.architecture_label }})
     runs-on: ${{ matrix.runner }}
@@ -218,7 +213,6 @@ jobs:
           CONTROL_PLANE_TOOLCHAIN: docker
           CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar
         run: ./scripts/build-test.sh --skip-image-build --group kind-jobs-core
-
   integration-kind-jobs-transfer:
     name: Integration Kind Jobs Transfer (${{ matrix.architecture_label }})
     runs-on: ${{ matrix.runner }}
@@ -259,7 +253,6 @@ jobs:
           CONTROL_PLANE_TOOLCHAIN: docker
           CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar
         run: ./scripts/build-test.sh --skip-image-build --group kind-jobs-transfer
-
   sccache-changes:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Detect SCCACHE Image Changes
@@ -298,7 +291,6 @@ jobs:
           fi
 
           printf 'sccache_changed=%s\n' "${sccache_changed}" >> "${GITHUB_OUTPUT}"
-
   publish-architecture-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Publish Architecture Images (${{ matrix.architecture_label }})
@@ -376,7 +368,6 @@ jobs:
             docker push "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
             docker push "${GHCR_SCCACHE_IMAGE}:${SCCACHE_COMPONENT_TAG}-${IMAGE_ARCH}"
           fi
-
   publish-manifests:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
@@ -444,7 +435,6 @@ jobs:
               "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-amd64" \
               "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-arm64"
           fi
-
   cleanup-packages:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
