@@ -13,7 +13,6 @@ entrypoint は `~/.config/control-plane/runtime.env` を生成し、login shell 
 - `TZ` で指定した IANA timezone
 - Copilot CPU cap
 - 監査ログ SQLite DB の path と record cap
-- `sccache` S3 backend の endpoint / bucket / credential file path（設定時）
 - Secret / ConfigMap 由来の file path
 - Job 実行先 namespace と mode の既定値
 - fast execution pod の enable flag、runtime image、bootstrap image、timeout、resource limit
@@ -22,11 +21,10 @@ entrypoint は `~/.config/control-plane/runtime.env` を生成し、login shell 
 
 ## 2. 永続化する state
 
-sample manifest の既定値では、次の 3 つを分けます。
+sample manifest の既定値では、次の 2 つを分けます。
 
 - RWX の copilot session PVC
 - RWO の `/workspace` PVC
-- RWO の dedicated `sccache` object-store PVC（standalone Garage Deployment 用）
 
 copilot session PVC へまとめるもの:
 
@@ -41,27 +39,6 @@ copilot session PVC へまとめるもの:
 
 `session-exec.json` には、hook rewrite が使う session key ごとの Execution Pod
 名 / Pod IP / auth token / owner metadata / node 名 / runtime image が入ります。
-
-dedicated sccache PVC は current-cluster の long-running Rust Job 向け
-standalone Garage Deployment 用です。sample manifest では
-`ReadWriteOnce` の 5Gi claim を `/var/lib/garage` へ mount し、
-Garage bucket quota を `4294967296` bytes に抑えて 4GiB までに制限します。
-Rust Job 自体は PVC を mount せず、`SCCACHE_BUCKET`、`SCCACHE_ENDPOINT`、
-`AWS_ACCESS_KEY_ID_FILE`、`AWS_SECRET_ACCESS_KEY_FILE` を受け取って cluster 内の
-`garage-s3` Service へ接続します。これらの file は control-plane Pod に mount
-した `garage-sccache-auth` Secret から供給されます。この Secret は sample manifest
-では事前作成せず、別 Pod の `garage-bootstrap` Job が Garage admin API の
-`CreateKey` で生成した key と同期しながら作成します。そのため control-plane Pod は
-bootstrap 完了まで自然に待機します。
-Garage 本体は公式 `dxflrs/garage:v2.2.0` image を使い、initContainer が
-`garage.toml` を生成します。single-node layout / key / bucket / lifecycle は
-既存の `control-plane` image に同梱した bootstrap script から idempotent に適用します。
-この Job は normal Garage pod restart とは切り離され、fresh PVC や
-bootstrap-managed Garage credential を再初期化したいときだけ delete/recreate
-して rerun します。古い cache object は S3 lifecycle expiration で自動削除します。Rust Job の
-`cargo` / `rustup` / `target` / `sccache` は
-`/var/tmp/containerized-rust/<repo>/<branch>/...` の ephemeral path を使い、
-`/workspace` PVC に Rust cache を溜めません。
 
 監査ログの保持件数は `control-plane-env` ConfigMap の
 `CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）で調整し、
@@ -92,8 +69,8 @@ bootstrap-managed Garage credential を再初期化したいときだけ delete/
 ### ConfigMap
 
 - `control-plane-config`: `copilot-config.json` の JSON object overlay
-- `control-plane-env`: namespace / PVC / Job 既定値 / file path / sccache S3 endpoint /
-  fast execution pod 設定のような非機密 env
+- `control-plane-env`: namespace / PVC / Job 既定値 / file path / fast execution pod
+  設定のような非機密 env
 
 `COPILOT_CONFIG_JSON_FILE` で渡した JSON object は、PVC 上の既存
 `~/.copilot/config.json` へ deep-merge されます。
@@ -101,8 +78,6 @@ bootstrap-managed Garage credential を再初期化したいときだけ delete/
 ### Secret
 
 - `control-plane-auth`: `ssh-public-key` と認証系の Secret 値を startup 専用 input として供給
-- `garage-admin-auth`: Garage bootstrap 用の admin token / rpc secret
-- `garage-sccache-auth`: `garage-bootstrap` Job が初回作成し、rerun 時は更新する `sccache` S3 access key / secret key
 - `gh` 認証は `gh-github-token` または `gh-hosts.yml`
 - 必要に応じて `copilot-github-token` も保持
 
@@ -143,13 +118,13 @@ pre-commit では bundled `postToolUse` linter を走らせ、必要なら repo 
 `.github/git-hooks/pre-commit` / `.github/git-hooks/pre-push` も続けて
 実行します。
 
-bundled `preToolUse/exec-forward.mjs` は、`CONTROL_PLANE_FAST_EXECUTION_ENABLED=1`
+bundled `preToolUse/exec-forward` は、`CONTROL_PLANE_FAST_EXECUTION_ENABLED=1`
 のとき Copilot CLI の `bash` tool を `control-plane-session-exec proxy` へ
 書き換えます。helper は same-namespace / same-node の Execution Pod を
 on-demand で作成または再利用し、`/workspace` PVC を共有したまま
 gRPC 経由で転送します。Execution Pod は任意の Linux image を起点にしつつ、
 bootstrap image から受け取った Rust binary と Git hook を使って初期化されます。
-bundled `sessionEnd/cleanup.mjs` は同じ session key で明示 cleanup を行い、
+bundled `sessionEnd/cleanup` は同じ session key で明示 cleanup を行い、
 Control Plane Pod 側の OwnerReference でも Pod 漏れを抑えます。bash hook では
 `CONTROL_PLANE_HOOK_SESSION_KEY="$PPID"` を渡し、
 transient shell PID ではなく Copilot session 側の親プロセスを key に使います。

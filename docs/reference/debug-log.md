@@ -24,7 +24,6 @@
 | injected Copilot config が壊れている | [§10](#10-injected-copilot-config-が壊れている) |
 | gh Secret の指定が足りない | [§11](#11-gh-secret-の指定が足りない) |
 | execution image の bootstrap に失敗する | [§12](#12-execution-image-の-bootstrap-に失敗する) |
-| `control-plane-sccache-pvc` が `Pending` のまま | [§13](#13-garage-cache-pvc-が-bound-しない) |
 
 ## 1. bundled skill が読めない
 
@@ -207,31 +206,3 @@ Execution Pod の base image が `/bin/sh` を持たないか、bootstrap 時に
 - `CONTROL_PLANE_FAST_EXECUTION_IMAGE` が Linux base image を指す
 - image 内に `/bin/sh` がある
 - image 内で `apk` か `apt-get` のどちらかが使える
-
-## 13. Garage cache PVC が Bound しない
-
-### 代表ログ
-
-```text
-Warning  FailedScheduling  default-scheduler  0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims.
-```
-
-### 意味
-
-sample manifest の `control-plane-sccache-pvc` は standalone Garage
-Deployment 専用の `ReadWriteOnce` claim です。Job 側へ PVC を mount するのではなく、
-`garage-s3` Service 経由で各クライアントを接続させる前提なので、この claim が
-Bound しないと Garage Pod が立ち上がりません。
-
-### 期待する確認結果
-
-- `kubectl get pvc control-plane-sccache-pvc -n copilot-sandbox` が `Bound`
-- `kubectl get pod -n copilot-sandbox -l app.kubernetes.io/name=garage-s3` が `1/1 Ready`
-- `kubectl get svc garage-s3 -n copilot-sandbox` で `3900/TCP` が見える
-- `kubectl get job garage-bootstrap -n copilot-sandbox` が `Complete`
-
-`garage-bootstrap` Job が失敗した場合は、まず
-`kubectl logs -n copilot-sandbox job/garage-bootstrap` で bootstrap の失敗点を見ます。
-fresh PVC や bootstrap-managed Garage credential を再初期化したいときだけ、`kubectl delete job garage-bootstrap -n copilot-sandbox`
-のあとに sample manifest を再適用して rerun してください。bootstrap 処理は
-`control-plane` image に同梱した script が実行します。

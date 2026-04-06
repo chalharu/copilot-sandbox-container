@@ -44,27 +44,19 @@ runtime の制約、capability 要件、state cleanup、resource 競合を増や
 
 ## 5. sample manifest の state をどう分けるか
 
-sample manifest の既定値では、永続化を 3 つの PVC に分けます。
+sample manifest の既定値では、永続化を 2 つの PVC に分けます。
 
 - RWX の copilot session PVC
 - RWO の `/workspace` PVC
-- RWO の dedicated `sccache` object-store PVC（5Gi）
 
 copilot session PVC には `~/.copilot/config.json`、`~/.copilot/command-history-state.json`、`~/.copilot/session-state`、`~/.copilot/session-state/audit/audit-log.db`、`~/.config/gh`、`~/.ssh`、`/var/lib/control-plane/ssh-host-keys` をまとめます。これで session picker、GitHub 認証、SSH 鍵、Copilot の設定、監査ログは Pod 再作成後も残せます。
 
 `~/.copilot/session-state/session-exec.json` も同じ PVC に置き、session key ごとの
 Execution Pod 名、Pod IP、owner metadata、node name を記録します。
 
-一方で long-running Rust Job の `sccache` は、Job ごとに PVC を mount せず
-standalone Garage Deployment へ Service 越しに送ります。shared cache 本体は
-`ReadWriteOnce` の dedicated PVC へ寄せ、shared `/workspace` PVC を巨大な
-object cache で埋めないようにします。sample manifest では 5Gi claim に対して
-Garage bucket quota を `4294967296` bytes に抑え、メタデータや一時
-ファイル向けの headroom を残します。古い cache object は S3 lifecycle の
-expiration で自動削除します。object-store mode を切った場合も、Job の
-`cargo` / `rustup` / `target` / `sccache` は
+一方で long-running Rust Job の `cargo` / `rustup` / `target` は
 `/var/tmp/containerized-rust/<repo>/<branch>/...` の ephemeral path を使い、
-`/workspace` 側には Rust cache を残しません。
+`/workspace` 側には再生成可能な Rust cache を残しません。
 
 一方、`~/.copilot/tmp`、Screen socket、`/var/tmp/control-plane` 配下の一時
 作業領域、Rust の `cargo-target` などは PVC ではなく ephemeral path に置きます。

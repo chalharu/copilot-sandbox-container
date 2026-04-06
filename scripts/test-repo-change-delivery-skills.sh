@@ -4,8 +4,8 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 external_skills_manifest="${repo_root}/containers/control-plane/config/external-skills.yaml"
-git_skills_manifest_installer_bin="${repo_root}/containers/control-plane/bin/install-git-skills-from-manifest"
-git_skills_manifest_parser_js="${repo_root}/containers/control-plane/bin/external-skills-manifest-to-tsv.mjs"
+git_skills_runtime_manifest="${repo_root}/containers/control-plane/runtime-tools/Cargo.toml"
+git_skills_runtime_src="${repo_root}/containers/control-plane/runtime-tools/src/main.rs"
 git_skills_manifest_installer="${script_dir}/install-git-skills-from-manifest.sh"
 legacy_external_skills_ref_file="${repo_root}/containers/control-plane/config/anthropic-skills.ref"
 legacy_doc_coauthor_skill_dir="${repo_root}/.github/skills/doc-coauthoring"
@@ -136,8 +136,8 @@ printf '%s\n' 'repo-change-delivery-skills-test: fetching pinned upstream skills
 
 printf '%s\n' 'repo-change-delivery-skills-test: checking skill files' >&2
 assert_file_present "${external_skills_manifest}"
-assert_file_present "${git_skills_manifest_installer_bin}"
-assert_file_present "${git_skills_manifest_parser_js}"
+assert_file_present "${git_skills_runtime_manifest}"
+assert_file_present "${git_skills_runtime_src}"
 assert_file_present "${git_skills_manifest_installer}"
 assert_file_present "${doc_coauthor_skill_file}"
 assert_file_present "${repo_skill_file}"
@@ -160,15 +160,16 @@ assert_path_absent "${removed_control_plane_ops_dir}"
 assert_path_absent "${removed_audit_analysis_dir}"
 assert_path_absent "${script_dir}/fetch-anthropic-skills.sh"
 assert_path_absent "${script_dir}/install-git-skill.sh"
+assert_path_absent "${repo_root}/containers/control-plane/bin/install-git-skills-from-manifest"
+assert_path_absent "${repo_root}/containers/control-plane/bin/external-skills-manifest-to-tsv.mjs"
 
 assert_file_contains "${doc_coauthor_skill_file}" 'name: doc-coauthoring'
 assert_file_contains "${external_skills_manifest}" 'repository: https://github.com/anthropics/skills'
 assert_file_contains "${external_skills_manifest}" 'skills/doc-coauthoring'
 assert_file_contains "${external_skills_manifest}" 'skills/skill-creator'
 assert_file_contains "${external_skills_manifest}" 'currentValue=main'
-assert_file_contains "${git_skills_manifest_installer_bin}" 'depName=js-yaml'
-assert_file_contains "${git_skills_manifest_installer_bin}" "npm exec --yes --package \"js-yaml@\${js_yaml_version}\""
-assert_file_not_contains "${git_skills_manifest_installer_bin}" "awk '"
+assert_file_contains "${git_skills_runtime_src}" '"install-git-skills-from-manifest"'
+assert_file_not_contains "${git_skills_runtime_src}" 'js-yaml'
 assert_file_contains "${skill_creator_skill_file}" 'name: skill-creator'
 assert_file_contains "${generic_skill_file}" 'name: repo-change-delivery'
 assert_file_contains "${generic_skill_file}" 'full implementation loop'
@@ -186,8 +187,9 @@ assert_file_contains "${repo_reference_file}" './scripts/test-repo-change-delive
 assert_file_contains "${repo_reference_file}" './scripts/test-k8s-job.sh'
 assert_file_contains "${repo_reference_file}" '.github/workflows/control-plane-ci.yml'
 assert_file_contains "${dockerfile_path}" 'config/external-skills.yaml'
-assert_file_contains "${dockerfile_path}" 'install-git-skills-from-manifest'
-assert_file_contains "${dockerfile_path}" 'external-skills-manifest-to-tsv.mjs'
+assert_file_contains "${dockerfile_path}" 'runtime-tools-builder'
+assert_file_contains "${dockerfile_path}" '/usr/local/bin/install-git-skills-from-manifest'
+assert_file_not_contains "${dockerfile_path}" 'external-skills-manifest-to-tsv.mjs'
 assert_file_contains "${entrypoint_path}" 'install_bundled_control_plane_skills'
 
 printf '%s\n' 'repo-change-delivery-skills-test: validating and packaging skills' >&2

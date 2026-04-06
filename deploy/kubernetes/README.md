@@ -17,22 +17,21 @@ kubectl apply -k deploy/kubernetes/control-plane.example
 
 ## 構成
 
-- `control-plane.example/common/`: Namespace、RBAC、Secret、ConfigMap、Garage S3 関連リソース、`garage-bootstrap` Job などの共通リソースを 1 resource = 1 file で置いています。
+- `control-plane.example/common/`: Namespace、RBAC、Secret、ConfigMap などの共通リソースを 1 resource = 1 file で置いています。
 - `control-plane.example/base/`: 1 つの control-plane インスタンスとして再利用する `PersistentVolumeClaim`、`Service`、`Deployment` を個別ファイルで置いています。
 - `control-plane.example/overlays/default/`: 同梱サンプルのカスタマイズ叩き台。`base/` の各 resource に対する書き換え候補をコメントで置いています。
 - `control-plane.example/install/`: 初回導入時だけ apply する shared PVC 定義。shared PVC に加えて、先に必要になる `copilot-sandbox` Namespace も置いています。
 
-ルートの `control-plane.example/kustomization.yaml` は、更新時に immutable な共有 PVC spec を触らないための通常運用パスです。`common/` と `base/` の個別 resource file をそのまま読むことで、standalone `kustomize` と `kubectl kustomize` の両方で warning なく扱いやすい構成にしています。`control-plane-copilot-session-pvc` や `control-plane-sccache-pvc` のような bound 済み PVC は、storage class や access mode を再 apply で安全に変えられないため、初回導入用の `install/` へ分離しています。
+ルートの `control-plane.example/kustomization.yaml` は、更新時に immutable な共有 PVC spec を触らないための通常運用パスです。`common/` と `base/` の個別 resource file をそのまま読むことで、standalone `kustomize` と `kubectl kustomize` の両方で warning なく扱いやすい構成にしています。bound 済みの `control-plane-copilot-session-pvc` は storage class や access mode を再 apply で安全に変えられないため、初回導入用の `install/` へ分離しています。
 
 ## 最初に書き換える場所
 
-1. `control-plane.example/install/pvc-control-plane-copilot-session.yaml` と `control-plane.example/install/pvc-control-plane-sccache.yaml` の shared PVC 設定をクラスタに合わせる。特に `control-plane-copilot-session-pvc` の RWX storage class は初回導入前に書き換える。
+1. `control-plane.example/install/pvc-control-plane-copilot-session.yaml` の shared PVC 設定をクラスタに合わせる。特に `control-plane-copilot-session-pvc` の RWX storage class は初回導入前に書き換える。
 2. `control-plane.example/base/pvc-control-plane-workspace.yaml` の workspace PVC 設定をクラスタに合わせる。PVC spec は bound 後に自由に変更できないので、storage class やサイズは初回導入前に確定させる。
-3. `control-plane.example/common/secret-control-plane-auth.yaml`、`control-plane.example/common/secret-garage-admin-auth.yaml`、`control-plane.example/common/configmap-control-plane-env.yaml` などの placeholder な credential とクラスタ依存値を置き換える。`garage-sccache-auth` は sample manifest では事前定義せず、`garage-bootstrap` Job が生成するので、通常は `control-plane-auth` と `garage-admin-auth` を主に調整する。
-4. `control-plane` image tag を、次の 3 箇所でそろえて書き換える。
+3. `control-plane.example/common/secret-control-plane-auth.yaml` と `control-plane.example/common/configmap-control-plane-env.yaml` の placeholder な credential とクラスタ依存値を置き換える。
+4. `control-plane` image tag を、次の 2 箇所でそろえて書き換える。
    - `control-plane.example/base/deployment-control-plane.yaml` の `Deployment/control-plane`
-   - `control-plane.example/common/configmap-control-plane-env.yaml` の `ConfigMap/control-plane-env` にある `CONTROL_PLANE_JOB_TRANSFER_IMAGE`
-   - `control-plane.example/common/job-garage-bootstrap.yaml` の `Job/garage-bootstrap`
+   - `control-plane.example/common/configmap-control-plane-env.yaml` の `ConfigMap/control-plane-env` にある `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` と `CONTROL_PLANE_JOB_TRANSFER_IMAGE`
 5. デフォルトのインスタンス名や workspace PVC 名を変えたい場合は、`control-plane.example/overlays/default/kustomization.yaml` の候補をベースに sibling overlay を作る。
 
 ## default overlay のカスタマイズ

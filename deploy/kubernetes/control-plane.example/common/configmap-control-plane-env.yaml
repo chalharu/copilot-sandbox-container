@@ -49,15 +49,6 @@ data:
   CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST: 256Mi
   CONTROL_PLANE_FAST_EXECUTION_MEMORY_LIMIT: 2Gi
   CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC: "3600"
-  # Rust Kubernetes jobs keep only ephemeral local sccache state under /var/tmp
-  # and store shared cache objects in the in-cluster Garage S3 service.
-  SCCACHE_BUCKET: control-plane-sccache
-  SCCACHE_ENDPOINT: http://garage-s3.copilot-sandbox.svc.cluster.local:3900
-  SCCACHE_REGION: garage
-  SCCACHE_S3_USE_SSL: "false"
-  SCCACHE_S3_KEY_PREFIX: sccache/
-  AWS_ACCESS_KEY_ID_FILE: /var/run/garage-sccache-auth/access-key-id
-  AWS_SECRET_ACCESS_KEY_FILE: /var/run/garage-sccache-auth/secret-access-key
   # Optional: when the job namespace has its own shared workspace PVC
   # that exposes the same repository contents, mount it into Jobs too.
   # Otherwise keep Jobs stateless and use `--mount-file`, which stages
@@ -83,5 +74,3 @@ data:
   CONTROL_PLANE_JOB_CPU_LIMIT: "2"
   CONTROL_PLANE_JOB_MEMORY_REQUEST: 256Mi
   CONTROL_PLANE_JOB_MEMORY_LIMIT: 2Gi
-  # Optional local-only fallback for Rust helpers when dist mode is disabled.
-  SCCACHE_CACHE_SIZE: "4G"

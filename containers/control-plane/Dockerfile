@@ -27,22 +27,28 @@ RUN target="$(rustc -vV | awk '/^host:/ { print $2 }' | sed 's/-unknown-linux-gn
     && cargo build --locked --release --target "${target}" \
     && cp "target/${target}/release/control-plane-exec-api" "target/release/control-plane-exec-api"
 
+FROM docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895 AS runtime-tools-builder
+
+WORKDIR /build/control-plane-runtime-tools
+COPY runtime-tools/Cargo.toml runtime-tools/Cargo.lock ./
+COPY runtime-tools/src ./src
+RUN cargo test --locked --release \
+    && cargo build --locked --release
+
 FROM docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895 AS rust-toolchain
 
 RUN rustup component add clippy rustfmt
 
-FROM node:24.14.1-bookworm-slim@sha256:06e5c9f86bfa0aaa7163cf37a5eaa8805f16b9acb48e3f85645b09d459fc2a9f AS skills-builder
+FROM docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895 AS skills-builder
 
 # hadolint ignore=DL3008
 RUN apt-get update -o Acquire::Retries=3 \
     && apt-get install -y --no-install-recommends \
-        bash \
         ca-certificates \
         git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --chmod=755 bin/install-git-skills-from-manifest /usr/local/bin/install-git-skills-from-manifest
-COPY --chmod=644 bin/external-skills-manifest-to-tsv.mjs /usr/local/bin/external-skills-manifest-to-tsv.mjs
+COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/bin/install-git-skills-from-manifest
 COPY --chmod=644 config/external-skills.yaml /tmp/external-skills.yaml
 
 RUN /usr/local/bin/install-git-skills-from-manifest /tmp/external-skills.yaml /opt/control-plane/external-skills
@@ -174,6 +180,13 @@ COPY --from=skills-builder /opt/control-plane/external-skills/ /usr/local/share/
 COPY hooks/ /usr/local/share/control-plane/hooks/
 COPY --from=rust-toolchain /usr/local/cargo/bin /usr/local/cargo/bin
 COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
+COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/bin/control-plane-runtime-tool
+COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/share/control-plane/hooks/audit/main
+COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/share/control-plane/hooks/preToolUse/exec-forward
+COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/share/control-plane/hooks/sessionEnd/cleanup
+COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/bin/k8s-job-wait
+COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/bin/k8s-job-pod
+COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/bin/k8s-job-logs
 COPY --from=exec-policy-builder /build/control-plane-exec-policy/target/release/libcontrol_plane_exec_policy.so /usr/local/lib/libcontrol_plane_exec_policy.so
 COPY --from=exec-policy-builder /build/control-plane-exec-policy/target/release/control-plane-pre-tool-use-hook /usr/local/share/control-plane/hooks/preToolUse/main
 COPY --chmod=755 bin/control-plane-screen /usr/local/bin/control-plane-screen
@@ -186,11 +199,7 @@ COPY --chmod=755 bin/control-plane-job-transfer /usr/local/bin/control-plane-job
 COPY --chmod=755 bin/control-plane-run /usr/local/bin/control-plane-run
 COPY --chmod=755 bin/control-plane-session /usr/local/bin/control-plane-session
 COPY --chmod=755 bin/control-plane-ssh-shell /usr/local/bin/control-plane-ssh-shell
-COPY --chmod=755 bin/garage-bootstrap.mjs /usr/local/bin/garage-bootstrap.mjs
 COPY --chmod=755 bin/k8s-job-start /usr/local/bin/k8s-job-start
-COPY --chmod=755 bin/k8s-job-wait /usr/local/bin/k8s-job-wait
-COPY --chmod=755 bin/k8s-job-pod /usr/local/bin/k8s-job-pod
-COPY --chmod=755 bin/k8s-job-logs /usr/local/bin/k8s-job-logs
 COPY --chmod=755 bin/k8s-job-run /usr/local/bin/k8s-job-run
 
 RUN ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen \
@@ -199,8 +208,11 @@ RUN ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen \
     && find /usr/local/share/control-plane/skills -type f -exec chmod 644 {} + \
     && find /usr/local/share/control-plane/hooks -type d -exec chmod 755 {} + \
     && find /usr/local/share/control-plane/hooks -type f -exec chmod 644 {} + \
+    && chmod 755 /usr/local/share/control-plane/hooks/audit/main \
     && chmod 755 /usr/local/share/control-plane/hooks/preToolUse/main \
+    && chmod 755 /usr/local/share/control-plane/hooks/preToolUse/exec-forward \
     && chmod 755 /usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh \
+    && chmod 755 /usr/local/share/control-plane/hooks/sessionEnd/cleanup \
     && for git_hook in pre-commit pre-push; do \
          if [ -f "/usr/local/share/control-plane/hooks/git/${git_hook}" ]; then chmod 755 "/usr/local/share/control-plane/hooks/git/${git_hook}"; fi; \
        done \

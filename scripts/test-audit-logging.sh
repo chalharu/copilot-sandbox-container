@@ -83,19 +83,19 @@ test "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" = "/home/copilot/.copilot/session-stat
 test "${CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS}" = "8"
 test "$(stat -c '%a %U %G' /home/copilot/.copilot/session-state/audit)" = '700 copilot copilot'
 
-cat <<'JSON' | node "${HOME}/.copilot/hooks/audit/main.mjs" sessionStart
+cat <<'JSON' | "${HOME}/.copilot/hooks/audit/main" sessionStart
 {"timestamp":1704614400000,"cwd":"/workspace","source":"new","initialPrompt":"bootstrap"}
 JSON
 
-cat <<'JSON' | node "${HOME}/.copilot/hooks/audit/main.mjs" userPromptSubmitted
+cat <<'JSON' | "${HOME}/.copilot/hooks/audit/main" userPromptSubmitted
 {"timestamp":1704614500000,"cwd":"/workspace","prompt":"Fix audit logging"}
 JSON
 
-cat <<'JSON' | node "${HOME}/.copilot/hooks/audit/main.mjs" preToolUse
+cat <<'JSON' | "${HOME}/.copilot/hooks/audit/main" preToolUse
 {"timestamp":1704614600000,"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"printf hello\",\"description\":\"demo\"}"}
 JSON
 
-cat <<'JSON' | node "${HOME}/.copilot/hooks/audit/main.mjs" postToolUse
+cat <<'JSON' | "${HOME}/.copilot/hooks/audit/main" postToolUse
 {"timestamp":1704614700000,"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"printf hello\",\"description\":\"demo\"}","toolResult":{"resultType":"success","textResultForLlm":"ok"}}
 JSON
 
@@ -113,27 +113,27 @@ sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT tool_result_type FROM audit
 sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT tool_result_text FROM audit_events WHERE event_type = 'postToolUse';" | grep -qx 'ok'
 sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT COUNT(*) FROM audit_events WHERE ppid = ${audit_shell_pid};" | grep -qx '4'
 
-cat <<'JSON' | node "${HOME}/.copilot/hooks/audit/main.mjs" preToolUse
+cat <<'JSON' | "${HOME}/.copilot/hooks/audit/main" preToolUse
 {"timestamp":1704614800000,"cwd":"/workspace","toolName":"bash","toolArgs":"{\"command\":\"printf second\"}"}
 JSON
 
-cat <<'JSON' | node "${HOME}/.copilot/hooks/audit/main.mjs" preToolUse
+cat <<'JSON' | "${HOME}/.copilot/hooks/audit/main" preToolUse
 {"timestamp":1704614900000,"cwd":"/workspace","toolName":"view","toolArgs":"{\"path\":\"/workspace/README.md\"}"}
 JSON
 
-cat <<'JSON' | node "${HOME}/.copilot/hooks/audit/main.mjs" postToolUse
+cat <<'JSON' | "${HOME}/.copilot/hooks/audit/main" postToolUse
 {"timestamp":1704615000000,"cwd":"/workspace","toolName":"view","toolArgs":"{\"path\":\"/workspace/README.md\"}","toolResult":{"resultType":"success","textResultForLlm":"view ok"}}
 JSON
 
-cat <<'JSON' | node "${HOME}/.copilot/hooks/audit/main.mjs" preToolUse
+cat <<'JSON' | "${HOME}/.copilot/hooks/audit/main" preToolUse
 {"timestamp":1704615100000,"cwd":"/workspace","toolName":"rg","toolArgs":"{\"pattern\":\"audit\"}"}
 JSON
 
-cat <<'JSON' | node "${HOME}/.copilot/hooks/audit/main.mjs" postToolUse
+cat <<'JSON' | "${HOME}/.copilot/hooks/audit/main" postToolUse
 {"timestamp":1704615200000,"cwd":"/workspace","toolName":"rg","toolArgs":"{\"pattern\":\"audit\"}","toolResult":{"resultType":"success","textResultForLlm":"rg ok"}}
 JSON
 
-cat <<'JSON' | node "${HOME}/.copilot/hooks/audit/main.mjs" preToolUse
+cat <<'JSON' | "${HOME}/.copilot/hooks/audit/main" preToolUse
 {"timestamp":1704615300000,"cwd":"/workspace","toolName":"git","toolArgs":"{\"args\":[\"status\",\"--short\"]}"}
 JSON
 
@@ -146,11 +146,11 @@ sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT event_type FROM audit_event
 sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT tool_name FROM audit_events ORDER BY created_at_ms DESC, id DESC LIMIT 1;" | grep -qx 'git'
 sqlite3 "${CONTROL_PLANE_AUDIT_LOG_DB_PATH}" "SELECT COUNT(*) FROM audit_events WHERE ppid = ${audit_shell_pid};" | grep -qx '7'
 
-cat <<'JSON' | node "${HOME}/.copilot/hooks/audit/main.mjs" preToolUse
+cat <<'JSON' | "${HOME}/.copilot/hooks/audit/main" preToolUse
 {"timestamp":1704614300000,"cwd":"/workspace","toolName":"history-replayed-pre","toolArgs":"{\"command\":\"printf replay-pre\"}"}
 JSON
 
-cat <<'JSON' | node "${HOME}/.copilot/hooks/audit/main.mjs" postToolUse
+cat <<'JSON' | "${HOME}/.copilot/hooks/audit/main" postToolUse
 {"timestamp":1704614300100,"cwd":"/workspace","toolName":"history-replayed-post","toolArgs":"{\"command\":\"printf replay-post\"}","toolResult":{"resultType":"success","textResultForLlm":"replayed ok"}}
 JSON
 

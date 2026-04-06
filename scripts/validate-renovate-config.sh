@@ -172,7 +172,6 @@ expected_dependencies=(
   "hadolint/hadolint"
   "koalaman/shellcheck"
   "markdownlint-cli2"
-  "mozilla/sccache"
   "yamllint"
 )
 

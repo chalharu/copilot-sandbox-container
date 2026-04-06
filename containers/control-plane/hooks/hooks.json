@@ -4,7 +4,7 @@
     "sessionStart": [
       {
         "type": "command",
-        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/audit/main.mjs\" && node \"$hook_script\" sessionStart",
+        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/audit/main\" && \"$hook_script\" sessionStart",
         "cwd": ".",
         "timeoutSec": 30
       }
@@ -12,7 +12,7 @@
     "userPromptSubmitted": [
       {
         "type": "command",
-        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/audit/main.mjs\" && node \"$hook_script\" userPromptSubmitted",
+        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/audit/main\" && \"$hook_script\" userPromptSubmitted",
         "cwd": ".",
         "timeoutSec": 30
       }
@@ -20,7 +20,7 @@
     "preToolUse": [
       {
         "type": "command",
-        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/audit/main.mjs\" && node \"$hook_script\" preToolUse",
+        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/audit/main\" && \"$hook_script\" preToolUse",
         "cwd": ".",
         "timeoutSec": 30
       },
@@ -32,7 +32,7 @@
       },
       {
         "type": "command",
-        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/preToolUse/exec-forward.mjs\" && CONTROL_PLANE_HOOK_SESSION_KEY=\"$PPID\" node \"$hook_script\"",
+        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/preToolUse/exec-forward\" && CONTROL_PLANE_HOOK_SESSION_KEY=\"$PPID\" \"$hook_script\"",
         "cwd": ".",
         "timeoutSec": 150
       }
@@ -40,7 +40,7 @@
     "postToolUse": [
       {
         "type": "command",
-        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/audit/main.mjs\" && node \"$hook_script\" postToolUse",
+        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/audit/main\" && \"$hook_script\" postToolUse",
         "cwd": ".",
         "timeoutSec": 30
       },
@@ -54,7 +54,7 @@
     "sessionEnd": [
       {
         "type": "command",
-        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/sessionEnd/cleanup.mjs\" && CONTROL_PLANE_HOOK_SESSION_KEY=\"$PPID\" node \"$hook_script\"",
+        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/sessionEnd/cleanup\" && CONTROL_PLANE_HOOK_SESSION_KEY=\"$PPID\" \"$hook_script\"",
         "cwd": ".",
         "timeoutSec": 30
       }

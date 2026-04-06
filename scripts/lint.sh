@@ -41,9 +41,6 @@ shellcheck_targets=(
   /workspace/containers/control-plane/bin/control-plane-run
   /workspace/containers/control-plane/bin/control-plane-session
   /workspace/containers/control-plane/bin/k8s-job-start
-  /workspace/containers/control-plane/bin/k8s-job-wait
-  /workspace/containers/control-plane/bin/k8s-job-pod
-  /workspace/containers/control-plane/bin/k8s-job-logs
   /workspace/containers/control-plane/bin/k8s-job-run
   /workspace/containers/control-plane/config/profile-control-plane-env.sh
   /workspace/containers/execution-plane-smoke/execution-plane-smoke

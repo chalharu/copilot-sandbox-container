@@ -51,7 +51,6 @@ assert_healthcheck_cmd() {
 printf '%s\n' 'dockerfile-hardening-test: verifying non-root defaults and healthchecks' >&2
 
 control_plane_dockerfile="${repo_root}/containers/control-plane/Dockerfile"
-sccache_dockerfile="${repo_root}/containers/sccache/Dockerfile"
 execution_plane_smoke_dockerfile="${repo_root}/containers/execution-plane-smoke/Dockerfile"
 legacy_execution_plane_go_dockerfile="${repo_root}/containers/execution-plane-go/Dockerfile"
 legacy_execution_plane_node_dockerfile="${repo_root}/containers/execution-plane-node/Dockerfile"
@@ -63,7 +62,6 @@ assert_file_contains "${control_plane_dockerfile}" "USER \${CONTROL_PLANE_USER}"
 assert_file_not_matches "${control_plane_dockerfile}" '^USER root$'
 assert_healthcheck_cmd "${control_plane_dockerfile}" '    CMD ["bash", "-lc", "node --version >/dev/null && cargo --version >/dev/null && yamllint --version >/dev/null && control-plane-exec-api --help >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]'
 
-assert_healthcheck_cmd "${sccache_dockerfile}" '    CMD ["/usr/local/bin/sccache", "--version"]'
 assert_healthcheck_cmd "${execution_plane_smoke_dockerfile}" '    CMD ["/usr/local/bin/execution-plane-smoke", "report"]'
 assert_path_absent "${legacy_execution_plane_go_dockerfile}"
 assert_path_absent "${legacy_execution_plane_node_dockerfile}"

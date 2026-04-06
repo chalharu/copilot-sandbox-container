@@ -173,12 +173,8 @@ build_image_for_toolchain docker localhost/image-maintenance:test "${context_dir
 [[ "${first_hash}" != "${second_hash}" ]]
 grep -Fq "buildx build --load --label $(build_context_hash_label_key)=${second_hash} -t localhost/image-maintenance:test ${context_dir}" "${docker_log}"
 
-printf '%s\n' 'image-maintenance-test: verifying helper image release wiring' >&2
-assert_file_contains "${sccache_dockerfile_path}" 'FROM docker.io/library/alpine:3.23.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659 AS fetcher'
-assert_file_contains "${sccache_dockerfile_path}" 'FROM scratch'
-assert_file_contains "${sccache_dockerfile_path}" 'COPY --from=fetcher /out/ /'
-assert_file_contains "${sccache_dockerfile_path}" 'USER 65532:65532'
-assert_file_contains "${sccache_dockerfile_path}" 'ENTRYPOINT ["/usr/local/bin/sccache"]'
+printf '%s\n' 'image-maintenance-test: verifying retired helper image contexts were removed' >&2
+[[ ! -e "${sccache_dockerfile_path}" ]]
 
 printf '%s\n' 'image-maintenance-test: verifying legacy helper images were removed' >&2
 [[ ! -e "${legacy_execution_plane_go_dockerfile_path}" ]]
@@ -187,14 +183,8 @@ printf '%s\n' 'image-maintenance-test: verifying legacy helper images were remov
 [[ ! -e "${legacy_execution_plane_rust_dockerfile_path}" ]]
 [[ ! -e "${legacy_yamllint_dockerfile_path}" ]]
 
-sccache_changes_block="$(job_block sccache-changes)"
 publish_block="$(job_block publish-architecture-images)"
 manifest_block="$(job_block publish-manifests)"
-
-[[ -n "${sccache_changes_block}" ]] || {
-  printf 'Expected sccache-changes job in %s\n' "${workflow_path}" >&2
-  exit 1
-}
 [[ -n "${publish_block}" ]] || {
   printf 'Expected publish-architecture-images job in %s\n' "${workflow_path}" >&2
   exit 1
@@ -204,35 +194,22 @@ manifest_block="$(job_block publish-manifests)"
   exit 1
 }
 
-assert_block_contains "${sccache_changes_block}" 'fetch-depth: 0' 'sccache-changes job block'
-assert_block_contains "${sccache_changes_block}" "sccache_changed=\"\$(changed_in_range containers/sccache)\"" 'sccache-changes job block'
-assert_block_contains "${sccache_changes_block}" "printf 'sccache_changed=%s\\n' \"\${sccache_changed}\"" 'sccache-changes job block'
-
-assert_block_contains "${publish_block}" '- sccache-changes' 'publish-architecture-images job block'
-assert_block_contains "${publish_block}" "if: needs.sccache-changes.outputs.sccache_changed == 'true'" 'publish-architecture-images job block'
-assert_block_contains "${publish_block}" "PUBLISH_SCCACHE: \${{ needs.sccache-changes.outputs.sccache_changed }}" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" "CONTROL_PLANE_COMPONENT_TAG: \${{ steps.image_versions.outputs.control_plane_component_tag }}" 'publish-architecture-images job block'
-assert_block_contains "${publish_block}" "SCCACHE_COMPONENT_TAG: \${{ steps.image_versions.outputs.sccache_component_tag }}" 'publish-architecture-images job block'
-assert_block_contains "${publish_block}" "if [[ \"\${PUBLISH_SCCACHE}\" == \"true\" ]]; then" 'publish-architecture-images job block'
 
-assert_block_contains "${manifest_block}" '- sccache-changes' 'publish-manifests job block'
-assert_block_contains "${manifest_block}" "PUBLISH_SCCACHE: \${{ needs.sccache-changes.outputs.sccache_changed }}" 'publish-manifests job block'
 assert_block_contains "${manifest_block}" "CONTROL_PLANE_COMPONENT_TAG: \${{ steps.image_versions.outputs.control_plane_component_tag }}" 'publish-manifests job block'
-assert_block_contains "${manifest_block}" "SCCACHE_COMPONENT_TAG: \${{ steps.image_versions.outputs.sccache_component_tag }}" 'publish-manifests job block'
-assert_block_contains "${manifest_block}" "if [[ \"\${PUBLISH_SCCACHE}\" == \"true\" ]]; then" 'publish-manifests job block'
-
-assert_file_contains "${workflow_path}" 'docker buildx build --load --tag localhost/sccache:test containers/sccache'
-assert_file_contains "${workflow_path}" "GHCR_SCCACHE_IMAGE: ghcr.io/\${{ github.repository }}/sccache"
-assert_file_contains "${workflow_path}" "docker tag localhost/sccache:test \"\${GHCR_SCCACHE_IMAGE}:\${GITHUB_SHA}-\${IMAGE_ARCH}\""
-assert_file_contains "${workflow_path}" "docker push \"\${GHCR_SCCACHE_IMAGE}:\${SCCACHE_COMPONENT_TAG}-\${IMAGE_ARCH}\""
-assert_file_contains "${workflow_path}" "create_manifest \"\${GHCR_SCCACHE_IMAGE}:latest\""
-assert_file_contains "${workflow_path}" "create_manifest \"\${GHCR_SCCACHE_IMAGE}:\${SCCACHE_COMPONENT_TAG}\""
-assert_file_matches "${workflow_path}" '^[[:space:]]+- sccache$'
-assert_file_contains "${renovate_config_path}" '/^containers\\/(control-plane|sccache)\\/Dockerfile$/'
+assert_file_contains "${renovate_config_path}" '/^containers\\/control-plane\\/Dockerfile$/'
 assert_file_contains "${renovate_config_path}" 'separateMultipleMajor: true'
 assert_file_contains "${renovate_config_path}" 'separateMultipleMinor: true'
 assert_file_contains "${renovate_config_path}" '"{{{depNameSanitized}}}{{#if newVersion}}__v{{{newVersion}}}{{/if}}{{#if newDigestShort}}__d{{{newDigestShort}}}{{/if}}",'
 assert_file_not_contains "${renovate_config_path}" '__{{updateType}}'
+assert_file_not_contains "${renovate_config_path}" 'containers\\/control-plane\\/bin\\/install-git-skills-from-manifest'
+assert_file_not_contains "${renovate_config_path}" 'mozilla/sccache'
+assert_file_not_contains "${workflow_path}" 'sccache-changes'
+assert_file_not_contains "${workflow_path}" 'containers/sccache'
+assert_file_not_contains "${workflow_path}" 'GHCR_SCCACHE_IMAGE'
+assert_file_not_contains "${workflow_path}" 'SCCACHE_COMPONENT_TAG'
+assert_file_not_contains "${workflow_path}" 'PUBLISH_SCCACHE'
+assert_file_not_matches "${workflow_path}" '^[[:space:]]+- sccache$'
 assert_file_not_contains "${workflow_path}" 'garage_changed'
 assert_file_not_contains "${workflow_path}" 'garage_bootstrap_changed'
 assert_file_not_matches "${workflow_path}" 'containers/garage([[:space:]/]|$)'
@@ -253,6 +230,7 @@ assert_file_not_contains "${workflow_path}" 'yamllint_changed'
 assert_file_not_contains "${workflow_path}" 'GHCR_YAMLLINT_IMAGE'
 assert_file_not_contains "${workflow_path}" 'localhost/yamllint:test'
 assert_file_not_contains "${renovate_config_path}" 'yamllint'
+assert_file_not_contains "${workflow_path}" '- sccache'
 
 printf '%s\n' 'image-maintenance-test: verifying GHCR cleanup keeps tagged images' >&2
 assert_file_contains "${workflow_path}" 'delete-only-untagged-versions: '\''true'\'''

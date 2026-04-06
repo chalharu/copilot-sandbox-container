@@ -199,9 +199,6 @@ spec:
             - name: control-plane-config
               mountPath: /var/run/control-plane-config
               readOnly: true
-            - name: garage-sccache-auth
-              mountPath: /var/run/garage-sccache-auth
-              readOnly: true
       volumes:
         - name: copilot-session
           persistentVolumeClaim:
@@ -214,14 +211,6 @@ spec:
         - name: control-plane-auth
           secret:
             secretName: control-plane-auth
-        - name: garage-sccache-auth
-          secret:
-            secretName: garage-sccache-auth
-            items:
-              - key: access-key-id
-                path: access-key-id
-              - key: secret-access-key
-                path: secret-access-key
         - name: control-plane-config
           configMap:
             name: control-plane-config

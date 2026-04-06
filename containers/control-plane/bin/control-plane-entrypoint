@@ -779,22 +779,6 @@ runtime_config_tmp="$(mktemp "${runtime_config_path}.XXXXXX")"
   if [[ -n "${TZ:-}" ]]; then
     write_runtime_var TZ "${TZ}"
   fi
-  for runtime_var in \
-    SCCACHE_VERSION \
-    SCCACHE_RELEASE_BASE_URL \
-    SCCACHE_BOOTSTRAP_JOBS \
-    SCCACHE_BUCKET \
-    SCCACHE_ENDPOINT \
-    SCCACHE_REGION \
-    SCCACHE_S3_USE_SSL \
-    SCCACHE_S3_KEY_PREFIX \
-    SCCACHE_CACHE_SIZE \
-    AWS_ACCESS_KEY_ID_FILE \
-    AWS_SECRET_ACCESS_KEY_FILE; do
-    if [[ -n "${!runtime_var:-}" ]]; then
-      write_runtime_var "${runtime_var}" "${!runtime_var}"
-    fi
-  done
   write_runtime_var KUBECONFIG "${KUBECONFIG:-}"
   if [[ -n "${copilot_github_token}" ]]; then
     write_runtime_var CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE "${copilot_token_path}"
