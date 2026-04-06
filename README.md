@@ -146,8 +146,8 @@ Kubernetes Job 実行:
 control-plane-run \
   --namespace copilot-sandbox-jobs \
   --job-name smoke-job \
-  --image ghcr.io/chalharu/copilot-sandbox-container/execution-plane-smoke:replace-me-with-commit-sha \
-  -- /usr/local/bin/execution-plane-smoke write-marker /workspace/job.txt job
+  --image ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha \
+  -- bash -lc 'printf "%s\n" job > /workspace/job.txt'
 ```
 
 `control-plane-run` は Kubernetes Job 専用です。Copilot CLI 自身の `bash`

@@ -29,12 +29,11 @@ printf '%s\n' 'test-github-hooks.sh: verifying Rust-backed hook helpers' >&2
   -v "${PWD}:/workspace" \
   -w /workspace/containers/control-plane/runtime-tools \
   --entrypoint sh \
-  "${control_plane_image:-${rust_test_image}}" \
+  "${rust_test_image}" \
   -c 'cargo test'
 
-printf '%s\n' 'test-github-hooks.sh: verifying remaining node hook tests' >&2
+printf '%s\n' 'test-github-hooks.sh: verifying remaining git hook tests' >&2
 node --test \
-  containers/control-plane/hooks/postToolUse/main.test.mjs \
   containers/control-plane/hooks/git/main.test.mjs
 
 if [[ -z "${control_plane_image}" ]]; then
@@ -57,10 +56,9 @@ test -f /usr/local/lib/libcontrol_plane_exec_policy.so
 test -x /usr/local/share/control-plane/hooks/git/pre-commit
 test -x /usr/local/share/control-plane/hooks/git/pre-push
 test -f /usr/local/share/control-plane/hooks/git/lib/common.sh
-test -f /usr/local/share/control-plane/hooks/postToolUse/main.mjs
+test -x /usr/local/share/control-plane/hooks/postToolUse/main
 test -x /usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh
 test -f /usr/local/share/control-plane/hooks/postToolUse/linters.json
-test -f /usr/local/share/control-plane/hooks/postToolUse/lib/incremental-files.mjs
 test -x /usr/local/share/control-plane/hooks/sessionEnd/cleanup
 test -x /usr/local/bin/control-plane-exec-api
 test -x /usr/local/bin/control-plane-exec-api-launcher
@@ -84,10 +82,9 @@ test -f /usr/local/lib/libcontrol_plane_exec_policy.so
 test -x /home/copilot/.copilot/hooks/git/pre-commit
 test -x /home/copilot/.copilot/hooks/git/pre-push
 test -f /home/copilot/.copilot/hooks/git/lib/common.sh
-test -f /home/copilot/.copilot/hooks/postToolUse/main.mjs
+test -x /home/copilot/.copilot/hooks/postToolUse/main
 test -x /home/copilot/.copilot/hooks/postToolUse/control-plane-rust.sh
 test -f /home/copilot/.copilot/hooks/postToolUse/linters.json
-test -f /home/copilot/.copilot/hooks/postToolUse/lib/incremental-files.mjs
 test -x /home/copilot/.copilot/hooks/sessionEnd/cleanup
 grep -Fqx '    hooksPath = /usr/local/share/control-plane/hooks/git' "${GIT_CONFIG_GLOBAL}"
 test "$(grep -Fc '    helper = !gh auth git-credential' "${GIT_CONFIG_GLOBAL}")" -eq 2
@@ -95,7 +92,7 @@ grep -Fq "COPILOT_HOME" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/audit/main" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/preToolUse/main" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/preToolUse/exec-forward" /home/copilot/.copilot/hooks/hooks.json
-grep -Fq "hooks/postToolUse/main.mjs" /home/copilot/.copilot/hooks/hooks.json
+grep -Fq "hooks/postToolUse/main" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/postToolUse/control-plane-rust.sh" /usr/local/share/control-plane/hooks/postToolUse/linters.json
 grep -Fq "hooks/sessionEnd/cleanup" /home/copilot/.copilot/hooks/hooks.json
 ! grep -Fq "powershell" /home/copilot/.copilot/hooks/hooks.json

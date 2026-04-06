@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-control_plane_image="${1:?usage: scripts/test-standalone.sh <control-plane-image> <execution-plane-image>}"
-: "${2:?usage: scripts/test-standalone.sh <control-plane-image> <execution-plane-image>}"
+control_plane_image="${1:?usage: scripts/test-standalone.sh <control-plane-image>}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ssh_port="${CONTROL_PLANE_TEST_SSH_PORT:-2222}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-docker}"
@@ -11,6 +10,9 @@ workdir="$(mktemp -d)"
 state_root="${workdir}/state"
 ssh_key="${workdir}/id_ed25519"
 control_plane_run_user=(--user 0:0)
+container_cap_flags=(--cap-add AUDIT_WRITE)
+container_privilege_flags=()
+container_start_flags=()
 container_env=()
 ssh_opts=()
 
@@ -25,6 +27,16 @@ require_command() {
     printf 'Missing required command: %s\n' "$1" >&2
     exit 1
   }
+}
+
+configure_container_runtime() {
+  if "${container_bin}" --version 2>/dev/null | grep -qi '^podman version'; then
+    # Podman 4.3 rejects this image's healthcheck and cap-add when bridge networking is enabled.
+    # Use privileged here so sshd still gets the capabilities the entrypoint requires.
+    container_cap_flags=()
+    container_privilege_flags=(--privileged)
+    container_start_flags=(--no-healthcheck)
+  fi
 }
 
 read_runtime_var() {
@@ -155,7 +167,9 @@ start_container() {
     run -d --rm
     "${control_plane_run_user[@]}"
     --name "${container_name}"
-    --cap-add AUDIT_WRITE
+    "${container_cap_flags[@]}"
+    "${container_privilege_flags[@]}"
+    "${container_start_flags[@]}"
     -e SSH_PUBLIC_KEY="$(cat "${ssh_key}.pub")"
     --network bridge -p "127.0.0.1:${ssh_port}:2222"
   )
@@ -181,6 +195,8 @@ require_command "${container_bin}"
 require_command ssh
 require_command ssh-keygen
 require_command ssh-keyscan
+
+configure_container_runtime
 
 mkdir -p "${state_root}/copilot" "${state_root}/gh" "${state_root}/ssh" "${state_root}/ssh-host-keys" "${state_root}/workspace"
 ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"

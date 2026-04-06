@@ -24,6 +24,15 @@ const sourceBundledPostToolUseDir = path.join(
 	"hooks",
 	"postToolUse",
 );
+const runtimeToolBin = path.join(
+	repoRoot,
+	"containers",
+	"control-plane",
+	"runtime-tools",
+	"target",
+	"debug",
+	"control-plane-runtime-tool",
+);
 
 function run(command, args, options = {}) {
 	const result = spawnSync(command, args, {
@@ -53,6 +62,7 @@ function createIsolatedGitEnv(t, prefix) {
 		home,
 		env: {
 			...process.env,
+			COPILOT_HOME: path.join(home, ".copilot"),
 			HOME: home,
 			XDG_CONFIG_HOME: path.join(home, ".config"),
 			GIT_CONFIG_NOSYSTEM: "1",
@@ -96,13 +106,18 @@ function setupGlobalHooks(t, repo) {
 
 	const copilotHooksDir = path.join(home, ".copilot", "hooks");
 	const bundledGitDir = path.join(copilotHooksDir, "git");
+	const bundledPostToolUseDir = path.join(copilotHooksDir, "postToolUse");
 	fs.mkdirSync(copilotHooksDir, { recursive: true });
 	fs.cpSync(sourceBundledGitDir, bundledGitDir, { recursive: true });
-	fs.cpSync(
-		sourceBundledPostToolUseDir,
-		path.join(copilotHooksDir, "postToolUse"),
-		{ recursive: true },
+	fs.cpSync(sourceBundledPostToolUseDir, bundledPostToolUseDir, {
+		recursive: true,
+	});
+	assert.equal(
+		fs.existsSync(runtimeToolBin),
+		true,
+		"expected built runtime tool binary",
 	);
+	fs.symlinkSync(runtimeToolBin, path.join(bundledPostToolUseDir, "main"));
 	fs.chmodSync(path.join(bundledGitDir, "pre-commit"), 0o755);
 	fs.chmodSync(path.join(bundledGitDir, "pre-push"), 0o755);
 	run("git", ["config", "--global", "core.hooksPath", bundledGitDir], {

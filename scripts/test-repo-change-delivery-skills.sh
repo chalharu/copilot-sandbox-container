@@ -5,7 +5,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 external_skills_manifest="${repo_root}/containers/control-plane/config/external-skills.yaml"
 git_skills_runtime_manifest="${repo_root}/containers/control-plane/runtime-tools/Cargo.toml"
-git_skills_runtime_src="${repo_root}/containers/control-plane/runtime-tools/src/main.rs"
+git_skills_runtime_dispatch="${repo_root}/containers/control-plane/runtime-tools/src/invocation.rs"
 git_skills_manifest_installer="${script_dir}/install-git-skills-from-manifest.sh"
 legacy_external_skills_ref_file="${repo_root}/containers/control-plane/config/anthropic-skills.ref"
 legacy_doc_coauthor_skill_dir="${repo_root}/.github/skills/doc-coauthoring"
@@ -137,7 +137,7 @@ printf '%s\n' 'repo-change-delivery-skills-test: fetching pinned upstream skills
 printf '%s\n' 'repo-change-delivery-skills-test: checking skill files' >&2
 assert_file_present "${external_skills_manifest}"
 assert_file_present "${git_skills_runtime_manifest}"
-assert_file_present "${git_skills_runtime_src}"
+assert_file_present "${git_skills_runtime_dispatch}"
 assert_file_present "${git_skills_manifest_installer}"
 assert_file_present "${doc_coauthor_skill_file}"
 assert_file_present "${repo_skill_file}"
@@ -168,8 +168,8 @@ assert_file_contains "${external_skills_manifest}" 'repository: https://github.c
 assert_file_contains "${external_skills_manifest}" 'skills/doc-coauthoring'
 assert_file_contains "${external_skills_manifest}" 'skills/skill-creator'
 assert_file_contains "${external_skills_manifest}" 'currentValue=main'
-assert_file_contains "${git_skills_runtime_src}" '"install-git-skills-from-manifest"'
-assert_file_not_contains "${git_skills_runtime_src}" 'js-yaml'
+assert_file_contains "${git_skills_runtime_dispatch}" '"install-git-skills-from-manifest"'
+assert_file_not_contains "${git_skills_runtime_dispatch}" 'js-yaml'
 assert_file_contains "${skill_creator_skill_file}" 'name: skill-creator'
 assert_file_contains "${generic_skill_file}" 'name: repo-change-delivery'
 assert_file_contains "${generic_skill_file}" 'full implementation loop'

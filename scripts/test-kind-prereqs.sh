@@ -47,7 +47,7 @@ set +e
 PATH="${workdir}/bin:${PATH}" \
 TEST_KIND_LOG="${kind_log}" \
 CONTROL_PLANE_KIND_REQUIRED_HOST_PATH="${workdir}/missing-modules" \
-  "${script_dir}/test-kind.sh" fake/control-plane:test fake/execution-plane:test kind-prereq-cluster \
+  "${script_dir}/test-kind.sh" fake/control-plane:test kind-prereq-cluster \
   > /dev/null 2>"${stderr_log}"
 status=$?
 set -e

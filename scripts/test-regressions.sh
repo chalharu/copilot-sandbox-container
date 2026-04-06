@@ -380,7 +380,7 @@ PATH="${workdir}/fake-bin:${control_plane_bin_dir}:${PATH}" \
   "${control_plane_bin_dir}/k8s-job-start" \
   --namespace control-plane-ci-jobs \
   --job-name regression-transfer-job \
-  --image localhost/execution-plane-smoke:test \
+  --image localhost/control-plane:test \
   --mount-file "${workdir}/k8s-transfer-input.txt:inputs/k8s-transfer-input.txt" \
   -- true >/dev/null
 
@@ -449,7 +449,7 @@ PATH="${workdir}/fake-bin:${control_plane_bin_dir}:${PATH}" \
   "${control_plane_bin_dir}/k8s-job-start" \
   --namespace control-plane-ci-jobs \
   --job-name regression-multiline-command-job \
-  --image localhost/execution-plane-smoke:test \
+  --image localhost/control-plane:test \
   -- bash -lc $'printf line-one\nprintf line-two' >/dev/null
 
 assert_multiline_command_block "${workdir}/k8s-job-multiline-manifest.yaml" '|-'
@@ -463,7 +463,7 @@ PATH="${workdir}/fake-bin:${control_plane_bin_dir}:${PATH}" \
   "${control_plane_bin_dir}/k8s-job-start" \
   --namespace control-plane-ci-jobs \
   --job-name regression-multiline-command-trailing-job \
-  --image localhost/execution-plane-smoke:test \
+  --image localhost/control-plane:test \
   -- bash -lc $'printf line-one\nprintf line-two\n' >/dev/null
 
 assert_multiline_command_block "${workdir}/k8s-job-multiline-trailing-manifest.yaml" '|+'
@@ -481,7 +481,7 @@ newline_transfer_output="$(
     "${control_plane_bin_dir}/k8s-job-start" \
     --namespace control-plane-ci-jobs \
     --job-name regression-transfer-job-invalid \
-    --image localhost/execution-plane-smoke:test \
+    --image localhost/control-plane:test \
     --mount-file "${workdir}/k8s-transfer-input.txt:inputs/k8s-transfer-input.txt" \
     -- true 2>&1
 )"

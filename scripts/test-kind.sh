@@ -2,9 +2,8 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-control_plane_image="${1:?usage: scripts/test-kind.sh <control-plane-image> <execution-plane-image> [cluster-name]}"
-execution_plane_image="${2:?usage: scripts/test-kind.sh <control-plane-image> <execution-plane-image> [cluster-name]}"
-cluster_name="${3:-control-plane-ci}"
+control_plane_image="${1:?usage: scripts/test-kind.sh <control-plane-image> [cluster-name]}"
+cluster_name="${2:-control-plane-ci}"
 namespace="${CONTROL_PLANE_TEST_NAMESPACE:-control-plane-ci}"
 job_namespace="${CONTROL_PLANE_TEST_JOB_NAMESPACE:-${namespace}-jobs}"
 ssh_port="${CONTROL_PLANE_TEST_SSH_PORT:-32222}"
@@ -245,7 +244,7 @@ load_kind_images() {
   if [[ -n "${kind_image_archive}" ]]; then
     helper_args+=(--image-archive "${kind_image_archive}")
   else
-    helper_args+=(--container-bin "${container_bin}" --image "${control_plane_image}" --image "${execution_plane_image}")
+    helper_args+=(--container-bin "${container_bin}" --image "${control_plane_image}")
   fi
 
   CONTROL_PLANE_KIND_USE_SUDO="${kind_uses_sudo}" \
@@ -1209,7 +1208,7 @@ run_job_core_assertions() {
   printf '%s\n' 'kind-test: starting manual job' >&2
   if ! job_name="$(ssh_bash <<EOF
 set -euo pipefail
-k8s-job-start --namespace ${job_namespace} --job-name ci-manual-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/manual-job.txt manual
+k8s-job-start --namespace ${job_namespace} --job-name ci-manual-job --image ${control_plane_image} -- bash -lc 'printf "%s\n" manual | tee /workspace/manual-job.txt'
 EOF
 )";
   then
@@ -1222,7 +1221,7 @@ kubectl get serviceaccount control-plane-job --namespace ${job_namespace}
 kubectl get pvc control-plane-workspace-pvc --namespace ${job_namespace}
 kubectl auth can-i create jobs --namespace ${job_namespace}
 kubectl delete job --namespace ${job_namespace} ci-manual-job --ignore-not-found >/dev/null 2>&1 || true
-bash -x "\$(command -v k8s-job-start)" --namespace ${job_namespace} --job-name ci-manual-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/manual-job.txt manual
+bash -x "\$(command -v k8s-job-start)" --namespace ${job_namespace} --job-name ci-manual-job --image ${control_plane_image} -- bash -lc 'printf "%s\n" manual | tee /workspace/manual-job.txt'
 EOF
     dump_control_plane_diagnostics
     exit 1
@@ -1257,7 +1256,7 @@ EOF
 
   default_mode_output="$(ssh_bash <<EOF
 set -euo pipefail
-control-plane-run --job-name ci-default-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/default-job.txt default
+control-plane-run --job-name ci-default-job --image ${control_plane_image} -- bash -lc 'printf "%s\n" default | tee /workspace/default-job.txt'
 EOF
 )"
   grep -q 'default' <<<"${default_mode_output}"
@@ -1270,7 +1269,7 @@ EOF
 }
 
 run_job_transfer_assertions() {
-  printf -v remote_job_transfer_command 'bash -l -se -- %q %q' "${execution_plane_image}" "${job_namespace}"
+  printf -v remote_job_transfer_command 'bash -l -se -- %q %q' "${control_plane_image}" "${job_namespace}"
   # shellcheck disable=SC2029
   if ! ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_job_transfer_command}" < "${script_dir}/test-job-transfer.sh"; then
     printf 'Expected kind job transfer regression script to succeed\n' >&2

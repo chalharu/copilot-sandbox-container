@@ -4,9 +4,9 @@ Copilot CLI の `postToolUse` hook をこのリポジトリ向けに最適化し
 
 ## Copilot hooks
 
-Control Plane entrypoint は bundled hook JSON を root-owned な `COPILOT_HOME/hooks/` から読み、互換用に `~/.copilot/hooks/` symlink も張ります。`hooks.json` は `COPILOT_HOME` を優先して `hooks/postToolUse/main.mjs` を起動するため、repo ごとの `.github/hooks/` を置かなくても共通の `postToolUse` hook を保護された path から利用できます。`main.mjs` は標準入力を 1 回だけ読み、Git 差分を 1 回だけ取得し、対象ファイルの判定と linter の切り替えをまとめて行います。各 linter 実行では `TMPDIR` / `NODE_COMPILE_CACHE` / `NPM_CONFIG_CACHE` を `${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane}/hooks` 配下へ寄せ、hook 用の一時ファイルと cache を共通の一時ディレクトリへ集約します。
+Control Plane entrypoint は bundled hook JSON を root-owned な `COPILOT_HOME/hooks/` から読み、互換用に `~/.copilot/hooks/` symlink も張ります。`hooks.json` は `COPILOT_HOME` を優先して Rust 製の `hooks/postToolUse/main` を起動するため、repo ごとの `.github/hooks/` を置かなくても共通の `postToolUse` hook を保護された path から利用できます。この hook は標準入力を 1 回だけ読み、Git 差分を 1 回だけ取得し、対象ファイルの判定と linter の切り替えをまとめて行います。各 linter 実行では `TMPDIR` / `NODE_COMPILE_CACHE` / `NPM_CONFIG_CACHE` を `${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane}/hooks` 配下へ寄せ、hook 用の一時ファイルと cache を共通の一時ディレクトリへ集約します。
 
-この hook は Copilot CLI から渡される JSON を stdin で受け取る前提です。`node ~/.copilot/hooks/postToolUse/main.mjs` を対話端末で直接実行すると、stdin の EOF が来るまで `readStdin()` が待つため、プロンプトが返ってこないように見えます。確認したいときは `printf '%s' '{"cwd":"/workspace","toolResult":{"resultType":"success"}}' | node ~/.copilot/hooks/postToolUse/main.mjs` のように JSON を pipe するか、空入力のまま EOF (`Ctrl-D`) を送ってください。
+この hook は Copilot CLI から渡される JSON を stdin で受け取る前提です。`~/.copilot/hooks/postToolUse/main` を対話端末で直接実行すると、stdin の EOF が来るまで入力待ちになります。確認したいときは `printf '%s' '{"cwd":"/workspace","toolResult":{"resultType":"success"}}' | ~/.copilot/hooks/postToolUse/main` のように JSON を pipe するか、空入力のまま EOF (`Ctrl-D`) を送ってください。
 
 実行対象は bundled hook と同じ `postToolUse` ディレクトリ内の `linters.json`（このリポジトリでは `containers/control-plane/hooks/postToolUse/linters.json`）と、repo root の `.github/linters.json` をマージして定義します。`.github/linters.json` が優先され、同じ `id` を持つ `tools` / `pipelines` は `.github` 側の定義で置き換えます。この JSON は `tools` と `pipelines` の 2 セクションだけを持ちます。`tools` は実行コマンドと引数を含む concrete な定義で、必要に応じて対象ファイルを引数に付けないコマンドも表現できます。`pipelines` は regex matcher 配列と実行順、各 step の fallback tools をまとめて表します。
 

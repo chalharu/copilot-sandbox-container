@@ -111,20 +111,28 @@ build_context_hash() {
     printf 'Build context directory not found: %s\n' "${context_dir}" >&2
     exit 1
   }
+  require_command find
+  require_command sort
   require_command tar
   require_command sha256sum
 
-  tar \
-    --sort=name \
-    --mtime='UTC 1970-01-01' \
-    --owner=0 \
-    --group=0 \
-    --numeric-owner \
-    -cf - \
-    -C "${context_dir}" \
-    . \
-    | sha256sum \
-    | awk '{print $1}'
+  (
+    cd "${context_dir}"
+    find . \
+      \( -path './.git' -o -path '*/target' \) -prune -o \
+      \( -type f -o -type l \) -print0 \
+      | LC_ALL=C sort -z \
+      | tar \
+          --null \
+          --no-recursion \
+          --sort=name \
+          --mtime='UTC 1970-01-01' \
+          --owner=0 \
+          --group=0 \
+          --numeric-owner \
+          -cf - \
+          --files-from -
+  ) | sha256sum | awk '{print $1}'
 }
 
 build_context_hash_label_key() {

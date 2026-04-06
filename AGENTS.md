@@ -53,7 +53,6 @@ CONTROL_PLANE_TOOLCHAIN=docker ./scripts/build-test.sh
 
 ```text
 /containers/control-plane         Control Plane image, entrypoints, bundled skills, fast-exec helpers
-/containers/execution-plane-smoke Smoke-test Execution Plane image
 /deploy/kubernetes                Sample deployment manifests
 /scripts                          Supported lint/build/test entry points
 ```

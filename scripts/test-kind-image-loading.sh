@@ -102,17 +102,11 @@ TEST_KIND_SUDO_LOG="${sudo_log}" \
   "${script_dir}/load-kind-images.sh" \
   --cluster-name control-plane-ci \
   --container-bin docker \
-  --image localhost/control-plane:test \
-  --image localhost/execution-plane-smoke:test
+  --image localhost/control-plane:test
 
 expected_control_archive="$(printf '%s' 'localhost/control-plane:test' | tr '/:' '__')"
-expected_execution_archive="$(printf '%s' 'localhost/execution-plane-smoke:test' | tr '/:' '__')"
 control_archive_path="$(sed -n "s|^load image-archive \\(.*/${expected_control_archive}\\.tar\\) --name control-plane-ci$|\\1|p" "${kind_log}" | head -n 1)"
-execution_archive_path="$(sed -n "s|^load image-archive \\(.*/${expected_execution_archive}\\.tar\\) --name control-plane-ci$|\\1|p" "${kind_log}" | head -n 1)"
 
 grep -Eq "^save --output .*/${expected_control_archive}\.tar localhost/control-plane:test$" "${docker_log}"
-grep -Eq "^save --output .*/${expected_execution_archive}\.tar localhost/execution-plane-smoke:test$" "${docker_log}"
 grep -Eq "^load image-archive .*/${expected_control_archive}\.tar --name control-plane-ci$" "${kind_log}"
-grep -Eq "^load image-archive .*/${expected_execution_archive}\.tar --name control-plane-ci$" "${kind_log}"
 grep -Fqx -- "-n env KIND_EXPERIMENTAL_PROVIDER=docker kind load image-archive ${control_archive_path} --name control-plane-ci" "${sudo_log}"
-grep -Fqx -- "-n env KIND_EXPERIMENTAL_PROVIDER=docker kind load image-archive ${execution_archive_path} --name control-plane-ci" "${sudo_log}"

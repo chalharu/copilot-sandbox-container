@@ -43,7 +43,6 @@ shellcheck_targets=(
   /workspace/containers/control-plane/bin/k8s-job-start
   /workspace/containers/control-plane/bin/k8s-job-run
   /workspace/containers/control-plane/config/profile-control-plane-env.sh
-  /workspace/containers/execution-plane-smoke/execution-plane-smoke
 )
 lint_log_dir="$(mktemp -d)"
 lint_job_names=()

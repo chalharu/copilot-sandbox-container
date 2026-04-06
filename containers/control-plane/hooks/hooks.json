@@ -46,7 +46,7 @@
       },
       {
         "type": "command",
-        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/postToolUse/main.mjs\" && node \"$hook_script\"",
+        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/postToolUse/main\" && \"$hook_script\"",
         "cwd": ".",
         "timeoutSec": 30
       }

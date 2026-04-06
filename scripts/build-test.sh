@@ -9,7 +9,6 @@ toolchain="$(detect_build_test_toolchain)"
 container_bin="$(container_runtime_for_toolchain "${toolchain}")"
 build_bin="$(build_command_for_toolchain "${toolchain}")"
 control_plane_image="${CONTROL_PLANE_IMAGE_TAG:-localhost/control-plane:test}"
-execution_plane_image="${EXECUTION_PLANE_IMAGE_TAG:-localhost/execution-plane-smoke:test}"
 cluster_name="${CONTROL_PLANE_KIND_CLUSTER_NAME:-control-plane-ci}"
 kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-${container_bin}}"
 build_only=0
@@ -24,7 +23,7 @@ EOF
 
 run_smoke_group() {
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
-    "${script_dir}/test-standalone.sh" "${control_plane_image}" "${execution_plane_image}"
+    "${script_dir}/test-standalone.sh" "${control_plane_image}"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-config-injection.sh" "${control_plane_image}"
@@ -83,7 +82,7 @@ run_kind_group() {
   KIND_EXPERIMENTAL_PROVIDER="${kind_provider}" \
     CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     CONTROL_PLANE_KIND_TEST_GROUP="${kind_test_group}" \
-    "${script_dir}/test-kind.sh" "${control_plane_image}" "${execution_plane_image}" "${cluster_name}"
+    "${script_dir}/test-kind.sh" "${control_plane_image}" "${cluster_name}"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -141,7 +140,6 @@ require_command "${container_bin}"
 printf 'Using %s toolchain for build/test\n' "${toolchain}"
 if [[ "${skip_image_build}" -eq 0 ]]; then
   build_image_for_toolchain "${toolchain}" "${control_plane_image}" containers/control-plane
-  build_image_for_toolchain "${toolchain}" "${execution_plane_image}" containers/execution-plane-smoke
 fi
 
 if [[ "${build_only}" -eq 1 ]]; then

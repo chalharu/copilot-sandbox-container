@@ -32,6 +32,8 @@ FROM docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d24
 WORKDIR /build/control-plane-runtime-tools
 COPY runtime-tools/Cargo.toml runtime-tools/Cargo.lock ./
 COPY runtime-tools/src ./src
+COPY runtime-tools/tests ./tests
+COPY hooks/postToolUse/linters.json /build/hooks/postToolUse/linters.json
 RUN cargo test --locked --release \
     && cargo build --locked --release
 
@@ -59,8 +61,15 @@ FROM node:24.14.1-bookworm-slim@sha256:06e5c9f86bfa0aaa7163cf37a5eaa8805f16b9acb
 ARG COPILOT_CLI_VERSION=1.0.18
 # renovate: datasource=github-releases depName=kubernetes-sigs/kind
 ARG KIND_VERSION=v0.31.0
-# renovate: datasource=pypi depName=yamllint
+# renovate: datasource=github-releases depName=jqlang/jq
+ARG JQ_VERSION=jq-1.8.1
+# renovate: datasource=github-releases depName=kubernetes/kubernetes
+ARG KUBECTL_VERSION=v1.35.3
+# renovate: datasource=github-releases depName=rclone/rclone
+ARG RCLONE_VERSION=v1.73.3
+# renovate: datasource=github-releases depName=adrienverge/yamllint
 ARG YAMLLINT_VERSION=1.38.0
+ARG YAMLLINT_WHEEL_SHA256=fc394a5b3be980a4062607b8fdddc0843f4fa394152b6da21722f5d59013c220
 ARG CONTROL_PLANE_UID=1000
 ARG CONTROL_PLANE_GID=1000
 ARG CONTROL_PLANE_USER=copilot
@@ -80,52 +89,76 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # hadolint ignore=DL3008
 RUN apt-get update -o Acquire::Retries=3 \
      && apt-get install -y --no-install-recommends \
-         bash \
-         ca-certificates \
-         cpulimit \
-         curl \
-         gcc \
-         libc6-dev \
-         jq \
-         kubernetes-client \
-         locales \
-        ncurses-term \
-        openssh-client \
-        openssh-server \
-        python3 \
-        python3-pip \
-        procps \
-         rclone \
-         screen \
-         sqlite3 \
-         tini \
-         vim \
-    && printf '%s\n' \
-        'en_US.UTF-8 UTF-8' \
-        'ja_JP.UTF-8 UTF-8' \
-        > /etc/locale.gen \
-    && locale-gen \
-    && localedef -i en_US -f UTF-8 en_US.UTF8 \
-    && localedef -i ja_JP -f UTF-8 ja_JP.UTF8 \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN arch="$(dpkg --print-architecture)" \
-    && case "${arch}" in \
-        amd64) kind_arch=amd64 ;; \
-        arm64) kind_arch=arm64 ;; \
-        *) printf 'Unsupported architecture for kind: %s\n' "${arch}" >&2; exit 1 ;; \
-    esac \
-    && curl -fsSLo "/tmp/kind-linux-${kind_arch}" "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-${kind_arch}" \
-    && curl -fsSLo "/tmp/kind-linux-${kind_arch}.sha256sum" "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-${kind_arch}.sha256sum" \
-    && kind_sha256="$(cut -d' ' -f1 "/tmp/kind-linux-${kind_arch}.sha256sum")" \
-    && printf '%s  %s\n' "${kind_sha256}" "/tmp/kind-linux-${kind_arch}" | sha256sum -c - \
-    && install -m 0755 "/tmp/kind-linux-${kind_arch}" /usr/local/bin/kind \
-    && rm -f "/tmp/kind-linux-${kind_arch}" "/tmp/kind-linux-${kind_arch}.sha256sum"
+          bash \
+          ca-certificates \
+          cpulimit \
+          curl \
+          gcc \
+          libc6-dev \
+          locales \
+          ncurses-term \
+          openssh-client \
+          openssh-server \
+          python3 \
+          python3-pip \
+          procps \
+          screen \
+          sqlite3 \
+          tini \
+          vim \
+     && arch="$(dpkg --print-architecture)" \
+     && case "${arch}" in \
+         amd64) \
+           kind_arch=amd64; \
+           jq_asset=jq-linux-amd64; \
+           jq_sha256=020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d; \
+           kubectl_arch=amd64; \
+           rclone_arch=amd64; \
+           rclone_sha256=70278c22b98c7d02aed01828b70053904dbce4c8a1a15d7781d836c6fdb036ea; \
+           ;; \
+         arm64) \
+           kind_arch=arm64; \
+           jq_asset=jq-linux-arm64; \
+           jq_sha256=6bc62f25981328edd3cfcfe6fe51b073f2d7e7710d7ef7fcdac28d4e384fc3d4; \
+           kubectl_arch=arm64; \
+           rclone_arch=arm64; \
+           rclone_sha256=ed2a638b4cb15abe4f01d6d9c015f3a1cb41aa7a17c96db2725542c61f353b8e; \
+           ;; \
+         *) printf 'Unsupported architecture for control-plane tools: %s\n' "${arch}" >&2; exit 1 ;; \
+       esac \
+     && curl -fsSLo "/tmp/kind-linux-${kind_arch}" "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-${kind_arch}" \
+     && curl -fsSLo "/tmp/kind-linux-${kind_arch}.sha256sum" "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-${kind_arch}.sha256sum" \
+     && kind_sha256="$(cut -d' ' -f1 "/tmp/kind-linux-${kind_arch}.sha256sum")" \
+     && printf '%s  %s\n' "${kind_sha256}" "/tmp/kind-linux-${kind_arch}" | sha256sum -c - \
+     && install -m 0755 "/tmp/kind-linux-${kind_arch}" /usr/local/bin/kind \
+     && curl -fsSLo "/tmp/${jq_asset}" "https://github.com/jqlang/jq/releases/download/${JQ_VERSION}/${jq_asset}" \
+     && printf '%s  %s\n' "${jq_sha256}" "/tmp/${jq_asset}" | sha256sum -c - \
+     && install -m 0755 "/tmp/${jq_asset}" /usr/local/bin/jq \
+     && curl -fsSLo /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${kubectl_arch}/kubectl" \
+     && curl -fsSLo /tmp/kubectl.sha256 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${kubectl_arch}/kubectl.sha256" \
+     && printf '%s  %s\n' "$(cat /tmp/kubectl.sha256)" /tmp/kubectl | sha256sum -c - \
+     && install -m 0755 /tmp/kubectl /usr/local/bin/kubectl \
+     && rclone_asset="rclone-${RCLONE_VERSION}-linux-${rclone_arch}.zip" \
+     && curl -fsSLo "/tmp/${rclone_asset}" "https://github.com/rclone/rclone/releases/download/${RCLONE_VERSION}/${rclone_asset}" \
+     && printf '%s  %s\n' "${rclone_sha256}" "/tmp/${rclone_asset}" | sha256sum -c - \
+     && rclone_member="$(python3 -c 'import sys, zipfile; archive, dest = sys.argv[1:3]; zf = zipfile.ZipFile(archive); member = next(name for name in zf.namelist() if name.endswith("/rclone")); zf.extract(member, dest); print(member)' "/tmp/${rclone_asset}" /tmp)" \
+     && install -m 0755 "/tmp/${rclone_member}" /usr/local/bin/rclone \
+     && yamllint_wheel="yamllint-${YAMLLINT_VERSION}-py3-none-any.whl" \
+     && curl -fsSLo "/tmp/${yamllint_wheel}" "https://github.com/adrienverge/yamllint/releases/download/v${YAMLLINT_VERSION}/${yamllint_wheel}" \
+     && printf '%s  %s\n' "${YAMLLINT_WHEEL_SHA256}" "/tmp/${yamllint_wheel}" | sha256sum -c - \
+     && python3 -m pip install --break-system-packages --no-cache-dir "/tmp/${yamllint_wheel}" \
+     && apt-get purge -y --auto-remove python3-pip \
+     && printf '%s\n' \
+         'en_US.UTF-8 UTF-8' \
+         'ja_JP.UTF-8 UTF-8' \
+         > /etc/locale.gen \
+     && locale-gen \
+     && localedef -i en_US -f UTF-8 en_US.UTF8 \
+     && localedef -i ja_JP -f UTF-8 ja_JP.UTF8 \
+     && rm -rf /var/lib/apt/lists/* /root/.cache /tmp/*
 
 RUN npm install --global "@github/copilot@${COPILOT_CLI_VERSION}" \
     && npm cache clean --force
-
-RUN python3 -m pip install --break-system-packages --no-cache-dir "yamllint==${YAMLLINT_VERSION}"
 
 RUN existing_group="$(getent group "${CONTROL_PLANE_GID}" | cut -d: -f1 || true)" \
     && if [ -n "${existing_group}" ] && [ "${existing_group}" != "${CONTROL_PLANE_USER}" ]; then \
@@ -181,12 +214,6 @@ COPY hooks/ /usr/local/share/control-plane/hooks/
 COPY --from=rust-toolchain /usr/local/cargo/bin /usr/local/cargo/bin
 COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
 COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/bin/control-plane-runtime-tool
-COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/share/control-plane/hooks/audit/main
-COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/share/control-plane/hooks/preToolUse/exec-forward
-COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/share/control-plane/hooks/sessionEnd/cleanup
-COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/bin/k8s-job-wait
-COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/bin/k8s-job-pod
-COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/bin/k8s-job-logs
 COPY --from=exec-policy-builder /build/control-plane-exec-policy/target/release/libcontrol_plane_exec_policy.so /usr/local/lib/libcontrol_plane_exec_policy.so
 COPY --from=exec-policy-builder /build/control-plane-exec-policy/target/release/control-plane-pre-tool-use-hook /usr/local/share/control-plane/hooks/preToolUse/main
 COPY --chmod=755 bin/control-plane-screen /usr/local/bin/control-plane-screen
@@ -203,6 +230,13 @@ COPY --chmod=755 bin/k8s-job-start /usr/local/bin/k8s-job-start
 COPY --chmod=755 bin/k8s-job-run /usr/local/bin/k8s-job-run
 
 RUN ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen \
+    && ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/share/control-plane/hooks/audit/main \
+    && ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/share/control-plane/hooks/preToolUse/exec-forward \
+    && ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/share/control-plane/hooks/postToolUse/main \
+    && ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/share/control-plane/hooks/sessionEnd/cleanup \
+    && ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/bin/k8s-job-wait \
+    && ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/bin/k8s-job-pod \
+    && ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/bin/k8s-job-logs \
     && usermod --shell /usr/local/bin/control-plane-ssh-shell "${CONTROL_PLANE_USER}" \
     && find /usr/local/share/control-plane/skills -type d -exec chmod 755 {} + \
     && find /usr/local/share/control-plane/skills -type f -exec chmod 644 {} + \
