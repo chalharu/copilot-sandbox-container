@@ -842,8 +842,11 @@ jq -e '.nested.replace.fromBase == true and .nested.replace.fromOverlay == true'
 jq -e '.nested.array == ["overlay"]' ~/.copilot/config.json >/dev/null
 jq -e '.topLevelOverlay == "kind"' ~/.copilot/config.json >/dev/null
 printf '%s\n' 'kind-test remote: config merge ok' >&2
-grep -Fqx '  git_protocol: ssh' ~/.config/gh/hosts.yml
-printf '%s\n' 'kind-test remote: gh hosts ok' >&2
+if cat ~/.config/gh/hosts.yml >/dev/null 2>&1; then
+  printf '%s\n' 'expected direct ~/.config/gh/hosts.yml reads to be blocked by the exec policy' >&2
+  exit 1
+fi
+printf '%s\n' 'kind-test remote: gh hosts confinement ok' >&2
 grep -Fqx 'CARGO_HOME=/home/copilot/.cargo' ~/.config/control-plane/runtime.env
 grep -Fqx 'CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target' ~/.config/control-plane/runtime.env
 test -d /var/tmp/control-plane
@@ -877,9 +880,9 @@ printf '%s\n' '--- persisted files ---'
 ls -ld ~/.copilot ~/.copilot/session-state ~/.config ~/.config/gh ~/.ssh /workspace || true
 ls -l ~/.copilot/config.json ~/.copilot/command-history-state.json ~/.config/gh/hosts.yml || true
 stat -c '%n %a %U %G' ~/.copilot/config.json ~/.copilot/command-history-state.json ~/.config/gh/hosts.yml || true
-printf '%s\n' '--- config and gh hosts ---'
+printf '%s\n' '--- config and gh auth ---'
 cat ~/.copilot/config.json || true
-cat ~/.config/gh/hosts.yml || true
+printf '%s\n' 'direct reads of ~/.config/gh/hosts.yml are expected to fail under the exec policy'
 printf '%s\n' '--- runtime tmp ---'
 ls -la /var/tmp/control-plane || true
 printf '%s\n' '--- runtime env ---'
