@@ -339,8 +339,8 @@ install -d -m 700 -o ${run_as_uid} -g ${run_as_gid} $(shell_quote "${remote_home
 cat > $(shell_quote "${remote_home}/.gitconfig") <<'__CONTROL_PLANE_GIT_CONFIG__'
 $(render_remote_git_config)
 __CONTROL_PLANE_GIT_CONFIG__
-chown ${run_as_uid}:${run_as_gid} $(shell_quote "${remote_home}/.gitconfig")
 chmod 600 $(shell_quote "${remote_home}/.gitconfig")
+chown ${run_as_uid}:${run_as_gid} $(shell_quote "${remote_home}/.gitconfig")
 exec $(shell_quote "${bootstrap_root}/bin/control-plane-exec-api") serve
 EOF
 }
