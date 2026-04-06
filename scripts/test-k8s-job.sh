@@ -173,12 +173,12 @@ ${service_account_yaml}
                  usermod --shell /usr/local/bin/control-plane-ssh-shell copilot
                 exec /usr/local/bin/control-plane-entrypoint /bin/bash -lc '
                  set -euo pipefail
-                 runtime_line="\$(grep -E "^(XDG_RUNTIME_DIR|TMPDIR|SCREENDIR|CONTROL_PLANE_RUN_MODE|CARGO_HOME|CARGO_TARGET_DIR|RUSTUP_HOME)=" /home/copilot/.config/control-plane/runtime.env | tr "\n" " ")"
+                 ! grep -q "^CONTROL_PLANE_RUN_MODE=" /home/copilot/.config/control-plane/runtime.env
+                 runtime_line="\$(grep -E "^(XDG_RUNTIME_DIR|TMPDIR|SCREENDIR|CARGO_HOME|CARGO_TARGET_DIR|RUSTUP_HOME)=" /home/copilot/.config/control-plane/runtime.env | tr "\n" " ")"
                  printf "job-check: runtime-env=%s\n" "\${runtime_line}"
                  [[ "\${runtime_line}" == *"XDG_RUNTIME_DIR=/run/user/1000"* ]]
                  [[ "\${runtime_line}" == *"TMPDIR=/var/tmp/control-plane/tmp-1000"* ]]
                  [[ "\${runtime_line}" == *"SCREENDIR=/run/user/1000/screen"* ]]
-                 [[ "\${runtime_line}" == *"CONTROL_PLANE_RUN_MODE=k8s-job"* ]]
                  [[ "\${runtime_line}" == *"CARGO_HOME=/home/copilot/.cargo"* ]]
                  [[ "\${runtime_line}" == *"CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target"* ]]
                  [[ "\${runtime_line}" == *"RUSTUP_HOME=/usr/local/rustup"* ]]

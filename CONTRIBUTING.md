@@ -49,8 +49,9 @@ Types:
 - Use trusted upstream images when they already satisfy the contract; if only a
   third-party image exists, build a thin repository-managed image and publish it
   to GHCR for reuse.
-- GitHub Actions needs `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` for the DHI
-  registry access used by the Renovate dry-run validation.
+- GitHub Actions validation should pass without extra registry secrets; keep the
+  Renovate dry-run scoped to public dependencies and the pinned external skills
+  repository.
 - `scripts/test-standalone.sh` and `scripts/test-kind.sh` remain the lower-level
   smoke / integration scripts used by `scripts/build-test.sh`.
 - When this repository is developed from inside a containerized tooling

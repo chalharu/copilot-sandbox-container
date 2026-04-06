@@ -27,4 +27,4 @@ fileAccessRules:
 
 `fileAccessRules` は exact path ベースの read blocker で、`${VAR}` 展開後の path が空なら rule 自体を無効化します。候補 path は canonical path まで展開されるので、directory path を rule に置くとその配下もまとめて保護できます。`allowedExecutables` も absolute path 必須で、exec 側は実行中 binary の実 path と、`bash /usr/local/bin/control-plane-copilot` のような shell wrapper では script path 自体を照合します。basename-only allowlist は受け付けないので、`/usr/local/bin/control-plane-copilot` や `/usr/bin/gh` のように managed executable の full path を明示してください。
 
-`/run/control-plane-auth` のような Secret mount は startup 専用 input として扱い、interactive shell からの direct read は directory rule でその配下ごと防ぐのが基本です。entrypoint が起動時にそれらを `authorized_keys`、`~/.config/gh/hosts.yml`、private runtime token file、`$XDG_RUNTIME_DIR/containers/auth.json` のような managed surface へ移したあとで、user-facing process はそちらだけを使います。
+`/run/control-plane-auth` のような Secret mount は startup 専用 input として扱い、interactive shell からの direct read は directory rule でその配下ごと防ぐのが基本です。entrypoint が起動時にそれらを `authorized_keys`、`~/.config/gh/hosts.yml`、private runtime token file のような managed surface へ移したあとで、user-facing process はそちらだけを使います。

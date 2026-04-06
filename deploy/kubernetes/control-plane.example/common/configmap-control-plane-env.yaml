@@ -18,8 +18,6 @@ data:
   # This full file wins over GH_GITHUB_TOKEN_FILE.
   # GH_HOSTS_YML_FILE: /var/run/control-plane-auth/gh-hosts.yml
   COPILOT_GITHUB_TOKEN_FILE: /var/run/control-plane-auth/copilot-github-token
-  DOCKERHUB_USERNAME_FILE: /var/run/control-plane-auth/dockerhub-username
-  DOCKERHUB_TOKEN_FILE: /var/run/control-plane-auth/dockerhub-token
   # Optional: preseed ~/.gitconfig inside the control plane.
   # CONTROL_PLANE_GIT_USER_NAME: Your Name
   # CONTROL_PLANE_GIT_USER_EMAIL: you@example.com
@@ -72,7 +70,6 @@ data:
   CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane.copilot-sandbox.svc.cluster.local
   CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"
   CONTROL_PLANE_JOB_SERVICE_ACCOUNT: control-plane-job
-  CONTROL_PLANE_RUN_MODE: k8s-job
   # Audit logs are written to ~/.copilot/session-state/audit/audit-log.db
   # on the shared copilot session PVC. Tune the retained row cap to
   # adjust history depth; when a tool hook sees more than this many

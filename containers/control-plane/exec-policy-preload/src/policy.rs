@@ -131,9 +131,9 @@ mod tests {
             protected_environments: vec![Regex::new("^(?:GIT_CONFIG_GLOBAL)$").unwrap()],
             file_access_rules: vec![
                 CompiledFileAccessRule {
-                    path: "/run/user/1000/containers/auth.json".to_string(),
-                    reason: "registry auth blocked".to_string(),
-                    allowed_executables: Vec::new(),
+                    path: "/home/copilot/.config/control-plane/copilot-github-token".to_string(),
+                    reason: "copilot token blocked".to_string(),
+                    allowed_executables: vec!["/usr/local/bin/control-plane-copilot".to_string()],
                 },
                 CompiledFileAccessRule {
                     path: "/home/copilot/.config/gh/hosts.yml".to_string(),
@@ -235,19 +235,19 @@ mod tests {
         assert_eq!(
             match_file_access_rule(
                 &config,
-                &["/usr/bin/bash"],
-                "/run/user/1000/containers/auth.json"
+                &["/usr/local/bin/control-plane-copilot"],
+                "/home/copilot/.config/control-plane/copilot-github-token"
             )
             .as_deref(),
-            Some("registry auth blocked")
+            None
         );
         assert_eq!(
             match_file_access_rule(
                 &config,
                 &["/usr/bin/bash", "/usr/bin/docker"],
-                "/run/user/1000/containers/auth.json",
+                "/home/copilot/.config/control-plane/copilot-github-token",
             ),
-            Some(String::from("registry auth blocked"))
+            Some(String::from("copilot token blocked"))
         );
         assert_eq!(
             match_file_access_rule(
@@ -270,7 +270,7 @@ mod tests {
             match_file_access_rule(
                 &config,
                 &["/usr/bin/bash"],
-                "/run/control-plane-auth/dockerhub-token"
+                "/run/control-plane-auth/copilot-github-token"
             )
             .as_deref(),
             Some("control-plane auth mount blocked")
@@ -279,7 +279,7 @@ mod tests {
             match_file_access_rule(
                 &config,
                 &["/usr/bin/bash"],
-                "/run/control-plane-auth/..data/dockerhub-token"
+                "/run/control-plane-auth/..data/copilot-github-token"
             )
             .as_deref(),
             Some("control-plane auth mount blocked")
@@ -288,7 +288,7 @@ mod tests {
             match_file_access_rule(
                 &config,
                 &["/usr/bin/bash"],
-                "/run/control-plane-auth-copy/dockerhub-token"
+                "/run/control-plane-auth-copy/copilot-github-token"
             ),
             None
         );

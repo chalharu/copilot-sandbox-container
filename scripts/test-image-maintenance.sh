@@ -104,7 +104,11 @@ label_store="${workdir}/docker-label"
 workflow_path="${repo_root}/.github/workflows/control-plane-ci.yml"
 renovate_config_path="${repo_root}/renovate.json5"
 sccache_dockerfile_path="${repo_root}/containers/sccache/Dockerfile"
-execution_plane_rust_dockerfile_path="${repo_root}/containers/execution-plane-rust/Dockerfile"
+legacy_execution_plane_go_dockerfile_path="${repo_root}/containers/execution-plane-go/Dockerfile"
+legacy_execution_plane_node_dockerfile_path="${repo_root}/containers/execution-plane-node/Dockerfile"
+legacy_execution_plane_python_dockerfile_path="${repo_root}/containers/execution-plane-python/Dockerfile"
+legacy_execution_plane_rust_dockerfile_path="${repo_root}/containers/execution-plane-rust/Dockerfile"
+legacy_yamllint_dockerfile_path="${repo_root}/containers/yamllint/Dockerfile"
 mkdir -p "${context_dir}" "${fake_bin_dir}"
 cat > "${context_dir}/Dockerfile" <<'EOF'
 FROM docker.io/library/busybox:1.37.0
@@ -176,11 +180,12 @@ assert_file_contains "${sccache_dockerfile_path}" 'COPY --from=fetcher /out/ /'
 assert_file_contains "${sccache_dockerfile_path}" 'USER 65532:65532'
 assert_file_contains "${sccache_dockerfile_path}" 'ENTRYPOINT ["/usr/local/bin/sccache"]'
 
-printf '%s\n' 'image-maintenance-test: verifying execution-plane-rust enables sccache' >&2
-assert_file_contains "${execution_plane_rust_dockerfile_path}" 'SCCACHE_DIR=/workspace/.cache/sccache'
-assert_file_contains "${execution_plane_rust_dockerfile_path}" 'RUSTC_WRAPPER=/usr/local/cargo/bin/sccache'
-assert_file_contains "${execution_plane_rust_dockerfile_path}" 'CARGO_INCREMENTAL=0'
-assert_line_order "${execution_plane_rust_dockerfile_path}" 'cargo install --locked sccache' 'RUSTC_WRAPPER=/usr/local/cargo/bin/sccache'
+printf '%s\n' 'image-maintenance-test: verifying legacy helper images were removed' >&2
+[[ ! -e "${legacy_execution_plane_go_dockerfile_path}" ]]
+[[ ! -e "${legacy_execution_plane_node_dockerfile_path}" ]]
+[[ ! -e "${legacy_execution_plane_python_dockerfile_path}" ]]
+[[ ! -e "${legacy_execution_plane_rust_dockerfile_path}" ]]
+[[ ! -e "${legacy_yamllint_dockerfile_path}" ]]
 
 sccache_changes_block="$(job_block sccache-changes)"
 publish_block="$(job_block publish-architecture-images)"
@@ -223,7 +228,7 @@ assert_file_contains "${workflow_path}" "docker push \"\${GHCR_SCCACHE_IMAGE}:\$
 assert_file_contains "${workflow_path}" "create_manifest \"\${GHCR_SCCACHE_IMAGE}:latest\""
 assert_file_contains "${workflow_path}" "create_manifest \"\${GHCR_SCCACHE_IMAGE}:\${SCCACHE_COMPONENT_TAG}\""
 assert_file_matches "${workflow_path}" '^[[:space:]]+- sccache$'
-assert_file_contains "${renovate_config_path}" '/^containers\\/(control-plane|yamllint|sccache)\\/Dockerfile$/'
+assert_file_contains "${renovate_config_path}" '/^containers\\/(control-plane|sccache)\\/Dockerfile$/'
 assert_file_contains "${renovate_config_path}" 'separateMultipleMajor: true'
 assert_file_contains "${renovate_config_path}" 'separateMultipleMinor: true'
 assert_file_contains "${renovate_config_path}" '"{{{depNameSanitized}}}{{#if newVersion}}__v{{{newVersion}}}{{/if}}{{#if newDigestShort}}__d{{{newDigestShort}}}{{/if}}",'
@@ -247,6 +252,7 @@ assert_file_not_contains "${workflow_path}" 'helper-image-changes'
 assert_file_not_contains "${workflow_path}" 'yamllint_changed'
 assert_file_not_contains "${workflow_path}" 'GHCR_YAMLLINT_IMAGE'
 assert_file_not_contains "${workflow_path}" 'localhost/yamllint:test'
+assert_file_not_contains "${renovate_config_path}" 'yamllint'
 
 printf '%s\n' 'image-maintenance-test: verifying GHCR cleanup keeps tagged images' >&2
 assert_file_contains "${workflow_path}" 'delete-only-untagged-versions: '\''true'\'''

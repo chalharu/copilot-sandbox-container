@@ -21,7 +21,6 @@ jobs:
             runner: ubuntu-24.04-arm
     permissions:
       contents: read
-    environment: dockerhub
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -30,8 +29,6 @@ jobs:
       - name: Run lint
         env:
           CONTROL_PLANE_TOOLCHAIN: docker
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: ./scripts/lint.sh
   integration:
     name: Integration Images (${{ matrix.architecture_label }})

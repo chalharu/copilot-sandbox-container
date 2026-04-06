@@ -222,71 +222,45 @@ if [[ "${runtime_env_status}" -ne 0 ]]; then
 fi
 grep -qx 'runtime-env-sccache-ok' <<<"${runtime_env_output}"
 
-printf '%s\n' 'regression-test: verifying startup materializes DHI auth without exposing secret files' >&2
+printf '%s\n' 'regression-test: verifying startup omits legacy registry auth surfaces' >&2
 mkdir -p \
-  "${workdir}/runtime-dhi-auth-state/copilot" \
-  "${workdir}/runtime-dhi-auth-state/gh" \
-  "${workdir}/runtime-dhi-auth-state/ssh" \
-  "${workdir}/runtime-dhi-auth-state/ssh-host-keys" \
-  "${workdir}/runtime-dhi-auth-state/workspace" \
-  "${workdir}/runtime-dhi-auth-state/control-plane-auth"
-printf '%s' 'test-user' > "${workdir}/runtime-dhi-auth-state/control-plane-auth/dockerhub-username"
-printf '%s' 'test-token' > "${workdir}/runtime-dhi-auth-state/control-plane-auth/dockerhub-token"
+  "${workdir}/runtime-legacy-surface-state/copilot" \
+  "${workdir}/runtime-legacy-surface-state/gh" \
+  "${workdir}/runtime-legacy-surface-state/ssh" \
+  "${workdir}/runtime-legacy-surface-state/ssh-host-keys" \
+  "${workdir}/runtime-legacy-surface-state/workspace"
 
 set +e
-runtime_dhi_auth_output="$("${container_bin}" run --rm \
+runtime_legacy_surface_output="$("${container_bin}" run --rm \
   --name "${container_name}" \
   "${control_plane_run_user[@]}" \
   "${startup_caps[@]}" \
   -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForRegressionOnly control-plane-regression' \
-  -e DOCKERHUB_USERNAME_FILE=/var/run/control-plane-auth/dockerhub-username \
-  -e DOCKERHUB_TOKEN_FILE=/var/run/control-plane-auth/dockerhub-token \
-  -v "${workdir}/runtime-dhi-auth-state/copilot:/home/copilot/.copilot" \
-  -v "${workdir}/runtime-dhi-auth-state/gh:/home/copilot/.config/gh" \
-  -v "${workdir}/runtime-dhi-auth-state/ssh:/home/copilot/.ssh" \
-  -v "${workdir}/runtime-dhi-auth-state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
-  -v "${workdir}/runtime-dhi-auth-state/workspace:/workspace" \
-  -v "${workdir}/runtime-dhi-auth-state/control-plane-auth:/var/run/control-plane-auth:ro" \
+  -v "${workdir}/runtime-legacy-surface-state/copilot:/home/copilot/.copilot" \
+  -v "${workdir}/runtime-legacy-surface-state/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/runtime-legacy-surface-state/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/runtime-legacy-surface-state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/runtime-legacy-surface-state/workspace:/workspace" \
   "${control_plane_image}" \
   bash -lc "set -euo pipefail
 runtime_env=/home/copilot/.config/control-plane/runtime.env
 auth_file=\"/run/user/\$(id -u copilot)/containers/auth.json\"
+! grep -q '^CONTROL_PLANE_RUN_MODE=' \"\$runtime_env\"
 ! grep -q '^DOCKERHUB_' \"\$runtime_env\"
 ! grep -q '^REGISTRY_AUTH_FILE=' \"\$runtime_env\"
-test -s \"\$auth_file\"
-test \"\$(stat -c '%U %G %a' \"\$auth_file\")\" = 'copilot copilot 600'
-stderr_file=\"\$(mktemp)\"
-if cat \"\$auth_file\" >/dev/null 2>\"\${stderr_file}\"; then
-  printf \"%s\n\" \"Expected direct registry auth.json read to be denied\" >&2
-  exit 1
-fi
-grep -Fq \"control-plane exec policy:\" \"\${stderr_file}\"
-grep -Fq \"registry auth.json\" \"\${stderr_file}\"
-rm -f \"\${stderr_file}\"
-su -l -s /bin/bash copilot -c 'set -euo pipefail
-set -a
-source \"\$HOME/.config/control-plane/runtime.env\"
-set +a
-stderr_file=\"\$(mktemp)\"
-if cat \"\${XDG_RUNTIME_DIR}/containers/auth.json\" >/dev/null 2>\"\${stderr_file}\"; then
-  printf \"%s\n\" \"Expected direct registry auth.json read to be denied\" >&2
-  exit 1
-fi
-grep -Fq \"control-plane exec policy:\" \"\${stderr_file}\"
-grep -Fq \"registry auth.json\" \"\${stderr_file}\"
-rm -f \"\${stderr_file}\"'
-printf '%s\n' runtime-dhi-auth-ok" 2>&1)"
-runtime_dhi_auth_status=$?
+test ! -e \"\$auth_file\"
+printf '%s\n' runtime-legacy-surface-ok" 2>&1)"
+runtime_legacy_surface_status=$?
 set -e
 
-if [[ "${runtime_dhi_auth_status}" -ne 0 ]]; then
-  printf 'Expected control-plane startup to materialize DHI auth without exposing secret file paths\n' >&2
-  printf '%s\n' "${runtime_dhi_auth_output}" >&2
+if [[ "${runtime_legacy_surface_status}" -ne 0 ]]; then
+  printf 'Expected control-plane startup to omit legacy registry auth surfaces\n' >&2
+  printf '%s\n' "${runtime_legacy_surface_output}" >&2
   exit 1
 fi
-grep -qx 'runtime-dhi-auth-ok' <<<"${runtime_dhi_auth_output}"
+grep -qx 'runtime-legacy-surface-ok' <<<"${runtime_legacy_surface_output}"
 
-printf '%s\n' 'regression-test: verifying secretless DHI auth handling' >&2
+printf '%s\n' 'regression-test: verifying Renovate local dry-run no longer injects registry host rules' >&2
 mkdir -p "${workdir}/fake-bin"
 cat > "${workdir}/fake-bin/docker" <<'EOF'
 #!/usr/bin/env bash
@@ -342,7 +316,6 @@ actions/checkout
 actions/upload-artifact
 azure/setup-kubectl
 busybox
-dhi.io/python
 docker.io/library/node
 engineerd/setup-kind
 ghcr.io/biomejs/biome
@@ -358,10 +331,6 @@ ERROR: lookupUpdates error (repository=local, packageFile=containers/control-pla
 ERROR: lookupUpdates error (repository=local, packageFile=containers/control-plane/config/external-skills.yaml)
        "packageName": "https://github.com/anthropics/skills",
        "message": "timeout while waiting for mutex to become available",
- WARN: Package lookup failures (repository=local)
-       "warnings": ["Failed to look up docker package dhi.io/python: no-result"],
-DEBUG: Request failed with status code 401 (Unauthorized): GET https://dhi.io/token?scope=repository%3Apython%3Apull&service=registry.docker.io (repository=local)
-DEBUG: Failed to look up docker package dhi.io/python: no-result (repository=local, packageFile=containers/yamllint/Dockerfile, dependency=dhi.io/python)
 ERROR: Cannot sync git when platform=local
 RENOVATE
         exit 1
@@ -383,13 +352,12 @@ PATH="${workdir}/fake-bin:${PATH}" \
   TEST_REGRESSION_LOG_DIR="${workdir}" \
   CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
   CONTROL_PLANE_CONTAINER_BIN=docker \
-  DOCKERHUB_USERNAME=test-user \
-  DOCKERHUB_TOKEN=test-token \
-  DOCKERHUB_USERNAME_FILE="${workdir}/missing-username" \
-  DOCKERHUB_TOKEN_FILE="${workdir}/missing-token" \
   "${script_dir}/validate-renovate-config.sh"
 
-grep -Fqx 'RENOVATE_HOST_RULES=[{"matchHost":"dhi.io","username":"test-user","password":"test-token"}]' "${workdir}/renovate.env"
+if grep -Fq 'RENOVATE_HOST_RULES=' "${workdir}/renovate.env"; then
+  printf 'Did not expect Renovate host rules in %s\n' "${workdir}/renovate.env" >&2
+  exit 1
+fi
 
 printf '%s\n' 'regression-test: verifying k8s-job-start expands transfer env in rclone config' >&2
 mkdir -p "${workdir}/k8s-home/.ssh" "${workdir}/k8s-host-keys"

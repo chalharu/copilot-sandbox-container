@@ -19,7 +19,7 @@
 | `podman system migrate` の自己修復ログ | [§5](#5-stale-state-は-podman-system-migrate-で直る) |
 | `cgroup.subtree_control` で止まる | [§6](#6-rootful-service-build-が-cgroup-で止まる) |
 | session picker が使えず shell へ落ちる | [§7](#7-session-picker-が使えず-shell-へ落ちる) |
-| DHI base image pull が unauthorized | [§8](#8-dhi-base-image-を-pull-できない) |
+| private image pull が unauthorized | [§8](#8-private-image-を-pull-できない) |
 | Service の `EXTERNAL-IP` が `pending` | [§9](#9-service-の-external-ip-が未割当て) |
 | injected Copilot config が壊れている | [§10](#10-injected-copilot-config-が壊れている) |
 | gh Secret の指定が足りない | [§11](#11-gh-secret-の指定が足りない) |
@@ -137,7 +137,7 @@ control-plane: session picker failed; continuing with the login shell. Set CONTR
 
 picker 自体の失敗です。対話は継続できますが、Screen の自動再接続は効いていません。恒久回避は `CONTROL_PLANE_DISABLE_SESSION_PICKER=1` ですが、通常は原因を直すほうを優先します。
 
-## 8. DHI base image を pull できない
+## 8. private image を pull できない
 
 ### 代表ログ
 
@@ -147,7 +147,7 @@ unable to retrieve auth token: invalid username/password: unauthorized: authenti
 
 ### 意味
 
-`dockerhub-username` / `dockerhub-token` Secret が無いか、DHI 用の Docker auth が不足しています。`scripts/prepare-dhi-images.sh` は既存の Docker auth か明示的な `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` を使い、`scripts/validate-renovate-config.sh` は secret file fallback を前提にしません。疎通確認は `docker login dhi.io` で行ってください。
+Kubernetes 側の image pull 認証が足りていません。`CONTROL_PLANE_FAST_EXECUTION_IMAGE` や `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` に private registry を使う場合は、Deployment / ServiceAccount に `imagePullSecrets` を付けてください。Control Plane の runtime file や `/run/control-plane-auth` の Secret mount では代替しません。
 
 ## 9. Service の `EXTERNAL-IP` が未割当て
 

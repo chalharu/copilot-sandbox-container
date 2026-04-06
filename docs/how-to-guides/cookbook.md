@@ -75,14 +75,13 @@ ConfigMap / Secret / write-back の具体的な path は
    `gh-github-token`、複数 host や `git_protocol: ssh` を含めたいなら
    `gh-hosts.yml` を使う。どちらも startup 時に `gh` 用の managed config へ
    取り込まれ、`/run/control-plane-auth` の raw mount を直接読む運用はしない
-3. 必要なら `dockerhub-username` / `dockerhub-token` と
-   `copilot-github-token` も入れる。DockerHub Secret は Control Plane
-   起動時に Podman auth へ取り込み、Copilot token も private runtime file へ
-   staging される。いずれも `/run/control-plane-auth` から直接読まない
+3. 必要なら `copilot-github-token` も入れる。Copilot token は private
+   runtime file へ staging されるので、`/run/control-plane-auth` から直接
+   読まない
 4. Copilot CLI の追加設定は `control-plane-config` ConfigMap の
    `copilot-config.json` へ書き、PVC 上の既存 `~/.copilot/config.json`
    へ merge させる
-5. namespace / PVC / Job 既定値や file path などの非機密 env は
+5. namespace / PVC / file path などの非機密 env は
    `control-plane-env` ConfigMap にまとめ、Deployment の `envFrom` で読む
 6. Copilot CLI の `bash` tool を fast execution pod へ委譲する場合は、
    `CONTROL_PLANE_FAST_EXECUTION_*` と
@@ -190,7 +189,7 @@ command の Job 経路です。
 基本形:
 
 ```bash
-control-plane-run --mode k8s-job ...
+control-plane-run ...
 ```
 
 ## 6. SSH login を検証する

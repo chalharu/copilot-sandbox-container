@@ -104,9 +104,9 @@ bootstrap-managed Garage credential を再初期化したいときだけ delete/
 - `garage-admin-auth`: Garage bootstrap 用の admin token / rpc secret
 - `garage-sccache-auth`: `garage-bootstrap` Job が初回作成し、rerun 時は更新する `sccache` S3 access key / secret key
 - `gh` 認証は `gh-github-token` または `gh-hosts.yml`
-- 必要に応じて `copilot-github-token`、DockerHub 認証情報も保持
+- 必要に応じて `copilot-github-token` も保持
 
-`control-plane-auth` 配下の mounted file は entrypoint が起動時に消費し、interactive shell からの direct read は exec policy が拒否します。`GH_HOSTS_YML_FILE` があればその file を優先し、無ければ `GH_GITHUB_TOKEN_FILE` から最小 `~/.config/gh/hosts.yml` を生成します。`COPILOT_GITHUB_TOKEN_FILE` は private runtime token file へ、DockerHub credential は managed registry auth へ移し、以後は raw mount を読ませません。
+`control-plane-auth` 配下の mounted file は entrypoint が起動時に消費し、interactive shell からの direct read は exec policy が拒否します。`GH_HOSTS_YML_FILE` があればその file を優先し、無ければ `GH_GITHUB_TOKEN_FILE` から最小 `~/.config/gh/hosts.yml` を生成します。`COPILOT_GITHUB_TOKEN_FILE` は private runtime token file へ移し、以後は raw mount を読ませません。
 
 sample manifest の fast execution pod では、runtime image とは別に
 `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` を指定し、initContainer が

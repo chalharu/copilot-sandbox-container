@@ -86,14 +86,6 @@ hook_config="${HOME}/.copilot/hooks/preToolUse/deny-rules.yaml"
 exec_policy_library="${CONTROL_PLANE_EXEC_POLICY_LIBRARY:-}"
 exec_policy_rules="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE:-}"
 copilot_token_path="${HOME}/.config/control-plane/copilot-github-token"
-registry_auth_path="${XDG_RUNTIME_DIR}/containers/auth.json"
-mounted_auth_dir="/run/control-plane-auth"
-ssh_public_key_mount_path="${mounted_auth_dir}/ssh-public-key"
-gh_github_token_mount_path="${mounted_auth_dir}/gh-github-token"
-gh_hosts_mount_path="${mounted_auth_dir}/gh-hosts.yml"
-copilot_token_mount_path="${mounted_auth_dir}/copilot-github-token"
-dockerhub_username_mount_path="${mounted_auth_dir}/dockerhub-username"
-dockerhub_token_mount_path="${mounted_auth_dir}/dockerhub-token"
 
 test -x "${hook_script}"
 test -f "${hook_config}"
@@ -105,7 +97,6 @@ test "${LD_PRELOAD}" = "${exec_policy_library}"
 
 mkdir -p "${HOME}/.config/gh"
 export CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE="${copilot_token_path}"
-test -f "${registry_auth_path}"
 
 # Raw secret mounts stay present, but direct reads are intentionally denied by
 # the exec policy. The explicit deny assertions below verify that contract.
@@ -310,16 +301,11 @@ assert_denied_exec 'pull request merge endpoints are blocked' gh api repos/octo-
 assert_denied_exec 'Protected environment overrides are blocked' env GIT_CONFIG_GLOBAL=/tmp/evil git status --short
 assert_denied_exec 'repo-local policy' git status --short
 assert_denied_shell 'CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE' 'while IFS= read -r _; do :; done < "${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}"'
-assert_denied_shell 'registry auth.json' 'while IFS= read -r _; do :; done < "${XDG_RUNTIME_DIR}/containers/auth.json"'
-assert_denied_shell 'registry auth.json' 'cat "${XDG_RUNTIME_DIR}/containers/auth.json"'
 assert_denied_shell '~/.config/gh/hosts.yml' 'while IFS= read -r _; do :; done < "${HOME}/.config/gh/hosts.yml"'
 assert_denied_shell '/run/control-plane-auth' 'cat "/run/control-plane-auth/ssh-public-key"'
 assert_denied_shell '/run/control-plane-auth' 'cat "/run/control-plane-auth/gh-github-token"'
 assert_denied_shell '/run/control-plane-auth' 'cat "/run/control-plane-auth/gh-hosts.yml"'
 assert_denied_shell '/run/control-plane-auth' 'cat "/run/control-plane-auth/copilot-github-token"'
-assert_denied_shell '/run/control-plane-auth' 'cat "/run/control-plane-auth/dockerhub-username"'
-assert_denied_shell '/run/control-plane-auth' 'cat "/run/control-plane-auth/dockerhub-token"'
-assert_denied_shell '/run/control-plane-auth' 'cat "/run/control-plane-auth/..data/dockerhub-token"'
 assert_allowed_shell '/usr/local/bin/control-plane-copilot'
 assert_allowed_shell 'gh auth status'
 assert_allowed_shell 'gh pr view 123'
@@ -430,10 +416,8 @@ env -u LD_PRELOAD bash -se <<'EOF_SETUP'
 set -euo pipefail
 install -d -o copilot -g copilot /home/copilot/.config/gh
 install -d -o copilot -g copilot /home/copilot/.config/control-plane
-install -d -o copilot -g copilot /run/user/1000/containers
 install -d -o copilot -g copilot /run/control-plane-auth/..data
 printf '%s\n' 'copilot-secret-token' > /home/copilot/.config/control-plane/copilot-github-token
-printf '%s\n' '{"auths":{"dhi.io":{"auth":"test-auth"}}}' > /run/user/1000/containers/auth.json
 cat > /home/copilot/.config/gh/hosts.yml <<'YAML'
 github.com:
   oauth_token: managed-gh-token
@@ -447,32 +431,22 @@ github.com:
   user: mounted-bot
 YAML
 printf '%s\n' 'mounted-copilot-token' > /run/control-plane-auth/..data/copilot-github-token
-printf '%s\n' 'mounted-dockerhub-user' > /run/control-plane-auth/..data/dockerhub-username
-printf '%s\n' 'mounted-dockerhub-token' > /run/control-plane-auth/..data/dockerhub-token
 ln -s ..data/ssh-public-key /run/control-plane-auth/ssh-public-key
 ln -s ..data/gh-github-token /run/control-plane-auth/gh-github-token
 ln -s ..data/gh-hosts.yml /run/control-plane-auth/gh-hosts.yml
 ln -s ..data/copilot-github-token /run/control-plane-auth/copilot-github-token
-ln -s ..data/dockerhub-username /run/control-plane-auth/dockerhub-username
-ln -s ..data/dockerhub-token /run/control-plane-auth/dockerhub-token
 chown copilot:copilot \
   /home/copilot/.config/control-plane/copilot-github-token \
-  /run/user/1000/containers/auth.json \
   /run/control-plane-auth/..data/ssh-public-key \
   /run/control-plane-auth/..data/gh-github-token \
   /run/control-plane-auth/..data/gh-hosts.yml \
-  /run/control-plane-auth/..data/copilot-github-token \
-  /run/control-plane-auth/..data/dockerhub-username \
-  /run/control-plane-auth/..data/dockerhub-token
+  /run/control-plane-auth/..data/copilot-github-token
 chmod 600 \
   /home/copilot/.config/control-plane/copilot-github-token \
-  /run/user/1000/containers/auth.json \
   /run/control-plane-auth/..data/ssh-public-key \
   /run/control-plane-auth/..data/gh-github-token \
   /run/control-plane-auth/..data/gh-hosts.yml \
-  /run/control-plane-auth/..data/copilot-github-token \
-  /run/control-plane-auth/..data/dockerhub-username \
-  /run/control-plane-auth/..data/dockerhub-token
+  /run/control-plane-auth/..data/copilot-github-token
 chown copilot:copilot /home/copilot/.config/gh/hosts.yml
 chmod 600 /home/copilot/.config/gh/hosts.yml
 rm -f \

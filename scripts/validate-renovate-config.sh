@@ -14,101 +14,6 @@ log_file=""
 # Docker, rootful Podman, and rootless Podman.
 workspace_access_user="0:0"
 renovate_env=()
-dockerhub_username="${DOCKERHUB_USERNAME:-}"
-dockerhub_token="${DOCKERHUB_TOKEN:-}"
-
-json_escape() {
-  local value="$1"
-  value="${value//\\/\\\\}"
-  value="${value//\"/\\\"}"
-  value="${value//$'\n'/\\n}"
-  value="${value//$'\r'/\\r}"
-  value="${value//$'\t'/\\t}"
-  printf '%s' "${value}"
-}
-
-request_failures_are_tolerated() {
-  local log_path="$1"
-  local failures
-
-  failures="$(grep -F 'Request failed with status code' "${log_path}" | grep -Fv 'node_modules/got/' || true)"
-  if [[ -z "${failures}" ]]; then
-    return 0
-  fi
-
-  if grep -Fv 'GET https://dhi.io/token?scope=repository%3Apython%3Apull&service=registry.docker.io' <<<"${failures}" >/dev/null; then
-    return 1
-  fi
-
-  return 0
-}
-
-docker_lookup_failures_are_tolerated() {
-  local log_path="$1"
-  local failures
-
-  failures="$(grep -F 'Failed to look up docker package' "${log_path}" || true)"
-  if [[ -z "${failures}" ]]; then
-    return 0
-  fi
-
-  if grep -Fv 'Failed to look up docker package dhi.io/python: no-result' <<<"${failures}" >/dev/null; then
-    return 1
-  fi
-
-  return 0
-}
-
-package_lookup_warnings_are_tolerated() {
-  local log_path="$1"
-
-  if ! grep -Fq 'WARN: Package lookup failures' "${log_path}"; then
-    return 0
-  fi
-
-  awk '
-    BEGIN {
-      in_block = 0
-      block_count = 0
-      saw_expected_warning = 0
-      ok = 1
-    }
-    function finish_block() {
-      if (!in_block) {
-        return
-      }
-      if (!saw_expected_warning) {
-        ok = 0
-      }
-      in_block = 0
-      saw_expected_warning = 0
-    }
-    /^ WARN: Package lookup failures/ {
-      finish_block()
-      in_block = 1
-      block_count++
-      next
-    }
-    in_block && /"warnings": / {
-      if ($0 ~ /^[[:space:]]*"warnings": \["Failed to look up docker package dhi\.io\/python: no-result"\],?$/) {
-        saw_expected_warning = 1
-      } else {
-        ok = 0
-      }
-      next
-    }
-    in_block && /^(DEBUG:| INFO:| WARN:|ERROR:)/ {
-      finish_block()
-      next
-    }
-    END {
-      finish_block()
-      if (block_count > 0 && ok == 0) {
-        exit 1
-      }
-    }
-  ' "${log_path}"
-}
 
 lookup_update_errors_are_tolerated() {
   local log_path="$1"
@@ -206,15 +111,6 @@ chmod 0777 "${base_dir}"
 
 require_command "${container_bin}"
 
-if [[ -n "${dockerhub_username}" ]] || [[ -n "${dockerhub_token}" ]]; then
-  : "${dockerhub_username:?DOCKERHUB_USERNAME is required when DOCKERHUB_TOKEN is set}"
-  : "${dockerhub_token:?DOCKERHUB_TOKEN is required when DOCKERHUB_USERNAME is set}"
-  printf -v renovate_host_rules '[{"matchHost":"dhi.io","username":"%s","password":"%s"}]' \
-    "$(json_escape "${dockerhub_username}")" \
-    "$(json_escape "${dockerhub_token}")"
-  renovate_env+=(-e "RENOVATE_HOST_RULES=${renovate_host_rules}")
-fi
-
 "${container_bin}" run --rm \
   --user "${workspace_access_user}" \
   -v "${PWD}:/workspace:ro" \
@@ -247,9 +143,6 @@ set -e
 
 if [[ "${renovate_status}" -ne 0 ]]; then
   if grep -Fq 'Cannot sync git when platform=local' "${log_file}" \
-    && request_failures_are_tolerated "${log_file}" \
-    && docker_lookup_failures_are_tolerated "${log_file}" \
-    && package_lookup_warnings_are_tolerated "${log_file}" \
     && lookup_update_errors_are_tolerated "${log_file}"; then
     printf '%s\n' \
       'Renovate local dry-run hit the known platform=local git sync limitation; validating the captured dependency report instead.' \
@@ -257,11 +150,6 @@ if [[ "${renovate_status}" -ne 0 ]]; then
     if grep -Fq 'ERROR: lookupUpdates error' "${log_file}"; then
       printf '%s\n' \
         'Ignoring transient git-refs lookup failures for the pinned external skills repository during local dry-run.' \
-        >&2
-    fi
-    if grep -Fq 'Failed to look up docker package dhi.io/python: no-result' "${log_file}"; then
-      printf '%s\n' \
-        'Ignoring expected dhi.io/python lookup failures during local dry-run.' \
         >&2
     fi
   else
@@ -277,7 +165,6 @@ expected_dependencies=(
   "actions/upload-artifact"
   "azure/setup-kubectl"
   "busybox"
-  "dhi.io/python"
   "docker.io/library/node"
   "engineerd/setup-kind"
   "ghcr.io/biomejs/biome"

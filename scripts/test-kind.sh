@@ -525,7 +525,6 @@ data:
   CONTROL_PLANE_JOB_WORKSPACE_PVC: control-plane-workspace-pvc
   CONTROL_PLANE_JOB_WORKSPACE_SUBPATH: workspace
   CONTROL_PLANE_JOB_SERVICE_ACCOUNT: control-plane-job
-  CONTROL_PLANE_RUN_MODE: k8s-job
   CONTROL_PLANE_JOB_TRANSFER_IMAGE: ${control_plane_image}
   CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane.${namespace}.svc.cluster.local
   CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"

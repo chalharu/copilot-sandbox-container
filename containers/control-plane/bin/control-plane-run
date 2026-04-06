@@ -7,7 +7,6 @@ Usage:
   control-plane-run --image IMAGE [options] -- COMMAND [ARG...]
 
 Options:
-  --mode k8s-job                  Execution mode (default: k8s-job)
   --namespace NAME                Kubernetes Job namespace
   --job-namespace NAME            Alias of --namespace
   --job-name NAME                 Kubernetes Job name
@@ -95,8 +94,6 @@ if [[ -f "${runtime_config_file}" ]]; then
   source "${runtime_config_file}"
 fi
 
-mode="${CONTROL_PLANE_RUN_MODE:-auto}"
-mode="${CONTROL_PLANE_RUN_MODE:-k8s-job}"
 namespace="${CONTROL_PLANE_JOB_NAMESPACE:-${CONTROL_PLANE_K8S_NAMESPACE:-default}}"
 job_name=""
 timeout="${CONTROL_PLANE_K8S_TIMEOUT:-300s}"
@@ -107,10 +104,6 @@ mount_files=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --mode)
-      mode="$2"
-      shift 2
-      ;;
     --namespace)
       namespace="$2"
       shift 2
@@ -155,14 +148,6 @@ done
 
 [[ -n "${image}" ]] || die "--image is required"
 [[ $# -gt 0 ]] || die "a command must be provided after --"
-
-case "${mode}" in
-  k8s-job)
-    ;;
-  *)
-    die "invalid mode: ${mode}"
-    ;;
-esac
 
 runner_args=(
   --namespace "${namespace}"
