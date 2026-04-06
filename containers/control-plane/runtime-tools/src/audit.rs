@@ -8,8 +8,10 @@ use rusqlite::{Connection, Transaction, params};
 use serde_json::{Map, Value, json};
 
 use crate::error::{ToolError, ToolResult};
+use crate::git;
 use crate::support::{
-    absolute_path, current_directory, parent_process_id, read_stdin_string, set_mode,
+    absolute_path, current_directory, parent_process_id, parse_json_object_input,
+    read_stdin_string, set_mode,
 };
 
 const DEFAULT_AUDIT_MAX_RECORDS: usize = 10_000;
@@ -42,18 +44,7 @@ fn require_supported_event_type(event_type: &str) -> Result<(), String> {
 }
 
 fn parse_hook_input(raw_input: &str, event_type: &str) -> Result<Map<String, Value>, String> {
-    if raw_input.trim().is_empty() {
-        return Ok(Map::new());
-    }
-
-    let parsed: Value = serde_json::from_str(raw_input)
-        .map_err(|error| format!("Failed to parse {event_type} hook input JSON: {error}"))?;
-    let Value::Object(object) = parsed else {
-        return Err(format!(
-            "{event_type} hook input must be a top-level JSON object."
-        ));
-    };
-    Ok(object)
+    parse_json_object_input(raw_input, &format!("{event_type} hook input"))
 }
 
 fn resolve_db_path() -> Result<PathBuf, String> {
@@ -384,27 +375,7 @@ fn normalize_tool_args(value: Option<&Value>) -> Option<String> {
 }
 
 fn resolve_repo_path(cwd: &Path) -> PathBuf {
-    let output = Command::new("git")
-        .arg("rev-parse")
-        .arg("--show-toplevel")
-        .current_dir(cwd)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output();
-
-    match output {
-        Ok(output) if output.status.success() => parse_repo_path_output(cwd, &output.stdout),
-        _ => cwd.to_path_buf(),
-    }
-}
-
-fn parse_repo_path_output(cwd: &Path, stdout: &[u8]) -> PathBuf {
-    let repo_path = String::from_utf8_lossy(stdout).trim().to_string();
-    if repo_path.is_empty() {
-        cwd.to_path_buf()
-    } else {
-        PathBuf::from(repo_path)
-    }
+    git::get_repo_root(cwd)
 }
 
 fn resolve_git_remotes(repo_path: &Path) -> Option<String> {

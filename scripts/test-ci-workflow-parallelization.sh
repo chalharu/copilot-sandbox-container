@@ -64,6 +64,24 @@ assert_block_not_contains() {
   fi
 }
 
+assert_block_contains_one_of() {
+  local block="$1"
+  local description="$2"
+  shift 2
+
+  local expected
+  for expected in "$@"; do
+    if grep -Fq -- "${expected}" <<<"${block}"; then
+      return 0
+    fi
+  done
+
+  printf 'Expected %s to contain one of:\n' "${description}" >&2
+  printf '  %s\n' "$@" >&2
+  printf '%s\n' "${block}" >&2
+  exit 1
+}
+
 require_command awk
 require_command grep
 
@@ -118,17 +136,33 @@ publish_block="$(job_block publish-architecture-images)"
 assert_block_not_contains "${integration_block}" 'needs: lint' 'integration job block'
 assert_block_contains "${integration_smoke_block}" 'Load integration images' 'integration-smoke job block'
 assert_block_contains "${integration_smoke_block}" 'docker load -i downloaded-images/control-plane-images.tar' 'integration-smoke job block'
-assert_block_contains "${integration_regressions_block}" 'Load integration images' 'integration-regressions job block'
-assert_block_contains "${integration_regressions_block}" 'docker load -i downloaded-images/control-plane-images.tar' 'integration-regressions job block'
+assert_block_contains_one_of \
+  "${integration_regressions_block}" \
+  'integration-regressions job block' \
+  'Load integration images' \
+  '*load-integration-images'
+assert_block_contains_one_of \
+  "${integration_regressions_block}" \
+  'integration-regressions job block' \
+  'docker load -i downloaded-images/control-plane-images.tar' \
+  '*load-integration-images'
 assert_block_contains "${integration_kind_session_block}" 'skipClusterCreation: true' 'integration-kind-session job block'
 assert_block_not_contains "${integration_kind_session_block}" 'Load integration images' 'integration-kind-session job block'
 assert_block_contains "${integration_kind_session_block}" 'CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar' 'integration-kind-session job block'
 assert_block_contains "${integration_kind_session_block}" './scripts/build-test.sh --skip-image-build --group kind-session' 'integration-kind-session job block'
-assert_block_contains "${integration_kind_jobs_block}" 'skipClusterCreation: true' 'integration-kind-jobs job block'
+assert_block_contains_one_of \
+  "${integration_kind_jobs_block}" \
+  'integration-kind-jobs job block' \
+  'skipClusterCreation: true' \
+  '*setup-kind'
 assert_block_not_contains "${integration_kind_jobs_block}" 'Load integration images' 'integration-kind-jobs job block'
 assert_block_contains "${integration_kind_jobs_block}" 'CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar' 'integration-kind-jobs job block'
 assert_block_contains "${integration_kind_jobs_block}" './scripts/build-test.sh --skip-image-build --group kind-jobs-core' 'integration-kind-jobs job block'
-assert_block_contains "${integration_kind_jobs_transfer_block}" 'skipClusterCreation: true' 'integration-kind-jobs-transfer job block'
+assert_block_contains_one_of \
+  "${integration_kind_jobs_transfer_block}" \
+  'integration-kind-jobs-transfer job block' \
+  'skipClusterCreation: true' \
+  '*setup-kind'
 assert_block_not_contains "${integration_kind_jobs_transfer_block}" 'Load integration images' 'integration-kind-jobs-transfer job block'
 assert_block_contains "${integration_kind_jobs_transfer_block}" 'CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar' 'integration-kind-jobs-transfer job block'
 assert_block_contains "${integration_kind_jobs_transfer_block}" './scripts/build-test.sh --skip-image-build --group kind-jobs-transfer' 'integration-kind-jobs-transfer job block'

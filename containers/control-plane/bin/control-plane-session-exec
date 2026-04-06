@@ -31,6 +31,8 @@ memory_request="${CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST:-256Mi}"
 memory_limit="${CONTROL_PLANE_FAST_EXECUTION_MEMORY_LIMIT:-2Gi}"
 remote_home="${CONTROL_PLANE_FAST_EXECUTION_HOME:-/root}"
 bootstrap_root="${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_ROOT:-/var/run/control-plane-bootstrap}"
+run_as_uid="${CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID:-1000}"
+run_as_gid="${CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID:-1000}"
 git_user_name="${CONTROL_PLANE_GIT_USER_NAME:-}"
 git_user_email="${CONTROL_PLANE_GIT_USER_EMAIL:-}"
 request_timeout="${CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC:-3600}"
@@ -60,6 +62,12 @@ yaml_quote() {
   printf "'%s'" "${value}"
 }
 
+shell_quote() {
+  local value="$1"
+  value="${value//\'/\'\"\'\"\'}"
+  printf "'%s'" "${value}"
+}
+
 ensure_single_line() {
   local name="$1"
   local value="$2"
@@ -82,6 +90,10 @@ ensure_configuration() {
   [[ -n "${node_name}" ]] || die "CONTROL_PLANE_NODE_NAME is required"
   [[ "${port}" =~ ^[0-9]+$ ]] || die "CONTROL_PLANE_FAST_EXECUTION_PORT must be numeric"
   [[ "${request_timeout}" =~ ^[0-9]+$ ]] || die "CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC must be numeric"
+  [[ "${run_as_uid}" =~ ^[0-9]+$ ]] || die "CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID must be numeric"
+  [[ "${run_as_gid}" =~ ^[0-9]+$ ]] || die "CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID must be numeric"
+  [[ "${run_as_uid}" -gt 0 ]] || die "CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID must be greater than zero"
+  [[ "${run_as_gid}" -gt 0 ]] || die "CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID must be greater than zero"
   ensure_single_line "CONTROL_PLANE_FAST_EXECUTION_IMAGE" "${image}"
   ensure_single_line "CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY" "${image_pull_policy}"
   ensure_single_line "CONTROL_PLANE_POD_NAME" "${owner_pod_name}"
@@ -91,6 +103,8 @@ ensure_configuration() {
   ensure_single_line "CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY" "${bootstrap_image_pull_policy}"
   ensure_single_line "CONTROL_PLANE_FAST_EXECUTION_HOME" "${remote_home}"
   ensure_single_line "CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_ROOT" "${bootstrap_root}"
+  ensure_single_line "CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID" "${run_as_uid}"
+  ensure_single_line "CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID" "${run_as_gid}"
   if [[ -n "${bootstrap_image}" ]]; then
     ensure_single_line "CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE" "${bootstrap_image}"
   fi
@@ -263,26 +277,6 @@ resolve_bootstrap_image() {
   printf '%s\n' "${resolved_bootstrap_image}"
 }
 
-exec_api_request() {
-  local pod_ip="$1"
-  local auth_token="$2"
-  local cwd="$3"
-  local command_text="$4"
-  local timeout_sec="$5"
-  local response_file="$6"
-  local command_base64=""
-
-  command_base64="$(printf '%s' "${command_text}" | base64 | tr -d '\n')"
-  control-plane-exec-api \
-    exec \
-    --addr "http://${pod_ip}:${port}" \
-    --timeout-sec "${timeout_sec}" \
-    --token "${auth_token}" \
-    --cwd "${cwd}" \
-    --command-base64 "${command_base64}" \
-    > "${response_file}"
-}
-
 validate_exec_api_response() {
   local response_file="$1"
 
@@ -315,12 +309,9 @@ EOF
   fi
 }
 
-render_bootstrap_command() {
+render_execution_start_command() {
   cat <<EOF
 set -eu
-if [ -f "${bootstrap_root}/runtime-ready" ]; then
-  exit 0
-fi
 
 missing_packages=0
 for required_command in bash git gh; do
@@ -344,44 +335,14 @@ if [ "\${missing_packages}" -eq 1 ]; then
   fi
 fi
 
-install -d -m 700 "${remote_home}" "${remote_home}/.config"
-cat > "${remote_home}/.gitconfig" <<'__CONTROL_PLANE_GIT_CONFIG__'
+install -d -m 700 -o ${run_as_uid} -g ${run_as_gid} $(shell_quote "${remote_home}") $(shell_quote "${remote_home}/.config")
+cat > $(shell_quote "${remote_home}/.gitconfig") <<'__CONTROL_PLANE_GIT_CONFIG__'
 $(render_remote_git_config)
 __CONTROL_PLANE_GIT_CONFIG__
-chmod 600 "${remote_home}/.gitconfig"
-: > "${bootstrap_root}/runtime-ready"
+chown ${run_as_uid}:${run_as_gid} $(shell_quote "${remote_home}/.gitconfig")
+chmod 600 $(shell_quote "${remote_home}/.gitconfig")
+exec $(shell_quote "${bootstrap_root}/bin/control-plane-exec-api") serve
 EOF
-}
-
-bootstrap_execution_pod() {
-  local pod_ip="$1"
-  local auth_token="$2"
-  local response_file=""
-  local bootstrap_command=""
-  local exit_code=""
-  local exec_api_status=""
-
-  bootstrap_command="$(render_bootstrap_command)"
-  response_file="$(mktemp "${TMPDIR:-/tmp}/control-plane-session-exec-bootstrap.XXXXXX")"
-  set +e
-  exec_api_request "${pod_ip}" "${auth_token}" "${workspace_mount_path}" "${bootstrap_command}" "${request_timeout}" "${response_file}"
-  exec_api_status=$?
-  set -e
-  if [[ "${exec_api_status}" -ne 0 ]]; then
-    rm -f "${response_file}"
-    die "failed to bootstrap execution pod runtime"
-  fi
-
-  validate_exec_api_response "${response_file}"
-  exit_code="$(jq -r '.exitCode' "${response_file}")"
-  if [[ "${exit_code}" -ne 0 ]]; then
-    jq -j '.stdout // ""' "${response_file}" >&2
-    jq -j '.stderr // ""' "${response_file}" >&2
-    rm -f "${response_file}"
-    die "execution pod bootstrap failed"
-  fi
-
-  rm -f "${response_file}"
 }
 
 render_exec_pod_manifest() {
@@ -413,7 +374,7 @@ spec:
   restartPolicy: Always
   nodeName: $(yaml_quote "${node_name}")
   securityContext:
-    fsGroup: 1000
+    fsGroup: ${run_as_gid}
   initContainers:
     - name: bootstrap-assets
       image: $(yaml_quote "${current_bootstrap_image}")
@@ -423,13 +384,13 @@ spec:
         - -lc
         - |
           set -eu
-          install -d -m 0755 ${bootstrap_root}/bin ${bootstrap_root}/hooks/git
-          cp /usr/local/bin/control-plane-exec-api ${bootstrap_root}/bin/control-plane-exec-api
-          chmod 755 ${bootstrap_root}/bin/control-plane-exec-api
-          cp -R /usr/local/share/control-plane/hooks/git/. ${bootstrap_root}/hooks/git/
-          find ${bootstrap_root}/hooks/git -type d -exec chmod 755 {} +
-          find ${bootstrap_root}/hooks/git -type f -exec chmod 644 {} +
-          chmod 755 ${bootstrap_root}/hooks/git/pre-commit ${bootstrap_root}/hooks/git/pre-push
+          install -d -m 0755 $(shell_quote "${bootstrap_root}/bin") $(shell_quote "${bootstrap_root}/hooks/git")
+          cp /usr/local/bin/control-plane-exec-api $(shell_quote "${bootstrap_root}/bin/control-plane-exec-api")
+          chmod 755 $(shell_quote "${bootstrap_root}/bin/control-plane-exec-api")
+          cp -R /usr/local/share/control-plane/hooks/git/. $(shell_quote "${bootstrap_root}/hooks/git/")
+          find $(shell_quote "${bootstrap_root}/hooks/git") -type d -exec chmod 755 {} +
+          find $(shell_quote "${bootstrap_root}/hooks/git") -type f -exec chmod 644 {} +
+          chmod 755 $(shell_quote "${bootstrap_root}/hooks/git/pre-commit") $(shell_quote "${bootstrap_root}/hooks/git/pre-push")
       securityContext:
         privileged: false
         runAsUser: 0
@@ -441,7 +402,6 @@ spec:
           add:
             - CHOWN
             - DAC_OVERRIDE
-            - FOWNER
         seccompProfile:
           type: RuntimeDefault
       volumeMounts:
@@ -455,8 +415,7 @@ spec:
         - /bin/sh
         - -lc
         - |
-          mkdir -p ${remote_home} ${remote_home}/.config
-          exec ${bootstrap_root}/bin/control-plane-exec-api serve
+$(render_execution_start_command | sed 's/^/          /')
       ports:
         - name: grpc
           containerPort: ${port}
@@ -489,7 +448,6 @@ spec:
           add:
             - CHOWN
             - DAC_OVERRIDE
-            - FOWNER
             - SETGID
             - SETUID
         seccompProfile:
@@ -521,6 +479,12 @@ EOF
           value: $(yaml_quote "${auth_token}")
         - name: CONTROL_PLANE_WORKSPACE
           value: $(yaml_quote "${workspace_mount_path}")
+        - name: CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC
+          value: $(yaml_quote "${request_timeout}")
+        - name: CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID
+          value: $(yaml_quote "${run_as_uid}")
+        - name: CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID
+          value: $(yaml_quote "${run_as_gid}")
         - name: HOME
           value: $(yaml_quote "${remote_home}")
         - name: GIT_CONFIG_GLOBAL
@@ -563,7 +527,6 @@ ensure_pod_ready() {
       cached_pod_ip="$(jq -r '.podIp // empty' <<<"${current_entry}")"
       cached_auth_token="$(jq -r '.authToken // empty' <<<"${current_entry}")"
       if [[ -n "${cached_auth_token}" ]] && healthcheck "${cached_pod_ip}"; then
-        bootstrap_execution_pod "${cached_pod_ip}" "${cached_auth_token}"
         printf '%s\n' "${cached_pod_ip}"
         return 0
       fi
@@ -575,7 +538,6 @@ ensure_pod_ready() {
     current_pod_ip="$(pod_ip_from_json "${current_pod_json}")"
     current_auth_token="$(session_entry_field "${session_key}" authToken)"
     if [[ -n "${current_auth_token}" ]] && wait_for_healthcheck "${current_pod_ip}"; then
-      bootstrap_execution_pod "${current_pod_ip}" "${current_auth_token}"
       write_session_entry "${session_key}" "${pod_name}" "${current_pod_ip}" "${current_auth_token}"
       printf '%s\n' "${current_pod_ip}"
       return 0
@@ -611,7 +573,6 @@ ensure_pod_ready() {
     die "execution pod ${pod_name} did not pass health checks"
   fi
 
-  bootstrap_execution_pod "${current_pod_ip}" "${session_auth_token}"
   write_session_entry "${session_key}" "${pod_name}" "${current_pod_ip}" "${session_auth_token}"
   printf '%s\n' "${current_pod_ip}"
 }

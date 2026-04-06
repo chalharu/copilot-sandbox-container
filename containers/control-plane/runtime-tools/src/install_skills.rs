@@ -111,6 +111,8 @@ impl SkillInstaller {
     ) -> Result<(), String> {
         let repository = require_non_empty(&entry.repository, "repository", manifest_path, None)?;
         let git_ref = require_non_empty(&entry.git_ref, "ref", manifest_path, Some(repository))?;
+        validate_repository(repository, manifest_path)?;
+        validate_git_ref(git_ref, manifest_path, repository)?;
         let checkout_dir = self.checkout_dir(repository, git_ref)?;
 
         for skill_path in entry.skills {
@@ -211,6 +213,31 @@ fn skill_name(skill_path: &str) -> Result<String, String> {
     }
 }
 
+fn validate_repository(repository: &str, manifest_path: &Path) -> Result<(), String> {
+    if repository.starts_with("https://") {
+        Ok(())
+    } else {
+        Err(format!(
+            "manifest entry in {} must use an https:// repository URL: {repository}",
+            manifest_path.display()
+        ))
+    }
+}
+
+fn validate_git_ref(git_ref: &str, manifest_path: &Path, repository: &str) -> Result<(), String> {
+    let valid = git_ref.chars().all(|character| {
+        character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '/' | '-')
+    });
+    if valid && !git_ref.starts_with('-') {
+        Ok(())
+    } else {
+        Err(format!(
+            "manifest entry in {} has an invalid ref for {repository}: {git_ref}",
+            manifest_path.display()
+        ))
+    }
+}
+
 fn reject_duplicate_skill(
     installed_skills: &HashMap<String, String>,
     skill_name: &str,
@@ -254,12 +281,12 @@ fn replace_skill_dir(source_skill_dir: &Path, destination_dir: &Path) -> Result<
 
 fn clone_checkout(repository: &str, git_ref: &str, checkout_dir: &Path) -> Result<(), String> {
     run_git(
-        ["clone", repository, checkout_dir.to_str().unwrap()],
+        &["clone", repository, checkout_dir.to_str().unwrap()],
         repository,
         "clone",
     )?;
     run_git(
-        [
+        &[
             "-C",
             checkout_dir.to_str().unwrap(),
             "checkout",
@@ -271,7 +298,7 @@ fn clone_checkout(repository: &str, git_ref: &str, checkout_dir: &Path) -> Resul
     )
 }
 
-fn run_git<const N: usize>(args: [&str; N], target: &str, action: &str) -> Result<(), String> {
+fn run_git(args: &[&str], target: &str, action: &str) -> Result<(), String> {
     let output = Command::new("git")
         .args(args)
         .stdout(Stdio::null())
@@ -382,5 +409,37 @@ mod tests {
 
         let error = install_from_manifest(&manifest, destination_root.path()).unwrap_err();
         assert!(error.contains("Duplicate installed skill name"));
+    }
+
+    #[test]
+    fn rejects_non_https_repositories() {
+        let _env_lock = lock_env();
+        let manifest_path = TempDir::new().unwrap();
+        let destination_root = TempDir::new().unwrap();
+        let manifest = manifest_path.path().join("external-skills.yaml");
+        fs::write(
+            &manifest,
+            "- repository: ssh://example.com/one.git\n  ref: abc\n  skills:\n    - skills/foo\n",
+        )
+        .unwrap();
+
+        let error = install_from_manifest(&manifest, destination_root.path()).unwrap_err();
+        assert!(error.contains("must use an https:// repository URL"));
+    }
+
+    #[test]
+    fn rejects_invalid_git_refs() {
+        let _env_lock = lock_env();
+        let manifest_path = TempDir::new().unwrap();
+        let destination_root = TempDir::new().unwrap();
+        let manifest = manifest_path.path().join("external-skills.yaml");
+        fs::write(
+            &manifest,
+            "- repository: https://example.com/one.git\n  ref: --orphan\n  skills:\n    - skills/foo\n",
+        )
+        .unwrap();
+
+        let error = install_from_manifest(&manifest, destination_root.path()).unwrap_err();
+        assert!(error.contains("has an invalid ref"));
     }
 }

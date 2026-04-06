@@ -10,10 +10,10 @@ fi
 usage() {
   cat <<'USAGE'
 Usage:
-  control-plane-rust.sh <fmt|fmt-check|check|clippy-fix|clippy|build|test>
+  control-plane-rust.sh <fmt|fmt-check|check|clippy-fix|clippy|build|test> [PATH ...]
 
-Run the requested cargo command across every Rust crate shipped under
-containers/control-plane/.
+Run the requested cargo command across the affected Rust crates shipped under
+containers/control-plane/. When no paths are provided, every shipped crate runs.
 USAGE
 }
 
@@ -38,21 +38,84 @@ repo_root="$(find_repo_root)"
 control_plane_tree="${repo_root}/containers/control-plane"
 [[ -d "${control_plane_tree}" ]] || die "run this hook from the repository root"
 
-manifests=()
-while IFS= read -r manifest; do
-  manifests+=("${manifest}")
-done < <(
-  find "${control_plane_tree}" -mindepth 2 -maxdepth 2 -name Cargo.toml -print \
-    | LC_ALL=C sort
-)
+load_all_manifests() {
+  local manifest
 
-[[ "${#manifests[@]}" -gt 0 ]] || die "no Cargo.toml files found under containers/control-plane"
-[[ $# -eq 1 ]] || {
+  manifests=()
+  while IFS= read -r manifest; do
+    manifests+=("${manifest}")
+  done < <(
+    find "${control_plane_tree}" -mindepth 2 -maxdepth 2 -name Cargo.toml -print \
+      | LC_ALL=C sort
+  )
+  [[ "${#manifests[@]}" -gt 0 ]] || die "no Cargo.toml files found under containers/control-plane"
+}
+
+normalize_candidate_path() {
+  local candidate="$1"
+
+  if [[ "${candidate}" = /* ]]; then
+    printf '%s\n' "${candidate}"
+  else
+    printf '%s\n' "${repo_root}/${candidate}"
+  fi
+}
+
+manifest_for_path() {
+  local candidate="$1"
+  local path
+  local search_dir
+  local parent
+
+  path="$(normalize_candidate_path "${candidate}")"
+  [[ "${path}" == "${control_plane_tree}" || "${path}" == "${control_plane_tree}/"* ]] || return 1
+  if [[ -d "${path}" ]]; then
+    search_dir="${path}"
+  else
+    search_dir="$(dirname "${path}")"
+  fi
+
+  while :; do
+    if [[ -f "${search_dir}/Cargo.toml" ]]; then
+      printf '%s\n' "${search_dir}/Cargo.toml"
+      return 0
+    fi
+    [[ "${search_dir}" == "${control_plane_tree}" ]] && return 1
+    parent="$(dirname "${search_dir}")"
+    [[ "${parent}" != "${search_dir}" ]] || return 1
+    search_dir="${parent}"
+  done
+}
+
+collect_target_manifests() {
+  local changed_path
+  local manifest
+
+  load_all_manifests
+  if [[ "$#" -eq 0 ]]; then
+    printf '%s\n' "${manifests[@]}"
+    return 0
+  fi
+
+  declare -A seen=()
+  for changed_path in "$@"; do
+    manifest="$(manifest_for_path "${changed_path}" || true)"
+    if [[ -n "${manifest}" ]] && [[ -z "${seen["${manifest}"]+x}" ]]; then
+      seen["${manifest}"]=1
+      printf '%s\n' "${manifest}"
+    fi
+  done
+}
+
+[[ $# -ge 1 ]] || {
   usage
   exit 64
 }
 
-case "$1" in
+preset="$1"
+shift
+
+case "${preset}" in
   fmt)
     cargo_args=(fmt --all)
     ;;
@@ -79,7 +142,7 @@ case "$1" in
     exit 0
     ;;
   *)
-    die "unknown preset: $1"
+    die "unknown preset: ${preset}"
     ;;
 esac
 
@@ -112,8 +175,14 @@ run_remote_cargo() {
 
   control-plane-run \
     --image "${remote_image}" \
-    -- bash -lc "${remote_command}"
+     -- bash -lc "${remote_command}"
 }
+
+mapfile -t manifests < <(collect_target_manifests "$@")
+if [[ "${#manifests[@]}" -eq 0 ]]; then
+  printf '%s\n' 'control-plane-rust: no affected control-plane Rust crates' >&2
+  exit 0
+fi
 
 for manifest in "${manifests[@]}"; do
   crate_dir="$(dirname "${manifest}")"

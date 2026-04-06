@@ -53,20 +53,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-run_rust_lint() {
+run_control_plane_rust_lint() {
   local runtime="$1"
-  local workspace_dir
 
-  shift
-
-  for workspace_dir in "$@"; do
-    local container_workspace_dir="/workspace/${workspace_dir#"${repo_root}/"}"
-    "${runtime}" run --rm --user "${workspace_access_user}" \
-      -v "${PWD}:/workspace" \
-      -w "${container_workspace_dir}" \
-      "${control_plane_image}" \
-      bash -lc 'cargo fmt --all --check && cargo clippy --all-targets -- -D warnings'
-  done
+  "${runtime}" run --rm --user "${workspace_access_user}" \
+    -v "${PWD}:/workspace" \
+    -w /workspace \
+    "${control_plane_image}" \
+    bash -lc '/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh fmt-check && /usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh clippy'
 }
 
 run_lint_job() {
@@ -169,7 +163,7 @@ run_lint_job markdownlint \
 
 if [[ "${#rust_workspace_dirs[@]}" -gt 0 ]]; then
   run_lint_job rust \
-    run_rust_lint "${container_bin}" "${rust_workspace_dirs[@]}"
+    run_control_plane_rust_lint "${container_bin}"
 fi
 
 wait_for_lint_jobs

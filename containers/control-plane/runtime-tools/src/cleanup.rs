@@ -1,10 +1,8 @@
-use std::env;
 use std::process::{Command, Stdio};
 
 use crate::error::{ToolError, ToolResult};
-use crate::support::{
-    DEFAULT_SESSION_EXEC_BIN, output_message, parent_process_id, read_stdin_string,
-};
+use crate::session_exec::{fast_execution_enabled, session_exec_bin, session_key};
+use crate::support::{output_message, read_stdin_string};
 
 pub fn run(_args: &[String]) -> ToolResult<i32> {
     let raw_input = read_stdin_string().map_err(|error| {
@@ -37,27 +35,6 @@ pub fn handle(_raw_input: &str) -> Result<(), String> {
             "failed to clean up session execution pod",
         ))
     }
-}
-
-fn fast_execution_enabled() -> bool {
-    matches!(
-        env::var("CONTROL_PLANE_FAST_EXECUTION_ENABLED")
-            .ok()
-            .as_deref(),
-        Some("1")
-    )
-}
-
-fn session_exec_bin() -> String {
-    env::var("CONTROL_PLANE_SESSION_EXEC_BIN")
-        .unwrap_or_else(|_| DEFAULT_SESSION_EXEC_BIN.to_string())
-}
-
-fn session_key() -> String {
-    env::var("CONTROL_PLANE_HOOK_SESSION_KEY")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| parent_process_id().unwrap_or(0).to_string())
 }
 
 #[cfg(test)]

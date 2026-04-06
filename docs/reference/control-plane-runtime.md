@@ -124,13 +124,18 @@ bundled `preToolUse/exec-forward` は、`CONTROL_PLANE_FAST_EXECUTION_ENABLED=1`
 on-demand で作成または再利用し、`/workspace` PVC を共有したまま
 gRPC 経由で転送します。Execution Pod は任意の Linux image を起点にしつつ、
 bootstrap image から受け取った Rust binary と Git hook を使って初期化されます。
+Exec API は per-pod token が必須で、delegated command 自体は
+`CONTROL_PLANE_FAST_EXECUTION_RUN_AS_{UID,GID}` で指定した非 root UID/GID へ
+drop してから実行します。gRPC 経路は cluster 内 plaintext を前提にしているため、
+flat network ではなく pod-to-pod 通信を信用できる namespace / CNI で使ってください。
 bundled `sessionEnd/cleanup` は同じ session key で明示 cleanup を行い、
 Control Plane Pod 側の OwnerReference でも Pod 漏れを抑えます。bash hook では
 `CONTROL_PLANE_HOOK_SESSION_KEY="$PPID"` を渡し、
 transient shell PID ではなく Copilot session 側の親プロセスを key に使います。
 
 sample manifest では、この経路のために control-plane ServiceAccount へ
-same-namespace Pod の `create/delete/get/list/watch` 権限を付けます。
+same-namespace Pod の `create/delete/get/list/watch` 権限を付けます。shared
+namespace へそのまま広げず、dedicated control-plane namespace を前提にしてください。
 
 ## 6. Bundled skill surface
 

@@ -3,6 +3,8 @@ kind: RoleBinding
 metadata:
   name: control-plane-exec-pods
   namespace: copilot-sandbox
+# Bind only the control-plane ServiceAccount in the dedicated control-plane
+# namespace; do not reuse this RoleBinding in a shared workload namespace.
 subjects:
   - kind: ServiceAccount
     name: control-plane

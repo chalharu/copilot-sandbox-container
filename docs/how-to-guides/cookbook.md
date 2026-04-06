@@ -94,11 +94,16 @@ ConfigMap / Secret / write-back の具体的な path は
    に使う
 8. control-plane ServiceAccount には同じ namespace の Pod を
    `create/delete/get/list/watch` できる Role / RoleBinding
-   (`control-plane-exec-pods`) を付ける
+   (`control-plane-exec-pods`) を付ける。ただし shared namespace ではなく、
+   control-plane 専用 namespace に閉じ込める
 9. `CONTROL_PLANE_FAST_EXECUTION_IMAGE` には delegated bash を実行したい
    任意の Linux image（例: `ubuntu:24.04` や `alpine:3.22`）を置き、
+   本番では digest-pinned ref を使う。
    `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` には Rust 製 exec-plane
-   binary と bundled Git hook を持つ control-plane image を置く
+   binary と bundled Git hook を持つ control-plane image を置く。
+   delegated command を非 root で走らせたい場合は
+   `CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID` /
+   `CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID` も合わせて定義する
 10. 監査ログ DB の保持件数は `control-plane-env` ConfigMap の
    `CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）で調整する
 

@@ -18,60 +18,72 @@ struct JobCommandArgs {
     timeout: Duration,
 }
 
-pub fn run_wait(args: &[String]) -> ToolResult<i32> {
-    if args.len() == 1 && args[0] == "--help" {
-        print_usage("k8s-job-wait");
-        return Ok(0);
-    }
+#[derive(Debug)]
+enum ParsedArg {
+    Namespace(String),
+    JobName(String),
+    Timeout(Duration),
+}
 
-    let parsed = parse_job_command_args("k8s-job-wait", args)?;
-    require_kubectl("k8s-job-wait")?;
-    match wait_for_job(&parsed.namespace, &parsed.job_name, parsed.timeout)
-        .map_err(|message| ToolError::new(1, "k8s-job-wait", message))?
-    {
-        JobWaitStatus::Completed => Ok(0),
-        JobWaitStatus::Failed => {
-            eprintln!("k8s-job-wait: job {} failed", parsed.job_name);
-            Ok(1)
-        }
-        JobWaitStatus::TimedOut => {
-            eprintln!(
-                "k8s-job-wait: timed out waiting for job {}",
-                parsed.job_name
-            );
-            Ok(124)
-        }
-    }
+pub fn run_wait(args: &[String]) -> ToolResult<i32> {
+    run_job_command(
+        "k8s-job-wait",
+        args,
+        |parsed, command_name| match wait_for_job(
+            &parsed.namespace,
+            &parsed.job_name,
+            parsed.timeout,
+        )
+        .map_err(|message| ToolError::new(1, command_name, message))?
+        {
+            JobWaitStatus::Completed => Ok(0),
+            JobWaitStatus::Failed => {
+                eprintln!("{command_name}: job {} failed", parsed.job_name);
+                Ok(1)
+            }
+            JobWaitStatus::TimedOut => {
+                eprintln!(
+                    "{command_name}: timed out waiting for job {}",
+                    parsed.job_name
+                );
+                Ok(124)
+            }
+        },
+    )
 }
 
 pub fn run_pod(args: &[String]) -> ToolResult<i32> {
-    if args.len() == 1 && args[0] == "--help" {
-        print_usage("k8s-job-pod");
-        return Ok(0);
-    }
-
-    let parsed = parse_job_command_args("k8s-job-pod", args)?;
-    require_kubectl("k8s-job-pod")?;
-    let pod_name = resolve_job_pod(&parsed.namespace, &parsed.job_name)
-        .map_err(|message| ToolError::new(1, "k8s-job-pod", message))?;
-    println!("{pod_name}");
-    Ok(0)
+    run_job_command("k8s-job-pod", args, |parsed, command_name| {
+        let pod_name = resolve_job_pod(&parsed.namespace, &parsed.job_name)
+            .map_err(|message| ToolError::new(1, command_name, message))?;
+        println!("{pod_name}");
+        Ok(0)
+    })
 }
 
 pub fn run_logs(args: &[String]) -> ToolResult<i32> {
-    if args.len() == 1 && args[0] == "--help" {
-        print_usage("k8s-job-logs");
-        return Ok(0);
-    }
-
-    let parsed = parse_job_command_args("k8s-job-logs", args)?;
-    require_kubectl("k8s-job-logs")?;
-    stream_job_logs(&parsed.namespace, &parsed.job_name)
-        .map_err(|message| ToolError::new(1, "k8s-job-logs", message))
+    run_job_command("k8s-job-logs", args, |parsed, command_name| {
+        stream_job_logs(&parsed.namespace, &parsed.job_name)
+            .map_err(|message| ToolError::new(1, command_name, message))
+    })
 }
 
 fn require_kubectl(command_name: &'static str) -> ToolResult<()> {
     ensure_command("kubectl").map_err(|error| ToolError::new(64, command_name, error.to_string()))
+}
+
+fn run_job_command<F>(command_name: &'static str, args: &[String], handler: F) -> ToolResult<i32>
+where
+    F: FnOnce(&JobCommandArgs, &'static str) -> ToolResult<i32>,
+{
+    if args.len() == 1 && args[0] == "--help" {
+        print_usage(command_name);
+        return Ok(0);
+    }
+
+    let parsed = parse_job_command_args(command_name, args)?;
+    require_kubectl(command_name)?;
+    handler(&parsed, command_name)
 }
 
 fn parse_job_command_args(
@@ -84,19 +96,15 @@ fn parse_job_command_args(
     let mut index = 0usize;
 
     while index < args.len() {
-        index = parse_arg(
-            command_name,
-            args,
-            index,
-            &mut namespace,
-            &mut job_name,
-            &mut timeout,
-        )?;
+        let (parsed_arg, next_index) = parse_arg(command_name, args, index)?;
+        apply_parsed_arg(parsed_arg, &mut namespace, &mut job_name, &mut timeout);
+        index = next_index;
     }
 
     if job_name.is_empty() {
         return Err(ToolError::new(64, command_name, "--job-name is required"));
     }
+    validate_job_name(command_name, &job_name)?;
 
     Ok(JobCommandArgs {
         namespace,
@@ -109,30 +117,44 @@ fn parse_arg(
     command_name: &'static str,
     args: &[String],
     index: usize,
-    namespace: &mut String,
-    job_name: &mut String,
-    timeout: &mut Duration,
-) -> ToolResult<usize> {
+) -> ToolResult<(ParsedArg, usize)> {
     match args[index].as_str() {
-        "--namespace" => {
-            *namespace = require_value(command_name, args, index, "--namespace")?.clone();
-            Ok(index + 2)
-        }
-        "--job-name" => {
-            *job_name = require_value(command_name, args, index, "--job-name")?.clone();
-            Ok(index + 2)
-        }
+        "--namespace" => Ok((
+            ParsedArg::Namespace(require_value(command_name, args, index, "--namespace")?.clone()),
+            index + 2,
+        )),
+        "--job-name" => Ok((
+            ParsedArg::JobName(require_value(command_name, args, index, "--job-name")?.clone()),
+            index + 2,
+        )),
         "--timeout" => {
             let value = require_value(command_name, args, index, "--timeout")?;
-            *timeout = parse_timeout_duration(value)
-                .map_err(|message| ToolError::new(64, command_name, message))?;
-            Ok(index + 2)
+            Ok((
+                ParsedArg::Timeout(
+                    parse_timeout_duration(value)
+                        .map_err(|message| ToolError::new(64, command_name, message))?,
+                ),
+                index + 2,
+            ))
         }
         other => Err(ToolError::new(
             64,
             command_name,
             format!("unknown option: {other}"),
         )),
+    }
+}
+
+fn apply_parsed_arg(
+    parsed_arg: ParsedArg,
+    namespace: &mut String,
+    job_name: &mut String,
+    timeout: &mut Duration,
+) {
+    match parsed_arg {
+        ParsedArg::Namespace(value) => *namespace = value,
+        ParsedArg::JobName(value) => *job_name = value,
+        ParsedArg::Timeout(value) => *timeout = value,
     }
 }
 
@@ -180,6 +202,30 @@ fn parse_timeout_duration(raw_value: &str) -> Result<Duration, String> {
         _ => return Err(format!("invalid timeout value: {raw_value}")),
     };
     Ok(Duration::from_secs(seconds))
+}
+
+fn validate_job_name(command_name: &'static str, job_name: &str) -> ToolResult<()> {
+    let is_valid = !job_name.is_empty()
+        && job_name.len() <= 253
+        && job_name.bytes().all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || matches!(character, b'.' | b'-')
+        })
+        && !job_name.starts_with(['.', '-'])
+        && !job_name.ends_with(['.', '-'])
+        && !job_name
+            .split('.')
+            .any(|label| label.is_empty() || label.starts_with('-') || label.ends_with('-'));
+    if is_valid {
+        Ok(())
+    } else {
+        Err(ToolError::new(
+            64,
+            command_name,
+            format!("invalid Kubernetes job name: {job_name}"),
+        ))
+    }
 }
 
 fn wait_for_job(
@@ -271,7 +317,7 @@ mod tests {
     use crate::support::shell_quote;
     use crate::test_support::{EnvRestore, lock_env, write_executable};
 
-    use super::{JobWaitStatus, resolve_job_pod, wait_for_job};
+    use super::{JobWaitStatus, parse_job_command_args, resolve_job_pod, wait_for_job};
 
     #[test]
     fn detects_completion() {
@@ -317,5 +363,23 @@ mod tests {
 
         let pod_name = resolve_job_pod("default", "demo").unwrap();
         assert_eq!(pod_name, "demo-pod");
+    }
+
+    #[test]
+    fn rejects_invalid_job_name() {
+        let error = parse_job_command_args(
+            "k8s-job-logs",
+            &[
+                "--job-name".to_string(),
+                "demo,status=running".to_string(),
+                "--namespace".to_string(),
+                "default".to_string(),
+            ],
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.message,
+            "invalid Kubernetes job name: demo,status=running"
+        );
     }
 }

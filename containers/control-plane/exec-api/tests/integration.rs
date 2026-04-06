@@ -17,6 +17,9 @@ async fn start_server(temp_dir: &TempDir, token: &str) -> (String, oneshot::Send
         port: listener.local_addr().expect("listener address").port(),
         workspace_root: temp_dir.path().to_path_buf(),
         exec_api_token: token.to_owned(),
+        exec_timeout: Duration::from_secs(5),
+        run_as_uid: unsafe { libc::geteuid() },
+        run_as_gid: unsafe { libc::getegid() },
     };
 
     tokio::spawn(async move {

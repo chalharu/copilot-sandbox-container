@@ -3,6 +3,8 @@ kind: Role
 metadata:
   name: control-plane-exec-pods
   namespace: copilot-sandbox
+# Keep this Role scoped to a dedicated control-plane namespace. The control-plane
+# shell can create/delete same-namespace execution pods through this grant.
 rules:
   - apiGroups: [""]
     resources: ["pods"]

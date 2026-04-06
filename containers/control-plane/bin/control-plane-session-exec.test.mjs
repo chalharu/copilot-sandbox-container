@@ -325,7 +325,7 @@ test("prepare renders the execution pod manifest and caches the pod state", (t) 
 	assert.match(manifest, /name: bootstrap-assets/);
 	assert.match(
 		manifest,
-		/cp \/usr\/local\/bin\/control-plane-exec-api \/var\/run\/control-plane-bootstrap\/bin\/control-plane-exec-api/,
+		/cp \/usr\/local\/bin\/control-plane-exec-api '\/var\/run\/control-plane-bootstrap\/bin\/control-plane-exec-api'/,
 	);
 	assert.match(manifest, /grpc:/);
 	assert.doesNotMatch(manifest, /httpGet:/);
@@ -355,6 +355,14 @@ test("prepare renders the execution pod manifest and caches the pod state", (t) 
 	assert.doesNotMatch(manifest, /garage-sccache-auth/);
 	assert.doesNotMatch(manifest, /envFrom:/);
 	assert.match(manifest, /name: CONTROL_PLANE_EXEC_API_TOKEN/);
+	assert.match(
+		manifest,
+		/name: CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC/,
+	);
+	assert.match(manifest, /value: '3600'/);
+	assert.match(manifest, /name: CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID/);
+	assert.match(manifest, /value: '1000'/);
+	assert.match(manifest, /name: CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID/);
 	assert.match(
 		manifest,
 		new RegExp(`value: '${escapeRegex(state.sessions[sessionKey].authToken)}'`),

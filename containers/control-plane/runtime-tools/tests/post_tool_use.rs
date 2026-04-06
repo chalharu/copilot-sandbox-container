@@ -324,7 +324,7 @@ fn linters_config_defines_language_pipelines() {
 
     assert_eq!(markdownlint_fix_npx["command"], "npx");
     assert_eq!(control_plane_rust_fmt["command"], "bash");
-    assert_eq!(control_plane_rust_fmt["appendFiles"], false);
+    assert_eq!(control_plane_rust_fmt["appendFiles"], true);
     assert_eq!(yamllint_check["command"], "yamllint");
     assert_eq!(markdown_pipeline["matcher"][0], "\\.(?:md|markdown)$");
     assert_eq!(scripts_pipeline["steps"][1]["tools"][0], "oxlint-fix");
@@ -448,18 +448,17 @@ fn hook_runs_python_rust_yaml_and_dockerfile_pipelines() {
 }
 
 #[test]
-fn hook_merges_bundled_and_repo_overrides() {
+fn hook_uses_repo_pipeline_overrides_with_bundled_tools() {
     let repo = setup_repo("post-tool-use-merge-");
     seed_repo(repo.path());
     make_files_dirty(repo.path());
     fs::write(
         repo.path().join(".github/linters.json"),
         serde_json::to_string_pretty(&serde_json::json!({
-            "tools": [{ "id": "repo-scripts-check", "command": "second-tool", "args": ["check"] }],
             "pipelines": [{
                 "id": "scripts",
                 "matcher": ["\\.(?:[cm]?[jt]s|[jt]sx)$"],
-                "steps": [{ "tools": ["repo-scripts-check"] }]
+                "steps": [{ "tools": ["biome-check-write"] }]
             }]
         }))
         .unwrap(),
@@ -469,10 +468,9 @@ fn hook_merges_bundled_and_repo_overrides() {
     let hook_env = create_tool_stubs(
         repo.path(),
         StubOptions {
-            biome: false,
+            biome: true,
             oxlint: false,
             eslint: false,
-            second_tool: true,
             ..StubOptions::default()
         },
     );
@@ -482,11 +480,41 @@ fn hook_merges_bundled_and_repo_overrides() {
 
     assert_eq!(result.status.code(), Some(1));
     assert!(hook_log.contains("--fix README.md"));
-    assert!(hook_log.contains("second-tool check index.ts"));
-    assert!(!hook_log.contains("biome check --write index.ts"));
+    assert!(hook_log.contains("biome check --write index.ts"));
     assert!(!hook_log.contains("oxlint --fix index.ts"));
     assert!(stderr.contains("remaining markdown issue in README.md"));
     assert!(!stderr.contains("JavaScript/TypeScript linter reported unresolved issues:"));
+}
+
+#[test]
+fn hook_rejects_repo_defined_commands() {
+    let repo = setup_repo("post-tool-use-reject-repo-tool-");
+    seed_repo(repo.path());
+    make_files_dirty(repo.path());
+    fs::write(
+        repo.path().join(".github/linters.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "tools": [{ "id": "repo-scripts-check", "command": "second-tool", "args": ["check"] }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let hook_env = create_tool_stubs(
+        repo.path(),
+        StubOptions {
+            second_tool: true,
+            ..StubOptions::default()
+        },
+    );
+    let result = run_hook(repo.path(), &hook_env, "success");
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert_eq!(result.status.code(), Some(1));
+    assert!(
+        stderr
+            .contains("Repo linters config may only override bundled tool ids: repo-scripts-check")
+    );
 }
 
 #[test]

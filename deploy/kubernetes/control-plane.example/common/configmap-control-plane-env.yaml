@@ -33,15 +33,21 @@ data:
   # Enable session-scoped execution pods for Copilot CLI bash commands.
   CONTROL_PLANE_FAST_EXECUTION_ENABLED: "1"
   # Choose the runtime image that should actually execute delegated bash
-  # commands. Alpine / Ubuntu both work as long as they provide /bin/sh and
-  # either apk or apt-get so the bootstrap step can install bash, git, and gh.
-  CONTROL_PLANE_FAST_EXECUTION_IMAGE: docker.io/library/ubuntu:24.04
+  # commands. Use digest-pinned images in shared clusters. Alpine / Ubuntu both
+  # work as long as they provide /bin/sh and either apk or apt-get so the
+  # startup step can install bash, git, and gh before serving requests.
+  CONTROL_PLANE_FAST_EXECUTION_IMAGE: docker.io/library/ubuntu:24.04@sha256:replace-with-digest
   CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: IfNotPresent
   # The bootstrap image provides the Rust exec-plane binary and bundled git hooks.
-  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha
+  # Prefer a digest-pinned ref here too.
+  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha@sha256:replace-with-digest
   CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: IfNotPresent
   CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 120s
   CONTROL_PLANE_FAST_EXECUTION_PORT: "8080"
+  # Delegated commands run as this unprivileged UID/GID even though the startup
+  # step may briefly need root to install packages in generic base images.
+  CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID: "1000"
+  CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID: "1000"
   CONTROL_PLANE_FAST_EXECUTION_HOME: /root
   CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_ROOT: /var/run/control-plane-bootstrap
   CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST: 250m

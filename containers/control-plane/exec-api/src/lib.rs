@@ -27,6 +27,9 @@ pub struct ServerConfig {
     pub port: u16,
     pub workspace_root: PathBuf,
     pub exec_api_token: String,
+    pub exec_timeout: Duration,
+    pub run_as_uid: u32,
+    pub run_as_gid: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,13 +44,19 @@ pub struct ExecResult {
 struct ExecApiService {
     workspace_root: PathBuf,
     exec_api_token: String,
+    exec_timeout: Duration,
+    run_as_uid: u32,
+    run_as_gid: u32,
 }
 
 impl ExecApiService {
-    fn new(workspace_root: PathBuf, exec_api_token: String) -> Self {
+    fn new(config: &ServerConfig) -> Self {
         Self {
-            workspace_root,
-            exec_api_token,
+            workspace_root: config.workspace_root.clone(),
+            exec_api_token: config.exec_api_token.clone(),
+            exec_timeout: config.exec_timeout,
+            run_as_uid: config.run_as_uid,
+            run_as_gid: config.run_as_gid,
         }
     }
 }
@@ -83,7 +92,14 @@ impl proto::exec_service_server::ExecService for ExecApiService {
 
         let cwd =
             normalize_cwd(&self.workspace_root, &request.cwd).map_err(Status::invalid_argument)?;
-        let result = run_shell_command(&request.command, &cwd).await?;
+        let result = run_shell_command(
+            &request.command,
+            &cwd,
+            self.exec_timeout,
+            self.run_as_uid,
+            self.run_as_gid,
+        )
+        .await?;
 
         Ok(Response::new(proto::ExecuteResponse {
             stdout: result.stdout,
@@ -96,6 +112,55 @@ impl proto::exec_service_server::ExecService for ExecApiService {
 pub fn load_server_config_from_env() -> Result<ServerConfig, String> {
     let raw_port =
         std::env::var("CONTROL_PLANE_FAST_EXECUTION_PORT").unwrap_or_else(|_| String::from("8080"));
+    let raw_workspace =
+        std::env::var("CONTROL_PLANE_WORKSPACE").unwrap_or_else(|_| String::from("/workspace"));
+    let exec_api_token = std::env::var("CONTROL_PLANE_EXEC_API_TOKEN")
+        .map_err(|_| String::from("CONTROL_PLANE_EXEC_API_TOKEN is required"))?;
+    let timeout_sec = std::env::var("CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC")
+        .unwrap_or_else(|_| String::from("3600"));
+    let run_as_uid = std::env::var("CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID")
+        .unwrap_or_else(|_| String::from("1000"));
+    let run_as_gid = std::env::var("CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID")
+        .unwrap_or_else(|_| String::from("1000"));
+    build_server_config(
+        &raw_port,
+        Path::new(&raw_workspace),
+        exec_api_token,
+        &timeout_sec,
+        &run_as_uid,
+        &run_as_gid,
+    )
+}
+
+fn build_server_config(
+    raw_port: &str,
+    raw_workspace: &Path,
+    exec_api_token: String,
+    timeout_sec: &str,
+    run_as_uid: &str,
+    run_as_gid: &str,
+) -> Result<ServerConfig, String> {
+    let port = parse_port(raw_port)?;
+    let workspace_root = normalize_workspace_root(raw_workspace)?;
+    let exec_timeout = Duration::from_secs(parse_positive_u64(
+        timeout_sec,
+        "CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC",
+    )?);
+    let run_as_uid = parse_non_root_u32(run_as_uid, "CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID")?;
+    let run_as_gid = parse_non_root_u32(run_as_gid, "CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID")?;
+    let exec_api_token = require_non_empty(exec_api_token, "CONTROL_PLANE_EXEC_API_TOKEN")?;
+
+    Ok(ServerConfig {
+        port,
+        workspace_root,
+        exec_api_token,
+        exec_timeout,
+        run_as_uid,
+        run_as_gid,
+    })
+}
+
+fn parse_port(raw_port: &str) -> Result<u16, String> {
     let port = raw_port
         .parse::<u16>()
         .map_err(|_| format!("invalid CONTROL_PLANE_FAST_EXECUTION_PORT: {raw_port}"))?;
@@ -104,17 +169,41 @@ pub fn load_server_config_from_env() -> Result<ServerConfig, String> {
             "invalid CONTROL_PLANE_FAST_EXECUTION_PORT: {raw_port}"
         ));
     }
+    Ok(port)
+}
 
-    let raw_workspace =
-        std::env::var("CONTROL_PLANE_WORKSPACE").unwrap_or_else(|_| String::from("/workspace"));
-    let workspace_root = normalize_workspace_root(Path::new(&raw_workspace))?;
-    let exec_api_token = std::env::var("CONTROL_PLANE_EXEC_API_TOKEN").unwrap_or_default();
+fn parse_positive_u64(raw_value: &str, variable_name: &str) -> Result<u64, String> {
+    let value = raw_value
+        .parse::<u64>()
+        .map_err(|_| format!("{variable_name} must be a positive integer: {raw_value}"))?;
+    if value == 0 {
+        Err(format!(
+            "{variable_name} must be a positive integer: {raw_value}"
+        ))
+    } else {
+        Ok(value)
+    }
+}
 
-    Ok(ServerConfig {
-        port,
-        workspace_root,
-        exec_api_token,
-    })
+fn parse_non_root_u32(raw_value: &str, variable_name: &str) -> Result<u32, String> {
+    let value = raw_value
+        .parse::<u32>()
+        .map_err(|_| format!("{variable_name} must be a positive integer: {raw_value}"))?;
+    if value == 0 {
+        Err(format!(
+            "{variable_name} must be greater than zero: {raw_value}"
+        ))
+    } else {
+        Ok(value)
+    }
+}
+
+fn require_non_empty(value: String, variable_name: &str) -> Result<String, String> {
+    if value.trim().is_empty() {
+        Err(format!("{variable_name} must not be empty"))
+    } else {
+        Ok(value)
+    }
 }
 
 pub async fn serve_with_listener<F>(
@@ -126,7 +215,7 @@ where
     F: Future<Output = ()> + Send + 'static,
 {
     let local_addr = listener.local_addr()?;
-    let service = ExecApiService::new(config.workspace_root.clone(), config.exec_api_token.clone());
+    let service = ExecApiService::new(&config);
     let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
         .set_service_status(HEALTH_SERVICE_NAME, ServingStatus::Serving)
@@ -208,7 +297,12 @@ fn normalize_workspace_root(raw_workspace: &Path) -> Result<PathBuf, String> {
             .join(raw_workspace)
     };
 
-    Ok(normalize_path(&absolute_workspace))
+    std::fs::canonicalize(&absolute_workspace).map_err(|error| {
+        format!(
+            "failed to resolve CONTROL_PLANE_WORKSPACE {}: {error}",
+            absolute_workspace.display()
+        )
+    })
 }
 
 fn normalize_cwd(workspace_root: &Path, raw_cwd: &str) -> Result<PathBuf, String> {
@@ -223,13 +317,15 @@ fn normalize_cwd(workspace_root: &Path, raw_cwd: &str) -> Result<PathBuf, String
         }
     };
 
-    if target == workspace_root || target.starts_with(workspace_root) {
-        Ok(target)
+    let resolved_target = std::fs::canonicalize(&target)
+        .map_err(|error| format!("failed to resolve cwd {}: {error}", target.display()))?;
+    if resolved_target == workspace_root || resolved_target.starts_with(workspace_root) {
+        Ok(resolved_target)
     } else {
         Err(format!(
             "cwd must stay within {}: {}",
             workspace_root.display(),
-            target.display()
+            resolved_target.display()
         ))
     }
 }
@@ -304,19 +400,34 @@ fn resolve_shell_candidate(candidate: &str) -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-async fn run_shell_command(command: &str, cwd: &Path) -> Result<ExecResult, Status> {
+async fn run_shell_command(
+    command: &str,
+    cwd: &Path,
+    exec_timeout: Duration,
+    run_as_uid: u32,
+    run_as_gid: u32,
+) -> Result<ExecResult, Status> {
     let shell = resolve_shell().ok_or_else(|| {
         Status::failed_precondition("no supported shell found (tried bash and sh variants)")
     })?;
-    let output = Command::new(shell)
+    let mut process = Command::new(shell);
+    process
         .arg("-lc")
         .arg(command)
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
+        .stderr(Stdio::piped());
+    process.kill_on_drop(true);
+    configure_command_identity(&mut process, run_as_uid, run_as_gid);
+    let output = tokio::time::timeout(exec_timeout, process.output())
         .await
+        .map_err(|_| {
+            Status::deadline_exceeded(format!(
+                "command exceeded execution timeout of {} seconds",
+                exec_timeout.as_secs()
+            ))
+        })?
         .map_err(|error| Status::new(Code::Internal, error.to_string()))?;
 
     Ok(ExecResult {
@@ -325,6 +436,15 @@ async fn run_shell_command(command: &str, cwd: &Path) -> Result<ExecResult, Stat
         exit_code: exit_code_from_status(output.status),
     })
 }
+
+#[cfg(unix)]
+fn configure_command_identity(process: &mut Command, run_as_uid: u32, run_as_gid: u32) {
+    process.uid(run_as_uid);
+    process.gid(run_as_gid);
+}
+
+#[cfg(not(unix))]
+fn configure_command_identity(_process: &mut Command, _run_as_uid: u32, _run_as_gid: u32) {}
 
 #[cfg(unix)]
 fn exit_code_from_status(status: std::process::ExitStatus) -> i32 {
@@ -343,8 +463,9 @@ fn exit_code_from_status(status: std::process::ExitStatus) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_cwd, normalize_path};
+    use super::{build_server_config, normalize_cwd, normalize_path};
     use std::path::{Path, PathBuf};
+    use tempfile::TempDir;
 
     #[test]
     fn normalize_path_removes_dot_segments() {
@@ -359,5 +480,45 @@ mod tests {
         let error = normalize_cwd(Path::new("/workspace"), "/workspace/../tmp")
             .expect_err("path should be rejected");
         assert_eq!(error, "cwd must stay within /workspace: /tmp");
+    }
+
+    #[test]
+    fn rejects_empty_exec_api_token() {
+        let workspace = TempDir::new().unwrap();
+        let error = build_server_config(
+            "8080",
+            workspace.path(),
+            String::new(),
+            "3600",
+            "1000",
+            "1000",
+        )
+        .unwrap_err();
+        assert_eq!(error, "CONTROL_PLANE_EXEC_API_TOKEN must not be empty");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn normalize_cwd_rejects_symlink_escapes() {
+        use std::os::unix::fs::symlink;
+
+        let temp_dir = TempDir::new().unwrap();
+        let workspace = temp_dir.path().join("workspace");
+        let outside = temp_dir.path().join("outside");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, workspace.join("escape")).unwrap();
+        let workspace = std::fs::canonicalize(&workspace).unwrap();
+
+        let error =
+            normalize_cwd(&workspace, workspace.join("escape").to_str().unwrap()).unwrap_err();
+        assert_eq!(
+            error,
+            format!(
+                "cwd must stay within {}: {}",
+                workspace.display(),
+                outside.display()
+            )
+        );
     }
 }

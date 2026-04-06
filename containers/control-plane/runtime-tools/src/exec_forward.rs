@@ -1,4 +1,3 @@
-use std::env;
 use std::process::{Command, Stdio};
 
 use base64::Engine as _;
@@ -6,9 +5,9 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde_json::{Map, Value, json};
 
 use crate::error::{ToolError, ToolResult};
+use crate::session_exec::{fast_execution_enabled, session_exec_bin, session_key};
 use crate::support::{
-    DEFAULT_SESSION_EXEC_BIN, current_directory, output_message, parent_process_id,
-    read_stdin_string, shell_quote,
+    current_directory, output_message, parse_json_object_input, read_stdin_string, shell_quote,
 };
 
 pub fn run(_args: &[String]) -> ToolResult<i32> {
@@ -64,15 +63,6 @@ fn should_rewrite(input: &Map<String, Value>) -> bool {
     input.get("toolName").and_then(Value::as_str) == Some("bash") && fast_execution_enabled()
 }
 
-fn fast_execution_enabled() -> bool {
-    matches!(
-        env::var("CONTROL_PLANE_FAST_EXECUTION_ENABLED")
-            .ok()
-            .as_deref(),
-        Some("1")
-    )
-}
-
 fn command_text(tool_args: &Map<String, Value>) -> Option<&str> {
     tool_args
         .get("command")
@@ -108,15 +98,7 @@ fn rewritten_command(
 }
 
 fn parse_input_object(raw_input: &str) -> Result<Map<String, Value>, String> {
-    if raw_input.trim().is_empty() {
-        return Ok(Map::new());
-    }
-
-    let parsed: Value = serde_json::from_str(raw_input).map_err(|error| error.to_string())?;
-    let Value::Object(object) = parsed else {
-        return Err("hook input must be a top-level JSON object".to_string());
-    };
-    Ok(object)
+    parse_json_object_input(raw_input, "hook input")
 }
 
 fn parse_tool_args(tool_args: Option<&Value>) -> Result<Map<String, Value>, String> {
@@ -154,18 +136,6 @@ fn prepare_execution_pod(session_exec_bin: &str, session_key: &str) -> Result<()
             "failed to prepare session execution pod",
         ))
     }
-}
-
-fn session_exec_bin() -> String {
-    env::var("CONTROL_PLANE_SESSION_EXEC_BIN")
-        .unwrap_or_else(|_| DEFAULT_SESSION_EXEC_BIN.to_string())
-}
-
-fn session_key() -> String {
-    env::var("CONTROL_PLANE_HOOK_SESSION_KEY")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| parent_process_id().unwrap_or(0).to_string())
 }
 
 fn deny_json(message: &str) -> String {

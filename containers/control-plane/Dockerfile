@@ -1,4 +1,6 @@
-FROM docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895 AS exec-policy-builder
+ARG RUST_BASE_IMAGE=docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895
+
+FROM ${RUST_BASE_IMAGE} AS exec-policy-builder
 
 WORKDIR /build/control-plane-exec-policy
 COPY exec-policy-preload/Cargo.toml exec-policy-preload/Cargo.lock ./
@@ -7,7 +9,7 @@ COPY hooks/preToolUse/deny-rules.yaml ./hooks/preToolUse/deny-rules.yaml
 RUN cargo test --locked --release \
     && cargo build --locked --release
 
-FROM docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895 AS exec-api-builder
+FROM ${RUST_BASE_IMAGE} AS exec-api-builder
 
 # hadolint ignore=DL3008
 RUN apt-get update -o Acquire::Retries=3 \
@@ -27,7 +29,7 @@ RUN target="$(rustc -vV | awk '/^host:/ { print $2 }' | sed 's/-unknown-linux-gn
     && cargo build --locked --release --target "${target}" \
     && cp "target/${target}/release/control-plane-exec-api" "target/release/control-plane-exec-api"
 
-FROM docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895 AS runtime-tools-builder
+FROM ${RUST_BASE_IMAGE} AS runtime-tools-builder
 
 WORKDIR /build/control-plane-runtime-tools
 COPY runtime-tools/Cargo.toml runtime-tools/Cargo.lock ./
@@ -37,11 +39,11 @@ COPY hooks/postToolUse/linters.json /build/hooks/postToolUse/linters.json
 RUN cargo test --locked --release \
     && cargo build --locked --release
 
-FROM docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895 AS rust-toolchain
+FROM ${RUST_BASE_IMAGE} AS rust-toolchain
 
 RUN rustup component add clippy rustfmt
 
-FROM docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895 AS skills-builder
+FROM ${RUST_BASE_IMAGE} AS skills-builder
 
 # hadolint ignore=DL3008
 RUN apt-get update -o Acquire::Retries=3 \
@@ -109,27 +111,27 @@ RUN apt-get update -o Acquire::Retries=3 \
      && arch="$(dpkg --print-architecture)" \
      && case "${arch}" in \
          amd64) \
-           kind_arch=amd64; \
-           jq_asset=jq-linux-amd64; \
-           jq_sha256=020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d; \
-           kubectl_arch=amd64; \
-           rclone_arch=amd64; \
-           rclone_sha256=70278c22b98c7d02aed01828b70053904dbce4c8a1a15d7781d836c6fdb036ea; \
-           ;; \
+            kind_arch=amd64; \
+            kind_sha256=eb244cbafcc157dff60cf68693c14c9a75c4e6e6fedaf9cd71c58117cb93e3fa; \
+            jq_asset=jq-linux-amd64; \
+            jq_sha256=020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d; \
+            kubectl_arch=amd64; \
+            rclone_arch=amd64; \
+            rclone_sha256=70278c22b98c7d02aed01828b70053904dbce4c8a1a15d7781d836c6fdb036ea; \
+            ;; \
          arm64) \
-           kind_arch=arm64; \
-           jq_asset=jq-linux-arm64; \
-           jq_sha256=6bc62f25981328edd3cfcfe6fe51b073f2d7e7710d7ef7fcdac28d4e384fc3d4; \
-           kubectl_arch=arm64; \
-           rclone_arch=arm64; \
-           rclone_sha256=ed2a638b4cb15abe4f01d6d9c015f3a1cb41aa7a17c96db2725542c61f353b8e; \
-           ;; \
-         *) printf 'Unsupported architecture for control-plane tools: %s\n' "${arch}" >&2; exit 1 ;; \
-       esac \
-     && curl -fsSLo "/tmp/kind-linux-${kind_arch}" "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-${kind_arch}" \
-     && curl -fsSLo "/tmp/kind-linux-${kind_arch}.sha256sum" "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-${kind_arch}.sha256sum" \
-     && kind_sha256="$(cut -d' ' -f1 "/tmp/kind-linux-${kind_arch}.sha256sum")" \
-     && printf '%s  %s\n' "${kind_sha256}" "/tmp/kind-linux-${kind_arch}" | sha256sum -c - \
+            kind_arch=arm64; \
+            kind_sha256=8e1014e87c34901cc422a1445866835d1e666f2a61301c27e722bdeab5a1f7e4; \
+            jq_asset=jq-linux-arm64; \
+            jq_sha256=6bc62f25981328edd3cfcfe6fe51b073f2d7e7710d7ef7fcdac28d4e384fc3d4; \
+            kubectl_arch=arm64; \
+            rclone_arch=arm64; \
+            rclone_sha256=ed2a638b4cb15abe4f01d6d9c015f3a1cb41aa7a17c96db2725542c61f353b8e; \
+            ;; \
+          *) printf 'Unsupported architecture for control-plane tools: %s\n' "${arch}" >&2; exit 1 ;; \
+        esac \
+      && curl -fsSLo "/tmp/kind-linux-${kind_arch}" "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-${kind_arch}" \
+      && printf '%s  %s\n' "${kind_sha256}" "/tmp/kind-linux-${kind_arch}" | sha256sum -c - \
      && install -m 0755 "/tmp/kind-linux-${kind_arch}" /usr/local/bin/kind \
      && curl -fsSLo "/tmp/${jq_asset}" "https://github.com/jqlang/jq/releases/download/${JQ_VERSION}/${jq_asset}" \
      && printf '%s  %s\n' "${jq_sha256}" "/tmp/${jq_asset}" | sha256sum -c - \

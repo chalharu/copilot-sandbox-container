@@ -73,7 +73,7 @@ pub fn load(repo_root: &Path, bundled_config_path: &Path) -> Result<Config, Stri
     let bundled = read_config_file(bundled_config_path, false)?.unwrap_or_default();
     let repo_config =
         read_config_file(&repo_root.join(".github/linters.json"), true)?.unwrap_or_default();
-    let tools = normalize_tools(merge_tools(bundled.tools, repo_config.tools))?;
+    let tools = normalize_tools(merge_tools(bundled.tools, repo_config.tools)?)?;
     let pipelines = normalize_pipelines(
         merge_pipelines(bundled.pipelines, repo_config.pipelines),
         &tools,
@@ -102,15 +102,24 @@ fn read_config_file(path: &Path, optional: bool) -> Result<Option<RawConfig>, St
     Ok(Some(parsed))
 }
 
-fn merge_tools(mut base: Vec<RawTool>, overrides: Vec<RawTool>) -> Vec<RawTool> {
+fn merge_tools(mut base: Vec<RawTool>, overrides: Vec<RawTool>) -> Result<Vec<RawTool>, String> {
     for override_tool in overrides {
-        if let Some(index) = base.iter().position(|tool| tool.id == override_tool.id) {
-            base[index] = override_tool;
-        } else {
-            base.push(override_tool);
+        let Some(index) = base.iter().position(|tool| tool.id == override_tool.id) else {
+            return Err(format!(
+                "Repo linters config may only override bundled tool ids: {}",
+                override_tool.id
+            ));
+        };
+        if base[index].command != override_tool.command {
+            return Err(format!(
+                "Repo linters config may not change the command for tool {}",
+                override_tool.id
+            ));
         }
+        base[index].args = override_tool.args;
+        base[index].append_files = override_tool.append_files;
     }
-    base
+    Ok(base)
 }
 
 fn merge_pipelines(mut base: Vec<RawPipeline>, overrides: Vec<RawPipeline>) -> Vec<RawPipeline> {
@@ -231,4 +240,56 @@ fn compile_matcher(pipeline_id: &str, matcher: &[String]) -> Result<Regex, Strin
 
 fn default_append_files() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RawTool, merge_tools};
+
+    fn raw_tool(id: &str, command: &str, args: &[&str], append_files: bool) -> RawTool {
+        RawTool {
+            id: id.to_string(),
+            command: command.to_string(),
+            args: args.iter().map(|value| value.to_string()).collect(),
+            append_files,
+        }
+    }
+
+    #[test]
+    fn rejects_repo_defined_tool_ids() {
+        let error = merge_tools(
+            vec![raw_tool("bundled", "biome", &["check"], true)],
+            vec![raw_tool("repo-only", "second-tool", &["check"], true)],
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "Repo linters config may only override bundled tool ids: repo-only"
+        );
+    }
+
+    #[test]
+    fn rejects_repo_command_changes() {
+        let error = merge_tools(
+            vec![raw_tool("bundled", "biome", &["check"], true)],
+            vec![raw_tool("bundled", "second-tool", &["check"], true)],
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "Repo linters config may not change the command for tool bundled"
+        );
+    }
+
+    #[test]
+    fn allows_repo_to_override_args_for_bundled_tools() {
+        let merged = merge_tools(
+            vec![raw_tool("bundled", "biome", &["check"], true)],
+            vec![raw_tool("bundled", "biome", &["check", "--write"], false)],
+        )
+        .unwrap();
+        assert_eq!(merged[0].command, "biome");
+        assert_eq!(merged[0].args, vec!["check", "--write"]);
+        assert!(!merged[0].append_files);
+    }
 }

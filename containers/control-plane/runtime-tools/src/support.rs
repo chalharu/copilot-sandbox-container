@@ -5,6 +5,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
+use serde_json::{Map, Value};
+
 pub const DEFAULT_SESSION_EXEC_BIN: &str = "/usr/local/bin/control-plane-session-exec";
 
 pub fn read_stdin_string() -> io::Result<String> {
@@ -73,4 +75,20 @@ pub fn set_mode(path: &Path, mode: u32) -> Result<(), String> {
 
 pub fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+pub fn parse_json_object_input(
+    raw_input: &str,
+    context: &str,
+) -> Result<Map<String, Value>, String> {
+    if raw_input.trim().is_empty() {
+        return Ok(Map::new());
+    }
+
+    let parsed: Value = serde_json::from_str(raw_input)
+        .map_err(|error| format!("Failed to parse {context} JSON: {error}"))?;
+    let Value::Object(object) = parsed else {
+        return Err(format!("{context} must be a top-level JSON object."));
+    };
+    Ok(object)
 }
