@@ -830,10 +830,14 @@ fi
 printf '%s\n' 'kind-test remote: gh hosts confinement ok' >&2
 grep -Fqx 'CARGO_HOME=/home/copilot/.cargo' ~/.config/control-plane/runtime.env
 grep -Fqx 'CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target' ~/.config/control-plane/runtime.env
+grep -Fqx 'LANG=C.UTF-8' ~/.config/control-plane/runtime.env
+grep -Fqx 'LC_CTYPE=C.UTF-8' ~/.config/control-plane/runtime.env
 grep -Fqx "CONTROL_PLANE_RUST_HOOK_IMAGE=${rust_hook_image}" ~/.config/control-plane/runtime.env
 test -d /var/tmp/control-plane
 test -d /var/tmp/control-plane/cargo-target
 printf '%s\n' 'kind-test remote: runtime tmp ok' >&2
+test "\${LANG}" = "C.UTF-8"
+test "\${LC_CTYPE}" = "C.UTF-8"
 test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
 test "\${CONTROL_PLANE_FAST_EXECUTION_ENABLED}" = "1"
 test "\${CONTROL_PLANE_FAST_EXECUTION_IMAGE}" = "${control_plane_image}"

@@ -67,8 +67,13 @@ assert_file_contains "${control_plane_dockerfile}" 'python3-venv'
 assert_file_contains "${control_plane_dockerfile}" "python3 -m venv \"\${YAMLLINT_VIRTUAL_ENV}\""
 assert_file_contains "${control_plane_dockerfile}" '/tmp/yamllint-requirements.txt'
 assert_file_contains "${control_plane_dockerfile}" '--only-binary=:all: --require-hashes -r /tmp/yamllint-requirements.txt'
+assert_file_contains "${control_plane_dockerfile}" 'LANG=C.UTF-8'
+assert_file_contains "${control_plane_dockerfile}" 'LC_CTYPE=C.UTF-8'
+assert_file_contains "${control_plane_dockerfile}" "        locales \\"
+assert_file_contains "${control_plane_dockerfile}" 'locale-gen'
+assert_file_contains "${control_plane_dockerfile}" 'localedef -i ja_JP -f UTF-8 ja_JP.UTF8'
 assert_file_not_matches "${control_plane_dockerfile}" 'install-yamllint-wheel\.py|python3-pathspec|python3-yaml|YAMLLINT_WHEEL_SHA256'
-assert_file_not_matches "${control_plane_dockerfile}" 'cpulimit|gcc|libc6-dev|libssl-dev|locales|ncurses-term|pkg-config|vim'
+assert_file_not_matches "${control_plane_dockerfile}" 'cpulimit|gcc|libc6-dev|libssl-dev|ncurses-term|pkg-config|vim'
 
 assert_path_absent "${execution_plane_smoke_dir}"
 assert_path_absent "${legacy_yamllint_installer}"

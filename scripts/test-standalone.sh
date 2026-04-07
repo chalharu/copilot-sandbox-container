@@ -367,6 +367,8 @@ set -euo pipefail
 pwd > /workspace/copilot-picker-pwd.txt
 printf '%s\n' "$@" > /workspace/copilot-picker-args.txt
 printenv COPILOT_GITHUB_TOKEN > /workspace/copilot-picker-token.txt
+printf '日本語★\n' > /workspace/copilot-picker-utf8.txt
+printf '日本語★\n'
 sleep 30
 INNER
 chmod +x /workspace/test-copilot
@@ -421,6 +423,7 @@ done
 test -f /workspace/copilot-picker-pwd.txt
 test -f /workspace/copilot-picker-args.txt
 test -f /workspace/copilot-picker-token.txt
+test -f /workspace/copilot-picker-utf8.txt
 if screen -list 2>/dev/null | grep -Eq 'copilot-smoke.*\(Dead'; then
   printf 'Expected stale copilot-smoke session to be wiped before creating a new one\n' >&2
   exit 1
@@ -429,6 +432,7 @@ grep -qx '/workspace' /workspace/copilot-picker-pwd.txt
 grep -qx -- '--secret-env-vars=COPILOT_GITHUB_TOKEN' /workspace/copilot-picker-args.txt
 grep -qx -- '--yolo' /workspace/copilot-picker-args.txt
 grep -qx 'picker-token' /workspace/copilot-picker-token.txt
+grep -qx '日本語★' /workspace/copilot-picker-utf8.txt
 EOF
 then
   printf 'Expected Copilot SSH login to create copilot-smoke session\n' >&2
@@ -446,6 +450,11 @@ if ! grep -Fq 'Starting Copilot session copilot-smoke in /workspace...' "${workd
 fi
 if grep -q 'cannot change locale' "${workdir}/ssh-copilot.log"; then
   printf 'Unexpected locale warning during Copilot SSH login\n' >&2
+  cat "${workdir}/ssh-copilot.log" >&2 || true
+  exit 1
+fi
+if ! grep -Fq '日本語★' "${workdir}/ssh-copilot.log"; then
+  printf 'Expected Copilot SSH login to preserve UTF-8 output through Screen\n' >&2
   cat "${workdir}/ssh-copilot.log" >&2 || true
   exit 1
 fi

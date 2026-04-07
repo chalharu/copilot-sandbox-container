@@ -7,6 +7,10 @@ if [[ -f "${runtime_config_file}" ]]; then
   source "${runtime_config_file}"
 fi
 
+: "${LANG:=C.UTF-8}"
+: "${LC_CTYPE:=C.UTF-8}"
+export LANG LC_CTYPE
+
 screen_runtime_root="${XDG_RUNTIME_DIR:-${HOME:-/tmp}/.copilot/run}"
 export SCREENDIR="${SCREENDIR:-${screen_runtime_root%/}/screen}"
 mkdir -p "${SCREENDIR}"
