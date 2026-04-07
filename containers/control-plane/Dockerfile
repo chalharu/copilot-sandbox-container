@@ -68,9 +68,16 @@ ARG JQ_VERSION=jq-1.8.1
 ARG KUBECTL_VERSION=v1.35.3
 # renovate: datasource=github-releases depName=rclone/rclone
 ARG RCLONE_VERSION=v1.73.3
-# renovate: datasource=github-releases depName=adrienverge/yamllint
+# renovate: datasource=pypi depName=yamllint
 ARG YAMLLINT_VERSION=1.38.0
-ARG YAMLLINT_WHEEL_SHA256=fc394a5b3be980a4062607b8fdddc0843f4fa394152b6da21722f5d59013c220
+ARG YAMLLINT_SHA256=fc394a5b3be980a4062607b8fdddc0843f4fa394152b6da21722f5d59013c220
+# renovate: datasource=pypi depName=pathspec
+ARG PATHSPEC_VERSION=1.0.4
+ARG PATHSPEC_SHA256=fb6ae2fd4e7c921a165808a552060e722767cfa526f99ca5156ed2ce45a5c723
+# renovate: datasource=pypi depName=PyYAML
+ARG PYYAML_VERSION=6.0.3
+ARG PYYAML_SHA256_AARCH64=10892704fc220243f5305762e276552a0395f7beb4dbf9b14ec8fd43b57f126c
+ARG PYYAML_SHA256_AMD64=b8bb0864c5a28024fac8a632c443c87c5aa6f215c0b126c449ae1a150412f31d
 ARG CONTROL_PLANE_UID=1000
 ARG CONTROL_PLANE_GID=1000
 ARG CONTROL_PLANE_USER=copilot
@@ -79,15 +86,14 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     CONTROL_PLANE_USER=${CONTROL_PLANE_USER} \
     CONTROL_PLANE_HOME=/home/${CONTROL_PLANE_USER} \
-    CONTROL_PLANE_WORKSPACE=/workspace
+    CONTROL_PLANE_WORKSPACE=/workspace \
+    YAMLLINT_VIRTUAL_ENV=/opt/yamllint
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/home/${CONTROL_PLANE_USER}/.cargo \
     CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target \
-    PATH=/usr/local/cargo/bin:${PATH}
+    PATH=${YAMLLINT_VIRTUAL_ENV}/bin:/usr/local/cargo/bin:${PATH}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-COPY --chmod=755 build/install-yamllint-wheel.py /usr/local/bin/install-yamllint-wheel.py
 
 # hadolint ignore=DL3008
 RUN apt-get update -o Acquire::Retries=3 \
@@ -105,8 +111,7 @@ RUN apt-get update -o Acquire::Retries=3 \
         openssh-server \
         pkg-config \
         python3 \
-        python3-pathspec \
-        python3-yaml \
+        python3-venv \
         procps \
         screen \
         tini \
@@ -150,11 +155,13 @@ RUN apt-get update -o Acquire::Retries=3 \
     && printf '%s  %s\n' "${rclone_sha256}" "/tmp/${rclone_asset}" | sha256sum -c - \
     && unzip -q "/tmp/${rclone_asset}" -d /tmp \
     && install -m 0755 "/tmp/rclone-${RCLONE_VERSION}-linux-${rclone_arch}/rclone" /usr/local/bin/rclone \
-    && yamllint_wheel="yamllint-${YAMLLINT_VERSION}-py3-none-any.whl" \
-    && curl -fsSLo "/tmp/${yamllint_wheel}" "https://github.com/adrienverge/yamllint/releases/download/v${YAMLLINT_VERSION}/${yamllint_wheel}" \
-    && printf '%s  %s\n' "${YAMLLINT_WHEEL_SHA256}" "/tmp/${yamllint_wheel}" | sha256sum -c - \
-    && export YAMLLINT_WHEEL_PATH="/tmp/${yamllint_wheel}" \
-    && python3 /usr/local/bin/install-yamllint-wheel.py \
+    && printf '%s\n' \
+        "pathspec==${PATHSPEC_VERSION} --hash=sha256:${PATHSPEC_SHA256}" \
+        "PyYAML==${PYYAML_VERSION} --hash=sha256:${PYYAML_SHA256_AARCH64} --hash=sha256:${PYYAML_SHA256_AMD64}" \
+        "yamllint==${YAMLLINT_VERSION} --hash=sha256:${YAMLLINT_SHA256}" \
+        > /tmp/yamllint-requirements.txt \
+    && python3 -m venv "${YAMLLINT_VIRTUAL_ENV}" \
+    && "${YAMLLINT_VIRTUAL_ENV}/bin/pip" install --no-cache-dir --only-binary=:all: --require-hashes -r /tmp/yamllint-requirements.txt \
     && apt-get purge -y --auto-remove curl unzip \
     && printf '%s\n' \
         'en_US.UTF-8 UTF-8' \

@@ -52,6 +52,7 @@ printf '%s\n' 'dockerfile-hardening-test: verifying non-root defaults and health
 
 control_plane_dockerfile="${repo_root}/containers/control-plane/Dockerfile"
 execution_plane_smoke_dir="${repo_root}/containers/execution-plane-smoke"
+legacy_yamllint_installer="${repo_root}/containers/control-plane/build/install-yamllint-wheel.py"
 legacy_execution_plane_go_dockerfile="${repo_root}/containers/execution-plane-go/Dockerfile"
 legacy_execution_plane_node_dockerfile="${repo_root}/containers/execution-plane-node/Dockerfile"
 legacy_execution_plane_python_dockerfile="${repo_root}/containers/execution-plane-python/Dockerfile"
@@ -61,8 +62,15 @@ legacy_yamllint_dockerfile="${repo_root}/containers/yamllint/Dockerfile"
 assert_file_contains "${control_plane_dockerfile}" "USER \${CONTROL_PLANE_USER}"
 assert_file_not_matches "${control_plane_dockerfile}" '^USER root$'
 assert_healthcheck_cmd "${control_plane_dockerfile}" '    CMD ["bash", "-lc", "node --version >/dev/null && cargo --version >/dev/null && yamllint --version >/dev/null && control-plane-exec-api --help >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]'
+assert_file_contains "${control_plane_dockerfile}" 'YAMLLINT_VIRTUAL_ENV=/opt/yamllint'
+assert_file_contains "${control_plane_dockerfile}" 'python3-venv'
+assert_file_contains "${control_plane_dockerfile}" "python3 -m venv \"\${YAMLLINT_VIRTUAL_ENV}\""
+assert_file_contains "${control_plane_dockerfile}" '/tmp/yamllint-requirements.txt'
+assert_file_contains "${control_plane_dockerfile}" '--only-binary=:all: --require-hashes -r /tmp/yamllint-requirements.txt'
+assert_file_not_matches "${control_plane_dockerfile}" 'install-yamllint-wheel\.py|python3-pathspec|python3-yaml|YAMLLINT_WHEEL_SHA256'
 
 assert_path_absent "${execution_plane_smoke_dir}"
+assert_path_absent "${legacy_yamllint_installer}"
 assert_path_absent "${legacy_execution_plane_go_dockerfile}"
 assert_path_absent "${legacy_execution_plane_node_dockerfile}"
 assert_path_absent "${legacy_execution_plane_python_dockerfile}"
