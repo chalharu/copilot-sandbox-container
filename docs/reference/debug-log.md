@@ -18,7 +18,7 @@
 | rootless Podman の user namespace error | [§4](#4-rootless-podman-が-outer-runtime-に止められている) |
 | `podman system migrate` の自己修復ログ | [§5](#5-stale-state-は-podman-system-migrate-で直る) |
 | `cgroup.subtree_control` で止まる | [§6](#6-rootful-service-build-が-cgroup-で止まる) |
-| session picker が使えず shell へ落ちる | [§7](#7-session-picker-が使えず-shell-へ落ちる) |
+| interactive SSH が Copilot session へ入らない | [§7](#7-interactive-ssh-が-copilot-session-へ入らない) |
 | private image pull が unauthorized | [§8](#8-private-image-を-pull-できない) |
 | Service の `EXTERNAL-IP` が `pending` | [§9](#9-service-の-external-ip-が未割当て) |
 | injected Copilot config が壊れている | [§10](#10-injected-copilot-config-が壊れている) |
@@ -124,17 +124,20 @@ job-check: podman-build=ok
 current-cluster-test: podman-build=ok
 ```
 
-## 7. session picker が使えず shell へ落ちる
+## 7. interactive SSH が Copilot session へ入らない
 
 ### 代表ログ
 
 ```text
-control-plane: session picker failed; continuing with the login shell. Set CONTROL_PLANE_DISABLE_SESSION_PICKER=1 to skip it entirely.
+mode=login action=bash-il
 ```
 
 ### 意味
 
-picker 自体の失敗です。対話は継続できますが、Screen の自動再接続は効いていません。恒久回避は `CONTROL_PLANE_DISABLE_SESSION_PICKER=1` ですが、通常は原因を直すほうを優先します。
+`CONTROL_PLANE_SSH_SHELL_LOG` にこの行が出るのは、interactive SSH login が
+Copilot 用 Screen session へ入らず通常の login shell へ落ちたことを示します。
+典型例は TTY が無い、`control-plane-session` が見つからない、あるいは login
+shell を command mode (`ssh host '...'`) で使っている場合です。
 
 ## 8. private image を pull できない
 

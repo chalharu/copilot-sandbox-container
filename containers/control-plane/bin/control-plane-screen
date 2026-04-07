@@ -7,25 +7,6 @@ if [[ -f "${runtime_config_file}" ]]; then
   source "${runtime_config_file}"
 fi
 
-ensure_compatible_term() {
-  local candidate
-
-  if TERM="${TERM:-}" tput clear >/dev/null 2>&1; then
-    return
-  fi
-
-  for candidate in xterm-256color xterm; do
-    if TERM="${candidate}" tput clear >/dev/null 2>&1; then
-      export TERM="${candidate}"
-      return
-    fi
-  done
-
-  export TERM=xterm
-}
-
-ensure_compatible_term
-
 screen_runtime_root="${XDG_RUNTIME_DIR:-${HOME:-/tmp}/.copilot/run}"
 export SCREENDIR="${SCREENDIR:-${screen_runtime_root%/}/screen}"
 mkdir -p "${SCREENDIR}"

@@ -14,7 +14,6 @@ ChallengeResponseAuthentication no
 UsePAM no
 PubkeyAuthentication yes
 AuthorizedKeysFile .ssh/authorized_keys
-AcceptEnv LANG LC_*
 PermitUserEnvironment no
 AllowTcpForwarding yes
 X11Forwarding no

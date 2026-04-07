@@ -139,6 +139,12 @@ build_context_hash_label_key() {
   printf '%s\n' 'io.github.chalharu.control-plane.build-context-sha256'
 }
 
+build_context_hash_label_key_for_target() {
+  local target_name="$1"
+
+  printf '%s.%s\n' "$(build_context_hash_label_key)" "${target_name}"
+}
+
 image_context_hash_for_toolchain() {
   local toolchain="$1"
   local image_tag="$2"
@@ -171,6 +177,41 @@ build_image_for_toolchain() {
   case "${toolchain}" in
     docker)
       "${build_bin}" buildx build --load \
+        --label "${context_hash_label_key}=${context_hash}" \
+        -t "${image_tag}" \
+        "${context_dir}"
+      ;;
+    *)
+      printf 'Unsupported toolchain: %s\n' "${toolchain}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+build_image_target_for_toolchain() {
+  local toolchain="$1"
+  local image_tag="$2"
+  local context_dir="$3"
+  local target_name="$4"
+  local build_bin
+  local context_hash
+  local context_hash_label_key
+  local existing_context_hash
+
+  build_bin="$(build_command_for_toolchain "${toolchain}")"
+  context_hash="$(build_context_hash "${context_dir}")"
+  context_hash_label_key="$(build_context_hash_label_key_for_target "${target_name}")"
+  existing_context_hash="$(image_context_hash_for_toolchain "${toolchain}" "${image_tag}" "${context_hash_label_key}" || true)"
+
+  if [[ -n "${existing_context_hash}" ]] && [[ "${existing_context_hash}" == "${context_hash}" ]]; then
+    printf 'Reusing %s; build context unchanged for target %s\n' "${image_tag}" "${target_name}" >&2
+    return 0
+  fi
+
+  case "${toolchain}" in
+    docker)
+      "${build_bin}" buildx build --load \
+        --target "${target_name}" \
         --label "${context_hash_label_key}=${context_hash}" \
         -t "${image_tag}" \
         "${context_dir}"

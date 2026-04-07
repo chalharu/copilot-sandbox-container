@@ -164,7 +164,7 @@ set -euo pipefail
 printf '%s\n' "${LD_PRELOAD:-missing}"
 FAKE
 chmod 755 /tmp/fake-copilot
-copilot_ld_preload="$(su -s /bin/bash copilot -lc 'CONTROL_PLANE_COPILOT_BIN=/tmp/fake-copilot CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT=0 control-plane-copilot')"
+copilot_ld_preload="$(su -s /bin/bash copilot -lc 'CONTROL_PLANE_COPILOT_BIN=/tmp/fake-copilot control-plane-copilot')"
 grep -qx '/usr/local/lib/libcontrol_plane_exec_policy.so' <<<"${copilot_ld_preload}"
 jq -e '.chat.editor == "vim"' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.chat.theme == "light"' /home/copilot/.copilot/config.json >/dev/null

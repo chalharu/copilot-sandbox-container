@@ -52,7 +52,6 @@ set_ssh_opts() {
     -o StrictHostKeyChecking=no
     -o UserKnownHostsFile=/dev/null
     -o IdentitiesOnly=yes
-    -o SetEnv=LC_ALL=en_US.UTF8
     -i "${ssh_key}"
     -p "${ssh_port}"
   )
@@ -88,33 +87,6 @@ wait_for_screen_session() {
     if ssh_bash <<EOF >/dev/null 2>&1
 set -euo pipefail
 screen -list | grep -q -- '${target_session}'
-EOF
-    then
-      return 0
-    fi
-    sleep 1
-  done
-
-  return 1
-}
-
-wait_for_screen_term() {
-  local target_session="$1"
-  local term_file="$2"
-  local expected_term_pattern="${3:-screen-256color(-bce)?}"
-  local attempts="${4:-15}"
-  local remote_command
-  local _
-
-  printf -v remote_command 'TARGET_SESSION=%q TERM_FILE=%q EXPECTED_TERM_PATTERN=%q bash -l -se' \
-    "${target_session}" "${term_file}" "${expected_term_pattern}"
-
-  for _ in $(seq 1 "${attempts}"); do
-    # shellcheck disable=SC2029
-    if ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_command}" <<'EOF' >/dev/null 2>&1
-set -euo pipefail
-screen -list | grep -q -- "${TARGET_SESSION}"
-grep -Eq -- "^(${EXPECTED_TERM_PATTERN})$" "${TERM_FILE}"
 EOF
     then
       return 0
@@ -214,13 +186,17 @@ npm ls -g @github/copilot --depth=0 | grep -q "@github/copilot@"
 ! command -v gh >/dev/null 2>&1
 ! command -v curl >/dev/null 2>&1
 ! command -v sqlite3 >/dev/null 2>&1
+! command -v cpulimit >/dev/null 2>&1
+! command -v gcc >/dev/null 2>&1
+! command -v pkg-config >/dev/null 2>&1
+! command -v vim >/dev/null 2>&1
 command -v kubectl
 command -v kind
+command -v cargo
 command -v yamllint
 command -v control-plane-exec-api
 command -v sshd
 command -v screen
-command -v vim
 command -v control-plane-run
 command -v control-plane-session
 command -v k8s-job-start
@@ -228,80 +204,19 @@ command -v k8s-job-wait
 command -v k8s-job-pod
 command -v k8s-job-logs
 command -v k8s-job-run
-test "$(TERM=xterm-256color tput colors)" -ge 256
-test "$(TERM=screen-256color tput colors)" -ge 256
-test "$(TERM=tmux-256color tput colors)" -ge 256
 printf '%s\n' "${LANG}" | grep -qi 'utf-8'
-locale -a | grep -Eqi '^en_US\.utf-?8$'
-locale -a | grep -Eqi '^ja_JP\.utf-?8$'
-test "${EDITOR}" = "vim"
-test "${VISUAL}" = "vim"
-test "${GH_PAGER}" = "cat"
 test -f /home/copilot/.copilot/skills/repo-change-delivery/SKILL.md
 EOF
 
 ssh_bash <<'EOF'
 set -euo pipefail
 printf '%s\n' "${LANG}" | grep -qi 'utf-8'
-test "${LC_ALL}" = "en_US.UTF8"
-locale charmap | grep -qx 'UTF-8'
-test "${EDITOR}" = "vim"
-test "${VISUAL}" = "vim"
-test "${GH_PAGER}" = "cat"
 mkdir -p ~/.copilot ~/.config/gh /workspace
 echo standalone > ~/.copilot/state.txt
 echo gh > ~/.config/gh/state.txt
 echo ssh > ~/.ssh/state.txt
-screen -T screen-256color -dmS smoke-session sh -lc 'printf "%s\n" "$TERM" > /workspace/screen-term.txt; printf "日本語★\n" > /workspace/screen-utf8.txt; echo screen-ok > /workspace/screen.txt; sleep 30'
+screen -dmS smoke-session sh -lc 'printf "日本語★\n" > /workspace/screen-utf8.txt; echo screen-ok > /workspace/screen.txt; sleep 30'
 EOF
-
-printf '%s\n' 'standalone-test: verifying login TERM fallback' >&2
-if ! TERM=bogusterm ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
-  "CONTROL_PLANE_DISABLE_SESSION_PICKER=1 bash -lic 'printf \"%s\n\" \"\$TERM\" > /workspace/login-term.txt; tput colors > /workspace/login-colors.txt'" \
-  </dev/null >"${workdir}/ssh-login-term.log" 2>&1; then
-  cat "${workdir}/ssh-login-term.log" >&2 || true
-  printf 'Expected login shell TERM fallback to succeed over SSH\n' >&2
-  exit 1
-fi
-if ! ssh_bash <<'EOF'
-set -euo pipefail
-grep -Eq '^(xterm-256color|xterm)$' /workspace/login-term.txt
-awk 'NR == 1 { exit !($1 >= 8) }' /workspace/login-colors.txt
-EOF
-then
-  ssh_bash <<'EOF' >&2 || true
-set -euo pipefail
-cat /workspace/login-term.txt || true
-cat /workspace/login-colors.txt || true
-EOF
-  printf 'Expected login shell TERM fallback files to report a usable terminal\n' >&2
-  exit 1
-fi
-printf '%s\n' 'standalone-test: login TERM fallback ok' >&2
-
-printf '%s\n' 'standalone-test: verifying login TERM upgrade to 256 colors' >&2
-if ! TERM=xterm-color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
-  "CONTROL_PLANE_DISABLE_SESSION_PICKER=1 bash -lic 'printf \"%s\n\" \"\$TERM\" > /workspace/login-term-upgrade.txt; tput colors > /workspace/login-term-upgrade-colors.txt'" \
-  </dev/null >"${workdir}/ssh-login-term-upgrade.log" 2>&1; then
-  cat "${workdir}/ssh-login-term-upgrade.log" >&2 || true
-  printf 'Expected login shell TERM upgrade to succeed over SSH\n' >&2
-  exit 1
-fi
-if ! ssh_bash <<'EOF'
-set -euo pipefail
-grep -qx 'xterm-256color' /workspace/login-term-upgrade.txt
-awk 'NR == 1 { exit !($1 >= 256) }' /workspace/login-term-upgrade-colors.txt
-EOF
-then
-  ssh_bash <<'EOF' >&2 || true
-set -euo pipefail
-cat /workspace/login-term-upgrade.txt || true
-cat /workspace/login-term-upgrade-colors.txt || true
-EOF
-  printf 'Expected login TERM upgrade files to report xterm-256color with 256 colors\n' >&2
-  exit 1
-fi
-printf '%s\n' 'standalone-test: login TERM upgrade ok' >&2
 
 utf8_roundtrip="$(ssh_bash <<'EOF'
 set -euo pipefail
@@ -310,21 +225,20 @@ EOF
 )"
 [[ "${utf8_roundtrip}" == "日本語★" ]]
 
-if ! wait_for_screen_term smoke-session /workspace/screen-term.txt; then
+if ! wait_for_screen_session smoke-session; then
   ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
 screen -list || true
-cat /workspace/screen-term.txt || true
 cat /workspace/screen-utf8.txt || true
+cat /workspace/screen.txt || true
 EOF
-  printf 'Expected smoke-session to report a screen-256color TERM variant\n' >&2
+  printf 'Expected smoke-session to stay available after SSH setup\n' >&2
   exit 1
 fi
 
 if ! wait_for_remote_grep '^日本語★$' /workspace/screen-utf8.txt; then
   ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
-cat /workspace/screen-term.txt || true
 cat /workspace/screen-utf8.txt || true
 cat /workspace/screen.txt || true
 EOF
@@ -335,7 +249,6 @@ fi
 if ! wait_for_remote_grep '^screen-ok$' /workspace/screen.txt; then
   ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
-cat /workspace/screen-term.txt || true
 cat /workspace/screen-utf8.txt || true
 cat /workspace/screen.txt || true
 EOF
@@ -344,52 +257,6 @@ EOF
 fi
 
 printf '%s\n' 'standalone-test: screen output ready' >&2
-
-printf '%s\n' 'standalone-test: verifying session picker fallback' >&2
-if ! TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
-  "CONTROL_PLANE_SESSION_SELECTION=9999 bash -lic 'printf \"%s\n\" fallback-shell-ok'" \
-  </dev/null >"${workdir}/ssh-picker-fallback.log" 2>&1; then
-  cat "${workdir}/ssh-picker-fallback.log" >&2 || true
-  printf 'Expected SSH login to fall back to a shell when the session picker fails\n' >&2
-  exit 1
-fi
-if ! grep -q 'fallback-shell-ok' "${workdir}/ssh-picker-fallback.log"; then
-  printf 'Expected fallback-shell-ok marker in standalone SSH fallback log\n' >&2
-  cat "${workdir}/ssh-picker-fallback.log" >&2 || true
-  exit 1
-fi
-if ! grep -q 'session picker failed; continuing with the login shell' "${workdir}/ssh-picker-fallback.log"; then
-  printf 'Expected session picker fallback warning in standalone SSH fallback log\n' >&2
-  cat "${workdir}/ssh-picker-fallback.log" >&2 || true
-  exit 1
-fi
-printf '%s\n' 'standalone-test: session picker fallback ok' >&2
-
-printf '%s\n' 'standalone-test: verifying picker menu options' >&2
-if ! ssh_bash <<'EOF'
-set -euo pipefail
-screen -T screen-256color -dmS shell bash -lc 'sleep 30'
-EOF
-then
-  printf 'Expected shell session fixture for picker menu test\n' >&2
-  exit 1
-fi
-set +e
-printf '9999\n' | TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
-  "control-plane-session --select" >"${workdir}/ssh-picker-menu.log" 2>&1
-picker_menu_status=$?
-set -e
-if [[ "${picker_menu_status}" -eq 0 ]]; then
-  printf 'Expected picker menu probe to fail on invalid selection\n' >&2
-  cat "${workdir}/ssh-picker-menu.log" >&2 || true
-  exit 1
-fi
-if ! grep -Fq 'Copilot (/workspace, --yolo)' "${workdir}/ssh-picker-menu.log"; then
-  printf 'Expected picker menu to show the Copilot option when only shell sessions exist\n' >&2
-  cat "${workdir}/ssh-picker-menu.log" >&2 || true
-  exit 1
-fi
-printf '%s\n' 'standalone-test: picker menu shows Copilot option' >&2
 
 first_host_fingerprint="$(ssh_host_fingerprint)"
 
@@ -452,24 +319,32 @@ fi
 printf '%s\n' 'standalone-test: cap-drop diagnostics look good' >&2
 
 "${container_bin}" rm -f "${container_name}" >/dev/null
-container_env=(-e CONTROL_PLANE_SESSION_SELECTION=new:auto-login)
+container_env=(-e CONTROL_PLANE_COPILOT_BIN=/workspace/test-copilot-shell)
 start_container
 wait_for_ssh
 
-printf '%s\n' 'standalone-test: starting auto-login ssh flow' >&2
+ssh_bash <<'EOF'
+set -euo pipefail
+cat > /workspace/test-copilot-shell <<'INNER'
+#!/usr/bin/env bash
+set -euo pipefail
+exec bash -il
+INNER
+chmod +x /workspace/test-copilot-shell
+EOF
+
+printf '%s\n' 'standalone-test: starting copilot-backed shell ssh flow' >&2
 "${script_dir}/test-ssh-session-persistence.sh" \
   --identity "${ssh_key}" \
   --port "${ssh_port}" \
-  --session-name auto-login \
-  --marker-path /workspace/standalone-auto-login-marker.txt
-printf '%s\n' 'standalone-test: auto-login session ready' >&2
-printf '%s\n' 'standalone-test: auto-login locale ok' >&2
+  --session-name copilot \
+  --marker-path /workspace/standalone-copilot-marker.txt
+printf '%s\n' 'standalone-test: copilot-backed shell session ready' >&2
 
 "${container_bin}" rm -f "${container_name}" >/dev/null
 container_env=(
   -e CONTROL_PLANE_COPILOT_BIN=/workspace/test-copilot
-  -e CONTROL_PLANE_COPILOT_SESSION=picker-copilot
-  -e CONTROL_PLANE_SESSION_SELECTION=copilot
+  -e CONTROL_PLANE_COPILOT_SESSION=copilot-smoke
   -e "CONTROL_PLANE_GIT_USER_NAME=Picker Test User"
   -e CONTROL_PLANE_GIT_USER_EMAIL=picker@example.com
   -e COPILOT_GITHUB_TOKEN=picker-token
@@ -496,10 +371,10 @@ sleep 30
 INNER
 chmod +x /workspace/test-copilot
 
-screen -T screen-256color -dmS picker-copilot bash -lc 'sleep 30'
+screen -dmS copilot-smoke bash -lc 'sleep 30'
 session_id=""
 for _ in $(seq 1 15); do
-  session_id="$(screen -list 2>/dev/null | awk '/picker-copilot/ && !/\(Dead/ { print $1; exit }')"
+  session_id="$(screen -list 2>/dev/null | awk '/copilot-smoke/ && !/\(Dead/ { print $1; exit }')"
   if [[ -n "${session_id}" ]]; then
     break
   fi
@@ -508,14 +383,14 @@ done
 test -n "${session_id}"
 kill -9 "${session_id%%.*}"
 for _ in $(seq 1 15); do
-  if screen -list 2>/dev/null | grep -Eq 'picker-copilot.*\(Dead'; then
+  if screen -list 2>/dev/null | grep -Eq 'copilot-smoke.*\(Dead'; then
     break
   fi
   sleep 1
 done
-screen -list 2>/dev/null | grep -Eq 'picker-copilot.*\(Dead'
-if control-plane-session --list | grep -q 'picker-copilot'; then
-  printf 'Dead picker-copilot session leaked into control-plane-session --list\n' >&2
+screen -list 2>/dev/null | grep -Eq 'copilot-smoke.*\(Dead'
+if control-plane-session --list | grep -q 'copilot-smoke'; then
+  printf 'Dead copilot-smoke session leaked into control-plane-session --list\n' >&2
   exit 1
 fi
 EOF
@@ -527,13 +402,13 @@ screen -list || true
 control-plane-session --list || true
 ls -la /workspace || true
 EOF
-  printf 'Expected Copilot picker preconditions to be configured correctly\n' >&2
+  printf 'Expected Copilot session preconditions to be configured correctly\n' >&2
   exit 1
 fi
-printf '%s\n' 'standalone-test: copilot picker state prepared' >&2
+printf '%s\n' 'standalone-test: copilot session state prepared' >&2
 
 printf '%s\n' 'standalone-test: starting copilot ssh flow' >&2
-TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 </dev/null >"${workdir}/ssh-copilot.log" 2>&1 &
+ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 </dev/null >"${workdir}/ssh-copilot.log" 2>&1 &
 copilot_ssh_pid=$!
 if ! ssh_bash <<'EOF'
 set -euo pipefail
@@ -546,8 +421,8 @@ done
 test -f /workspace/copilot-picker-pwd.txt
 test -f /workspace/copilot-picker-args.txt
 test -f /workspace/copilot-picker-token.txt
-if screen -list 2>/dev/null | grep -Eq 'picker-copilot.*\(Dead'; then
-  printf 'Expected stale picker-copilot session to be wiped before creating a new one\n' >&2
+if screen -list 2>/dev/null | grep -Eq 'copilot-smoke.*\(Dead'; then
+  printf 'Expected stale copilot-smoke session to be wiped before creating a new one\n' >&2
   exit 1
 fi
 grep -qx '/workspace' /workspace/copilot-picker-pwd.txt
@@ -556,7 +431,7 @@ grep -qx -- '--yolo' /workspace/copilot-picker-args.txt
 grep -qx 'picker-token' /workspace/copilot-picker-token.txt
 EOF
 then
-  printf 'Expected Copilot picker option to create picker-copilot session during SSH login\n' >&2
+  printf 'Expected Copilot SSH login to create copilot-smoke session\n' >&2
   cat "${workdir}/ssh-copilot.log" >&2 || true
   exit 1
 fi
@@ -564,7 +439,7 @@ printf '%s\n' 'standalone-test: copilot ssh flow ready' >&2
 
 kill "${copilot_ssh_pid}" >/dev/null 2>&1 || true
 wait "${copilot_ssh_pid}" 2>/dev/null || true
-if ! grep -Fq 'Starting Copilot session picker-copilot in /workspace...' "${workdir}/ssh-copilot.log"; then
+if ! grep -Fq 'Starting Copilot session copilot-smoke in /workspace...' "${workdir}/ssh-copilot.log"; then
   printf 'Expected Copilot SSH login to print a startup banner before attaching Screen\n' >&2
   cat "${workdir}/ssh-copilot.log" >&2 || true
   exit 1

@@ -62,7 +62,7 @@ cleanup() {
 run_remote_script() {
   local script="$1"
 
-  ssh "${ssh_opts[@]}" "${user}@${host}" 'CONTROL_PLANE_DISABLE_SESSION_PICKER=1 bash -l -se' <<<"${script}"
+  ssh "${ssh_opts[@]}" "${user}@${host}" 'bash -l -se' <<<"${script}"
 }
 
 remote_screen_session_exists() {
@@ -282,7 +282,7 @@ ssh_opts=(
 trap cleanup EXIT
 
 printf 'ssh-persistence: opening SSH session to %s@%s:%s\n' "${user}" "${host}" "${port}" >&2
-printf -v ssh_command 'exec env TERM=tmux-256color ssh -tt'
+printf -v ssh_command 'exec ssh -tt'
 for ssh_opt in "${ssh_opts[@]}"; do
   printf -v ssh_command '%s %q' "${ssh_command}" "${ssh_opt}"
 done

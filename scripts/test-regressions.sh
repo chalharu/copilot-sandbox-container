@@ -296,6 +296,25 @@ case "${1:-}" in
         ;;
       renovate)
         printf '%s\n' "${envs[@]}" > "${log_dir}/renovate.env"
+        if [[ "${TEST_REGRESSION_RENOVATE_MODE:-cannot-sync}" == "timeout" ]]; then
+          cat <<'RENOVATE'
+@github/copilot
+actions/download-artifact
+actions/checkout
+actions/upload-artifact
+azure/setup-kubectl
+engineerd/setup-kind
+       "packageName": "docker.io/library/node",
+DEBUG: Using queue: host=pypi.org, concurrency=16 (repository=local)
+DEBUG: http cache: saving https://registry.npmjs.org/markdownlint-cli2 (etag=W/"example", lastModified=Sun, 22 Mar 2026 01:29:22 GMT) (repository=local)
+DEBUG: getLabels(https://index.docker.io, library/busybox, latest) (repository=local)
+DEBUG: getLabels(https://index.docker.io, koalaman/shellcheck, latest) (repository=local)
+DEBUG: getLabels(https://index.docker.io, hadolint/hadolint, latest) (repository=local)
+DEBUG: getLabels(https://ghcr.io, renovatebot/renovate, latest) (repository=local)
+DEBUG: getLabels(https://ghcr.io, biomejs/biome, latest) (repository=local)
+RENOVATE
+          exit 137
+        fi
         cat <<'RENOVATE'
 @github/copilot
 actions/download-artifact
@@ -317,8 +336,8 @@ ERROR: lookupUpdates error (repository=local, packageFile=containers/control-pla
 ERROR: lookupUpdates error (repository=local, packageFile=containers/control-plane/config/external-skills.yaml)
        "packageName": "https://github.com/anthropics/skills",
        "message": "timeout while waiting for mutex to become available",
-ERROR: Cannot sync git when platform=local
 RENOVATE
+        printf '%s\n' 'ERROR: Cannot sync git when platform=local'
         exit 1
         ;;
       sh)
@@ -336,6 +355,14 @@ chmod +x "${workdir}/fake-bin/docker"
 
 PATH="${workdir}/fake-bin:${PATH}" \
   TEST_REGRESSION_LOG_DIR="${workdir}" \
+  CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+  CONTROL_PLANE_CONTAINER_BIN=docker \
+  "${script_dir}/validate-renovate-config.sh"
+
+PATH="${workdir}/fake-bin:${PATH}" \
+  TEST_REGRESSION_LOG_DIR="${workdir}" \
+  TEST_REGRESSION_RENOVATE_MODE=timeout \
+  CONTROL_PLANE_RENOVATE_DRY_RUN_TIMEOUT=1s \
   CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
   CONTROL_PLANE_CONTAINER_BIN=docker \
   "${script_dir}/validate-renovate-config.sh"
@@ -501,21 +528,7 @@ if [[ "${newline_transfer_status}" -eq 0 ]]; then
 fi
 grep -Fq 'CONTROL_PLANE_JOB_TRANSFER_HOST must not contain newlines' <<<"${newline_transfer_output}"
 
-printf '%s\n' 'regression-test: verifying Copilot launcher applies CPU cap, nice, and secret env injection' >&2
-cat > "${workdir}/fake-bin/cpulimit" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "$@" > "${TEST_REGRESSION_LOG_DIR:?}/cpulimit.args"
-[[ "${1:-}" == "-f" ]]
-[[ "${2:-}" == "-q" ]]
-[[ "${3:-}" == "-l" ]]
-shift 4
-[[ "${1:-}" == "--" ]]
-shift
-exec "$@"
-EOF
-chmod +x "${workdir}/fake-bin/cpulimit"
-
+printf '%s\n' 'regression-test: verifying Copilot launcher applies nice and secret env injection' >&2
 cat > "${workdir}/fake-bin/nice" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -542,22 +555,15 @@ run_copilot_launcher_test() {
   local CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null
   local CONTROL_PLANE_COPILOT_BIN=copilot
   local CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE="${workdir}/copilot-token"
-  local CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT=55
   local CONTROL_PLANE_COPILOT_NICE_LEVEL=7
   export PATH TEST_REGRESSION_LOG_DIR CONTROL_PLANE_RUNTIME_ENV_FILE
   export CONTROL_PLANE_COPILOT_BIN CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE
-  export CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT CONTROL_PLANE_COPILOT_NICE_LEVEL
+  export CONTROL_PLANE_COPILOT_NICE_LEVEL
   "${script_dir}/../containers/control-plane/bin/control-plane-copilot"
 }
 
 run_copilot_launcher_test
 
-grep -qx -- '-f' "${workdir}/cpulimit.args"
-grep -qx -- '-q' "${workdir}/cpulimit.args"
-grep -qx -- '-l' "${workdir}/cpulimit.args"
-grep -qx '55' "${workdir}/cpulimit.args"
-grep -qx -- '--' "${workdir}/cpulimit.args"
-grep -qx 'nice' "${workdir}/cpulimit.args"
 grep -qx -- '-n' "${workdir}/nice.args"
 grep -qx '7' "${workdir}/nice.args"
 grep -qx -- '--yolo' "${workdir}/copilot.args"

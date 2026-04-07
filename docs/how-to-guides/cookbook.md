@@ -186,7 +186,9 @@ kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox
 ssh -p 2222 copilot@127.0.0.1
 ```
 
-session picker を一時的に避けたい場合だけ、Pod の env に `CONTROL_PLANE_DISABLE_SESSION_PICKER=1` を設定します。常用する既定値ではありません。
+interactive SSH login は常に Copilot 用 GNU Screen session を再利用または作成します。
+one-shot の shell command だけなら `ssh -p 2222 copilot@127.0.0.1 'bash -il'` のように
+command mode を使います。
 
 ## 7. 典型的なデバッグの入口
 

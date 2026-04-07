@@ -55,7 +55,6 @@ copilot_github_token="${COPILOT_GITHUB_TOKEN:-}"
 git_user_name="${CONTROL_PLANE_GIT_USER_NAME:-}"
 git_user_email="${CONTROL_PLANE_GIT_USER_EMAIL:-}"
 audit_log_max_records="${CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS:-10000}"
-copilot_cpu_limit_percent="${CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT:-100}"
 copilot_nice_level="${CONTROL_PLANE_COPILOT_NICE_LEVEL:-10}"
 job_namespace="${CONTROL_PLANE_JOB_NAMESPACE:-${CONTROL_PLANE_K8S_NAMESPACE:-default}}"
 job_workspace_pvc="${CONTROL_PLANE_JOB_WORKSPACE_PVC:-}"
@@ -706,12 +705,6 @@ runtime_config_tmp="$(mktemp "${runtime_config_path}.XXXXXX")"
   if [[ -n "${CONTROL_PLANE_COPILOT_SESSION:-}" ]]; then
     write_runtime_var CONTROL_PLANE_COPILOT_SESSION "${CONTROL_PLANE_COPILOT_SESSION}"
   fi
-  if [[ -n "${CONTROL_PLANE_SESSION_SELECTION:-}" ]]; then
-    write_runtime_var CONTROL_PLANE_SESSION_SELECTION "${CONTROL_PLANE_SESSION_SELECTION}"
-  fi
-  if [[ -n "${CONTROL_PLANE_DISABLE_SESSION_PICKER:-}" ]]; then
-    write_runtime_var CONTROL_PLANE_DISABLE_SESSION_PICKER "${CONTROL_PLANE_DISABLE_SESSION_PICKER}"
-  fi
   write_runtime_var CONTROL_PLANE_FAST_EXECUTION_ENABLED "${CONTROL_PLANE_FAST_EXECUTION_ENABLED:-0}"
   if [[ -n "${CONTROL_PLANE_FAST_EXECUTION_IMAGE:-}" ]]; then
     write_runtime_var CONTROL_PLANE_FAST_EXECUTION_IMAGE "${CONTROL_PLANE_FAST_EXECUTION_IMAGE}"
@@ -740,8 +733,10 @@ runtime_config_tmp="$(mktemp "${runtime_config_path}.XXXXXX")"
   if [[ -n "${CONTROL_PLANE_COPILOT_BIN:-}" ]]; then
     write_runtime_var CONTROL_PLANE_COPILOT_BIN "${CONTROL_PLANE_COPILOT_BIN}"
   fi
-  write_runtime_var CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT "${copilot_cpu_limit_percent}"
   write_runtime_var CONTROL_PLANE_COPILOT_NICE_LEVEL "${copilot_nice_level}"
+  if [[ -n "${CONTROL_PLANE_RUST_HOOK_IMAGE:-}" ]]; then
+    write_runtime_var CONTROL_PLANE_RUST_HOOK_IMAGE "${CONTROL_PLANE_RUST_HOOK_IMAGE}"
+  fi
   write_runtime_var CONTROL_PLANE_JOB_SERVICE_ACCOUNT "${CONTROL_PLANE_JOB_SERVICE_ACCOUNT:-}"
   write_runtime_var CONTROL_PLANE_JOB_IMAGE_PULL_POLICY "${CONTROL_PLANE_JOB_IMAGE_PULL_POLICY:-IfNotPresent}"
   write_runtime_var CONTROL_PLANE_JOB_CPU_REQUEST "${CONTROL_PLANE_JOB_CPU_REQUEST:-100m}"

@@ -4,6 +4,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 control_plane_image="${CONTROL_PLANE_IMAGE_TAG:-localhost/control-plane:test}"
+rust_build_image="${CONTROL_PLANE_RUST_BUILD_IMAGE_TAG:-${control_plane_image}}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-docker}"
 manifest_path="$(realpath "${1:?usage: scripts/install-git-skills-from-manifest.sh <manifest-path> <destination-root>}")"
 destination_root="$(realpath -m "${2:?usage: scripts/install-git-skills-from-manifest.sh <manifest-path> <destination-root>}")"
@@ -33,7 +34,7 @@ command -v "${container_bin}" >/dev/null 2>&1 || {
   -v "${runtime_tools_target_dir}:/runtime-tools-target" \
   -w /workspace/containers/control-plane/runtime-tools \
   --entrypoint sh \
-  "${control_plane_image}" \
+  "${rust_build_image}" \
   -c 'cargo build --release'
 
 "${runtime_tools_bin}" install-git-skills-from-manifest "${manifest_path}" "${destination_root}"

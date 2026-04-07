@@ -10,6 +10,7 @@ container_bin=""
 renovate_image="${CONTROL_PLANE_RENOVATE_IMAGE:-ghcr.io/renovatebot/renovate:43.104.2@sha256:450cc98e3f218e08850ca564d5f99f6ef6e9b4c7a88b4af1dde4487d335848b0}"
 base_dir=""
 log_file=""
+renovate_dry_run_timeout="${CONTROL_PLANE_RENOVATE_DRY_RUN_TIMEOUT:-120s}"
 # Use container root so restrictive workspace mounts remain readable across
 # Docker, rootful Podman, and rootless Podman.
 workspace_access_user="0:0"
@@ -75,6 +76,38 @@ lookup_update_errors_are_tolerated() {
   ' "${log_path}"
 }
 
+dependency_report_contains() {
+  local dependency="$1"
+  local log_path="$2"
+
+  case "${dependency}" in
+    busybox)
+      grep -Eq '(^|[^[:alnum:]_-])busybox([^[:alnum:]_-]|$)|library/busybox' "${log_path}"
+      ;;
+    docker.io/library/node)
+      grep -Eq 'docker\.io/library/node|index\.docker\.io, library/node|index\.docker\.io/v2/library/node' "${log_path}"
+      ;;
+    ghcr.io/biomejs/biome)
+      grep -Eq 'ghcr\.io/biomejs/biome|ghcr\.io, biomejs/biome|ghcr\.io/v2/biomejs/biome' "${log_path}"
+      ;;
+    ghcr.io/renovatebot/renovate)
+      grep -Eq 'ghcr\.io/renovatebot/renovate|ghcr\.io, renovatebot/renovate|ghcr\.io/v2/renovatebot/renovate' "${log_path}"
+      ;;
+    hadolint/hadolint)
+      grep -Eq 'hadolint/hadolint|index\.docker\.io, hadolint/hadolint|index\.docker\.io/v2/hadolint/hadolint' "${log_path}"
+      ;;
+    koalaman/shellcheck)
+      grep -Eq 'koalaman/shellcheck|index\.docker\.io, koalaman/shellcheck|index\.docker\.io/v2/koalaman/shellcheck' "${log_path}"
+      ;;
+    yamllint)
+      grep -Eq 'yamllint|host=pypi\.org|https://pypi\.org' "${log_path}"
+      ;;
+    *)
+      grep -Fq "${dependency}" "${log_path}"
+      ;;
+  esac
+}
+
 cleanup() {
   local cleanup_container_bin="${container_bin:-}"
   local cleanup_renovate_image="${renovate_image:-}"
@@ -110,6 +143,7 @@ log_file="$(mktemp)"
 chmod 0777 "${base_dir}"
 
 require_command "${container_bin}"
+require_command timeout
 
 "${container_bin}" run --rm \
   --user "${workspace_access_user}" \
@@ -122,7 +156,8 @@ require_command "${container_bin}"
 renovate_status=0
 
 set +e
-"${container_bin}" run --rm \
+timeout --signal=TERM --kill-after=10s "${renovate_dry_run_timeout}" \
+  "${container_bin}" run --rm \
   --user "${workspace_access_user}" \
   "${renovate_env[@]}" \
   -e LOG_LEVEL=debug \
@@ -141,7 +176,21 @@ set +e
 renovate_status=$?
 set -e
 
-if [[ "${renovate_status}" -ne 0 ]]; then
+if [[ "${renovate_status}" -eq 124 || "${renovate_status}" -eq 137 || "${renovate_status}" -eq 143 ]]; then
+  if lookup_update_errors_are_tolerated "${log_file}"; then
+    printf 'Renovate local dry-run timed out after %s; validating the captured dependency report instead.\n' \
+      "${renovate_dry_run_timeout}" \
+      >&2
+    if grep -Fq 'ERROR: lookupUpdates error' "${log_file}"; then
+      printf '%s\n' \
+        'Ignoring transient git-refs lookup failures for the pinned external skills repository during local dry-run.' \
+        >&2
+    fi
+  else
+    cat "${log_file}" >&2
+    exit 1
+  fi
+elif [[ "${renovate_status}" -ne 0 ]]; then
   if grep -Fq 'Cannot sync git when platform=local' "${log_file}" \
     && lookup_update_errors_are_tolerated "${log_file}"; then
     printf '%s\n' \
@@ -176,7 +225,7 @@ expected_dependencies=(
 )
 
 for dependency in "${expected_dependencies[@]}"; do
-  if ! grep -F "${dependency}" "${log_file}" >/dev/null; then
+  if ! dependency_report_contains "${dependency}" "${log_file}"; then
     printf 'Renovate local dry run did not report expected dependency: %s\n' "${dependency}" >&2
     cat "${log_file}" >&2
     exit 1

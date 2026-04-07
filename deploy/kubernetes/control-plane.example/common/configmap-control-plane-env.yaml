@@ -63,6 +63,9 @@ data:
   # CONTROL_PLANE_JOB_WORKSPACE_PVC: control-plane-workspace-pvc
   # CONTROL_PLANE_JOB_WORKSPACE_SUBPATH: workspace
   CONTROL_PLANE_JOB_INPUT_MOUNT_PATH: /var/run/control-plane/job-inputs
+  # Compile-heavy Rust hooks should run through a dedicated toolchain image
+  # instead of the slim control-plane image.
+  CONTROL_PLANE_RUST_HOOK_IMAGE: docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895
   CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha
   CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane.copilot-sandbox.svc.cluster.local
   CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"
@@ -72,9 +75,6 @@ data:
   # adjust history depth; when a tool hook sees more than this many
   # rows, it deletes the oldest rows until roughly 3/4 of the cap remains.
   CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS: "10000"
-  # `cpulimit` treats 100 as roughly one CPU core, which keeps an
-  # interactive Copilot session from monopolizing the node.
-  CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT: "100"
   CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: IfNotPresent
   CONTROL_PLANE_JOB_CPU_REQUEST: 250m
   CONTROL_PLANE_JOB_CPU_LIMIT: "2"

@@ -15,7 +15,7 @@ kind_required_host_path="${CONTROL_PLANE_KIND_REQUIRED_HOST_PATH:-/lib/modules}"
 workdir="$(mktemp -d)"
 ssh_key="${workdir}/id_ed25519"
 kubeconfig_path="${workdir}/kubeconfig"
-kind_auto_login_session="k8s-auto-login-${RANDOM}"
+rust_hook_image="${CONTROL_PLANE_TEST_RUST_HOOK_IMAGE:-docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895}"
 port_forward_pid=""
 created_cluster=0
 kind_uses_sudo=0
@@ -100,7 +100,6 @@ ssh_opts=(
   -o StrictHostKeyChecking=no
   -o UserKnownHostsFile=/dev/null
   -o IdentitiesOnly=yes
-  -o SetEnv=LC_ALL=en_US.UTF8
   -i "${ssh_key}"
   -p "${ssh_port}"
 )
@@ -129,33 +128,6 @@ wait_for_ssh() {
   fi
   dump_control_plane_diagnostics
   exit 1
-}
-
-wait_for_screen_term() {
-  local target_session="$1"
-  local term_file="$2"
-  local expected_term_pattern="${3:-screen-256color(-bce)?}"
-  local attempts="${4:-15}"
-  local remote_command
-  local _
-
-  printf -v remote_command 'TARGET_SESSION=%q TERM_FILE=%q EXPECTED_TERM_PATTERN=%q bash -l -se' \
-    "${target_session}" "${term_file}" "${expected_term_pattern}"
-
-  for _ in $(seq 1 "${attempts}"); do
-    # shellcheck disable=SC2029
-    if ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_command}" <<'EOF' >/dev/null 2>&1
-set -euo pipefail
-screen -list | grep -q -- "${TARGET_SESSION}"
-grep -Eq -- "^(${EXPECTED_TERM_PATTERN})$" "${TERM_FILE}"
-EOF
-    then
-      return 0
-    fi
-    sleep 1
-  done
-
-  return 1
 }
 
 wait_for_remote_grep() {
@@ -527,7 +499,7 @@ data:
   CONTROL_PLANE_JOB_TRANSFER_IMAGE: ${control_plane_image}
   CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane.${namespace}.svc.cluster.local
   CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"
-  CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT: "100"
+  CONTROL_PLANE_RUST_HOOK_IMAGE: ${rust_hook_image}
   CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: Never
 ---
 apiVersion: v1
@@ -807,21 +779,13 @@ command -v cargo
 command -v yamllint
 command -v sshd
 command -v screen
-command -v vim
+! command -v cpulimit >/dev/null 2>&1
+! command -v gcc >/dev/null 2>&1
+! command -v pkg-config >/dev/null 2>&1
+! command -v vim >/dev/null 2>&1
 printf '%s\n' 'kind-test remote: command availability ok' >&2
-test "\$(TERM=xterm-256color tput colors)" -ge 256
-test "\$(TERM=screen-256color tput colors)" -ge 256
-test "\$(TERM=tmux-256color tput colors)" -ge 256
-printf '%s\n' 'kind-test remote: terminfo ok' >&2
 printf '%s\n' "\${LANG}" | grep -qi 'utf-8'
-test "\${LC_ALL}" = "en_US.UTF8"
-locale charmap | grep -qx 'UTF-8'
-locale -a | grep -Eqi '^en_US\.utf-?8$'
-locale -a | grep -Eqi '^ja_JP\.utf-?8$'
-test "\${EDITOR}" = "vim"
-test "\${VISUAL}" = "vim"
-test "\${GH_PAGER}" = "cat"
-printf '%s\n' 'kind-test remote: locale and editor env ok' >&2
+printf '%s\n' 'kind-test remote: login env ok' >&2
 test -f ~/.copilot/skills/repo-change-delivery/SKILL.md
 test -f ~/.copilot/config.json
 test -f ~/.copilot/command-history-state.json
@@ -847,6 +811,7 @@ fi
 printf '%s\n' 'kind-test remote: gh hosts confinement ok' >&2
 grep -Fqx 'CARGO_HOME=/home/copilot/.cargo' ~/.config/control-plane/runtime.env
 grep -Fqx 'CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target' ~/.config/control-plane/runtime.env
+grep -Fqx "CONTROL_PLANE_RUST_HOOK_IMAGE=${rust_hook_image}" ~/.config/control-plane/runtime.env
 test -d /var/tmp/control-plane
 test -d /var/tmp/control-plane/cargo-target
 printf '%s\n' 'kind-test remote: runtime tmp ok' >&2
@@ -855,6 +820,7 @@ test "\${CONTROL_PLANE_FAST_EXECUTION_ENABLED}" = "1"
 test "\${CONTROL_PLANE_FAST_EXECUTION_IMAGE}" = "${control_plane_image}"
 test "\${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE}" = "${control_plane_image}"
 test "\${CONTROL_PLANE_COPILOT_SESSION_PVC}" = "control-plane-copilot-session-pvc"
+test "\${CONTROL_PLANE_RUST_HOOK_IMAGE}" = "${rust_hook_image}"
 cat /proc/self/uid_map > /workspace/k8s-pod-uid-map.txt
 printf '%s\n' 'kind-test remote: runtime env and workspace write ok' >&2
 EOF
@@ -863,17 +829,6 @@ EOF
 set +e
 printf '%s\n' '--- kind-test initial remote debug ---'
 printf 'LANG=%s\n' "${LANG:-}" || true
-printf 'LC_ALL=%s\n' "${LC_ALL:-}" || true
-printf 'EDITOR=%s\n' "${EDITOR:-}" || true
-printf 'VISUAL=%s\n' "${VISUAL:-}" || true
-printf 'GH_PAGER=%s\n' "${GH_PAGER:-}" || true
-printf '%s\n' '--- terminfo ---'
-TERM=xterm-256color tput colors || true
-TERM=screen-256color tput colors || true
-TERM=tmux-256color tput colors || true
-printf '%s\n' '--- locale ---'
-locale charmap || true
-locale -a || true
 printf '%s\n' '--- persisted files ---'
 ls -ld ~/.copilot ~/.copilot/session-state ~/.config ~/.config/gh ~/.ssh /workspace || true
 ls -l ~/.copilot/config.json ~/.copilot/command-history-state.json ~/.config/gh/hosts.yml || true
@@ -889,6 +844,7 @@ printf 'CONTROL_PLANE_FAST_EXECUTION_ENABLED=%s\n' "${CONTROL_PLANE_FAST_EXECUTI
 printf 'CONTROL_PLANE_FAST_EXECUTION_IMAGE=%s\n' "${CONTROL_PLANE_FAST_EXECUTION_IMAGE:-}" || true
 printf 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE=%s\n' "${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE:-}" || true
 printf 'CONTROL_PLANE_COPILOT_SESSION_PVC=%s\n' "${CONTROL_PLANE_COPILOT_SESSION_PVC:-}" || true
+printf 'CONTROL_PLANE_RUST_HOOK_IMAGE=%s\n' "${CONTROL_PLANE_RUST_HOOK_IMAGE:-}" || true
 cat /proc/self/uid_map || true
 EOF
     dump_control_plane_diagnostics
@@ -1017,7 +973,7 @@ mkdir -p ~/.copilot ~/.config/gh ~/.ssh /workspace
 echo k8s > ~/.copilot/state.txt
 echo gh > ~/.config/gh/state.txt
 echo ssh > ~/.ssh/state.txt
-screen -T screen-256color -dmS kind-session sh -lc 'printf "%s\n" "$TERM" > /workspace/k8s-screen-term.txt; printf "日本語★\n" > /workspace/k8s-screen-utf8.txt; echo k8s-screen > /workspace/k8s-screen.txt; sleep 30'
+screen -dmS kind-session sh -lc 'printf "日本語★\n" > /workspace/k8s-screen-utf8.txt; echo k8s-screen > /workspace/k8s-screen.txt; sleep 30'
 EOF
   printf '%s\n' 'kind-test: screen session started' >&2
 }
@@ -1026,7 +982,6 @@ wait_for_screen_output_fixture() {
   if ! wait_for_remote_grep '^k8s-screen$' /workspace/k8s-screen.txt; then
     ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
-cat /workspace/k8s-screen-term.txt || true
 cat /workspace/k8s-screen-utf8.txt || true
 cat /workspace/k8s-screen.txt || true
 EOF
@@ -1036,70 +991,21 @@ EOF
 }
 
 run_terminal_session_assertions() {
-  printf '%s\n' 'kind-test: verifying login TERM fallback' >&2
-  if ! TERM=bogusterm ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
-    "CONTROL_PLANE_DISABLE_SESSION_PICKER=1 bash -lic 'printf \"%s\n\" \"\$TERM\" > /workspace/k8s-login-term.txt; tput colors > /workspace/k8s-login-colors.txt'" \
-    </dev/null >"${workdir}/ssh-login-term.log" 2>&1; then
-    cat "${workdir}/ssh-login-term.log" >&2 || true
-    printf 'Expected kind login shell TERM fallback to succeed over SSH\n' >&2
-    exit 1
-  fi
-  if ! ssh_bash <<'EOF'
-set -euo pipefail
-grep -Eq '^(xterm-256color|xterm)$' /workspace/k8s-login-term.txt
-awk 'NR == 1 { exit !($1 >= 8) }' /workspace/k8s-login-colors.txt
-EOF
-  then
-    ssh_bash <<'EOF' >&2 || true
-set -euo pipefail
-cat /workspace/k8s-login-term.txt || true
-cat /workspace/k8s-login-colors.txt || true
-EOF
-    printf 'Expected kind login TERM fallback files to report a usable terminal\n' >&2
-    exit 1
-  fi
-  printf '%s\n' 'kind-test: login TERM fallback ok' >&2
-
-  printf '%s\n' 'kind-test: verifying login TERM upgrade to 256 colors' >&2
-  if ! TERM=xterm-color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
-    "CONTROL_PLANE_DISABLE_SESSION_PICKER=1 bash -lic 'printf \"%s\n\" \"\$TERM\" > /workspace/k8s-login-term-upgrade.txt; tput colors > /workspace/k8s-login-term-upgrade-colors.txt'" \
-    </dev/null >"${workdir}/ssh-login-term-upgrade.log" 2>&1; then
-    cat "${workdir}/ssh-login-term-upgrade.log" >&2 || true
-    printf 'Expected kind login TERM upgrade to succeed over SSH\n' >&2
-    exit 1
-  fi
-  if ! ssh_bash <<'EOF'
-set -euo pipefail
-grep -qx 'xterm-256color' /workspace/k8s-login-term-upgrade.txt
-awk 'NR == 1 { exit !($1 >= 256) }' /workspace/k8s-login-term-upgrade-colors.txt
-EOF
-  then
-    ssh_bash <<'EOF' >&2 || true
-set -euo pipefail
-cat /workspace/k8s-login-term-upgrade.txt || true
-cat /workspace/k8s-login-term-upgrade-colors.txt || true
-EOF
-    printf 'Expected kind login TERM upgrade files to report xterm-256color with 256 colors\n' >&2
-    exit 1
-  fi
-  printf '%s\n' 'kind-test: login TERM upgrade ok' >&2
-
-  if ! wait_for_screen_term kind-session /workspace/k8s-screen-term.txt; then
+  if ! wait_for_screen_session kind-session; then
     ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
 screen -list || true
-cat /workspace/k8s-screen-term.txt || true
 cat /workspace/k8s-screen-utf8.txt || true
+cat /workspace/k8s-screen.txt || true
 EOF
-    printf 'Expected kind-session to report a screen-256color TERM variant\n' >&2
+    printf 'Expected kind-session to stay available after SSH setup\n' >&2
     exit 1
   fi
-  printf '%s\n' 'kind-test: screen term ready' >&2
+  printf '%s\n' 'kind-test: screen session ready' >&2
 
   if ! wait_for_remote_grep '^日本語★$' /workspace/k8s-screen-utf8.txt; then
     ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
-cat /workspace/k8s-screen-term.txt || true
 cat /workspace/k8s-screen-utf8.txt || true
 cat /workspace/k8s-screen.txt || true
 EOF
@@ -1111,7 +1017,6 @@ EOF
   if ! wait_for_remote_grep '^k8s-screen$' /workspace/k8s-screen.txt; then
     ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
-cat /workspace/k8s-screen-term.txt || true
 cat /workspace/k8s-screen-utf8.txt || true
 cat /workspace/k8s-screen.txt || true
 EOF
@@ -1120,34 +1025,20 @@ EOF
   fi
   printf '%s\n' 'kind-test: screen output ready' >&2
 
-  printf '%s\n' 'kind-test: verifying session picker fallback' >&2
-  if ! TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
-    "CONTROL_PLANE_SESSION_SELECTION=9999 bash -lic 'printf \"%s\n\" fallback-shell-ok'" \
-    </dev/null >"${workdir}/ssh-picker-fallback.log" 2>&1; then
-    cat "${workdir}/ssh-picker-fallback.log" >&2 || true
-    printf 'Expected SSH login to fall back to a shell when the session picker fails\n' >&2
-    exit 1
-  fi
-  if ! grep -q 'fallback-shell-ok' "${workdir}/ssh-picker-fallback.log"; then
-    printf 'Expected fallback-shell-ok marker in kind SSH fallback log\n' >&2
-    cat "${workdir}/ssh-picker-fallback.log" >&2 || true
-    exit 1
-  fi
-  if ! grep -q 'session picker failed; continuing with the login shell' "${workdir}/ssh-picker-fallback.log"; then
-    printf 'Expected session picker fallback warning in kind SSH fallback log\n' >&2
-    cat "${workdir}/ssh-picker-fallback.log" >&2 || true
-    exit 1
-  fi
-  printf '%s\n' 'kind-test: session picker fallback ok' >&2
-
-  printf '%s\n' 'kind-test: verifying interactive SSH auto-login' >&2
+  printf '%s\n' 'kind-test: verifying interactive SSH Copilot session reuse' >&2
   if ! ssh_bash <<EOF
 set -euo pipefail
 cp ~/.config/control-plane/runtime.env /workspace/k8s-runtime.env.bak
-printf '\nCONTROL_PLANE_SESSION_SELECTION=new:%s\n' "${kind_auto_login_session}" >> ~/.config/control-plane/runtime.env
+printf '\nCONTROL_PLANE_COPILOT_BIN=%s\n' /workspace/test-copilot-shell >> ~/.config/control-plane/runtime.env
+cat > /workspace/test-copilot-shell <<'INNER'
+#!/usr/bin/env bash
+set -euo pipefail
+exec bash -il
+INNER
+chmod +x /workspace/test-copilot-shell
 EOF
   then
-    printf 'Expected kind runtime.env backup/setup to succeed before SSH auto-login probe\n' >&2
+    printf 'Expected kind runtime.env backup/setup to succeed before SSH Copilot probe\n' >&2
     exit 1
   fi
 
@@ -1155,9 +1046,9 @@ EOF
   "${script_dir}/test-ssh-session-persistence.sh" \
     --identity "${ssh_key}" \
     --port "${ssh_port}" \
-    --session-name "${kind_auto_login_session}" \
-    --marker-path /workspace/k8s-auto-login-marker.txt
-  kind_auto_login_status=$?
+    --session-name copilot \
+    --marker-path /workspace/k8s-copilot-marker.txt
+  kind_copilot_status=$?
   set -e
 
   if ! ssh_bash <<'EOF'
@@ -1165,43 +1056,18 @@ set -euo pipefail
 cp /workspace/k8s-runtime.env.bak ~/.config/control-plane/runtime.env
 chmod 600 ~/.config/control-plane/runtime.env
 rm -f /workspace/k8s-runtime.env.bak
+rm -f /workspace/test-copilot-shell
 EOF
   then
-    printf 'Expected kind runtime.env restore to succeed after SSH auto-login probe\n' >&2
+    printf 'Expected kind runtime.env restore to succeed after SSH Copilot probe\n' >&2
     exit 1
   fi
 
-  if [[ "${kind_auto_login_status}" -ne 0 ]]; then
-    printf 'Expected kind interactive SSH auto-login to stay attached and accept input\n' >&2
+  if [[ "${kind_copilot_status}" -ne 0 ]]; then
+    printf 'Expected kind interactive SSH Copilot session to stay attached and accept input\n' >&2
     exit 1
   fi
-  printf '%s\n' 'kind-test: interactive SSH auto-login ok' >&2
-
-  printf '%s\n' 'kind-test: verifying picker menu options' >&2
-  if ! ssh_bash <<'EOF'
-set -euo pipefail
-screen -T screen-256color -dmS shell bash -lc 'sleep 30'
-EOF
-  then
-    printf 'Expected shell session fixture for kind picker menu test\n' >&2
-    exit 1
-  fi
-  set +e
-  printf '9999\n' | TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
-    "control-plane-session --select" >"${workdir}/ssh-picker-menu.log" 2>&1
-  picker_menu_status=$?
-  set -e
-  if [[ "${picker_menu_status}" -eq 0 ]]; then
-    printf 'Expected kind picker menu probe to fail on invalid selection\n' >&2
-    cat "${workdir}/ssh-picker-menu.log" >&2 || true
-    exit 1
-  fi
-  if ! grep -Fq 'Copilot (/workspace, --yolo)' "${workdir}/ssh-picker-menu.log"; then
-    printf 'Expected kind picker menu to show the Copilot option when only shell sessions exist\n' >&2
-    cat "${workdir}/ssh-picker-menu.log" >&2 || true
-    exit 1
-  fi
-  printf '%s\n' 'kind-test: picker menu shows Copilot option' >&2
+  printf '%s\n' 'kind-test: interactive SSH Copilot session ok' >&2
 }
 
 run_job_core_assertions() {

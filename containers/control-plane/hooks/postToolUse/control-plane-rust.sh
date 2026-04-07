@@ -107,6 +107,14 @@ collect_target_manifests() {
   done
 }
 
+cargo_target_dir() {
+  local crate_dir="$1"
+  local crate_name
+
+  crate_name="$(basename "${crate_dir}")"
+  printf '%s\n' "${CONTROL_PLANE_RUST_TARGET_DIR:-/tmp/control-plane-rust-target/${crate_name}}"
+}
+
 [[ $# -ge 1 ]] || {
   usage
   exit 64
@@ -152,13 +160,24 @@ if [[ -n "${remote_image}" ]] && command -v control-plane-run >/dev/null 2>&1; t
   use_remote=1
 fi
 
+preset_requires_toolchain=0
+case "${preset}" in
+  fmt|fmt-check)
+    ;;
+  *)
+    preset_requires_toolchain=1
+    ;;
+esac
+
 run_local_cargo() {
   local crate_dir="$1"
+  local target_dir
 
   require_command cargo
+  target_dir="$(cargo_target_dir "${crate_dir}")"
   (
     cd "${crate_dir}"
-    cargo "${cargo_args[@]}"
+    CARGO_TARGET_DIR="${target_dir}" cargo "${cargo_args[@]}"
   )
 }
 
@@ -167,8 +186,11 @@ run_remote_cargo() {
   local crate_relative="${crate_dir#"${repo_root}/"}"
   local remote_dir="/workspace/${crate_relative}"
   local remote_command
+  local target_dir
 
-  printf -v remote_command 'cd %q && cargo' "${remote_dir}"
+  target_dir="$(cargo_target_dir "${crate_dir}")"
+
+  printf -v remote_command 'export CARGO_TARGET_DIR=%q && cd %q && cargo' "${target_dir}" "${remote_dir}"
   for cargo_arg in "${cargo_args[@]}"; do
     printf -v remote_command '%s %q' "${remote_command}" "${cargo_arg}"
   done
@@ -176,6 +198,12 @@ run_remote_cargo() {
   control-plane-run \
     --image "${remote_image}" \
      -- bash -lc "${remote_command}"
+}
+
+require_local_build_toolchain() {
+  [[ "${preset_requires_toolchain}" -eq 1 ]] || return 0
+  command -v cc >/dev/null 2>&1 && command -v pkg-config >/dev/null 2>&1 && return 0
+  die "local ${preset} needs cc and pkg-config; set CONTROL_PLANE_RUST_HOOK_IMAGE to run heavy cargo work in a separate image"
 }
 
 mapfile -t manifests < <(collect_target_manifests "$@")
@@ -190,6 +218,7 @@ for manifest in "${manifests[@]}"; do
   if [[ "${use_remote}" -eq 1 ]]; then
     run_remote_cargo "${crate_dir}"
   else
+    require_local_build_toolchain
     run_local_cargo "${crate_dir}"
   fi
 done

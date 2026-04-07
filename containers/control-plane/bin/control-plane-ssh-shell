@@ -27,15 +27,14 @@ run_login_shell() {
     stdout_tty="yes"
   fi
   debug_log_line \
-    "mode=login argv0=${0} ssh_tty=${SSH_TTY:-} sty=${STY:-} disable=${CONTROL_PLANE_DISABLE_SESSION_PICKER:-} stdin_tty=${stdin_tty} stdout_tty=${stdout_tty}"
+    "mode=login argv0=${0} ssh_tty=${SSH_TTY:-} sty=${STY:-} stdin_tty=${stdin_tty} stdout_tty=${stdout_tty}"
   if [[ -n "${SSH_TTY:-}" ]] \
     && [[ -z "${STY:-}" ]] \
-    && [[ -z "${CONTROL_PLANE_DISABLE_SESSION_PICKER:-}" ]] \
     && [[ -t 0 ]] \
     && [[ -t 1 ]] \
     && command -v control-plane-session >/dev/null 2>&1; then
-    debug_log_line "mode=login action=session-picker"
-    exec control-plane-session --select
+    debug_log_line "mode=login action=copilot-session"
+    exec control-plane-session
   fi
 
   debug_log_line "mode=login action=bash-il"

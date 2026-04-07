@@ -186,11 +186,11 @@ ${service_account_yaml}
                   su -s /bin/bash copilot -c '"'"'set -euo pipefail; doc_coauthor_skill_root="\$HOME/.copilot/skills/doc-coauthoring"; delivery_skill_root="\$HOME/.copilot/skills/repo-change-delivery"; commit_skill_root="\$HOME/.copilot/skills/git-commit"; pull_request_skill_root="\$HOME/.copilot/skills/pull-request-workflow"; skill_creator_skill_root="\$HOME/.copilot/skills/skill-creator"; test ! -L "\$doc_coauthor_skill_root"; test -r "\$doc_coauthor_skill_root/SKILL.md"; grep -Fqx "name: doc-coauthoring" "\$doc_coauthor_skill_root/SKILL.md"; test ! -L "\$delivery_skill_root"; test -r "\$delivery_skill_root/SKILL.md"; grep -Fqx "name: repo-change-delivery" "\$delivery_skill_root/SKILL.md"; test ! -L "\$commit_skill_root"; test -r "\$commit_skill_root/SKILL.md"; grep -Fqx "name: git-commit" "\$commit_skill_root/SKILL.md"; test ! -L "\$pull_request_skill_root"; test -r "\$pull_request_skill_root/SKILL.md"; grep -Fqx "name: pull-request-workflow" "\$pull_request_skill_root/SKILL.md"; test ! -L "\$skill_creator_skill_root"; test -r "\$skill_creator_skill_root/SKILL.md"; test -r "\$skill_creator_skill_root/LICENSE.txt"; grep -Fqx "name: skill-creator" "\$skill_creator_skill_root/SKILL.md"'"'"'
                   printf "%s\n" "job-check: skill-read=ok"
 
-                 term_report="\$(TERM=xterm-color bash -lc '"'"'printf "%s %s" "\$TERM" "\$(tput colors)"'"'"')"
-                 printf "job-check: term=%s\n" "\${term_report}"
-                  [[ "\${term_report}" == "xterm-256color 256" ]]
+                 lang_report="\$(bash -lc '"'"'printf "%s" "\${LANG:-}"'"'"')"
+                 printf "job-check: lang=%s\n" "\${lang_report}"
+                  [[ "\${lang_report}" == "C.UTF-8" ]]
 
-                  su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; command -v cargo >/dev/null; command -v yamllint >/dev/null; command -v control-plane-run >/dev/null; command -v control-plane-exec-api >/dev/null; cargo --version >/dev/null; yamllint --version >/dev/null; control-plane-run --help >/dev/null; control-plane-exec-api --help >/dev/null'"'"'
+                  su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; command -v cargo >/dev/null; command -v yamllint >/dev/null; command -v control-plane-run >/dev/null; command -v control-plane-exec-api >/dev/null; ! command -v cpulimit >/dev/null 2>&1; ! command -v gcc >/dev/null 2>&1; ! command -v pkg-config >/dev/null 2>&1; ! command -v vim >/dev/null 2>&1; cargo --version >/dev/null; yamllint --version >/dev/null; control-plane-run --help >/dev/null; control-plane-exec-api --help >/dev/null'"'"'
                   printf "%s\n" "job-check: bundled-tools=ok"
                   test -d /var/tmp/control-plane
                   test -d /var/tmp/control-plane/cargo-target
@@ -219,23 +219,30 @@ ${service_account_yaml}
 
                   cp /home/copilot/.config/control-plane/runtime.env /tmp/runtime.env.bak
                   printf "\n%s\n" "CONTROL_PLANE_SSH_SHELL_LOG=/tmp/control-plane-ssh-shell.log" >> /home/copilot/.config/control-plane/runtime.env
-                  printf "\n%s\n" "CONTROL_PLANE_SESSION_SELECTION=new:k8s-auto-login" >> /home/copilot/.config/control-plane/runtime.env
+                  printf "\n%s\n" "CONTROL_PLANE_COPILOT_SESSION=k8s-copilot" >> /home/copilot/.config/control-plane/runtime.env
+                  printf "\n%s\n" "CONTROL_PLANE_COPILOT_BIN=/tmp/fake-copilot-shell" >> /home/copilot/.config/control-plane/runtime.env
+                  cat > /tmp/fake-copilot-shell <<'"'"'INNER'"'"'
+#!/usr/bin/env bash
+set -euo pipefail
+exec bash -il
+INNER
+                  chmod 755 /tmp/fake-copilot-shell
                   rm -f /tmp/ssh-interactive-marker.txt
                   rm -f /tmp/control-plane-ssh-shell.log
                   printf "%s\n" "job-check: ssh-interactive-probe-ready=ok"
                   for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60; do
-                    if grep -Fq "mode=login action=session-picker" /tmp/control-plane-ssh-shell.log 2>/dev/null \
-                      && su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list 2>/dev/null | grep -q -- k8s-auto-login'"'"'; then
+                    if grep -Fq "mode=login action=copilot-session" /tmp/control-plane-ssh-shell.log 2>/dev/null \
+                      && su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list 2>/dev/null | grep -q -- k8s-copilot'"'"'; then
                       break
                     fi
                     sleep 1
                   done
-                  if ! grep -Fq "mode=login action=session-picker" /tmp/control-plane-ssh-shell.log 2>/dev/null \
-                    || ! su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list 2>/dev/null | grep -q -- k8s-auto-login'"'"'; then
+                  if ! grep -Fq "mode=login action=copilot-session" /tmp/control-plane-ssh-shell.log 2>/dev/null \
+                    || ! su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list 2>/dev/null | grep -q -- k8s-copilot'"'"'; then
                     printf "Interactive SSH never reached a usable screen session in k8s smoke\n" >&2
                     cat /tmp/sshd.log >&2 || true
                     cat /tmp/control-plane-ssh-shell.log >&2 || true
-                    su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; rm -f /tmp/control-plane-session.log; timeout 10s script -qefc "control-plane-session --select" /tmp/control-plane-session.log'"'"' >&2 || true
+                    su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; rm -f /tmp/control-plane-session.log; timeout 10s script -qefc "control-plane-session" /tmp/control-plane-session.log'"'"' >&2 || true
                     cat /tmp/control-plane-session.log >&2 || true
                      su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list'"'"' >&2 || true
                      exit 1
@@ -340,7 +347,7 @@ set +e
   --identity "${ssh_key}" \
   --host "${job_pod_ip}" \
   --port 2222 \
-  --session-name k8s-auto-login \
+  --session-name k8s-copilot \
   --marker-path /tmp/ssh-interactive-marker.txt \
   --no-remote-check \
   >"${ssh_probe_log}" 2>&1
@@ -372,7 +379,7 @@ printf '%s\n' "${job_logs}"
 
 grep -Fq 'job-check: runtime-env=' <<<"${job_logs}"
 grep -Fq 'job-check: skill-read=ok' <<<"${job_logs}"
-grep -Fq 'job-check: term=xterm-256color 256' <<<"${job_logs}"
+grep -Fq 'job-check: lang=C.UTF-8' <<<"${job_logs}"
 grep -Fq 'job-check: bundled-tools=ok' <<<"${job_logs}"
 grep -Fq 'job-check: runtime-cache=ok' <<<"${job_logs}"
 grep -Fq 'job-check: ssh-clean=ok' <<<"${job_logs}"

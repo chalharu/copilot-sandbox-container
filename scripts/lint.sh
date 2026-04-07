@@ -21,6 +21,8 @@ markdownlint_node_image="${CONTROL_PLANE_MARKDOWNLINT_NODE_IMAGE:-docker.io/libr
 markdownlint_version="${CONTROL_PLANE_MARKDOWNLINT_VERSION:-0.22.0}"
 markdownlint_cache_volume="${CONTROL_PLANE_MARKDOWNLINT_CACHE_VOLUME:-control-plane-markdownlint-cache}"
 control_plane_image="${CONTROL_PLANE_IMAGE_TAG:-localhost/control-plane:test}"
+control_plane_rust_lint_image="${CONTROL_PLANE_RUST_LINT_IMAGE_TAG:-localhost/control-plane-rust-toolchain:test}"
+control_plane_rust_lint_target="${CONTROL_PLANE_RUST_LINT_DOCKER_TARGET:-rust-toolchain}"
 yamllint_config="${CONTROL_PLANE_YAMLLINT_CONFIG:-/workspace/.yamllint}"
 # Use container root so restrictive workspace mounts remain readable.
 workspace_access_user="0:0"
@@ -59,8 +61,8 @@ run_control_plane_rust_lint() {
   "${runtime}" run --rm --user "${workspace_access_user}" \
     -v "${PWD}:/workspace" \
     -w /workspace \
-    "${control_plane_image}" \
-    bash -lc '/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh fmt-check && /usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh clippy'
+    "${control_plane_rust_lint_image}" \
+    bash -lc "export PATH=/usr/local/cargo/bin:\$PATH && bash /workspace/containers/control-plane/hooks/postToolUse/control-plane-rust.sh fmt-check && bash /workspace/containers/control-plane/hooks/postToolUse/control-plane-rust.sh clippy"
 }
 
 run_lint_job() {
@@ -135,6 +137,9 @@ printf 'Using %s toolchain for lint\n' "${toolchain}"
 "${container_bin}" run --rm -i --entrypoint biome "${biome_image}" check --formatter-enabled=false --write --stdin-file-path=renovate.json5 < renovate.json5 >/dev/null
 CONTROL_PLANE_CONTAINER_BIN="${container_bin}" "${script_dir}/validate-renovate-config.sh"
 build_image_for_toolchain "${toolchain}" "${control_plane_image}" containers/control-plane
+if [[ "${#rust_workspace_dirs[@]}" -gt 0 ]]; then
+  build_image_target_for_toolchain "${toolchain}" "${control_plane_rust_lint_image}" containers/control-plane "${control_plane_rust_lint_target}"
+fi
 if [[ "${#rust_workspace_dirs[@]}" -gt 0 ]]; then
   printf '%s\n' 'Running hadolint, shellcheck, yamllint, markdownlint, and Rust fmt/clippy in parallel' >&2
 else

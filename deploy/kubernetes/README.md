@@ -30,9 +30,10 @@ kubectl apply -k deploy/kubernetes/control-plane.example
 2. `control-plane.example/base/pvc-control-plane-workspace.yaml` の workspace PVC 設定をクラスタに合わせる。PVC spec は bound 後に自由に変更できないので、storage class やサイズは初回導入前に確定させる。
 3. `control-plane.example/common/secret-control-plane-auth.yaml` と `control-plane.example/common/configmap-control-plane-env.yaml` の placeholder な credential とクラスタ依存値を置き換える。
 4. `control-plane` image tag を、次の 2 箇所でそろえて書き換える。
-   - `control-plane.example/base/deployment-control-plane.yaml` の `Deployment/control-plane`
-   - `control-plane.example/common/configmap-control-plane-env.yaml` の `ConfigMap/control-plane-env` にある `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` と `CONTROL_PLANE_JOB_TRANSFER_IMAGE`
-5. デフォルトのインスタンス名や workspace PVC 名を変えたい場合は、`control-plane.example/overlays/default/kustomization.yaml` の候補をベースに sibling overlay を作る。
+    - `control-plane.example/base/deployment-control-plane.yaml` の `Deployment/control-plane`
+    - `control-plane.example/common/configmap-control-plane-env.yaml` の `ConfigMap/control-plane-env` にある `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` と `CONTROL_PLANE_JOB_TRANSFER_IMAGE`
+5. compile-heavy Rust hook を使う場合は、同じ `ConfigMap/control-plane-env` の `CONTROL_PLANE_RUST_HOOK_IMAGE` をクラスタで pull できる toolchain image に合わせる。
+6. デフォルトのインスタンス名や workspace PVC 名を変えたい場合は、`control-plane.example/overlays/default/kustomization.yaml` の候補をベースに sibling overlay を作る。
 
 ## default overlay のカスタマイズ
 

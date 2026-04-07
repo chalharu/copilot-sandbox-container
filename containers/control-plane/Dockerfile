@@ -100,23 +100,15 @@ RUN apt-get update -o Acquire::Retries=3 \
     && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
-        cpulimit \
         curl \
-        gcc \
-        libc6-dev \
-        libssl-dev \
-        locales \
-        ncurses-term \
         openssh-client \
         openssh-server \
-        pkg-config \
         python3 \
         python3-venv \
         procps \
         screen \
         tini \
         unzip \
-        vim \
     && arch="$(dpkg --print-architecture)" \
     && case "${arch}" in \
         amd64) \
@@ -163,13 +155,6 @@ RUN apt-get update -o Acquire::Retries=3 \
     && python3 -m venv "${YAMLLINT_VIRTUAL_ENV}" \
     && "${YAMLLINT_VIRTUAL_ENV}/bin/pip" install --no-cache-dir --only-binary=:all: --require-hashes -r /tmp/yamllint-requirements.txt \
     && apt-get purge -y --auto-remove curl unzip \
-    && printf '%s\n' \
-        'en_US.UTF-8 UTF-8' \
-        'ja_JP.UTF-8 UTF-8' \
-        > /etc/locale.gen \
-    && locale-gen \
-    && localedef -i en_US -f UTF-8 en_US.UTF8 \
-    && localedef -i ja_JP -f UTF-8 ja_JP.UTF8 \
     && rm -rf /var/lib/apt/lists/* /root/.cache /tmp/*
 
 RUN npm install --global "@github/copilot@${COPILOT_CLI_VERSION}" \
