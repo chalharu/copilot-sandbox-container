@@ -91,7 +91,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/home/${CONTROL_PLANE_USER}/.cargo \
     CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target \
-    PATH=${YAMLLINT_VIRTUAL_ENV}/bin:/usr/local/cargo/bin:${PATH}
+    PATH=${YAMLLINT_VIRTUAL_ENV}/bin:/usr/local/cargo/bin:${PATH} \
+    LANG=C.UTF-8 \
+    LC_CTYPE=C.UTF-8
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -101,6 +103,7 @@ RUN apt-get update -o Acquire::Retries=3 \
         bash \
         ca-certificates \
         curl \
+        locales \
         openssh-client \
         openssh-server \
         python3 \
@@ -155,6 +158,13 @@ RUN apt-get update -o Acquire::Retries=3 \
     && python3 -m venv "${YAMLLINT_VIRTUAL_ENV}" \
     && "${YAMLLINT_VIRTUAL_ENV}/bin/pip" install --no-cache-dir --only-binary=:all: --require-hashes -r /tmp/yamllint-requirements.txt \
     && apt-get purge -y --auto-remove curl unzip \
+    && printf '%s\n' \
+        'en_US.UTF-8 UTF-8' \
+        'ja_JP.UTF-8 UTF-8' \
+        > /etc/locale.gen \
+    && locale-gen \
+    && localedef -i en_US -f UTF-8 en_US.UTF8 \
+    && localedef -i ja_JP -f UTF-8 ja_JP.UTF8 \
     && rm -rf /var/lib/apt/lists/* /root/.cache /tmp/*
 
 RUN npm install --global "@github/copilot@${COPILOT_CLI_VERSION}" \

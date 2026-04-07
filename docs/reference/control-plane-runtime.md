@@ -11,6 +11,7 @@ entrypoint は `~/.config/control-plane/runtime.env` を生成し、login shell 
 少なくとも次を渡します。
 
 - `TZ` で指定した IANA timezone
+- UTF-8 locale を保証する `LANG=C.UTF-8` と `LC_CTYPE=C.UTF-8`
 - 監査ログ SQLite DB の path と record cap
 - Secret / ConfigMap 由来の file path
 - Job 実行先 namespace と mode の既定値

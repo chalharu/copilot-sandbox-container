@@ -771,6 +771,8 @@ runtime_config_tmp="$(mktemp "${runtime_config_path}.XXXXXX")"
   write_runtime_var CARGO_HOME "${cargo_home_dir}"
   write_runtime_var CARGO_TARGET_DIR "${cargo_target_dir}"
   write_runtime_var RUSTUP_HOME "${rustup_home_dir}"
+  write_runtime_var LANG "C.UTF-8"
+  write_runtime_var LC_CTYPE "C.UTF-8"
   if [[ -n "${TZ:-}" ]]; then
     write_runtime_var TZ "${TZ}"
   fi

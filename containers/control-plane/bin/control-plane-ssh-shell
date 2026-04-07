@@ -9,6 +9,10 @@ if [[ -f "${runtime_config_file}" ]]; then
   set +a
 fi
 
+: "${LANG:=C.UTF-8}"
+: "${LC_CTYPE:=C.UTF-8}"
+export LANG LC_CTYPE
+
 debug_log="${CONTROL_PLANE_SSH_SHELL_LOG:-}"
 
 debug_log_line() {

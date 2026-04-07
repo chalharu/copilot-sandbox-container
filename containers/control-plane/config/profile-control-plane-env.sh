@@ -9,4 +9,5 @@ if [ -f "${runtime_config_file}" ]; then
 fi
 
 : "${LANG:=C.UTF-8}"
-export LANG
+: "${LC_CTYPE:=${LANG}}"
+export LANG LC_CTYPE
