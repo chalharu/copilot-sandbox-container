@@ -12,4 +12,10 @@ export SCREENDIR="${SCREENDIR:-${screen_runtime_root%/}/screen}"
 mkdir -p "${SCREENDIR}"
 chmod 700 "${SCREENDIR}"
 
+case "${TERM:-}" in
+  '' | dumb)
+    export TERM=xterm
+    ;;
+esac
+
 exec /usr/bin/screen "$@"

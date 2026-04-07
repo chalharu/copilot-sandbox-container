@@ -130,6 +130,25 @@ wait_for_ssh() {
   exit 1
 }
 
+wait_for_screen_session() {
+  local target_session="$1"
+  local attempts="${2:-15}"
+  local _
+
+  for _ in $(seq 1 "${attempts}"); do
+    if ssh_bash <<EOF >/dev/null 2>&1
+set -euo pipefail
+screen -list | grep -q -- '${target_session}'
+EOF
+    then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
 wait_for_remote_grep() {
   local remote_pattern="$1"
   local remote_path="$2"
