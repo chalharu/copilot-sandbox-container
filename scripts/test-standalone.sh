@@ -212,6 +212,8 @@ command -v npm
 npm ls -g @github/copilot --depth=0 | grep -q "@github/copilot@"
 ! command -v git >/dev/null 2>&1
 ! command -v gh >/dev/null 2>&1
+! command -v curl >/dev/null 2>&1
+! command -v sqlite3 >/dev/null 2>&1
 command -v kubectl
 command -v kind
 command -v yamllint

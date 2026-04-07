@@ -49,7 +49,6 @@ FROM ${RUST_BASE_IMAGE} AS skills-builder
 RUN apt-get update -o Acquire::Retries=3 \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
-        git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/bin/install-git-skills-from-manifest
@@ -88,76 +87,83 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+COPY --chmod=755 build/install-yamllint-wheel.py /usr/local/bin/install-yamllint-wheel.py
+
 # hadolint ignore=DL3008
 RUN apt-get update -o Acquire::Retries=3 \
-     && apt-get install -y --no-install-recommends \
-          bash \
-          ca-certificates \
-          cpulimit \
-          curl \
-          gcc \
-          libc6-dev \
-          locales \
-          ncurses-term \
-          openssh-client \
-          openssh-server \
-          python3 \
-          python3-pip \
-          procps \
-          screen \
-          sqlite3 \
-          tini \
-          vim \
-     && arch="$(dpkg --print-architecture)" \
-     && case "${arch}" in \
-         amd64) \
+    && apt-get install -y --no-install-recommends \
+        bash \
+        ca-certificates \
+        cpulimit \
+        curl \
+        gcc \
+        libc6-dev \
+        libssl-dev \
+        locales \
+        ncurses-term \
+        openssh-client \
+        openssh-server \
+        pkg-config \
+        python3 \
+        python3-pathspec \
+        python3-yaml \
+        procps \
+        screen \
+        tini \
+        unzip \
+        vim \
+    && arch="$(dpkg --print-architecture)" \
+    && case "${arch}" in \
+        amd64) \
             kind_arch=amd64; \
             kind_sha256=eb244cbafcc157dff60cf68693c14c9a75c4e6e6fedaf9cd71c58117cb93e3fa; \
             jq_asset=jq-linux-amd64; \
             jq_sha256=020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d; \
             kubectl_arch=amd64; \
+            kubectl_sha256=fd31c7d7129260e608f6faf92d5984c3267ad0b5ead3bced2fe125686e286ad6; \
             rclone_arch=amd64; \
             rclone_sha256=70278c22b98c7d02aed01828b70053904dbce4c8a1a15d7781d836c6fdb036ea; \
             ;; \
-         arm64) \
+        arm64) \
             kind_arch=arm64; \
             kind_sha256=8e1014e87c34901cc422a1445866835d1e666f2a61301c27e722bdeab5a1f7e4; \
             jq_asset=jq-linux-arm64; \
             jq_sha256=6bc62f25981328edd3cfcfe6fe51b073f2d7e7710d7ef7fcdac28d4e384fc3d4; \
             kubectl_arch=arm64; \
+            kubectl_sha256=6f0cd088a82dde5d5807122056069e2fac4ed447cc518efc055547ae46525f14; \
             rclone_arch=arm64; \
             rclone_sha256=ed2a638b4cb15abe4f01d6d9c015f3a1cb41aa7a17c96db2725542c61f353b8e; \
             ;; \
-          *) printf 'Unsupported architecture for control-plane tools: %s\n' "${arch}" >&2; exit 1 ;; \
-        esac \
+        *) printf 'Unsupported architecture for control-plane tools: %s\n' "${arch}" >&2; exit 1 ;; \
+    esac \
       && curl -fsSLo "/tmp/kind-linux-${kind_arch}" "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-${kind_arch}" \
       && printf '%s  %s\n' "${kind_sha256}" "/tmp/kind-linux-${kind_arch}" | sha256sum -c - \
-     && install -m 0755 "/tmp/kind-linux-${kind_arch}" /usr/local/bin/kind \
-     && curl -fsSLo "/tmp/${jq_asset}" "https://github.com/jqlang/jq/releases/download/${JQ_VERSION}/${jq_asset}" \
-     && printf '%s  %s\n' "${jq_sha256}" "/tmp/${jq_asset}" | sha256sum -c - \
-     && install -m 0755 "/tmp/${jq_asset}" /usr/local/bin/jq \
-     && curl -fsSLo /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${kubectl_arch}/kubectl" \
-     && curl -fsSLo /tmp/kubectl.sha256 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${kubectl_arch}/kubectl.sha256" \
-     && printf '%s  %s\n' "$(cat /tmp/kubectl.sha256)" /tmp/kubectl | sha256sum -c - \
-     && install -m 0755 /tmp/kubectl /usr/local/bin/kubectl \
-     && rclone_asset="rclone-${RCLONE_VERSION}-linux-${rclone_arch}.zip" \
-     && curl -fsSLo "/tmp/${rclone_asset}" "https://github.com/rclone/rclone/releases/download/${RCLONE_VERSION}/${rclone_asset}" \
-     && printf '%s  %s\n' "${rclone_sha256}" "/tmp/${rclone_asset}" | sha256sum -c - \
-     && rclone_member="$(python3 -c 'import sys, zipfile; archive, dest = sys.argv[1:3]; zf = zipfile.ZipFile(archive); member = next(name for name in zf.namelist() if name.endswith("/rclone")); zf.extract(member, dest); print(member)' "/tmp/${rclone_asset}" /tmp)" \
-     && install -m 0755 "/tmp/${rclone_member}" /usr/local/bin/rclone \
-     && yamllint_wheel="yamllint-${YAMLLINT_VERSION}-py3-none-any.whl" \
-     && curl -fsSLo "/tmp/${yamllint_wheel}" "https://github.com/adrienverge/yamllint/releases/download/v${YAMLLINT_VERSION}/${yamllint_wheel}" \
-     && printf '%s  %s\n' "${YAMLLINT_WHEEL_SHA256}" "/tmp/${yamllint_wheel}" | sha256sum -c - \
-     && python3 -m pip install --break-system-packages --no-cache-dir "/tmp/${yamllint_wheel}" \
-     && apt-get purge -y --auto-remove python3-pip \
-     && printf '%s\n' \
-         'en_US.UTF-8 UTF-8' \
-         'ja_JP.UTF-8 UTF-8' \
-         > /etc/locale.gen \
-     && locale-gen \
-     && localedef -i en_US -f UTF-8 en_US.UTF8 \
-     && localedef -i ja_JP -f UTF-8 ja_JP.UTF8 \
-     && rm -rf /var/lib/apt/lists/* /root/.cache /tmp/*
+    && install -m 0755 "/tmp/kind-linux-${kind_arch}" /usr/local/bin/kind \
+    && curl -fsSLo "/tmp/${jq_asset}" "https://github.com/jqlang/jq/releases/download/${JQ_VERSION}/${jq_asset}" \
+    && printf '%s  %s\n' "${jq_sha256}" "/tmp/${jq_asset}" | sha256sum -c - \
+    && install -m 0755 "/tmp/${jq_asset}" /usr/local/bin/jq \
+    && curl -fsSLo /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${kubectl_arch}/kubectl" \
+    && printf '%s  %s\n' "${kubectl_sha256}" /tmp/kubectl | sha256sum -c - \
+    && install -m 0755 /tmp/kubectl /usr/local/bin/kubectl \
+    && rclone_asset="rclone-${RCLONE_VERSION}-linux-${rclone_arch}.zip" \
+    && curl -fsSLo "/tmp/${rclone_asset}" "https://github.com/rclone/rclone/releases/download/${RCLONE_VERSION}/${rclone_asset}" \
+    && printf '%s  %s\n' "${rclone_sha256}" "/tmp/${rclone_asset}" | sha256sum -c - \
+    && unzip -q "/tmp/${rclone_asset}" -d /tmp \
+    && install -m 0755 "/tmp/rclone-${RCLONE_VERSION}-linux-${rclone_arch}/rclone" /usr/local/bin/rclone \
+    && yamllint_wheel="yamllint-${YAMLLINT_VERSION}-py3-none-any.whl" \
+    && curl -fsSLo "/tmp/${yamllint_wheel}" "https://github.com/adrienverge/yamllint/releases/download/v${YAMLLINT_VERSION}/${yamllint_wheel}" \
+    && printf '%s  %s\n' "${YAMLLINT_WHEEL_SHA256}" "/tmp/${yamllint_wheel}" | sha256sum -c - \
+    && export YAMLLINT_WHEEL_PATH="/tmp/${yamllint_wheel}" \
+    && python3 /usr/local/bin/install-yamllint-wheel.py \
+    && apt-get purge -y --auto-remove curl unzip \
+    && printf '%s\n' \
+        'en_US.UTF-8 UTF-8' \
+        'ja_JP.UTF-8 UTF-8' \
+        > /etc/locale.gen \
+    && locale-gen \
+    && localedef -i en_US -f UTF-8 en_US.UTF8 \
+    && localedef -i ja_JP -f UTF-8 ja_JP.UTF8 \
+    && rm -rf /var/lib/apt/lists/* /root/.cache /tmp/*
 
 RUN npm install --global "@github/copilot@${COPILOT_CLI_VERSION}" \
     && npm cache clean --force

@@ -1,11 +1,11 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, Transaction, params};
 use serde_json::{Map, Value, json};
+use url::Url;
 
 use crate::error::{ToolError, ToolResult};
 use crate::git;
@@ -379,22 +379,9 @@ fn resolve_repo_path(cwd: &Path) -> PathBuf {
 }
 
 fn resolve_git_remotes(repo_path: &Path) -> Option<String> {
-    let output = Command::new("git")
-        .arg("config")
-        .arg("--get-regexp")
-        .arg("^remote\\..*\\.url$")
-        .current_dir(repo_path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-
-    let remotes = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(parse_remote_line)
+    let remotes = git::list_remotes(repo_path)
+        .into_iter()
+        .map(|remote| json!({ "name": remote.name, "url": redact_remote_url(&remote.url) }))
         .collect::<Vec<_>>();
     if remotes.is_empty() {
         None
@@ -403,19 +390,33 @@ fn resolve_git_remotes(repo_path: &Path) -> Option<String> {
     }
 }
 
-fn parse_remote_line(line: &str) -> Option<Value> {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
+fn redact_remote_url(remote_url: &str) -> String {
+    redact_standard_remote_url(remote_url)
+        .or_else(|| redact_scp_like_remote(remote_url))
+        .unwrap_or_else(|| remote_url.to_string())
+}
+
+fn redact_standard_remote_url(remote_url: &str) -> Option<String> {
+    let mut url = Url::parse(remote_url).ok()?;
+    if !url.username().is_empty() {
+        let _ = url.set_username("");
+    }
+    let _ = url.set_password(None);
+    url.set_query(None);
+    url.set_fragment(None);
+    Some(url.to_string())
+}
+
+fn redact_scp_like_remote(remote_url: &str) -> Option<String> {
+    if remote_url.contains("://") {
         return None;
     }
-
-    let (key, url) = trimmed.split_once(' ')?;
-    let parts = key.split('.').collect::<Vec<_>>();
-    if parts.len() != 3 || parts[0] != "remote" || parts[2] != "url" {
-        return None;
+    let (userinfo, host_path) = remote_url.split_once('@')?;
+    if userinfo.is_empty() || !host_path.contains(':') {
+        None
+    } else {
+        Some(host_path.to_string())
     }
-
-    Some(json!({ "name": parts[1], "url": url }))
 }
 
 fn insert_event_row(transaction: &Transaction<'_>, event: &AuditEvent) -> Result<i64, String> {
@@ -524,7 +525,7 @@ mod tests {
 
     use crate::test_support::{EnvRestore, lock_env};
 
-    use super::handle;
+    use super::{handle, redact_remote_url};
 
     #[test]
     fn inserts_and_prunes_records() {
@@ -571,5 +572,17 @@ mod tests {
             )
             .unwrap();
         assert!(newest.contains("echo four"));
+    }
+
+    #[test]
+    fn redacts_credentials_from_remote_urls() {
+        assert_eq!(
+            redact_remote_url("https://token:x-oauth-basic@github.com/octo/repo.git?foo=bar#frag"),
+            "https://github.com/octo/repo.git"
+        );
+        assert_eq!(
+            redact_remote_url("git@github.com:octo/repo.git"),
+            "github.com:octo/repo.git"
+        );
     }
 }

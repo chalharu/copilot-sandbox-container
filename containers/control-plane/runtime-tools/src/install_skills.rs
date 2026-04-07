@@ -2,14 +2,17 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::path::{Component, Path, PathBuf};
 
+use git2::{
+    Repository,
+    build::{CheckoutBuilder, RepoBuilder},
+};
 use serde::Deserialize;
 use tempfile::TempDir;
 
 use crate::error::{ToolError, ToolResult};
-use crate::support::{ensure_command, output_message, set_mode};
+use crate::support::set_mode;
 
 const USAGE: &str = "usage: install-git-skills-from-manifest <manifest-path> <destination-root>";
 
@@ -40,7 +43,6 @@ pub fn run(args: &[String]) -> ToolResult<i32> {
 }
 
 fn install_from_manifest(manifest_path: &Path, destination_root: &Path) -> Result<(), String> {
-    ensure_command("git").map_err(|error| error.to_string())?;
     ensure_manifest_exists(manifest_path)?;
     fs::create_dir_all(destination_root).map_err(|error| {
         format!(
@@ -143,7 +145,7 @@ impl SkillInstaller {
         git_ref: &str,
         skill_path: &str,
     ) -> Result<(), String> {
-        let normalized_skill_path = skill_path.trim_matches('/');
+        let normalized_skill_path = normalize_skill_path(skill_path)?;
         let skill_name = skill_name(normalized_skill_path)?;
         let installed_from = format!("{repository}@{git_ref}:{normalized_skill_path}");
         reject_duplicate_skill(&self.installed_skills, &skill_name, &installed_from)?;
@@ -210,6 +212,24 @@ fn skill_name(skill_path: &str) -> Result<String, String> {
         ))
     } else {
         Ok(skill_name)
+    }
+}
+
+fn normalize_skill_path(skill_path: &str) -> Result<&str, String> {
+    let normalized_skill_path = skill_path.trim_matches('/');
+    let path = Path::new(normalized_skill_path);
+    let is_safe = !path.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::CurDir | Component::RootDir | Component::Prefix(_)
+        )
+    });
+    if is_safe {
+        Ok(normalized_skill_path)
+    } else {
+        Err(format!(
+            "skill path must stay within repository checkout: {skill_path}"
+        ))
     }
 }
 
@@ -280,39 +300,46 @@ fn replace_skill_dir(source_skill_dir: &Path, destination_dir: &Path) -> Result<
 }
 
 fn clone_checkout(repository: &str, git_ref: &str, checkout_dir: &Path) -> Result<(), String> {
-    run_git(
-        &["clone", repository, checkout_dir.to_str().unwrap()],
-        repository,
-        "clone",
-    )?;
-    run_git(
-        &[
-            "-C",
-            checkout_dir.to_str().unwrap(),
-            "checkout",
-            "--detach",
-            git_ref,
-        ],
-        &format!("{repository}@{git_ref}"),
-        "checkout",
-    )
+    let repo = clone_repository(repository, checkout_dir)?;
+    let object = resolve_checkout_object(&repo, git_ref)?;
+    repo.checkout_tree(&object, Some(CheckoutBuilder::new().force()))
+        .map_err(|error| format!("git checkout failed for {repository}@{git_ref}: {error}"))?;
+    repo.set_head_detached(object.id())
+        .map_err(|error| format!("failed to detach HEAD for {repository}@{git_ref}: {error}"))
 }
 
-fn run_git(args: &[&str], target: &str, action: &str) -> Result<(), String> {
-    let output = Command::new("git")
-        .args(args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|error| format!("failed to run git {action} for {target}: {error}"))?;
+fn clone_repository(repository: &str, checkout_dir: &Path) -> Result<Repository, String> {
+    let mut builder = RepoBuilder::new();
+    builder.clone(repository, checkout_dir).map_err(|error| {
+        format!(
+            "git clone failed for {repository} into {}: {error}",
+            checkout_dir.display()
+        )
+    })
+}
 
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "git {action} failed for {target}: {}",
-            output_message(&output, &format!("unknown git {action} failure"))
-        ))
+fn resolve_checkout_object<'a>(
+    repo: &'a Repository,
+    git_ref: &str,
+) -> Result<git2::Object<'a>, String> {
+    let candidates = [
+        git_ref.to_string(),
+        format!("refs/tags/{git_ref}"),
+        format!("refs/remotes/origin/{git_ref}"),
+        format!("origin/{git_ref}"),
+    ];
+    let mut last_error = None;
+    for candidate in candidates {
+        match repo.revparse_single(&candidate) {
+            Ok(object) => return Ok(object),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    match last_error {
+        Some(error) => Err(format!(
+            "failed to resolve requested ref {git_ref}: {error}"
+        )),
+        None => Err(format!("failed to resolve requested ref: {git_ref}")),
     }
 }
 
@@ -374,40 +401,42 @@ fn copy_dir_entry(source_path: &Path, destination_path: &Path) -> Result<(), Str
 
 #[cfg(test)]
 mod tests {
-    use std::env;
     use std::fs;
 
     use tempfile::TempDir;
 
-    use crate::test_support::{EnvRestore, lock_env, write_executable};
+    use crate::test_support::lock_env;
 
-    use super::install_from_manifest;
+    use super::{SkillInstaller, install_from_manifest};
 
     #[test]
     fn rejects_duplicate_skill_names() {
         let _env_lock = lock_env();
-        let manifest_path = TempDir::new().unwrap();
         let destination_root = TempDir::new().unwrap();
-        let bin_dir = TempDir::new().unwrap();
-        let manifest = manifest_path.path().join("external-skills.yaml");
-        let git_path = bin_dir.path().join("git");
-        write_executable(
-            &git_path,
-            "#!/usr/bin/env bash\nset -euo pipefail\nif [[ \"$1\" == clone ]]; then\n  repo=\"$2\"\n  target=\"$3\"\n  mkdir -p \"$target\"\n  case \"$repo\" in\n    https://example.com/one.git)\n      mkdir -p \"$target/skills/foo\"\n      printf '# foo\\n' > \"$target/skills/foo/SKILL.md\"\n      ;;\n    https://example.com/two.git)\n      mkdir -p \"$target/other/foo\"\n      printf '# foo\\n' > \"$target/other/foo/SKILL.md\"\n      ;;\n    *)\n      printf 'unexpected repository: %s\\n' \"$repo\" >&2\n      exit 1\n      ;;\n  esac\n  exit 0\nfi\nif [[ \"$1\" == -C ]]; then\n  exit 0\nfi\nprintf 'unexpected git args: %s\\n' \"$*\" >&2\nexit 1\n",
-        );
-        fs::write(
-            &manifest,
-            "- repository: https://example.com/one.git\n  ref: abc\n  skills:\n    - skills/foo\n- repository: https://example.com/two.git\n  ref: def\n  skills:\n    - other/foo\n",
-        )
-        .unwrap();
-        let path_value = format!(
-            "{}:{}",
-            bin_dir.path().display(),
-            env::var("PATH").unwrap_or_default()
-        );
-        let _path = EnvRestore::set("PATH", &path_value);
+        let first_repo = TempDir::new().unwrap();
+        let second_repo = TempDir::new().unwrap();
+        fs::create_dir_all(first_repo.path().join("skills/foo")).unwrap();
+        fs::create_dir_all(second_repo.path().join("other/foo")).unwrap();
+        fs::write(first_repo.path().join("skills/foo/SKILL.md"), "# foo\n").unwrap();
+        fs::write(second_repo.path().join("other/foo/SKILL.md"), "# foo\n").unwrap();
 
-        let error = install_from_manifest(&manifest, destination_root.path()).unwrap_err();
+        let mut installer = SkillInstaller::new(destination_root.path()).unwrap();
+        installer
+            .install_skill(
+                first_repo.path(),
+                "https://example.com/one.git",
+                "abc",
+                "skills/foo",
+            )
+            .unwrap();
+        let error = installer
+            .install_skill(
+                second_repo.path(),
+                "https://example.com/two.git",
+                "def",
+                "other/foo",
+            )
+            .unwrap_err();
         assert!(error.contains("Duplicate installed skill name"));
     }
 
@@ -441,5 +470,28 @@ mod tests {
 
         let error = install_from_manifest(&manifest, destination_root.path()).unwrap_err();
         assert!(error.contains("has an invalid ref"));
+    }
+
+    #[test]
+    fn rejects_skill_path_traversal() {
+        let _env_lock = lock_env();
+        let destination_root = TempDir::new().unwrap();
+        let checkout_root = TempDir::new().unwrap();
+        let checkout_dir = checkout_root.path().join("repo");
+        let escaped_dir = checkout_root.path().join("outside");
+        fs::create_dir_all(&checkout_dir).unwrap();
+        fs::create_dir_all(&escaped_dir).unwrap();
+        fs::write(escaped_dir.join("SKILL.md"), "# outside\n").unwrap();
+
+        let mut installer = SkillInstaller::new(destination_root.path()).unwrap();
+        let error = installer
+            .install_skill(
+                &checkout_dir,
+                "https://example.com/one.git",
+                "abc",
+                "../outside",
+            )
+            .unwrap_err();
+        assert!(error.contains("must stay within repository checkout"));
     }
 }

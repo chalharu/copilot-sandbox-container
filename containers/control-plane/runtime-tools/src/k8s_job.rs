@@ -1,8 +1,14 @@
-use std::process::{Command, Stdio};
+use std::future::Future;
+use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
+use futures_util::AsyncBufReadExt;
+use k8s_openapi::api::batch::v1::{Job, JobCondition};
+use k8s_openapi::api::core::v1::Pod;
+use kube::api::{ListParams, LogParams};
+use kube::{Api, Client};
+
 use crate::error::{ToolError, ToolResult};
-use crate::support::{ensure_command, output_message};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum JobWaitStatus {
@@ -26,16 +32,16 @@ enum ParsedArg {
 }
 
 pub fn run_wait(args: &[String]) -> ToolResult<i32> {
-    run_job_command(
-        "k8s-job-wait",
-        args,
-        |parsed, command_name| match wait_for_job(
-            &parsed.namespace,
-            &parsed.job_name,
-            parsed.timeout,
-        )
-        .map_err(|message| ToolError::new(1, command_name, message))?
-        {
+    run_job_command("k8s-job-wait", args, |parsed, command_name| {
+        let namespace = parsed.namespace.clone();
+        let job_name = parsed.job_name.clone();
+        let timeout = parsed.timeout;
+        let status = run_async(async move {
+            let client = kube_client().await?;
+            wait_for_job(client, namespace, job_name, timeout).await
+        })
+        .map_err(|message| ToolError::new(1, command_name, message))?;
+        match status {
             JobWaitStatus::Completed => Ok(0),
             JobWaitStatus::Failed => {
                 eprintln!("{command_name}: job {} failed", parsed.job_name);
@@ -48,14 +54,19 @@ pub fn run_wait(args: &[String]) -> ToolResult<i32> {
                 );
                 Ok(124)
             }
-        },
-    )
+        }
+    })
 }
 
 pub fn run_pod(args: &[String]) -> ToolResult<i32> {
     run_job_command("k8s-job-pod", args, |parsed, command_name| {
-        let pod_name = resolve_job_pod(&parsed.namespace, &parsed.job_name)
-            .map_err(|message| ToolError::new(1, command_name, message))?;
+        let namespace = parsed.namespace.clone();
+        let job_name = parsed.job_name.clone();
+        let pod_name = run_async(async move {
+            let client = kube_client().await?;
+            resolve_job_pod(client, namespace, job_name).await
+        })
+        .map_err(|message| ToolError::new(1, command_name, message))?;
         println!("{pod_name}");
         Ok(0)
     })
@@ -63,13 +74,14 @@ pub fn run_pod(args: &[String]) -> ToolResult<i32> {
 
 pub fn run_logs(args: &[String]) -> ToolResult<i32> {
     run_job_command("k8s-job-logs", args, |parsed, command_name| {
-        stream_job_logs(&parsed.namespace, &parsed.job_name)
-            .map_err(|message| ToolError::new(1, command_name, message))
+        let namespace = parsed.namespace.clone();
+        let job_name = parsed.job_name.clone();
+        run_async(async move {
+            let client = kube_client().await?;
+            stream_job_logs(client, namespace, job_name).await
+        })
+        .map_err(|message| ToolError::new(1, command_name, message))
     })
-}
-
-fn require_kubectl(command_name: &'static str) -> ToolResult<()> {
-    ensure_command("kubectl").map_err(|error| ToolError::new(64, command_name, error.to_string()))
 }
 
 fn run_job_command<F>(command_name: &'static str, args: &[String], handler: F) -> ToolResult<i32>
@@ -82,7 +94,6 @@ where
     }
 
     let parsed = parse_job_command_args(command_name, args)?;
-    require_kubectl(command_name)?;
     handler(&parsed, command_name)
 }
 
@@ -104,6 +115,7 @@ fn parse_job_command_args(
     if job_name.is_empty() {
         return Err(ToolError::new(64, command_name, "--job-name is required"));
     }
+    validate_namespace(command_name, &namespace)?;
     validate_job_name(command_name, &job_name)?;
 
     Ok(JobCommandArgs {
@@ -205,19 +217,7 @@ fn parse_timeout_duration(raw_value: &str) -> Result<Duration, String> {
 }
 
 fn validate_job_name(command_name: &'static str, job_name: &str) -> ToolResult<()> {
-    let is_valid = !job_name.is_empty()
-        && job_name.len() <= 253
-        && job_name.bytes().all(|character| {
-            character.is_ascii_lowercase()
-                || character.is_ascii_digit()
-                || matches!(character, b'.' | b'-')
-        })
-        && !job_name.starts_with(['.', '-'])
-        && !job_name.ends_with(['.', '-'])
-        && !job_name
-            .split('.')
-            .any(|label| label.is_empty() || label.starts_with('-') || label.ends_with('-'));
-    if is_valid {
+    if is_dns_subdomain(job_name) {
         Ok(())
     } else {
         Err(ToolError::new(
@@ -228,141 +228,266 @@ fn validate_job_name(command_name: &'static str, job_name: &str) -> ToolResult<(
     }
 }
 
-fn wait_for_job(
-    namespace: &str,
-    job_name: &str,
+fn validate_namespace(command_name: &'static str, namespace: &str) -> ToolResult<()> {
+    if is_dns_label(namespace) {
+        Ok(())
+    } else {
+        Err(ToolError::new(
+            64,
+            command_name,
+            format!("invalid Kubernetes namespace: {namespace}"),
+        ))
+    }
+}
+
+fn is_dns_subdomain(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 253
+        && value.bytes().all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || matches!(character, b'.' | b'-')
+        })
+        && !value.starts_with(['.', '-'])
+        && !value.ends_with(['.', '-'])
+        && value.split('.').all(is_dns_label)
+}
+
+fn is_dns_label(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 63
+        && value.bytes().all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == b'-'
+        })
+        && !value.starts_with('-')
+        && !value.ends_with('-')
+}
+
+async fn wait_for_job(
+    client: Client,
+    namespace: String,
+    job_name: String,
     timeout: Duration,
 ) -> Result<JobWaitStatus, String> {
     let started = Instant::now();
+    let jobs: Api<Job> = Api::namespaced(client, &namespace);
     loop {
-        let conditions = read_job_conditions(namespace, job_name)?;
-        if has_condition(&conditions, "Complete=True") {
-            return Ok(JobWaitStatus::Completed);
+        let job = jobs
+            .get(&job_name)
+            .await
+            .map_err(|error| format!("failed to read job {job_name}: {error}"))?;
+        match evaluate_job_wait_status(&job) {
+            Some(status) => return Ok(status),
+            None if started.elapsed() >= timeout => return Ok(JobWaitStatus::TimedOut),
+            None => tokio::time::sleep(Duration::from_secs(1)).await,
         }
-        if has_condition(&conditions, "Failed=True") {
-            return Ok(JobWaitStatus::Failed);
-        }
-        if started.elapsed() >= timeout {
-            return Ok(JobWaitStatus::TimedOut);
-        }
-        std::thread::sleep(Duration::from_secs(1));
     }
 }
 
-fn read_job_conditions(namespace: &str, job_name: &str) -> Result<String, String> {
-    let output = Command::new("kubectl")
-        .arg("get")
-        .arg("job")
-        .arg(job_name)
-        .arg("--namespace")
-        .arg(namespace)
-        .arg("-o")
-        .arg(r#"jsonpath={range .status.conditions[*]}{.type}={.status}{"\n"}{end}"#)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .map_err(|error| format!("failed to run kubectl get job {job_name}: {error}"))?;
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+async fn kube_client() -> Result<Client, String> {
+    Client::try_default()
+        .await
+        .map_err(|error| format!("failed to create Kubernetes client: {error}"))
 }
 
-fn has_condition(conditions: &str, expected: &str) -> bool {
-    conditions.lines().any(|line| line.trim() == expected)
+fn run_async<F, T>(future: F) -> Result<T, String>
+where
+    F: Future<Output = Result<T, String>>,
+{
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| format!("failed to start async runtime: {error}"))?;
+    runtime.block_on(future)
 }
 
-fn resolve_job_pod(namespace: &str, job_name: &str) -> Result<String, String> {
-    let output = Command::new("kubectl")
-        .arg("get")
-        .arg("pods")
-        .arg("--namespace")
-        .arg(namespace)
-        .arg("--selector")
-        .arg(format!("job-name={job_name}"))
-        .arg("-o")
-        .arg("jsonpath={.items[0].metadata.name}")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|error| format!("failed to run kubectl get pods for {job_name}: {error}"))?;
-
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+fn evaluate_job_wait_status(job: &Job) -> Option<JobWaitStatus> {
+    let conditions = job.status.as_ref()?.conditions.as_ref()?;
+    if has_condition(conditions, "Complete", "True") {
+        Some(JobWaitStatus::Completed)
+    } else if has_condition(conditions, "Failed", "True") {
+        Some(JobWaitStatus::Failed)
     } else {
-        Err(output_message(&output, "failed to resolve job pod"))
+        None
     }
 }
 
-fn stream_job_logs(namespace: &str, job_name: &str) -> Result<i32, String> {
-    let pod_name = resolve_job_pod(namespace, job_name)?;
-    if pod_name.is_empty() {
-        return Err(format!("could not resolve pod for job {job_name}"));
-    }
+fn has_condition(conditions: &[JobCondition], expected_type: &str, expected_status: &str) -> bool {
+    conditions
+        .iter()
+        .any(|condition| condition.type_ == expected_type && condition.status == expected_status)
+}
 
-    let status = Command::new("kubectl")
-        .arg("logs")
-        .arg("--namespace")
-        .arg(namespace)
-        .arg(&pod_name)
-        .status()
-        .map_err(|error| format!("failed to run kubectl logs for {pod_name}: {error}"))?;
-    Ok(status.code().unwrap_or(1))
+async fn resolve_job_pod(
+    client: Client,
+    namespace: String,
+    job_name: String,
+) -> Result<String, String> {
+    let job_uid = read_job_uid(client.clone(), &namespace, &job_name).await?;
+    let pods = list_job_pods(client, &namespace, &job_name, &job_uid).await?;
+    first_controlled_pod_name(&pods, &job_name, &job_uid)
+}
+
+async fn read_job_uid(client: Client, namespace: &str, job_name: &str) -> Result<String, String> {
+    let jobs: Api<Job> = Api::namespaced(client, namespace);
+    let job = jobs
+        .get(job_name)
+        .await
+        .map_err(|error| format!("failed to read job {job_name}: {error}"))?;
+    job.metadata
+        .uid
+        .ok_or_else(|| format!("job {job_name} is missing metadata.uid"))
+}
+
+async fn list_job_pods(
+    client: Client,
+    namespace: &str,
+    job_name: &str,
+    job_uid: &str,
+) -> Result<Vec<Pod>, String> {
+    let pods: Api<Pod> = Api::namespaced(client, namespace);
+    let selector = format!("job-name={job_name},controller-uid={job_uid}");
+    let pod_list = pods
+        .list(&ListParams::default().labels(&selector))
+        .await
+        .map_err(|error| format!("failed to list pods for {job_name}: {error}"))?;
+    Ok(pod_list.items)
+}
+
+fn first_controlled_pod_name(
+    pods: &[Pod],
+    job_name: &str,
+    job_uid: &str,
+) -> Result<String, String> {
+    pods.iter()
+        .find_map(|pod| controlled_pod_name(pod, job_name, job_uid))
+        .ok_or_else(|| format!("failed to resolve controlled pod for job {job_name}"))
+}
+
+fn controlled_pod_name(pod: &Pod, job_name: &str, job_uid: &str) -> Option<String> {
+    if is_controlled_by_job(pod, job_name, job_uid) {
+        pod.metadata.name.clone()
+    } else {
+        None
+    }
+}
+
+fn is_controlled_by_job(pod: &Pod, job_name: &str, job_uid: &str) -> bool {
+    let owners = pod.metadata.owner_references.as_deref().unwrap_or(&[]);
+    owners.iter().any(|owner| {
+        owner.kind == "Job"
+            && owner.name == job_name
+            && owner.uid == job_uid
+            && owner.controller.unwrap_or(false)
+    })
+}
+
+async fn stream_job_logs(
+    client: Client,
+    namespace: String,
+    job_name: String,
+) -> Result<i32, String> {
+    let pod_name = resolve_job_pod(client.clone(), namespace.clone(), job_name).await?;
+    let pods: Api<Pod> = Api::namespaced(client, &namespace);
+    let mut logs = pods
+        .log_stream(&pod_name, &LogParams::default())
+        .await
+        .map_err(|error| format!("failed to open log stream for {pod_name}: {error}"))?;
+    let mut buffer = Vec::new();
+    loop {
+        buffer.clear();
+        let bytes_read = logs
+            .read_until(b'\n', &mut buffer)
+            .await
+            .map_err(|error| format!("failed to read logs for {pod_name}: {error}"))?;
+        if bytes_read == 0 {
+            break;
+        }
+        io::stdout()
+            .write_all(&buffer)
+            .map_err(|error| format!("failed to write logs for {pod_name}: {error}"))?;
+    }
+    io::stdout()
+        .flush()
+        .map_err(|error| format!("failed to flush logs for {pod_name}: {error}"))?;
+    Ok(0)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::env;
-    use std::time::Duration;
+    use k8s_openapi::api::batch::v1::{Job, JobCondition, JobStatus};
+    use k8s_openapi::api::core::v1::Pod;
+    use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, OwnerReference};
 
-    use tempfile::TempDir;
-
-    use crate::support::shell_quote;
-    use crate::test_support::{EnvRestore, lock_env, write_executable};
-
-    use super::{JobWaitStatus, parse_job_command_args, resolve_job_pod, wait_for_job};
+    use super::{
+        JobWaitStatus, evaluate_job_wait_status, first_controlled_pod_name, parse_job_command_args,
+    };
 
     #[test]
     fn detects_completion() {
-        let _env_lock = lock_env();
-        let temp_dir = TempDir::new().unwrap();
-        let kubectl_path = temp_dir.path().join("kubectl");
-        let state_path = temp_dir.path().join("state");
-        write_executable(
-            &kubectl_path,
-            &format!(
-                "#!/usr/bin/env bash\nset -euo pipefail\ncount=0\nif [[ -f {} ]]; then count=$(cat {}); fi\ncount=$((count + 1))\nprintf '%s' \"$count\" > {}\nif [[ \"$count\" -ge 2 ]]; then printf 'Complete=True\\n'; fi\n",
-                shell_quote(state_path.to_str().unwrap()),
-                shell_quote(state_path.to_str().unwrap()),
-                shell_quote(state_path.to_str().unwrap())
-            ),
-        );
-        let path_value = format!(
-            "{}:{}",
-            temp_dir.path().display(),
-            env::var("PATH").unwrap_or_default()
-        );
-        let _path = EnvRestore::set("PATH", &path_value);
-
-        let status = wait_for_job("default", "demo", Duration::from_secs(3)).unwrap();
+        let status = evaluate_job_wait_status(&Job {
+            status: Some(JobStatus {
+                conditions: Some(vec![JobCondition {
+                    type_: "Complete".to_string(),
+                    status: "True".to_string(),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .unwrap();
         assert_eq!(status, JobWaitStatus::Completed);
     }
 
     #[test]
-    fn returns_first_pod_name() {
-        let _env_lock = lock_env();
-        let temp_dir = TempDir::new().unwrap();
-        let kubectl_path = temp_dir.path().join("kubectl");
-        write_executable(
-            &kubectl_path,
-            "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'demo-pod'\n",
-        );
-        let path_value = format!(
-            "{}:{}",
-            temp_dir.path().display(),
-            env::var("PATH").unwrap_or_default()
-        );
-        let _path = EnvRestore::set("PATH", &path_value);
-
-        let pod_name = resolve_job_pod("default", "demo").unwrap();
+    fn returns_controlled_pod_name() {
+        let pod_name = first_controlled_pod_name(
+            &[Pod {
+                metadata: ObjectMeta {
+                    name: Some("demo-pod".to_string()),
+                    owner_references: Some(vec![OwnerReference {
+                        api_version: "batch/v1".to_string(),
+                        block_owner_deletion: Some(true),
+                        controller: Some(true),
+                        kind: "Job".to_string(),
+                        name: "demo-job".to_string(),
+                        uid: "job-uid".to_string(),
+                    }]),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }],
+            "demo-job",
+            "job-uid",
+        )
+        .unwrap();
         assert_eq!(pod_name, "demo-pod");
+    }
+
+    #[test]
+    fn ignores_pods_without_matching_owner() {
+        let error = first_controlled_pod_name(
+            &[Pod {
+                metadata: ObjectMeta {
+                    name: Some("demo-pod".to_string()),
+                    owner_references: Some(vec![OwnerReference {
+                        api_version: "batch/v1".to_string(),
+                        block_owner_deletion: Some(true),
+                        controller: Some(true),
+                        kind: "Job".to_string(),
+                        name: "other-job".to_string(),
+                        uid: "other-uid".to_string(),
+                    }]),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }],
+            "demo-job",
+            "job-uid",
+        )
+        .unwrap_err();
+        assert_eq!(error, "failed to resolve controlled pod for job demo-job");
     }
 
     #[test]
@@ -381,5 +506,20 @@ mod tests {
             error.message,
             "invalid Kubernetes job name: demo,status=running"
         );
+    }
+
+    #[test]
+    fn rejects_invalid_namespace() {
+        let error = parse_job_command_args(
+            "k8s-job-logs",
+            &[
+                "--job-name".to_string(),
+                "demo-job".to_string(),
+                "--namespace".to_string(),
+                "default.ops".to_string(),
+            ],
+        )
+        .unwrap_err();
+        assert_eq!(error.message, "invalid Kubernetes namespace: default.ops");
     }
 }
