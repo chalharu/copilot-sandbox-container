@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: control-plane-exec-pods
+  namespace: copilot-sandbox
+# Keep this Role scoped to a dedicated control-plane namespace. The control-plane
+# shell can create/delete same-namespace execution pods through this grant.
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]

@@ -18,32 +18,31 @@
 | rootless Podman の user namespace error | [§4](#4-rootless-podman-が-outer-runtime-に止められている) |
 | `podman system migrate` の自己修復ログ | [§5](#5-stale-state-は-podman-system-migrate-で直る) |
 | `cgroup.subtree_control` で止まる | [§6](#6-rootful-service-build-が-cgroup-で止まる) |
-| session picker が使えず shell へ落ちる | [§7](#7-session-picker-が使えず-shell-へ落ちる) |
-| DHI base image pull が unauthorized | [§8](#8-dhi-base-image-を-pull-できない) |
+| interactive SSH が Copilot session へ入らない | [§7](#7-interactive-ssh-が-copilot-session-へ入らない) |
+| private image pull が unauthorized | [§8](#8-private-image-を-pull-できない) |
 | Service の `EXTERNAL-IP` が `pending` | [§9](#9-service-の-external-ip-が未割当て) |
 | injected Copilot config が壊れている | [§10](#10-injected-copilot-config-が壊れている) |
 | gh Secret の指定が足りない | [§11](#11-gh-secret-の指定が足りない) |
-| 監査分析 hook の設定が壊れている | [§12](#12-監査分析-hook-の設定が壊れている) |
-| `control-plane-sccache-pvc` が `Pending` のまま | [§13](#13-garage-cache-pvc-が-bound-しない) |
+| execution image の bootstrap に失敗する | [§12](#12-execution-image-の-bootstrap-に失敗する) |
 
 ## 1. bundled skill が読めない
 
 ### 代表ログ
 
 ```text
-ls: cannot access '/home/copilot/.copilot/skills/control-plane-operations/references/control-plane-run.md': Permission denied
-ls: cannot access '/home/copilot/.copilot/skills/control-plane-operations/references/skills.md': Permission denied
+cat: /home/copilot/.copilot/skills/repo-change-delivery/SKILL.md: Permission denied
 ```
 
 ### 意味
 
-`references/` directory に execute bit が無く、path traversal が壊れています。symlink 同期と image build 時の mode 崩れが主因です。
+bundled skill directory の mode が壊れ、path traversal ができません。copy 同期後の
+directory / file mode が崩れると発生します。
 
 ### 期待する確認結果
 
-- `~/.copilot/skills/control-plane-operations` が symlink ではない
-- `references/` が `drwxr-xr-x` 相当
-- `control-plane-run.md` と `skills.md` が `-rw-r--r--` 相当
+- `~/.copilot/skills/repo-change-delivery` が symlink ではない
+- skill directory が `drwxr-xr-x` 相当
+- `SKILL.md` が `-rw-r--r--` 相当
 
 ## 2. capability が足りず起動時に止まる
 
@@ -98,8 +97,8 @@ Pod 内設定ではなく outer runtime / CRI / host 側が nested user namespac
 ### 代表ログ
 
 ```text
-control-plane-podman: detected stale rootless Podman state; attempting `podman system migrate` once.
-control-plane-podman: `podman system migrate` repaired the local Podman state.
+legacy local runtime wrapper: detected stale rootless Podman state; attempting `podman system migrate` once.
+legacy local runtime wrapper: `podman system migrate` repaired the local Podman state.
 ```
 
 ### 意味
@@ -125,19 +124,22 @@ job-check: podman-build=ok
 current-cluster-test: podman-build=ok
 ```
 
-## 7. session picker が使えず shell へ落ちる
+## 7. interactive SSH が Copilot session へ入らない
 
 ### 代表ログ
 
 ```text
-control-plane: session picker failed; continuing with the login shell. Set CONTROL_PLANE_DISABLE_SESSION_PICKER=1 to skip it entirely.
+mode=login action=bash-il
 ```
 
 ### 意味
 
-picker 自体の失敗です。対話は継続できますが、Screen の自動再接続は効いていません。恒久回避は `CONTROL_PLANE_DISABLE_SESSION_PICKER=1` ですが、通常は原因を直すほうを優先します。
+`CONTROL_PLANE_SSH_SHELL_LOG` にこの行が出るのは、interactive SSH login が
+Copilot 用 Screen session へ入らず通常の login shell へ落ちたことを示します。
+典型例は TTY が無い、`control-plane-session` が見つからない、あるいは login
+shell を command mode (`ssh host '...'`) で使っている場合です。
 
-## 8. DHI base image を pull できない
+## 8. private image を pull できない
 
 ### 代表ログ
 
@@ -147,7 +149,7 @@ unable to retrieve auth token: invalid username/password: unauthorized: authenti
 
 ### 意味
 
-`dockerhub-username` / `dockerhub-token` Secret が無いか、Control Plane 起動時の Podman auth 生成ができていません。`scripts/prepare-dhi-images.sh` は既存の Podman auth か明示的な `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` を使い、`scripts/validate-renovate-config.sh` は secret file fallback を前提にしません。`${XDG_RUNTIME_DIR}/containers/auth.json` の直読は policy で止まるので、疎通確認は `podman login --get-login dhi.io` で行ってください。
+Kubernetes 側の image pull 認証が足りていません。`CONTROL_PLANE_FAST_EXECUTION_IMAGE` や `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` に private registry を使う場合は、Deployment / ServiceAccount に `imagePullSecrets` を付けてください。Control Plane の runtime file や `/run/control-plane-auth` の Secret mount では代替しません。
 
 ## 9. Service の `EXTERNAL-IP` が未割当て
 
@@ -188,48 +190,22 @@ Refusing to install an empty gh hosts source from /var/run/control-plane-auth/gh
 
 `GH_GITHUB_TOKEN_FILE` または `GH_HOSTS_YML_FILE` を env で指定したのに、対応する Secret key が無いか空です。`gh-hosts.yml` を使う場合はその file が優先され、無ければ `gh-github-token` から最小 `~/.config/gh/hosts.yml` を生成する、という順序で動きます。
 
-## 12. 監査分析 hook の設定が壊れている
+## 12. execution image の bootstrap に失敗する
 
 ### 代表ログ
 
 ```text
-control-plane audit analysis: Audit analysis config at /home/copilot/.copilot/config.json must define controlPlane.auditAnalysis as a JSON object.
+unsupported execution image package manager: need apk or apt-get
 ```
 
 ### 意味
 
-`control-plane-config` ConfigMap の `copilot-config.json` overlay で、`controlPlane.auditAnalysis` が JSON object ではないか、壊れた値が入っています。bundled `audit-log-analysis` skill と lifecycle analysis hooks (`agentStop` / `subagentStop` / `sessionEnd` / `errorOccurred`) は同じ設定を読むため、ここが壊れると `~/.copilot/session-state/audit/audit-analysis.db` の更新も止まります。
+Execution Pod の base image が `/bin/sh` を持たないか、bootstrap 時に `apk` / `apt-get`
+のどちらも使えません。現行の session-exec bootstrap は、まず staged Rust gRPC binary
+を起動し、その後 gRPC 経由で `bash` / `git` / `gh` を導入する前提です。
 
 ### 期待する確認結果
 
-- `~/.copilot/config.json` の `controlPlane.auditAnalysis` が JSON object
-- `~/.copilot/session-state/audit/audit-analysis.db` が存在する
-- `node ~/.copilot/skills/audit-log-analysis/scripts/audit-analysis.mjs status --json` が成功する
-
-## 13. Garage cache PVC が Bound しない
-
-### 代表ログ
-
-```text
-Warning  FailedScheduling  default-scheduler  0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims.
-```
-
-### 意味
-
-sample manifest の `control-plane-sccache-pvc` は standalone Garage
-Deployment 専用の `ReadWriteOnce` claim です。Job 側へ PVC を mount するのではなく、
-`garage-s3` Service 経由で各クライアントを接続させる前提なので、この claim が
-Bound しないと Garage Pod が立ち上がりません。
-
-### 期待する確認結果
-
-- `kubectl get pvc control-plane-sccache-pvc -n copilot-sandbox` が `Bound`
-- `kubectl get pod -n copilot-sandbox -l app.kubernetes.io/name=garage-s3` が `1/1 Ready`
-- `kubectl get svc garage-s3 -n copilot-sandbox` で `3900/TCP` が見える
-- `kubectl get job garage-bootstrap -n copilot-sandbox` が `Complete`
-
-`garage-bootstrap` Job が失敗した場合は、まず
-`kubectl logs -n copilot-sandbox job/garage-bootstrap` で bootstrap の失敗点を見ます。
-fresh PVC や bootstrap-managed Garage credential を再初期化したいときだけ、`kubectl delete job garage-bootstrap -n copilot-sandbox`
-のあとに sample manifest を再適用して rerun してください。bootstrap 処理は
-`control-plane` image に同梱した script が実行します。
+- `CONTROL_PLANE_FAST_EXECUTION_IMAGE` が Linux base image を指す
+- image 内に `/bin/sh` がある
+- image 内で `apk` か `apt-get` のどちらかが使える

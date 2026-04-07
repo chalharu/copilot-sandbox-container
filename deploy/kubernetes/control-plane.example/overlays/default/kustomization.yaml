@@ -45,8 +45,8 @@ resources: []
 #   path: /spec/resources/requests/storage
 #   value: 8Gi
 #   # Remove the storage op when the default size is already fine.
-# Shared PVC candidates such as `control-plane-copilot-session-pvc` and
-# `control-plane-sccache-pvc` live in `../../install/`
+# Shared PVC candidates such as `control-plane-copilot-session-pvc` live in
+# `../../install/`
 # because the root kustomization intentionally avoids mutating those immutable
 # shared claims during routine updates.
 #
@@ -86,5 +86,5 @@ resources: []
 #   path: /spec/template/spec/containers/0/image
 #   value: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha
 # Keep the same tag aligned in `../../common/configmap-control-plane-env.yaml`
-# for `CONTROL_PLANE_JOB_TRANSFER_IMAGE` and in
-# `../../common/job-garage-bootstrap.yaml` for the `garage-bootstrap` Job image.
+# for `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` and
+# `CONTROL_PLANE_JOB_TRANSFER_IMAGE`.

@@ -18,8 +18,6 @@ data:
   # This full file wins over GH_GITHUB_TOKEN_FILE.
   # GH_HOSTS_YML_FILE: /var/run/control-plane-auth/gh-hosts.yml
   COPILOT_GITHUB_TOKEN_FILE: /var/run/control-plane-auth/copilot-github-token
-  DOCKERHUB_USERNAME_FILE: /var/run/control-plane-auth/dockerhub-username
-  DOCKERHUB_TOKEN_FILE: /var/run/control-plane-auth/dockerhub-token
   # Optional: preseed ~/.gitconfig inside the control plane.
   # CONTROL_PLANE_GIT_USER_NAME: Your Name
   # CONTROL_PLANE_GIT_USER_EMAIL: you@example.com
@@ -27,17 +25,36 @@ data:
   # TZ: Asia/Tokyo
   CONTROL_PLANE_K8S_NAMESPACE: copilot-sandbox
   CONTROL_PLANE_JOB_NAMESPACE: copilot-sandbox-jobs
+  CONTROL_PLANE_COPILOT_SESSION_PVC: control-plane-copilot-session-pvc
+  CONTROL_PLANE_COPILOT_SESSION_GH_SUBPATH: state/gh
+  CONTROL_PLANE_COPILOT_SESSION_SSH_SUBPATH: state/ssh
   CONTROL_PLANE_WORKSPACE_PVC: control-plane-workspace-pvc
   CONTROL_PLANE_WORKSPACE_SUBPATH: workspace
-  # Rust Kubernetes jobs keep only ephemeral local sccache state under /var/tmp
-  # and store shared cache objects in the in-cluster Garage S3 service.
-  SCCACHE_BUCKET: control-plane-sccache
-  SCCACHE_ENDPOINT: http://garage-s3.copilot-sandbox.svc.cluster.local:3900
-  SCCACHE_REGION: garage
-  SCCACHE_S3_USE_SSL: "false"
-  SCCACHE_S3_KEY_PREFIX: sccache/
-  AWS_ACCESS_KEY_ID_FILE: /var/run/garage-sccache-auth/access-key-id
-  AWS_SECRET_ACCESS_KEY_FILE: /var/run/garage-sccache-auth/secret-access-key
+  # Enable session-scoped execution pods for Copilot CLI bash commands.
+  CONTROL_PLANE_FAST_EXECUTION_ENABLED: "1"
+  # Choose the runtime image that should actually execute delegated bash
+  # commands. Use digest-pinned images in shared clusters. Alpine / Ubuntu both
+  # work as long as they provide /bin/sh and either apk or apt-get so the
+  # startup step can install bash, git, and gh before serving requests.
+  CONTROL_PLANE_FAST_EXECUTION_IMAGE: docker.io/library/ubuntu:24.04@sha256:replace-with-digest
+  CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: IfNotPresent
+  # The bootstrap image provides the Rust exec-plane binary and bundled git hooks.
+  # Prefer a digest-pinned ref here too.
+  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha@sha256:replace-with-digest
+  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: IfNotPresent
+  CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 120s
+  CONTROL_PLANE_FAST_EXECUTION_PORT: "8080"
+  # Delegated commands run as this unprivileged UID/GID even though the startup
+  # step may briefly need root to install packages in generic base images.
+  CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID: "1000"
+  CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID: "1000"
+  CONTROL_PLANE_FAST_EXECUTION_HOME: /root
+  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_ROOT: /var/run/control-plane-bootstrap
+  CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST: 250m
+  CONTROL_PLANE_FAST_EXECUTION_CPU_LIMIT: "2"
+  CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST: 256Mi
+  CONTROL_PLANE_FAST_EXECUTION_MEMORY_LIMIT: 2Gi
+  CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC: "3600"
   # Optional: when the job namespace has its own shared workspace PVC
   # that exposes the same repository contents, mount it into Jobs too.
   # Otherwise keep Jobs stateless and use `--mount-file`, which stages
@@ -46,40 +63,20 @@ data:
   # CONTROL_PLANE_JOB_WORKSPACE_PVC: control-plane-workspace-pvc
   # CONTROL_PLANE_JOB_WORKSPACE_SUBPATH: workspace
   CONTROL_PLANE_JOB_INPUT_MOUNT_PATH: /var/run/control-plane/job-inputs
+  # Compile-heavy Rust hooks should run through a dedicated toolchain image
+  # instead of the slim control-plane image.
+  CONTROL_PLANE_RUST_HOOK_IMAGE: docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895
   CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha
   CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane.copilot-sandbox.svc.cluster.local
   CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"
   CONTROL_PLANE_JOB_SERVICE_ACCOUNT: control-plane-job
-  # Keep Kubernetes Jobs as the default path in the least-privilege
-  # profile. Local Podman still works on the current cluster through a
-  # rootful remote service when you explicitly opt into `podman`.
-  CONTROL_PLANE_RUN_MODE: k8s-job
-  # Current-cluster local Podman profile: run a rootful remote service
-  # inside the control-plane container. The Podman image cache stays on
-  # a disposable emptyDir under /var/lib/control-plane/rootful-podman,
-  # while the runtime dir moves to a sibling emptyDir-backed path under
-  # /var/tmp/control-plane/rootful-overlay so Podman temp data stays on
-  # disposable cache storage instead of the persistent copilot session
-  # or workspace PVCs.
-  CONTROL_PLANE_LOCAL_PODMAN_MODE: rootful-service
-  CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER: overlay
-  CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR: /var/tmp/control-plane/rootful-overlay
   # Audit logs are written to ~/.copilot/session-state/audit/audit-log.db
   # on the shared copilot session PVC. Tune the retained row cap to
   # adjust history depth; when a tool hook sees more than this many
   # rows, it deletes the oldest rows until roughly 3/4 of the cap remains.
-  # A bundled postToolUse analysis hook also writes derived findings to
-  # ~/.copilot/session-state/audit/audit-analysis.db and reads its
-  # target repository / thresholds from controlPlane.auditAnalysis in
-  # copilot-config.json.
   CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS: "10000"
-  # `cpulimit` treats 100 as roughly one CPU core, which keeps an
-  # interactive Copilot session from monopolizing the node.
-  CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT: "100"
   CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: IfNotPresent
   CONTROL_PLANE_JOB_CPU_REQUEST: 250m
   CONTROL_PLANE_JOB_CPU_LIMIT: "2"
   CONTROL_PLANE_JOB_MEMORY_REQUEST: 256Mi
   CONTROL_PLANE_JOB_MEMORY_LIMIT: 2Gi
-  # Optional local-only fallback for Rust helpers when dist mode is disabled.
-  SCCACHE_CACHE_SIZE: "4G"

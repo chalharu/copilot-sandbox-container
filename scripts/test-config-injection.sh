@@ -2,7 +2,7 @@
 set -euo pipefail
 
 control_plane_image="${1:?usage: scripts/test-config-injection.sh <control-plane-image>}"
-container_bin="${CONTROL_PLANE_CONTAINER_BIN:-podman}"
+container_bin="${CONTROL_PLANE_CONTAINER_BIN:-docker}"
 workdir="$(mktemp -d)"
 container_name="control-plane-config-injection-test"
 control_plane_run_user=(--user 0:0)
@@ -140,7 +140,8 @@ grep -Fxq 'HostKey /etc/ssh/ssh_host_ed25519_key' /etc/ssh/sshd_config
 grep -Fqx 'CONTROL_PLANE_EXEC_POLICY_LIBRARY=/usr/local/lib/libcontrol_plane_exec_policy.so' /home/copilot/.config/control-plane/runtime.env
 grep -Fqx 'CONTROL_PLANE_EXEC_POLICY_RULES_FILE=/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml' /home/copilot/.config/control-plane/runtime.env
 grep -Fqx 'LD_PRELOAD=/usr/local/lib/libcontrol_plane_exec_policy.so' /home/copilot/.config/control-plane/runtime.env
-git config --global --get core.hooksPath | grep -qx '/usr/local/share/control-plane/hooks/git'
+grep -Fqx '    hooksPath = /usr/local/share/control-plane/hooks/git' "${GIT_CONFIG_GLOBAL}"
+test "$(grep -Fc '    helper = !gh auth git-credential' "${GIT_CONFIG_GLOBAL}")" -eq 2
 if su -s /bin/bash copilot -lc "printf tamper >> \"${GIT_CONFIG_GLOBAL}\"" 2>/dev/null; then
   printf '%s\n' 'Expected managed global git config to be read-only for the Copilot user' >&2
   exit 1
@@ -163,7 +164,7 @@ set -euo pipefail
 printf '%s\n' "${LD_PRELOAD:-missing}"
 FAKE
 chmod 755 /tmp/fake-copilot
-copilot_ld_preload="$(su -s /bin/bash copilot -lc 'CONTROL_PLANE_COPILOT_BIN=/tmp/fake-copilot CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT=0 control-plane-copilot')"
+copilot_ld_preload="$(su -s /bin/bash copilot -lc 'CONTROL_PLANE_COPILOT_BIN=/tmp/fake-copilot control-plane-copilot')"
 grep -qx '/usr/local/lib/libcontrol_plane_exec_policy.so' <<<"${copilot_ld_preload}"
 jq -e '.chat.editor == "vim"' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.chat.theme == "light"' /home/copilot/.copilot/config.json >/dev/null
@@ -171,7 +172,7 @@ jq -e '.nested.keep == 1' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.nested.replace.fromBase == true and .nested.replace.fromOverlay == true' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.nested.array == ["overlay"]' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.topLevelOverlay == "configmap"' /home/copilot/.copilot/config.json >/dev/null
-su -s /bin/bash copilot -lc 'gh config get git_protocol --host github.com' | grep -qx 'ssh'
+grep -Fqx '  git_protocol: ssh' /home/copilot/.config/gh/hosts.yml
 printf '%s\n' file-backed-ok
 EOF
 )"
@@ -333,7 +334,7 @@ token_backed_output="$("${container_bin}" run --rm \
   bash -l -se 2>&1 <<'EOF'
 set -euo pipefail
 test "$(stat -c '%a %U %G' /home/copilot/.config/gh/hosts.yml)" = '600 copilot copilot'
-su -s /bin/bash copilot -lc 'gh config get git_protocol --host github.com' | grep -qx 'https'
+grep -Fqx '    git_protocol: https' /home/copilot/.config/gh/hosts.yml
 printf '%s\n' token-backed-ok
 EOF
 )"

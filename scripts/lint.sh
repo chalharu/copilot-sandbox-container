@@ -20,21 +20,22 @@ markdownlint_node_image="${CONTROL_PLANE_MARKDOWNLINT_NODE_IMAGE:-docker.io/libr
 # renovate: datasource=npm depName=markdownlint-cli2
 markdownlint_version="${CONTROL_PLANE_MARKDOWNLINT_VERSION:-0.22.0}"
 markdownlint_cache_volume="${CONTROL_PLANE_MARKDOWNLINT_CACHE_VOLUME:-control-plane-markdownlint-cache}"
-yamllint_image="${CONTROL_PLANE_YAMLLINT_IMAGE_TAG:-localhost/yamllint:test}"
+control_plane_image="${CONTROL_PLANE_IMAGE_TAG:-localhost/control-plane:test}"
+control_plane_rust_lint_image="${CONTROL_PLANE_RUST_LINT_IMAGE_TAG:-localhost/control-plane-rust-toolchain:test}"
+control_plane_rust_lint_target="${CONTROL_PLANE_RUST_LINT_DOCKER_TARGET:-rust-toolchain}"
 yamllint_config="${CONTROL_PLANE_YAMLLINT_CONFIG:-/workspace/.yamllint}"
-# Use container root so restrictive workspace mounts remain readable across
-# Docker, rootful Podman, and rootless Podman.
+# Use container root so restrictive workspace mounts remain readable.
 workspace_access_user="0:0"
-rust_lint_script="${script_dir}/../containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh"
 dockerfiles=()
 yaml_files=()
 markdown_files=()
 rust_workspace_dirs=()
 shellcheck_targets=(
   /workspace/containers/control-plane/bin/control-plane-copilot
-  /workspace/containers/control-plane/bin/control-plane-podman
+  /workspace/containers/control-plane/bin/control-plane-exec-api-launcher
   /workspace/containers/control-plane/bin/control-plane-screen
   /workspace/containers/control-plane/bin/control-plane-entrypoint
+  /workspace/containers/control-plane/bin/control-plane-session-exec
   /workspace/containers/control-plane/hooks/git/pre-commit
   /workspace/containers/control-plane/hooks/git/pre-push
   /workspace/containers/control-plane/hooks/git/lib/common.sh
@@ -42,12 +43,8 @@ shellcheck_targets=(
   /workspace/containers/control-plane/bin/control-plane-run
   /workspace/containers/control-plane/bin/control-plane-session
   /workspace/containers/control-plane/bin/k8s-job-start
-  /workspace/containers/control-plane/bin/k8s-job-wait
-  /workspace/containers/control-plane/bin/k8s-job-pod
-  /workspace/containers/control-plane/bin/k8s-job-logs
   /workspace/containers/control-plane/bin/k8s-job-run
   /workspace/containers/control-plane/config/profile-control-plane-env.sh
-  /workspace/containers/execution-plane-smoke/execution-plane-smoke
 )
 lint_log_dir="$(mktemp -d)"
 lint_job_names=()
@@ -58,19 +55,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-run_rust_lint() {
+run_control_plane_rust_lint() {
   local runtime="$1"
-  local workspace_dir
 
-  shift
-
-  for workspace_dir in "$@"; do
-    (
-      cd "${workspace_dir}"
-      CONTAINERIZED_RUST_CONTAINER_BIN="${runtime}" bash "${rust_lint_script}" fmt-check
-      CONTAINERIZED_RUST_CONTAINER_BIN="${runtime}" bash "${rust_lint_script}" clippy
-    )
-  done
+  "${runtime}" run --rm --user "${workspace_access_user}" \
+    -v "${PWD}:/workspace" \
+    -w /workspace \
+    "${control_plane_rust_lint_image}" \
+    bash -lc "export PATH=/usr/local/cargo/bin:\$PATH && bash /workspace/containers/control-plane/hooks/postToolUse/control-plane-rust.sh fmt-check && bash /workspace/containers/control-plane/hooks/postToolUse/control-plane-rust.sh clippy"
 }
 
 run_lint_job() {
@@ -144,10 +136,10 @@ printf 'Using %s toolchain for lint\n' "${toolchain}"
 # through stdin and discard the normalized output once parsing succeeds.
 "${container_bin}" run --rm -i --entrypoint biome "${biome_image}" check --formatter-enabled=false --write --stdin-file-path=renovate.json5 < renovate.json5 >/dev/null
 CONTROL_PLANE_CONTAINER_BIN="${container_bin}" "${script_dir}/validate-renovate-config.sh"
-if [[ "${toolchain}" == "podman" ]]; then
-  "${script_dir}/prepare-dhi-images.sh"
+build_image_for_toolchain "${toolchain}" "${control_plane_image}" containers/control-plane
+if [[ "${#rust_workspace_dirs[@]}" -gt 0 ]]; then
+  build_image_target_for_toolchain "${toolchain}" "${control_plane_rust_lint_image}" containers/control-plane "${control_plane_rust_lint_target}"
 fi
-build_image_for_toolchain "${toolchain}" "${yamllint_image}" containers/yamllint
 if [[ "${#rust_workspace_dirs[@]}" -gt 0 ]]; then
   printf '%s\n' 'Running hadolint, shellcheck, yamllint, markdownlint, and Rust fmt/clippy in parallel' >&2
 else
@@ -161,7 +153,8 @@ run_lint_job shellcheck \
   "${container_bin}" run --rm --user "${workspace_access_user}" -v "${PWD}:/workspace:ro" "${shellcheck_image}" -x -P /workspace "${shellcheck_targets[@]}"
 
 run_lint_job yamllint \
-  "${container_bin}" run --rm --user "${workspace_access_user}" -v "${PWD}:/workspace:ro" "${yamllint_image}" -c "${yamllint_config}" "${yaml_files[@]}"
+  "${container_bin}" run --rm --user "${workspace_access_user}" --entrypoint yamllint \
+    -v "${PWD}:/workspace:ro" "${control_plane_image}" -c "${yamllint_config}" "${yaml_files[@]}"
 
 run_lint_job markdownlint \
   "${container_bin}" run --rm --user "${workspace_access_user}" \
@@ -175,7 +168,7 @@ run_lint_job markdownlint \
 
 if [[ "${#rust_workspace_dirs[@]}" -gt 0 ]]; then
   run_lint_job rust \
-    run_rust_lint "${container_bin}" "${rust_workspace_dirs[@]}"
+    run_control_plane_rust_lint "${container_bin}"
 fi
 
 wait_for_lint_jobs

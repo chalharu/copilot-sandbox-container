@@ -28,11 +28,11 @@
 
 今回の修正では、current-cluster smoke に interactive SSH login の確認を追加し、`drop: ALL` 系 profile で「接続できるがすぐ切れる」回帰を今後検知できるようにしています。
 
-## フェーズ 4: bundled skill と current-cluster 運用知識の定着
+## フェーズ 4: bundled skill の整理と最小化
 
-Control Plane 固有の運用知識は repo-local docs だけでは足りず、image に同梱した skill として常に見える必要がありました。そのため `control-plane-operations` skill を image に載せ、起動時に `~/.copilot/skills` へ同期する構成にしました。
+Control Plane 固有の補助 workflow は repo-local docs だけでは足りず、image に同梱した skill として常に見える必要がありました。一方で runtime 委譲が gRPC 化したことで、containerized tool wrapper 系の skill は不要になりました。そこで現在は repo change delivery 系の skill だけを残し、runtime / hook 周辺は image 内の script と binary に寄せています。
 
-今回の修正では、symlink ではなく copy 同期へ切り替え、`references/` 配下の permission 崩れを解消しています。これにより、Control Plane 自体の運用知識も current-cluster で安定して参照できます。
+同時に、symlink ではなく copy 同期へ切り替え、permission 崩れを解消しています。これにより、残した bundled skill も current-cluster で安定して参照できます。
 
 ## フェーズ 5: ドキュメントの Diátaxis 再編
 

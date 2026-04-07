@@ -485,16 +485,11 @@ EOF
             - -lc
             - |
               set -euo pipefail
-              api_server="https://\${KUBERNETES_SERVICE_HOST}:\${KUBERNETES_SERVICE_PORT_HTTPS:-443}"
-              service_account_dir=/var/run/secrets/kubernetes.io/serviceaccount
-              token="\$(cat "\${service_account_dir}/token")"
-              namespace="\$(cat "\${service_account_dir}/namespace")"
-              ca_crt="\${service_account_dir}/ca.crt"
+              namespace="\$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)"
               pod_name="\${HOSTNAME:?}"
               execution_exit_code=""
               while [[ -z "\${execution_exit_code}" ]]; do
-                pod_json="\$(curl -fsS --cacert "\${ca_crt}" -H "Authorization: Bearer \${token}" "\${api_server}/api/v1/namespaces/\${namespace}/pods/\${pod_name}")"
-                execution_exit_code="\$(jq -r '.status.containerStatuses[] | select(.name == "execution") | .state.terminated.exitCode // empty' <<<"\${pod_json}")"
+                execution_exit_code="\$(kubectl get pod "\${pod_name}" --namespace "\${namespace}" -o jsonpath='{.status.containerStatuses[?(@.name=="execution")].state.terminated.exitCode}')"
                 if [[ -z "\${execution_exit_code}" ]]; then
                   sleep 1
                 fi

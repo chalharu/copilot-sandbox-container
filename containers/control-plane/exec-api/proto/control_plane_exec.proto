@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package controlplane.exec.v1;
+
+service ExecService {
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+}
+
+message ExecuteRequest {
+  string command = 1;
+  string cwd = 2;
+}
+
+message ExecuteResponse {
+  string stdout = 1;
+  string stderr = 2;
+  int32 exit_code = 3;
+}

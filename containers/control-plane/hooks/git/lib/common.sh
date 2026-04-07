@@ -45,25 +45,20 @@ git_hook_require_executable_or_absent() {
 git_hook_run_post_tool_use_linter() {
   local repo_root="$1"
   local hook_root="${COPILOT_HOME:-${HOME}/.copilot}"
-  local hook_script="${hook_root}/hooks/postToolUse/main.mjs"
+  local hook_script="${hook_root}/hooks/postToolUse/main"
+  local hook_input
 
-  command -v node >/dev/null 2>&1 || {
-    printf 'Global git hooks require node on PATH to run %s\n' "${hook_script}" >&2
-    exit 1
-  }
-
-  if [[ ! -f "${hook_script}" ]]; then
+  if [[ ! -x "${hook_script}" ]]; then
     printf 'Expected bundled postToolUse hook at %s\n' "${hook_script}" >&2
     exit 1
   fi
 
-  REPO_ROOT="${repo_root}" node --input-type=module <<'EOF' | node "${hook_script}"
-process.stdout.write(
-  JSON.stringify({
-    cwd: process.env.REPO_ROOT,
-    toolName: "git-hook",
-    toolResult: { resultType: "success" },
-  }),
-);
-EOF
+  command -v jq >/dev/null 2>&1 || {
+    printf 'Global git hooks require jq on PATH to run %s\n' "${hook_script}" >&2
+    exit 1
+  }
+
+  hook_input="$(jq -cn --arg cwd "${repo_root}" \
+    '{cwd:$cwd, toolName:"git-hook", toolResult:{resultType:"success"}}')"
+  printf '%s' "${hook_input}" | "${hook_script}"
 }

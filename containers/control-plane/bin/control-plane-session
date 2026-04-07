@@ -8,7 +8,6 @@ if [[ -f "${runtime_config_file}" ]]; then
 fi
 
 session_name="${CONTROL_PLANE_SCREEN_SESSION:-shell}"
-selection_override="${CONTROL_PLANE_SESSION_SELECTION:-}"
 copilot_session_name="${CONTROL_PLANE_COPILOT_SESSION:-copilot}"
 copilot_workspace="${CONTROL_PLANE_COPILOT_WORKSPACE:-${CONTROL_PLANE_WORKSPACE:-/workspace}}"
 
@@ -19,7 +18,7 @@ prune_dead_sessions() {
 attach_session() {
   local target_session="$1"
 
-  exec screen -T screen-256color -D -RR "${target_session}"
+  exec screen -D -RR "${target_session}"
 }
 
 list_sessions() {
@@ -27,36 +26,30 @@ list_sessions() {
   screen -list 2>/dev/null | awk '/^[[:space:]]*[0-9]+\./ && !/\(Dead/ {sub(/^[[:space:]]+/, "", $0); print}'
 }
 
-create_session() {
-  local new_session_name="${1:-${session_name}}"
+copilot_session_exists() {
+  local session_line
+  local session_id
 
-  [[ -n "${new_session_name}" ]] || new_session_name="${session_name}"
-  if [[ -n "${selection_override}" ]]; then
-    # Scripted selection overrides are test-only entry points, so keep the
-    # explicit login shell but stay attached from the beginning like a real SSH
-    # login instead of detached-then-reattach.
-    exec screen -T screen-256color -S "${new_session_name}" \
-      env CONTROL_PLANE_DISABLE_SESSION_PICKER=1 bash -il
-  fi
-  exec screen -T screen-256color -S "${new_session_name}"
+  while IFS= read -r session_line; do
+    [[ -n "${session_line}" ]] || continue
+    session_id="${session_line%%[[:space:]]*}"
+    if [[ "${session_id#*.}" == "${copilot_session_name}" ]]; then
+      return 0
+    fi
+  done < <(list_sessions || true)
+
+  return 1
 }
 
 create_copilot_session() {
-  local target_session="${1:-${copilot_session_name}}"
-
-  [[ -n "${target_session}" ]] || target_session="${copilot_session_name}"
   command -v control-plane-copilot >/dev/null 2>&1 || {
     printf '%s\n' 'control-plane-session: missing control-plane-copilot launcher' >&2
     exit 127
   }
 
-  prune_dead_sessions
-  printf 'Starting Copilot session %s in %s...\n' "${target_session}" "${copilot_workspace}" >&2
-
-  # Start attached so Copilot sees the SSH TTY from the beginning instead of
-  # inheriting a detached Screen startup context.
+  printf 'Starting Copilot session %s in %s...\n' "${copilot_session_name}" "${copilot_workspace}" >&2
   # shellcheck disable=SC2016
-  exec screen -T screen-256color -S "${target_session}" \
+  exec screen -S "${copilot_session_name}" \
     bash -lc '
       set -euo pipefail
       mkdir -p -- "$1"
@@ -66,130 +59,13 @@ create_copilot_session() {
     bash "${copilot_workspace}"
 }
 
-resolve_existing_session() {
-  local selection="$1"
-  shift
-  local index=1
-  local session_line session_id short_name
-
-  for session_line in "$@"; do
-    session_id="${session_line%%[[:space:]]*}"
-    short_name="${session_id#*.}"
-
-    if [[ "${selection}" == "${index}" ]] || [[ "${selection}" == "${session_id}" ]] || [[ "${selection}" == "${short_name}" ]]; then
-      printf '%s\n' "${session_id}"
-      return 0
-    fi
-
-    index=$((index + 1))
-  done
-
-  return 1
-}
-
-session_has_short_name() {
-  local target_short_name="$1"
-  shift
-  local session_line session_id short_name
-
-  for session_line in "$@"; do
-    session_id="${session_line%%[[:space:]]*}"
-    short_name="${session_id#*.}"
-    if [[ "${short_name}" == "${target_short_name}" ]]; then
-      return 0
-    fi
-  done
-
-  return 1
-}
-
-select_session() {
-  local session_lines=()
-  local session_line
-  local session_count=0
-  local selection=""
-  local new_session_index=0
-  local copilot_option_enabled=1
-  local copilot_index=0
-  local default_selection=""
-  local attach_target=""
-  local new_session_name=""
-
-  while IFS= read -r session_line; do
-    [[ -n "${session_line}" ]] || continue
-    session_lines+=("${session_line}")
-  done < <(list_sessions || true)
-
-  session_count="${#session_lines[@]}"
-  if session_has_short_name "${copilot_session_name}" "${session_lines[@]}"; then
-    copilot_option_enabled=0
+attach_or_create_copilot_session() {
+  prune_dead_sessions
+  if copilot_session_exists; then
+    attach_session "${copilot_session_name}"
   fi
 
-  if [[ "${copilot_option_enabled}" -eq 1 ]]; then
-    copilot_index=$((session_count + 1))
-    new_session_index=$((session_count + 2))
-    default_selection="${copilot_index}"
-  else
-    new_session_index=$((session_count + 1))
-    default_selection="${new_session_index}"
-  fi
-
-  if [[ -n "${selection_override}" ]]; then
-    selection="${selection_override}"
-  else
-    printf 'GNU Screen sessions:\n'
-    if [[ "${session_count}" -eq 0 ]]; then
-      printf '  (no existing sessions)\n'
-    else
-      local index=1
-      for session_line in "${session_lines[@]}"; do
-        printf '  %d) %s\n' "${index}" "${session_line}"
-        index=$((index + 1))
-      done
-    fi
-    if [[ "${copilot_option_enabled}" -eq 1 ]]; then
-      printf '  %d) Copilot (%s, --yolo)\n' "${copilot_index}" "${copilot_workspace}"
-    fi
-    printf '  %d) New session (%s)\n' "${new_session_index}" "${session_name}"
-    printf 'Select a session number or type a new session name [%s]: ' "${default_selection}" >&2
-    read -r selection || exit 0
-    [[ -n "${selection}" ]] || selection="${default_selection}"
-  fi
-
-  if [[ "${session_count}" -gt 0 ]] && attach_target="$(resolve_existing_session "${selection}" "${session_lines[@]}")"; then
-    attach_session "${attach_target}"
-  fi
-
-  if [[ "${copilot_option_enabled}" -eq 1 ]] && [[ "${selection}" == "${copilot_index}" ]]; then
-    create_copilot_session "${copilot_session_name}"
-  fi
-
-  case "${selection}" in
-    copilot)
-      create_copilot_session "${copilot_session_name}"
-      ;;
-    new)
-      create_session "${session_name}"
-      ;;
-    new:*)
-      new_session_name="${selection#new:}"
-      create_session "${new_session_name}"
-      ;;
-    "${new_session_index}")
-      create_session "${session_name}"
-      ;;
-    ''|*[!0-9]*)
-      create_session "${selection}"
-      ;;
-    [0-9]*)
-      printf 'control-plane-session: session index %s not found; choose 1-%d or type a new session name\n' "${selection}" "${new_session_index}" >&2
-      exit 64
-      ;;
-    *)
-      printf 'control-plane-session: invalid selection %s\n' "${selection}" >&2
-      exit 64
-      ;;
-  esac
+  create_copilot_session
 }
 
 if [[ "${1:-}" == "--command" ]]; then
@@ -198,7 +74,7 @@ if [[ "${1:-}" == "--command" ]]; then
     printf 'control-plane-session: --command requires a shell command\n' >&2
     exit 64
   }
-  exec screen -T screen-256color -DmS "${session_name}" bash -lc "$*"
+  exec screen -DmS "${session_name}" bash -lc "$*"
 fi
 
 if [[ "${1:-}" == "--list" ]]; then
@@ -207,8 +83,8 @@ if [[ "${1:-}" == "--list" ]]; then
 fi
 
 if [[ "${1:-}" == "--select" ]]; then
-  select_session
+  attach_or_create_copilot_session
   exit 0
 fi
 
-attach_session "${session_name}"
+attach_or_create_copilot_session

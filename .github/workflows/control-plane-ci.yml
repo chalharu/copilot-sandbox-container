@@ -9,7 +9,7 @@ jobs:
     name: Lint (${{ matrix.architecture_label }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
-    strategy:
+    strategy: &architecture-matrix
       fail-fast: false
       matrix:
         include:
@@ -22,56 +22,30 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Check out repository
+      - &checkout-repo
+        name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Install Podman toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y podman
-      - name: Prepare DHI images
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: ./scripts/prepare-dhi-images.sh
       - name: Run lint
         env:
-          CONTROL_PLANE_TOOLCHAIN: podman
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          CONTROL_PLANE_TOOLCHAIN: docker
         run: ./scripts/lint.sh
   integration:
     name: Integration Images (${{ matrix.architecture_label }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - architecture_label: x64
-            image_arch: amd64
-            runner: ubuntu-24.04
-          - architecture_label: aarch64
-            image_arch: arm64
-            runner: ubuntu-24.04-arm
+    strategy: *architecture-matrix
     permissions:
       contents: read
     steps:
-      - name: Check out repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Install Podman toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y podman
+      - *checkout-repo
       - name: Build integration images
         env:
-          CONTROL_PLANE_TOOLCHAIN: podman
+          CONTROL_PLANE_TOOLCHAIN: docker
         run: ./scripts/build-test.sh --build-only
       - name: Save integration images
-        run: podman save --multi-image-archive -o control-plane-images.tar localhost/control-plane:test localhost/execution-plane-smoke:test
+        run: docker save -o control-plane-images.tar localhost/control-plane:test
       - name: Upload integration images
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
@@ -84,122 +58,64 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     needs: integration
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - architecture_label: x64
-            image_arch: amd64
-            runner: ubuntu-24.04
-          - architecture_label: aarch64
-            image_arch: arm64
-            runner: ubuntu-24.04-arm
+    strategy: *architecture-matrix
     permissions:
       contents: read
     steps:
-      - name: Check out repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Install Podman toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y podman
-      - name: Download integration images
+      - *checkout-repo
+      - &download-integration-images
+        name: Download integration images
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: control-plane-images-${{ matrix.image_arch }}
           path: downloaded-images
-      - name: Load integration images
-        run: podman load -i downloaded-images/control-plane-images.tar
+      - &load-integration-images
+        name: Load integration images
+        run: docker load -i downloaded-images/control-plane-images.tar
       - name: Run smoke integration group
         env:
-          CONTROL_PLANE_TOOLCHAIN: podman
+          CONTROL_PLANE_TOOLCHAIN: docker
         run: ./scripts/build-test.sh --skip-image-build --group smoke
   integration-regressions:
     name: Integration Regressions (${{ matrix.architecture_label }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     needs: integration
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - architecture_label: x64
-            image_arch: amd64
-            runner: ubuntu-24.04
-          - architecture_label: aarch64
-            image_arch: arm64
-            runner: ubuntu-24.04-arm
+    strategy: *architecture-matrix
     permissions:
       contents: read
     steps:
-      - name: Check out repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Install Podman toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y podman
-      - name: Download integration images
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: control-plane-images-${{ matrix.image_arch }}
-          path: downloaded-images
-      - name: Load integration images
-        run: podman load -i downloaded-images/control-plane-images.tar
-      - name: Prepare DHI images
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: ./scripts/prepare-dhi-images.sh
+      - *checkout-repo
+      - *download-integration-images
+      - *load-integration-images
       - name: Run regression integration group
         env:
-          CONTROL_PLANE_TOOLCHAIN: podman
+          CONTROL_PLANE_TOOLCHAIN: docker
         run: ./scripts/build-test.sh --skip-image-build --group regressions
   integration-kind-session:
     name: Integration Kind Session (${{ matrix.architecture_label }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     needs: integration
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - architecture_label: x64
-            image_arch: amd64
-            runner: ubuntu-24.04
-          - architecture_label: aarch64
-            image_arch: arm64
-            runner: ubuntu-24.04-arm
+    strategy: *architecture-matrix
     permissions:
       contents: read
     steps:
-      - name: Check out repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Install Podman toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y podman
-      - name: Set up kubectl
+      - *checkout-repo
+      - &setup-kubectl
+        name: Set up kubectl
         uses: azure/setup-kubectl@15650b3ad78fff148532a140b8a4c821796b2d7b # v5.0.0
-      - name: Set up Kind
+      - &setup-kind
+        name: Set up Kind
         uses: engineerd/setup-kind@ecfad61750951586a9ef973db567df1d28671bdc # v0.6.2
         with:
           skipClusterCreation: true
           skipClusterLogsExport: true
           version: v0.24.0
-      - name: Download integration images
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: control-plane-images-${{ matrix.image_arch }}
-          path: downloaded-images
+      - *download-integration-images
       - name: Run Kind session integration group
         env:
-          CONTROL_PLANE_TOOLCHAIN: podman
+          CONTROL_PLANE_TOOLCHAIN: docker
           CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar
         run: ./scripts/build-test.sh --skip-image-build --group kind-session
   integration-kind-jobs:
@@ -207,43 +123,17 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     needs: integration
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - architecture_label: x64
-            image_arch: amd64
-            runner: ubuntu-24.04
-          - architecture_label: aarch64
-            image_arch: arm64
-            runner: ubuntu-24.04-arm
+    strategy: *architecture-matrix
     permissions:
       contents: read
     steps:
-      - name: Check out repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Install Podman toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y podman
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@15650b3ad78fff148532a140b8a4c821796b2d7b # v5.0.0
-      - name: Set up Kind
-        uses: engineerd/setup-kind@ecfad61750951586a9ef973db567df1d28671bdc # v0.6.2
-        with:
-          skipClusterCreation: true
-          skipClusterLogsExport: true
-          version: v0.24.0
-      - name: Download integration images
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: control-plane-images-${{ matrix.image_arch }}
-          path: downloaded-images
+      - *checkout-repo
+      - *setup-kubectl
+      - *setup-kind
+      - *download-integration-images
       - name: Run Kind job core integration group
         env:
-          CONTROL_PLANE_TOOLCHAIN: podman
+          CONTROL_PLANE_TOOLCHAIN: docker
           CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar
         run: ./scripts/build-test.sh --skip-image-build --group kind-jobs-core
   integration-kind-jobs-transfer:
@@ -251,89 +141,19 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     needs: integration
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - architecture_label: x64
-            image_arch: amd64
-            runner: ubuntu-24.04
-          - architecture_label: aarch64
-            image_arch: arm64
-            runner: ubuntu-24.04-arm
+    strategy: *architecture-matrix
     permissions:
       contents: read
     steps:
-      - name: Check out repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Install Podman toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y podman
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@15650b3ad78fff148532a140b8a4c821796b2d7b # v5.0.0
-      - name: Set up Kind
-        uses: engineerd/setup-kind@ecfad61750951586a9ef973db567df1d28671bdc # v0.6.2
-        with:
-          skipClusterCreation: true
-          skipClusterLogsExport: true
-          version: v0.24.0
-      - name: Download integration images
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: control-plane-images-${{ matrix.image_arch }}
-          path: downloaded-images
+      - *checkout-repo
+      - *setup-kubectl
+      - *setup-kind
+      - *download-integration-images
       - name: Run Kind job transfer integration group
         env:
-          CONTROL_PLANE_TOOLCHAIN: podman
+          CONTROL_PLANE_TOOLCHAIN: docker
           CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar
         run: ./scripts/build-test.sh --skip-image-build --group kind-jobs-transfer
-  helper-image-changes:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    name: Detect Helper Image Changes
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    outputs:
-      yamllint_changed: ${{ steps.detect.outputs.yamllint_changed }}
-      sccache_changed: ${{ steps.detect.outputs.sccache_changed }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Detect helper image changes
-        id: detect
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-          GITHUB_SHA: ${{ github.sha }}
-        run: |
-          before_sha="${BEFORE_SHA}"
-          changed_in_range() {
-            local path="$1"
-            if git diff --quiet "${before_sha}" "${GITHUB_SHA}" -- "${path}"; then
-              printf 'false\n'
-            else
-              printf 'true\n'
-            fi
-          }
-
-          if [[ -z "${before_sha}" ]] || [[ "${before_sha}" == '0000000000000000000000000000000000000000' ]]; then
-            yamllint_changed=true
-            sccache_changed=true
-          else
-            yamllint_changed="$(changed_in_range containers/yamllint)"
-            sccache_changed="$(changed_in_range containers/sccache)"
-          fi
-
-          {
-            printf 'yamllint_changed=%s\n' "${yamllint_changed}"
-            printf 'sccache_changed=%s\n' "${sccache_changed}"
-          } >> "${GITHUB_OUTPUT}"
   publish-architecture-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Publish Architecture Images (${{ matrix.architecture_label }})
@@ -346,103 +166,42 @@ jobs:
       - integration-kind-session
       - integration-kind-jobs
       - integration-kind-jobs-transfer
-      - helper-image-changes
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - architecture_label: x64
-            image_arch: amd64
-            runner: ubuntu-24.04
-          - architecture_label: aarch64
-            image_arch: arm64
-            runner: ubuntu-24.04-arm
+    strategy: *architecture-matrix
     permissions:
       contents: read
       packages: write
     steps:
-      - name: Check out repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Install Podman toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y podman
-      - name: Download integration images
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: control-plane-images-${{ matrix.image_arch }}
-          path: downloaded-images
-      - name: Load integration images
-        run: podman load -i downloaded-images/control-plane-images.tar
+      - *checkout-repo
+      - *download-integration-images
+      - *load-integration-images
       - name: Log in to GHCR
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USERNAME: ${{ github.actor }}
-        run: printf '%s' "${GHCR_TOKEN}" | podman login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
-      - name: Prepare DHI images
-        if: needs.helper-image-changes.outputs.yamllint_changed == 'true'
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: ./scripts/prepare-dhi-images.sh
-      - name: Build yamllint image for publishing
-        if: needs.helper-image-changes.outputs.yamllint_changed == 'true'
-        run: podman build --tag localhost/yamllint:test containers/yamllint
-      - name: Build sccache image for publishing
-        if: needs.helper-image-changes.outputs.sccache_changed == 'true'
-        run: podman build --tag localhost/sccache:test containers/sccache
+        run: printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
       - name: Read published image versions
         id: image_versions
         run: |
           control_plane_version="$(sed -n 's/^ARG COPILOT_CLI_VERSION=//p' containers/control-plane/Dockerfile)"
-          yamllint_version="$(sed -n 's/^ARG YAMLLINT_VERSION=//p' containers/yamllint/Dockerfile)"
-          sccache_version="$(sed -n 's/^ARG SCCACHE_VERSION=//p' containers/sccache/Dockerfile)"
           test -n "${control_plane_version}"
-          test -n "${yamllint_version}"
-          test -n "${sccache_version}"
-          {
-            printf 'control_plane_component_tag=copilot-%s\n' "${control_plane_version}"
-            printf 'yamllint_component_tag=%s\n' "${yamllint_version}"
-            printf 'sccache_component_tag=%s\n' "${sccache_version}"
-          } >> "${GITHUB_OUTPUT}"
+          printf 'control_plane_component_tag=copilot-%s\n' "${control_plane_version}" >> "${GITHUB_OUTPUT}"
       - name: Publish architecture image tags
         env:
           GHCR_CONTROL_PLANE_IMAGE: ghcr.io/${{ github.repository }}/control-plane
-          GHCR_YAMLLINT_IMAGE: ghcr.io/${{ github.repository }}/yamllint
-          GHCR_SCCACHE_IMAGE: ghcr.io/${{ github.repository }}/sccache
           CONTROL_PLANE_COMPONENT_TAG: ${{ steps.image_versions.outputs.control_plane_component_tag }}
-          YAMLLINT_COMPONENT_TAG: ${{ steps.image_versions.outputs.yamllint_component_tag }}
-          SCCACHE_COMPONENT_TAG: ${{ steps.image_versions.outputs.sccache_component_tag }}
           GITHUB_SHA: ${{ github.sha }}
           IMAGE_ARCH: ${{ matrix.image_arch }}
-          PUBLISH_YAMLLINT: ${{ needs.helper-image-changes.outputs.yamllint_changed }}
-          PUBLISH_SCCACHE: ${{ needs.helper-image-changes.outputs.sccache_changed }}
         run: |
-          podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
-          podman tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${CONTROL_PLANE_COMPONENT_TAG}-${IMAGE_ARCH}"
-          podman push "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
-          podman push "${GHCR_CONTROL_PLANE_IMAGE}:${CONTROL_PLANE_COMPONENT_TAG}-${IMAGE_ARCH}"
-          if [[ "${PUBLISH_YAMLLINT}" == "true" ]]; then
-            podman tag localhost/yamllint:test "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
-            podman tag localhost/yamllint:test "${GHCR_YAMLLINT_IMAGE}:${YAMLLINT_COMPONENT_TAG}-${IMAGE_ARCH}"
-            podman push "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
-            podman push "${GHCR_YAMLLINT_IMAGE}:${YAMLLINT_COMPONENT_TAG}-${IMAGE_ARCH}"
-          fi
-          if [[ "${PUBLISH_SCCACHE}" == "true" ]]; then
-            podman tag localhost/sccache:test "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
-            podman tag localhost/sccache:test "${GHCR_SCCACHE_IMAGE}:${SCCACHE_COMPONENT_TAG}-${IMAGE_ARCH}"
-            podman push "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
-            podman push "${GHCR_SCCACHE_IMAGE}:${SCCACHE_COMPONENT_TAG}-${IMAGE_ARCH}"
-          fi
+          docker tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
+          docker tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${CONTROL_PLANE_COMPONENT_TAG}-${IMAGE_ARCH}"
+          docker push "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-${IMAGE_ARCH}"
+          docker push "${GHCR_CONTROL_PLANE_IMAGE}:${CONTROL_PLANE_COMPONENT_TAG}-${IMAGE_ARCH}"
   publish-manifests:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs:
       - publish-architecture-images
-      - helper-image-changes
     permissions:
       contents: read
       packages: write
@@ -451,86 +210,38 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Install Podman toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y podman
       - name: Read published image versions
         id: image_versions
         run: |
           control_plane_version="$(sed -n 's/^ARG COPILOT_CLI_VERSION=//p' containers/control-plane/Dockerfile)"
-          yamllint_version="$(sed -n 's/^ARG YAMLLINT_VERSION=//p' containers/yamllint/Dockerfile)"
-          sccache_version="$(sed -n 's/^ARG SCCACHE_VERSION=//p' containers/sccache/Dockerfile)"
           test -n "${control_plane_version}"
-          test -n "${yamllint_version}"
-          test -n "${sccache_version}"
-          {
-            printf 'control_plane_component_tag=copilot-%s\n' "${control_plane_version}"
-            printf 'yamllint_component_tag=%s\n' "${yamllint_version}"
-            printf 'sccache_component_tag=%s\n' "${sccache_version}"
-          } >> "${GITHUB_OUTPUT}"
+          printf 'control_plane_component_tag=copilot-%s\n' "${control_plane_version}" >> "${GITHUB_OUTPUT}"
       - name: Log in to GHCR
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USERNAME: ${{ github.actor }}
-        run: printf '%s' "${GHCR_TOKEN}" | podman login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+        run: printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
       - name: Publish GHCR multi-arch manifests
         env:
           GHCR_CONTROL_PLANE_IMAGE: ghcr.io/${{ github.repository }}/control-plane
-          GHCR_YAMLLINT_IMAGE: ghcr.io/${{ github.repository }}/yamllint
-          GHCR_SCCACHE_IMAGE: ghcr.io/${{ github.repository }}/sccache
           CONTROL_PLANE_COMPONENT_TAG: ${{ steps.image_versions.outputs.control_plane_component_tag }}
-          YAMLLINT_COMPONENT_TAG: ${{ steps.image_versions.outputs.yamllint_component_tag }}
-          SCCACHE_COMPONENT_TAG: ${{ steps.image_versions.outputs.sccache_component_tag }}
           GITHUB_SHA: ${{ github.sha }}
-          PUBLISH_YAMLLINT: ${{ needs.helper-image-changes.outputs.yamllint_changed }}
-          PUBLISH_SCCACHE: ${{ needs.helper-image-changes.outputs.sccache_changed }}
         run: |
           create_manifest() {
-            local manifest_name="$1"
-            local target_ref="$2"
-            shift 2
-            podman manifest rm "${manifest_name}" >/dev/null 2>&1 || true
-            podman manifest create "${manifest_name}"
-            for source_ref in "$@"; do
-              podman manifest add "${manifest_name}" "docker://${source_ref}"
-            done
-            podman manifest push --all "${manifest_name}" "docker://${target_ref}"
+            local target_ref="$1"
+            shift
+            docker buildx imagetools create --tag "${target_ref}" "$@"
           }
 
-          create_manifest "localhost/control-plane:manifest-sha" "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}" \
+          create_manifest "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}" \
             "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-amd64" \
             "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-arm64"
-          create_manifest "localhost/control-plane:manifest-latest" "${GHCR_CONTROL_PLANE_IMAGE}:latest" \
+          create_manifest "${GHCR_CONTROL_PLANE_IMAGE}:latest" \
             "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-amd64" \
             "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-arm64"
-          create_manifest "localhost/control-plane:manifest-version" "${GHCR_CONTROL_PLANE_IMAGE}:${CONTROL_PLANE_COMPONENT_TAG}" \
+          create_manifest "${GHCR_CONTROL_PLANE_IMAGE}:${CONTROL_PLANE_COMPONENT_TAG}" \
             "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-amd64" \
             "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-arm64"
-
-          if [[ "${PUBLISH_YAMLLINT}" == "true" ]]; then
-            create_manifest "localhost/yamllint:manifest-sha" "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}" \
-              "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-amd64" \
-              "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-arm64"
-            create_manifest "localhost/yamllint:manifest-latest" "${GHCR_YAMLLINT_IMAGE}:latest" \
-              "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-amd64" \
-              "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-arm64"
-            create_manifest "localhost/yamllint:manifest-version" "${GHCR_YAMLLINT_IMAGE}:${YAMLLINT_COMPONENT_TAG}" \
-              "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-amd64" \
-              "${GHCR_YAMLLINT_IMAGE}:${GITHUB_SHA}-arm64"
-          fi
-
-          if [[ "${PUBLISH_SCCACHE}" == "true" ]]; then
-            create_manifest "localhost/sccache:manifest-sha" "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}" \
-              "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-amd64" \
-              "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-arm64"
-            create_manifest "localhost/sccache:manifest-latest" "${GHCR_SCCACHE_IMAGE}:latest" \
-              "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-amd64" \
-              "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-arm64"
-            create_manifest "localhost/sccache:manifest-version" "${GHCR_SCCACHE_IMAGE}:${SCCACHE_COMPONENT_TAG}" \
-              "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-amd64" \
-              "${GHCR_SCCACHE_IMAGE}:${GITHUB_SHA}-arm64"
-          fi
   cleanup-packages:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
@@ -546,8 +257,6 @@ jobs:
       matrix:
         package_suffix:
           - control-plane
-          - yamllint
-          - sccache
     steps:
       - name: Delete old GHCR package versions
         uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0

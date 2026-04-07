@@ -1,4 +1,6 @@
-FROM docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895 AS exec-policy-builder
+ARG RUST_BASE_IMAGE=docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895
+
+FROM ${RUST_BASE_IMAGE} AS exec-policy-builder
 
 WORKDIR /build/control-plane-exec-policy
 COPY exec-policy-preload/Cargo.toml exec-policy-preload/Cargo.lock ./
@@ -7,12 +9,75 @@ COPY hooks/preToolUse/deny-rules.yaml ./hooks/preToolUse/deny-rules.yaml
 RUN cargo test --locked --release \
     && cargo build --locked --release
 
+FROM ${RUST_BASE_IMAGE} AS exec-api-builder
+
+# hadolint ignore=DL3008
+RUN apt-get update -o Acquire::Retries=3 \
+    && apt-get install -y --no-install-recommends \
+        musl-tools \
+        protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build/control-plane-exec-api
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+COPY exec-api/Cargo.toml exec-api/Cargo.lock exec-api/build.rs ./
+COPY exec-api/proto ./proto
+COPY exec-api/src ./src
+RUN target="$(rustc -vV | awk '/^host:/ { print $2 }' | sed 's/-unknown-linux-gnu/-unknown-linux-musl/')" \
+    && rustup target add "${target}" \
+    && cargo test --locked --release --target "${target}" \
+    && cargo build --locked --release --target "${target}" \
+    && cp "target/${target}/release/control-plane-exec-api" "target/release/control-plane-exec-api"
+
+FROM ${RUST_BASE_IMAGE} AS runtime-tools-builder
+
+WORKDIR /build/control-plane-runtime-tools
+COPY runtime-tools/Cargo.toml runtime-tools/Cargo.lock ./
+COPY runtime-tools/src ./src
+COPY runtime-tools/tests ./tests
+COPY hooks/postToolUse/linters.json /build/hooks/postToolUse/linters.json
+RUN cargo test --locked --release \
+    && cargo build --locked --release
+
+FROM ${RUST_BASE_IMAGE} AS rust-toolchain
+
+RUN rustup component add clippy rustfmt
+
+FROM ${RUST_BASE_IMAGE} AS skills-builder
+
+# hadolint ignore=DL3008
+RUN apt-get update -o Acquire::Retries=3 \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/bin/install-git-skills-from-manifest
+COPY --chmod=644 config/external-skills.yaml /tmp/external-skills.yaml
+
+RUN /usr/local/bin/install-git-skills-from-manifest /tmp/external-skills.yaml /opt/control-plane/external-skills
+
 FROM node:24.14.1-bookworm-slim@sha256:06e5c9f86bfa0aaa7163cf37a5eaa8805f16b9acb48e3f85645b09d459fc2a9f
 
 # renovate: datasource=npm depName=@github/copilot
 ARG COPILOT_CLI_VERSION=1.0.18
 # renovate: datasource=github-releases depName=kubernetes-sigs/kind
 ARG KIND_VERSION=v0.31.0
+# renovate: datasource=github-releases depName=jqlang/jq
+ARG JQ_VERSION=jq-1.8.1
+# renovate: datasource=github-releases depName=kubernetes/kubernetes
+ARG KUBECTL_VERSION=v1.35.3
+# renovate: datasource=github-releases depName=rclone/rclone
+ARG RCLONE_VERSION=v1.73.3
+# renovate: datasource=pypi depName=yamllint
+ARG YAMLLINT_VERSION=1.38.0
+ARG YAMLLINT_SHA256=fc394a5b3be980a4062607b8fdddc0843f4fa394152b6da21722f5d59013c220
+# renovate: datasource=pypi depName=pathspec
+ARG PATHSPEC_VERSION=1.0.4
+ARG PATHSPEC_SHA256=fb6ae2fd4e7c921a165808a552060e722767cfa526f99ca5156ed2ce45a5c723
+# renovate: datasource=pypi depName=PyYAML
+ARG PYYAML_VERSION=6.0.3
+ARG PYYAML_SHA256_AARCH64=10892704fc220243f5305762e276552a0395f7beb4dbf9b14ec8fd43b57f126c
+ARG PYYAML_SHA256_AMD64=b8bb0864c5a28024fac8a632c443c87c5aa6f215c0b126c449ae1a150412f31d
 ARG CONTROL_PLANE_UID=1000
 ARG CONTROL_PLANE_GID=1000
 ARG CONTROL_PLANE_USER=copilot
@@ -21,7 +86,12 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     CONTROL_PLANE_USER=${CONTROL_PLANE_USER} \
     CONTROL_PLANE_HOME=/home/${CONTROL_PLANE_USER} \
-    CONTROL_PLANE_WORKSPACE=/workspace
+    CONTROL_PLANE_WORKSPACE=/workspace \
+    YAMLLINT_VIRTUAL_ENV=/opt/yamllint
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/home/${CONTROL_PLANE_USER}/.cargo \
+    CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target \
+    PATH=${YAMLLINT_VIRTUAL_ENV}/bin:/usr/local/cargo/bin:${PATH}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -30,47 +100,62 @@ RUN apt-get update -o Acquire::Retries=3 \
     && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
-        cpulimit \
         curl \
-        fuse-overlayfs \
-        gh \
-        git \
-        jq \
-        kubernetes-client \
-        locales \
-        ncurses-term \
         openssh-client \
         openssh-server \
-        podman \
+        python3 \
+        python3-venv \
         procps \
-         rclone \
-         screen \
-         slirp4netns \
-         sqlite3 \
-         tini \
-         uidmap \
-         vim \
-    && printf '%s\n' \
-        'en_US.UTF-8 UTF-8' \
-        'ja_JP.UTF-8 UTF-8' \
-        > /etc/locale.gen \
-    && locale-gen \
-    && localedef -i en_US -f UTF-8 en_US.UTF8 \
-    && localedef -i ja_JP -f UTF-8 ja_JP.UTF8 \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN arch="$(dpkg --print-architecture)" \
+        screen \
+        tini \
+        unzip \
+    && arch="$(dpkg --print-architecture)" \
     && case "${arch}" in \
-        amd64) kind_arch=amd64 ;; \
-        arm64) kind_arch=arm64 ;; \
-        *) printf 'Unsupported architecture for kind: %s\n' "${arch}" >&2; exit 1 ;; \
+        amd64) \
+            kind_arch=amd64; \
+            kind_sha256=eb244cbafcc157dff60cf68693c14c9a75c4e6e6fedaf9cd71c58117cb93e3fa; \
+            jq_asset=jq-linux-amd64; \
+            jq_sha256=020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d; \
+            kubectl_arch=amd64; \
+            kubectl_sha256=fd31c7d7129260e608f6faf92d5984c3267ad0b5ead3bced2fe125686e286ad6; \
+            rclone_arch=amd64; \
+            rclone_sha256=70278c22b98c7d02aed01828b70053904dbce4c8a1a15d7781d836c6fdb036ea; \
+            ;; \
+        arm64) \
+            kind_arch=arm64; \
+            kind_sha256=8e1014e87c34901cc422a1445866835d1e666f2a61301c27e722bdeab5a1f7e4; \
+            jq_asset=jq-linux-arm64; \
+            jq_sha256=6bc62f25981328edd3cfcfe6fe51b073f2d7e7710d7ef7fcdac28d4e384fc3d4; \
+            kubectl_arch=arm64; \
+            kubectl_sha256=6f0cd088a82dde5d5807122056069e2fac4ed447cc518efc055547ae46525f14; \
+            rclone_arch=arm64; \
+            rclone_sha256=ed2a638b4cb15abe4f01d6d9c015f3a1cb41aa7a17c96db2725542c61f353b8e; \
+            ;; \
+        *) printf 'Unsupported architecture for control-plane tools: %s\n' "${arch}" >&2; exit 1 ;; \
     esac \
-    && curl -fsSLo "/tmp/kind-linux-${kind_arch}" "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-${kind_arch}" \
-    && curl -fsSLo "/tmp/kind-linux-${kind_arch}.sha256sum" "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-${kind_arch}.sha256sum" \
-    && kind_sha256="$(cut -d' ' -f1 "/tmp/kind-linux-${kind_arch}.sha256sum")" \
-    && printf '%s  %s\n' "${kind_sha256}" "/tmp/kind-linux-${kind_arch}" | sha256sum -c - \
+      && curl -fsSLo "/tmp/kind-linux-${kind_arch}" "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-${kind_arch}" \
+      && printf '%s  %s\n' "${kind_sha256}" "/tmp/kind-linux-${kind_arch}" | sha256sum -c - \
     && install -m 0755 "/tmp/kind-linux-${kind_arch}" /usr/local/bin/kind \
-    && rm -f "/tmp/kind-linux-${kind_arch}" "/tmp/kind-linux-${kind_arch}.sha256sum"
+    && curl -fsSLo "/tmp/${jq_asset}" "https://github.com/jqlang/jq/releases/download/${JQ_VERSION}/${jq_asset}" \
+    && printf '%s  %s\n' "${jq_sha256}" "/tmp/${jq_asset}" | sha256sum -c - \
+    && install -m 0755 "/tmp/${jq_asset}" /usr/local/bin/jq \
+    && curl -fsSLo /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${kubectl_arch}/kubectl" \
+    && printf '%s  %s\n' "${kubectl_sha256}" /tmp/kubectl | sha256sum -c - \
+    && install -m 0755 /tmp/kubectl /usr/local/bin/kubectl \
+    && rclone_asset="rclone-${RCLONE_VERSION}-linux-${rclone_arch}.zip" \
+    && curl -fsSLo "/tmp/${rclone_asset}" "https://github.com/rclone/rclone/releases/download/${RCLONE_VERSION}/${rclone_asset}" \
+    && printf '%s  %s\n' "${rclone_sha256}" "/tmp/${rclone_asset}" | sha256sum -c - \
+    && unzip -q "/tmp/${rclone_asset}" -d /tmp \
+    && install -m 0755 "/tmp/rclone-${RCLONE_VERSION}-linux-${rclone_arch}/rclone" /usr/local/bin/rclone \
+    && printf '%s\n' \
+        "pathspec==${PATHSPEC_VERSION} --hash=sha256:${PATHSPEC_SHA256}" \
+        "PyYAML==${PYYAML_VERSION} --hash=sha256:${PYYAML_SHA256_AARCH64} --hash=sha256:${PYYAML_SHA256_AMD64}" \
+        "yamllint==${YAMLLINT_VERSION} --hash=sha256:${YAMLLINT_SHA256}" \
+        > /tmp/yamllint-requirements.txt \
+    && python3 -m venv "${YAMLLINT_VIRTUAL_ENV}" \
+    && "${YAMLLINT_VIRTUAL_ENV}/bin/pip" install --no-cache-dir --only-binary=:all: --require-hashes -r /tmp/yamllint-requirements.txt \
+    && apt-get purge -y --auto-remove curl unzip \
+    && rm -rf /var/lib/apt/lists/* /root/.cache /tmp/*
 
 RUN npm install --global "@github/copilot@${COPILOT_CLI_VERSION}" \
     && npm cache clean --force
@@ -108,13 +193,11 @@ RUN existing_group="$(getent group "${CONTROL_PLANE_GID}" | cut -d: -f1 || true)
     && passwd -d "${CONTROL_PLANE_USER}" \
     && mkdir -p \
         "/home/${CONTROL_PLANE_USER}/.copilot" \
-        "/home/${CONTROL_PLANE_USER}/.config/containers" \
+        "/home/${CONTROL_PLANE_USER}/.cargo" \
         "/home/${CONTROL_PLANE_USER}/.config/gh" \
         "/home/${CONTROL_PLANE_USER}/.ssh" \
         /run/sshd \
         /workspace \
-    && if ! grep -q "^${CONTROL_PLANE_USER}:" /etc/subuid; then printf '%s:%s:65536\n' "${CONTROL_PLANE_USER}" 100000 >> /etc/subuid; fi \
-    && if ! grep -q "^${CONTROL_PLANE_USER}:" /etc/subgid; then printf '%s:%s:65536\n' "${CONTROL_PLANE_USER}" 100000 >> /etc/subgid; fi \
     && chown -R "${CONTROL_PLANE_USER}:${CONTROL_PLANE_USER}" \
         "/home/${CONTROL_PLANE_USER}" \
         /workspace \
@@ -123,45 +206,48 @@ RUN existing_group="$(getent group "${CONTROL_PLANE_GID}" | cut -d: -f1 || true)
 
 COPY --chmod=644 config/sshd_config /etc/ssh/sshd_config
 COPY --chmod=644 config/screenrc /etc/screenrc
-COPY --chmod=644 config/storage.conf /home/${CONTROL_PLANE_USER}/.config/containers/storage.conf
 COPY --chmod=644 config/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
 COPY --chmod=644 config/profile-control-plane-session.sh /etc/profile.d/control-plane-session.sh
-COPY --chmod=644 config/external-skills.yaml /tmp/external-skills.yaml
 COPY skills/ /usr/local/share/control-plane/skills/
+COPY --from=skills-builder /opt/control-plane/external-skills/ /usr/local/share/control-plane/skills/
 COPY hooks/ /usr/local/share/control-plane/hooks/
+COPY --from=rust-toolchain /usr/local/cargo/bin /usr/local/cargo/bin
+COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
+COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/bin/control-plane-runtime-tool
 COPY --from=exec-policy-builder /build/control-plane-exec-policy/target/release/libcontrol_plane_exec_policy.so /usr/local/lib/libcontrol_plane_exec_policy.so
 COPY --from=exec-policy-builder /build/control-plane-exec-policy/target/release/control-plane-pre-tool-use-hook /usr/local/share/control-plane/hooks/preToolUse/main
-COPY --chmod=755 bin/control-plane-podman /usr/local/bin/control-plane-podman
 COPY --chmod=755 bin/control-plane-screen /usr/local/bin/control-plane-screen
 COPY --chmod=755 bin/control-plane-entrypoint /usr/local/bin/control-plane-entrypoint
+COPY --chmod=755 bin/control-plane-exec-api-launcher /usr/local/bin/control-plane-exec-api-launcher
+COPY --chmod=755 bin/control-plane-session-exec /usr/local/bin/control-plane-session-exec
 COPY --chmod=755 bin/control-plane-copilot /usr/local/bin/control-plane-copilot
-COPY --chmod=755 bin/install-git-skills-from-manifest /usr/local/bin/install-git-skills-from-manifest
-COPY --chmod=644 bin/external-skills-manifest-to-tsv.mjs /usr/local/bin/external-skills-manifest-to-tsv.mjs
+COPY --from=exec-api-builder /build/control-plane-exec-api/target/release/control-plane-exec-api /usr/local/bin/control-plane-exec-api
 COPY --chmod=755 bin/control-plane-job-transfer /usr/local/bin/control-plane-job-transfer
 COPY --chmod=755 bin/control-plane-run /usr/local/bin/control-plane-run
 COPY --chmod=755 bin/control-plane-session /usr/local/bin/control-plane-session
 COPY --chmod=755 bin/control-plane-ssh-shell /usr/local/bin/control-plane-ssh-shell
-COPY --chmod=755 bin/garage-bootstrap.mjs /usr/local/bin/garage-bootstrap.mjs
 COPY --chmod=755 bin/k8s-job-start /usr/local/bin/k8s-job-start
-COPY --chmod=755 bin/k8s-job-wait /usr/local/bin/k8s-job-wait
-COPY --chmod=755 bin/k8s-job-pod /usr/local/bin/k8s-job-pod
-COPY --chmod=755 bin/k8s-job-logs /usr/local/bin/k8s-job-logs
 COPY --chmod=755 bin/k8s-job-run /usr/local/bin/k8s-job-run
 
-RUN /usr/local/bin/install-git-skills-from-manifest /tmp/external-skills.yaml /usr/local/share/control-plane/skills \
-    && rm -f \
-        /tmp/external-skills.yaml \
-        /usr/local/bin/install-git-skills-from-manifest \
-        /usr/local/bin/external-skills-manifest-to-tsv.mjs \
-    && ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/podman \
-    && ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/docker \
+RUN mkdir -p /usr/local/share/control-plane/hooks/sessionEnd \
     && ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen \
+    && ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/share/control-plane/hooks/audit/main \
+    && ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/share/control-plane/hooks/preToolUse/exec-forward \
+    && ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/share/control-plane/hooks/postToolUse/main \
+    && ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/share/control-plane/hooks/sessionEnd/cleanup \
+    && ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/bin/k8s-job-wait \
+    && ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/bin/k8s-job-pod \
+    && ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/bin/k8s-job-logs \
     && usermod --shell /usr/local/bin/control-plane-ssh-shell "${CONTROL_PLANE_USER}" \
     && find /usr/local/share/control-plane/skills -type d -exec chmod 755 {} + \
     && find /usr/local/share/control-plane/skills -type f -exec chmod 644 {} + \
     && find /usr/local/share/control-plane/hooks -type d -exec chmod 755 {} + \
     && find /usr/local/share/control-plane/hooks -type f -exec chmod 644 {} + \
+    && chmod 755 /usr/local/share/control-plane/hooks/audit/main \
     && chmod 755 /usr/local/share/control-plane/hooks/preToolUse/main \
+    && chmod 755 /usr/local/share/control-plane/hooks/preToolUse/exec-forward \
+    && chmod 755 /usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh \
+    && chmod 755 /usr/local/share/control-plane/hooks/sessionEnd/cleanup \
     && for git_hook in pre-commit pre-push; do \
          if [ -f "/usr/local/share/control-plane/hooks/git/${git_hook}" ]; then chmod 755 "/usr/local/share/control-plane/hooks/git/${git_hook}"; fi; \
        done \
@@ -170,10 +256,10 @@ RUN /usr/local/bin/install-git-skills-from-manifest /tmp/external-skills.yaml /u
 
 WORKDIR /workspace
 # Supported runtimes still have to override this to root because the entrypoint
-# provisions mounted state, SSH host keys, and the rootful Podman service.
+# provisions mounted state and SSH host keys.
 USER ${CONTROL_PLANE_USER}
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["bash", "-lc", "node --version >/dev/null && gh --version >/dev/null && podman --version >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]
+    CMD ["bash", "-lc", "node --version >/dev/null && cargo --version >/dev/null && yamllint --version >/dev/null && control-plane-exec-api --help >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]
 EXPOSE 2222
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/control-plane-entrypoint"]
 CMD ["/usr/sbin/sshd", "-D", "-e", "-f", "/etc/ssh/sshd_config"]

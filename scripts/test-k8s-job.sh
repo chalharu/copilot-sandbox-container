@@ -111,7 +111,6 @@ kubectl delete configmap "${configmap_name}" -n "${active_namespace}" --ignore-n
 kubectl create configmap "${configmap_name}" \
   -n "${active_namespace}" \
   --from-file=control-plane-entrypoint=/workspace/containers/control-plane/bin/control-plane-entrypoint \
-  --from-file=control-plane-podman=/workspace/containers/control-plane/bin/control-plane-podman \
   --from-file=control-plane-copilot=/workspace/containers/control-plane/bin/control-plane-copilot \
   --from-file=control-plane-job-transfer=/workspace/containers/control-plane/bin/control-plane-job-transfer \
   --from-file=control-plane-screen=/workspace/containers/control-plane/bin/control-plane-screen \
@@ -120,10 +119,6 @@ kubectl create configmap "${configmap_name}" \
   --from-file=job-ssh-public-key="${ssh_key}.pub" \
   --from-file=profile-control-plane-env.sh=/workspace/containers/control-plane/config/profile-control-plane-env.sh \
   --from-file=profile-control-plane-session.sh=/workspace/containers/control-plane/config/profile-control-plane-session.sh \
-  --from-file=control-plane-skill.md=/workspace/containers/control-plane/skills/control-plane-operations/SKILL.md \
-  --from-file=control-plane-run.md=/workspace/containers/control-plane/skills/control-plane-operations/references/control-plane-run.md \
-  --from-file=skills-reference.md=/workspace/containers/control-plane/skills/control-plane-operations/references/skills.md \
-  --from-file=containerized-yamllint-ops-skill.md=/workspace/containers/control-plane/skills/containerized-yamllint-ops/SKILL.md \
   --from-file=repo-change-delivery-skill.md=/workspace/containers/control-plane/skills/repo-change-delivery/SKILL.md \
   --from-file=git-commit-skill.md=/workspace/containers/control-plane/skills/git-commit/SKILL.md \
   --from-file=pull-request-workflow-skill.md=/workspace/containers/control-plane/skills/pull-request-workflow/SKILL.md
@@ -155,20 +150,12 @@ ${service_account_yaml}
         - name: smoke
           image: ${control_plane_image}
           imagePullPolicy: ${image_pull_policy}
-          env:
-            - name: CONTROL_PLANE_LOCAL_PODMAN_MODE
-              value: rootful-service
-            - name: CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER
-              value: overlay
-            - name: CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR
-              value: /var/tmp/control-plane/rootful-overlay
           command:
             - /bin/bash
             - -lc
             - |
               set -euo pipefail
               install -m 0755 /var/run/control-plane-test/control-plane-entrypoint /usr/local/bin/control-plane-entrypoint
-                install -m 0755 /var/run/control-plane-test/control-plane-podman /usr/local/bin/control-plane-podman
                 install -m 0755 /var/run/control-plane-test/control-plane-copilot /usr/local/bin/control-plane-copilot
                 install -m 0755 /var/run/control-plane-test/control-plane-job-transfer /usr/local/bin/control-plane-job-transfer
                 install -m 0755 /var/run/control-plane-test/control-plane-screen /usr/local/bin/control-plane-screen
@@ -176,98 +163,38 @@ ${service_account_yaml}
                 install -m 0755 /var/run/control-plane-test/control-plane-ssh-shell /usr/local/bin/control-plane-ssh-shell
                  install -m 0644 /var/run/control-plane-test/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
                  install -m 0644 /var/run/control-plane-test/profile-control-plane-session.sh /etc/profile.d/control-plane-session.sh
-                 install -d -m 0755 /usr/local/share/control-plane/skills/control-plane-operations/references
-                 install -d -m 0755 /usr/local/share/control-plane/skills/containerized-yamllint-ops
                  install -d -m 0755 /usr/local/share/control-plane/skills/repo-change-delivery
                  install -d -m 0755 /usr/local/share/control-plane/skills/git-commit
                  install -d -m 0755 /usr/local/share/control-plane/skills/pull-request-workflow
-                  install -m 0644 /var/run/control-plane-test/control-plane-skill.md /usr/local/share/control-plane/skills/control-plane-operations/SKILL.md
-                  install -m 0644 /var/run/control-plane-test/control-plane-run.md /usr/local/share/control-plane/skills/control-plane-operations/references/control-plane-run.md
-                  install -m 0644 /var/run/control-plane-test/skills-reference.md /usr/local/share/control-plane/skills/control-plane-operations/references/skills.md
-                  install -m 0644 /var/run/control-plane-test/containerized-yamllint-ops-skill.md /usr/local/share/control-plane/skills/containerized-yamllint-ops/SKILL.md
                   install -m 0644 /var/run/control-plane-test/repo-change-delivery-skill.md /usr/local/share/control-plane/skills/repo-change-delivery/SKILL.md
                   install -m 0644 /var/run/control-plane-test/git-commit-skill.md /usr/local/share/control-plane/skills/git-commit/SKILL.md
                   install -m 0644 /var/run/control-plane-test/pull-request-workflow-skill.md /usr/local/share/control-plane/skills/pull-request-workflow/SKILL.md
-                 ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/podman
-                ln -sf /usr/local/bin/control-plane-podman /usr/local/bin/docker
-                ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen
-                usermod --shell /usr/local/bin/control-plane-ssh-shell copilot
+                 ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen
+                 usermod --shell /usr/local/bin/control-plane-ssh-shell copilot
                 exec /usr/local/bin/control-plane-entrypoint /bin/bash -lc '
                  set -euo pipefail
-                 runtime_line="\$(grep -E "^(XDG_RUNTIME_DIR|TMPDIR|SCREENDIR|CONTAINER_HOST|DOCKER_HOST|CONTROL_PLANE_LOCAL_PODMAN_MODE|CONTROL_PLANE_PODMAN_DEFAULT_CGROUPS|CONTROL_PLANE_PODMAN_DEFAULT_NETWORK|CONTROL_PLANE_PODMAN_BUILD_ISOLATION)=" /home/copilot/.config/control-plane/runtime.env | tr "\n" " ")"
+                 ! grep -q "^CONTROL_PLANE_RUN_MODE=" /home/copilot/.config/control-plane/runtime.env
+                 runtime_line="\$(grep -E "^(XDG_RUNTIME_DIR|TMPDIR|SCREENDIR|CARGO_HOME|CARGO_TARGET_DIR|RUSTUP_HOME)=" /home/copilot/.config/control-plane/runtime.env | tr "\n" " ")"
                  printf "job-check: runtime-env=%s\n" "\${runtime_line}"
                  [[ "\${runtime_line}" == *"XDG_RUNTIME_DIR=/run/user/1000"* ]]
                  [[ "\${runtime_line}" == *"TMPDIR=/var/tmp/control-plane/tmp-1000"* ]]
                  [[ "\${runtime_line}" == *"SCREENDIR=/run/user/1000/screen"* ]]
-                 [[ "\${runtime_line}" == *"CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service"* ]]
-                 [[ "\${runtime_line}" == *"CONTROL_PLANE_PODMAN_DEFAULT_CGROUPS=disabled"* ]]
-                 [[ "\${runtime_line}" == *"CONTROL_PLANE_PODMAN_DEFAULT_NETWORK=host"* ]]
-                 [[ "\${runtime_line}" == *"CONTROL_PLANE_PODMAN_BUILD_ISOLATION=chroot"* ]]
-                  [[ "\${runtime_line}" == *"CONTAINER_HOST="*"/var/tmp/control-plane/rootful-overlay/podman-root.sock"* ]]
+                 [[ "\${runtime_line}" == *"CARGO_HOME=/home/copilot/.cargo"* ]]
+                 [[ "\${runtime_line}" == *"CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target"* ]]
+                 [[ "\${runtime_line}" == *"RUSTUP_HOME=/usr/local/rustup"* ]]
 
-                  su -s /bin/bash copilot -c '"'"'set -euo pipefail; skill_root="\$HOME/.copilot/skills/control-plane-operations"; yamllint_skill_root="\$HOME/.copilot/skills/containerized-yamllint-ops"; doc_coauthor_skill_root="\$HOME/.copilot/skills/doc-coauthoring"; delivery_skill_root="\$HOME/.copilot/skills/repo-change-delivery"; commit_skill_root="\$HOME/.copilot/skills/git-commit"; pull_request_skill_root="\$HOME/.copilot/skills/pull-request-workflow"; skill_creator_skill_root="\$HOME/.copilot/skills/skill-creator"; test ! -L "\$skill_root"; test -r "\$skill_root/SKILL.md"; test -x "\$skill_root/references"; test -r "\$skill_root/references/control-plane-run.md"; test -r "\$skill_root/references/skills.md"; test ! -L "\$yamllint_skill_root"; test -r "\$yamllint_skill_root/SKILL.md"; grep -Fqx "name: containerized-yamllint-ops" "\$yamllint_skill_root/SKILL.md"; test ! -L "\$doc_coauthor_skill_root"; test -r "\$doc_coauthor_skill_root/SKILL.md"; grep -Fqx "name: doc-coauthoring" "\$doc_coauthor_skill_root/SKILL.md"; test ! -L "\$delivery_skill_root"; test -r "\$delivery_skill_root/SKILL.md"; grep -Fqx "name: repo-change-delivery" "\$delivery_skill_root/SKILL.md"; test ! -L "\$commit_skill_root"; test -r "\$commit_skill_root/SKILL.md"; grep -Fqx "name: git-commit" "\$commit_skill_root/SKILL.md"; test ! -L "\$pull_request_skill_root"; test -r "\$pull_request_skill_root/SKILL.md"; grep -Fqx "name: pull-request-workflow" "\$pull_request_skill_root/SKILL.md"; test ! -L "\$skill_creator_skill_root"; test -r "\$skill_creator_skill_root/SKILL.md"; test -r "\$skill_creator_skill_root/LICENSE.txt"; grep -Fqx "name: skill-creator" "\$skill_creator_skill_root/SKILL.md"'"'"'
+                  su -s /bin/bash copilot -c '"'"'set -euo pipefail; doc_coauthor_skill_root="\$HOME/.copilot/skills/doc-coauthoring"; delivery_skill_root="\$HOME/.copilot/skills/repo-change-delivery"; commit_skill_root="\$HOME/.copilot/skills/git-commit"; pull_request_skill_root="\$HOME/.copilot/skills/pull-request-workflow"; skill_creator_skill_root="\$HOME/.copilot/skills/skill-creator"; test ! -L "\$doc_coauthor_skill_root"; test -r "\$doc_coauthor_skill_root/SKILL.md"; grep -Fqx "name: doc-coauthoring" "\$doc_coauthor_skill_root/SKILL.md"; test ! -L "\$delivery_skill_root"; test -r "\$delivery_skill_root/SKILL.md"; grep -Fqx "name: repo-change-delivery" "\$delivery_skill_root/SKILL.md"; test ! -L "\$commit_skill_root"; test -r "\$commit_skill_root/SKILL.md"; grep -Fqx "name: git-commit" "\$commit_skill_root/SKILL.md"; test ! -L "\$pull_request_skill_root"; test -r "\$pull_request_skill_root/SKILL.md"; grep -Fqx "name: pull-request-workflow" "\$pull_request_skill_root/SKILL.md"; test ! -L "\$skill_creator_skill_root"; test -r "\$skill_creator_skill_root/SKILL.md"; test -r "\$skill_creator_skill_root/LICENSE.txt"; grep -Fqx "name: skill-creator" "\$skill_creator_skill_root/SKILL.md"'"'"'
                   printf "%s\n" "job-check: skill-read=ok"
 
-                 term_report="\$(TERM=xterm-color bash -lc '"'"'printf "%s %s" "\$TERM" "\$(tput colors)"'"'"')"
-                 printf "job-check: term=%s\n" "\${term_report}"
-                  [[ "\${term_report}" == "xterm-256color 256" ]]
+                 lang_report="\$(bash -lc '"'"'printf "%s" "\${LANG:-}"'"'"')"
+                 printf "job-check: lang=%s\n" "\${lang_report}"
+                  [[ "\${lang_report}" == "C.UTF-8" ]]
 
-                  podman_info="\$(su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; podman info --format "{{.Store.GraphRoot}} {{.Store.GraphDriverName}} {{.Host.Security.Rootless}}"'"'"')"
-                  printf "job-check: podman-info=%s\n" "\${podman_info}"
-                  [[ "\${podman_info}" == "/var/lib/control-plane/rootful-podman/rootful-overlay/storage overlay false" ]]
-                  test ! -e /home/copilot/.copilot/containers/rootful-overlay
-                  test -d /var/tmp/control-plane/rootful-overlay/runroot
-                  grep -qx "driver = \"overlay\"" /var/tmp/control-plane/rootful-overlay/storage.conf
-                  grep -qx "graphroot = \"/var/lib/control-plane/rootful-podman/rootful-overlay/storage\"" /var/tmp/control-plane/rootful-overlay/storage.conf
-                  grep -qx "runroot = \"/var/tmp/control-plane/rootful-overlay/runroot\"" /var/tmp/control-plane/rootful-overlay/storage.conf
-                  if [[ -e /dev/fuse ]]; then
-                    grep -qx "mount_program = \"/usr/bin/fuse-overlayfs\"" /var/tmp/control-plane/rootful-overlay/storage.conf
-                  else
-                    ! grep -q "mount_program" /var/tmp/control-plane/rootful-overlay/storage.conf
-                  fi
-                  printf "%s\n" "job-check: rootful-store=ephemeral-cache"
-
-                 podman_output="\$(su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; podman run --rm docker.io/library/busybox:1.37.0 echo k8s-job-podman-ok'"'"')"
-                 printf "job-check: podman=%s\n" "\${podman_output}"
-                 [[ "\${podman_output}" == *"k8s-job-podman-ok"* ]]
-
-                 mkdir -p /tmp/podman-build-probe
-                 printf "%s\n" "FROM docker.io/library/busybox:1.37.0" > /tmp/podman-build-probe/Dockerfile
-                 printf "%s\n" "RUN echo build-ok > /build-ok.txt" >> /tmp/podman-build-probe/Dockerfile
-                 set +e
-                 build_image_id="\$(su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; podman build --isolation=chroot -q -t localhost/k8s-job-build-probe:test /tmp/podman-build-probe'"'"' 2>/tmp/podman-build.log)"
-                 build_status=\$?
-                 set -e
-                 if [[ "\${build_status}" -eq 0 ]]; then
-                   printf "job-check: podman-build-image=%s\n" "\${build_image_id}"
-                   test -n "\${build_image_id}"
-                   build_output="\$(su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; podman run --rm localhost/k8s-job-build-probe:test cat /build-ok.txt'"'"')"
-                   [[ "\${build_output}" == "build-ok" ]]
-                   printf "%s\n" "job-check: podman-build=ok"
-                 else
-                   sed "s/^/job-check: podman-build-log: /" /tmp/podman-build.log >&2 || true
-                   printf "%s\n" "job-check: podman-build=skipped"
-                 fi
-
-                 printf "%s\n" "#!/usr/bin/env bash" > /tmp/podman-it-check.sh
-                 printf "%s\n" "set -euo pipefail" >> /tmp/podman-it-check.sh
-                 printf "%s\n" "podman run -it --rm docker.io/library/busybox:1.37.0 true" >> /tmp/podman-it-check.sh
-                printf "%s\n" "printf \"%s\\n\" \"status:0\"" >> /tmp/podman-it-check.sh
-                chmod 755 /tmp/podman-it-check.sh
-                set +e
-                su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; timeout 20s script -qec /tmp/podman-it-check.sh /tmp/podman-it.log'"'"'
-                podman_it_status=\$?
-                set -e
-                printf "job-check: interactive-status=%s\n" "\${podman_it_status}"
-                if [[ "\${podman_it_status}" -ne 0 ]]; then
-                  printf "Interactive podman probe failed: %s\n" "\${podman_it_status}" >&2
-                  cat /tmp/podman-it.log >&2 || true
-                  exit 1
-                fi
-                tr -d "\r" < /tmp/podman-it.log > /tmp/podman-it.log.clean
-                sed "s/^/job-check: interactive-log: /" /tmp/podman-it.log.clean
-                grep -Fq "status:0" /tmp/podman-it.log.clean
-                printf "%s\n" "job-check: interactive=ok"
+                  su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; command -v cargo >/dev/null; command -v yamllint >/dev/null; command -v control-plane-run >/dev/null; command -v control-plane-exec-api >/dev/null; ! command -v cpulimit >/dev/null 2>&1; ! command -v gcc >/dev/null 2>&1; ! command -v pkg-config >/dev/null 2>&1; ! command -v vim >/dev/null 2>&1; cargo --version >/dev/null; yamllint --version >/dev/null; control-plane-run --help >/dev/null; control-plane-exec-api --help >/dev/null'"'"'
+                  printf "%s\n" "job-check: bundled-tools=ok"
+                  test -d /var/tmp/control-plane
+                  test -d /var/tmp/control-plane/cargo-target
+                  printf "%s\n" "job-check: runtime-cache=ok"
 
                 ssh-keygen -q -t ed25519 -N "" -f /tmp/id_ed25519
                 cat /tmp/id_ed25519.pub >> /home/copilot/.ssh/authorized_keys
@@ -292,23 +219,30 @@ ${service_account_yaml}
 
                   cp /home/copilot/.config/control-plane/runtime.env /tmp/runtime.env.bak
                   printf "\n%s\n" "CONTROL_PLANE_SSH_SHELL_LOG=/tmp/control-plane-ssh-shell.log" >> /home/copilot/.config/control-plane/runtime.env
-                  printf "\n%s\n" "CONTROL_PLANE_SESSION_SELECTION=new:k8s-auto-login" >> /home/copilot/.config/control-plane/runtime.env
+                  printf "\n%s\n" "CONTROL_PLANE_COPILOT_SESSION=k8s-copilot" >> /home/copilot/.config/control-plane/runtime.env
+                  printf "\n%s\n" "CONTROL_PLANE_COPILOT_BIN=/tmp/fake-copilot-shell" >> /home/copilot/.config/control-plane/runtime.env
+                  cat > /tmp/fake-copilot-shell <<'"'"'INNER'"'"'
+#!/usr/bin/env bash
+set -euo pipefail
+exec bash -il
+INNER
+                  chmod 755 /tmp/fake-copilot-shell
                   rm -f /tmp/ssh-interactive-marker.txt
                   rm -f /tmp/control-plane-ssh-shell.log
                   printf "%s\n" "job-check: ssh-interactive-probe-ready=ok"
                   for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60; do
-                    if grep -Fq "mode=login action=session-picker" /tmp/control-plane-ssh-shell.log 2>/dev/null \
-                      && su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list 2>/dev/null | grep -q -- k8s-auto-login'"'"'; then
+                    if grep -Fq "mode=login action=copilot-session" /tmp/control-plane-ssh-shell.log 2>/dev/null \
+                      && su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list 2>/dev/null | grep -q -- k8s-copilot'"'"'; then
                       break
                     fi
                     sleep 1
                   done
-                  if ! grep -Fq "mode=login action=session-picker" /tmp/control-plane-ssh-shell.log 2>/dev/null \
-                    || ! su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list 2>/dev/null | grep -q -- k8s-auto-login'"'"'; then
+                  if ! grep -Fq "mode=login action=copilot-session" /tmp/control-plane-ssh-shell.log 2>/dev/null \
+                    || ! su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list 2>/dev/null | grep -q -- k8s-copilot'"'"'; then
                     printf "Interactive SSH never reached a usable screen session in k8s smoke\n" >&2
                     cat /tmp/sshd.log >&2 || true
                     cat /tmp/control-plane-ssh-shell.log >&2 || true
-                    su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; rm -f /tmp/control-plane-session.log; timeout 10s script -qefc "control-plane-session --select" /tmp/control-plane-session.log'"'"' >&2 || true
+                    su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; rm -f /tmp/control-plane-session.log; timeout 10s script -qefc "control-plane-session" /tmp/control-plane-session.log'"'"' >&2 || true
                     cat /tmp/control-plane-session.log >&2 || true
                      su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; screen -list'"'"' >&2 || true
                      exit 1
@@ -333,26 +267,17 @@ ${service_account_yaml}
                 - DAC_OVERRIDE
                 - FOWNER
                 - KILL
-                - MKNOD
-                - NET_ADMIN
-                - SETFCAP
                 - SETGID
-                - SETPCAP
                 - SETUID
-                - SYS_ADMIN
                 - SYS_CHROOT
             seccompProfile:
-              type: Unconfined
-            appArmorProfile:
-              type: Unconfined
+              type: RuntimeDefault
           volumeMounts:
             - name: test-files
               mountPath: /var/run/control-plane-test
               readOnly: true
             - name: state
               mountPath: /home/copilot/.copilot
-            - name: rootful-podman
-              mountPath: /var/lib/control-plane/rootful-podman
             - name: runtime-tmp
               mountPath: /var/tmp/control-plane
       volumes:
@@ -361,8 +286,6 @@ ${service_account_yaml}
             name: ${configmap_name}
             defaultMode: 0555
         - name: state
-          emptyDir: {}
-        - name: rootful-podman
           emptyDir: {}
         - name: runtime-tmp
           emptyDir: {}
@@ -424,7 +347,7 @@ set +e
   --identity "${ssh_key}" \
   --host "${job_pod_ip}" \
   --port 2222 \
-  --session-name k8s-auto-login \
+  --session-name k8s-copilot \
   --marker-path /tmp/ssh-interactive-marker.txt \
   --no-remote-check \
   >"${ssh_probe_log}" 2>&1
@@ -456,15 +379,12 @@ printf '%s\n' "${job_logs}"
 
 grep -Fq 'job-check: runtime-env=' <<<"${job_logs}"
 grep -Fq 'job-check: skill-read=ok' <<<"${job_logs}"
-grep -Fq 'job-check: term=xterm-256color 256' <<<"${job_logs}"
-grep -Fq 'job-check: podman-info=/var/lib/control-plane/rootful-podman/rootful-overlay/storage overlay false' <<<"${job_logs}"
-grep -Fq 'job-check: rootful-store=ephemeral-cache' <<<"${job_logs}"
-grep -Fq 'job-check: podman=k8s-job-podman-ok' <<<"${job_logs}"
-grep -Eq 'job-check: podman-build=(ok|skipped)' <<<"${job_logs}"
-grep -Fq 'job-check: interactive=ok' <<<"${job_logs}"
+grep -Fq 'job-check: lang=C.UTF-8' <<<"${job_logs}"
+grep -Fq 'job-check: bundled-tools=ok' <<<"${job_logs}"
+grep -Fq 'job-check: runtime-cache=ok' <<<"${job_logs}"
 grep -Fq 'job-check: ssh-clean=ok' <<<"${job_logs}"
 grep -Fq 'job-check: ssh-interactive-probe-ready=ok' <<<"${job_logs}"
 grep -Fq 'job-check: ssh-interactive-ready=ok' <<<"${job_logs}"
 grep -Fq 'job-check: ssh-interactive=ok' <<<"${job_logs}"
 
-printf '%s\n' 'k8s-job-test: current-cluster rootful-service smoke ok' >&2
+printf '%s\n' 'k8s-job-test: current-cluster smoke ok' >&2

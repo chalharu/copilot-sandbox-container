@@ -11,7 +11,6 @@ fi
 
 copilot_bin="${CONTROL_PLANE_COPILOT_BIN:-copilot}"
 copilot_github_token_file="${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE:-}"
-copilot_cpu_limit_percent="${CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT:-100}"
 copilot_nice_level="${CONTROL_PLANE_COPILOT_NICE_LEVEL:-10}"
 
 die() {
@@ -32,9 +31,6 @@ command -v "${copilot_bin}" >/dev/null 2>&1 || {
 }
 
 require_integer "${copilot_nice_level}" "CONTROL_PLANE_COPILOT_NICE_LEVEL"
-if [[ -n "${copilot_cpu_limit_percent}" ]]; then
-  require_integer "${copilot_cpu_limit_percent}" "CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT"
-fi
 
 copilot_args=("${copilot_bin}" --yolo)
 if [[ -n "${copilot_github_token_file}" ]] && [[ -f "${copilot_github_token_file}" ]]; then
@@ -45,15 +41,4 @@ if [[ -n "${copilot_github_token_file}" ]] && [[ -f "${copilot_github_token_file
   fi
 fi
 
-launch_args=(nice -n "${copilot_nice_level}" "${copilot_args[@]}")
-if [[ -n "${copilot_cpu_limit_percent}" ]] && (( copilot_cpu_limit_percent > 0 )); then
-  if ! command -v cpulimit >/dev/null 2>&1; then
-    printf '%s\n' \
-      'control-plane-copilot: cpulimit is unavailable; continuing without an explicit CPU cap.' \
-      >&2
-    exec "${launch_args[@]}"
-  fi
-  exec cpulimit -f -q -l "${copilot_cpu_limit_percent}" -- "${launch_args[@]}"
-fi
-
-exec "${launch_args[@]}"
+exec nice -n "${copilot_nice_level}" "${copilot_args[@]}"

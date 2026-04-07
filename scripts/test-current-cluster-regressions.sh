@@ -67,10 +67,17 @@ printf 'current-cluster-test: pod=%s/%s image=%s\n' "${namespace}" "${pod_name}"
 # Keep this live-cluster path focused on behavior that only a running control-plane
 # Pod can validate. Static skill packaging and local Podman flows already have
 # coverage in the standard regression suite.
-printf '%s\n' 'current-cluster-test: verifying interactive SSH auto-login' >&2
+printf '%s\n' 'current-cluster-test: verifying interactive SSH Copilot session reuse' >&2
 cp "${runtime_config_file}" "${runtime_backup}"
 cp "${HOME}/.ssh/authorized_keys" "${authorized_keys_backup}"
-printf '\nCONTROL_PLANE_SESSION_SELECTION=new:%s\n' "${session_name}" >> "${runtime_config_file}"
+cat > "${workdir}/fake-copilot-shell" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+exec bash -il
+EOF
+chmod 700 "${workdir}/fake-copilot-shell"
+printf '\nCONTROL_PLANE_COPILOT_SESSION=%s\n' "${session_name}" >> "${runtime_config_file}"
+printf '\nCONTROL_PLANE_COPILOT_BIN=%s\n' "${workdir}/fake-copilot-shell" >> "${runtime_config_file}"
 ssh-keygen -q -t ed25519 -N '' -f "${workdir}/id_ed25519" >/dev/null
 cat "${workdir}/id_ed25519.pub" >> "${HOME}/.ssh/authorized_keys"
 chmod 600 "${HOME}/.ssh/authorized_keys"

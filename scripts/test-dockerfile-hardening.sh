@@ -24,6 +24,15 @@ assert_file_not_matches() {
   fi
 }
 
+assert_path_absent() {
+  local path="$1"
+
+  if [[ -e "${path}" ]]; then
+    printf 'Did not expect %s to exist\n' "${path}" >&2
+    exit 1
+  fi
+}
+
 assert_healthcheck_cmd() {
   local path="$1"
   local expected_cmd_line="$2"
@@ -42,27 +51,31 @@ assert_healthcheck_cmd() {
 printf '%s\n' 'dockerfile-hardening-test: verifying non-root defaults and healthchecks' >&2
 
 control_plane_dockerfile="${repo_root}/containers/control-plane/Dockerfile"
-yamllint_dockerfile="${repo_root}/containers/yamllint/Dockerfile"
-sccache_dockerfile="${repo_root}/containers/sccache/Dockerfile"
-execution_plane_go_dockerfile="${repo_root}/containers/execution-plane-go/Dockerfile"
-execution_plane_node_dockerfile="${repo_root}/containers/execution-plane-node/Dockerfile"
-execution_plane_python_dockerfile="${repo_root}/containers/execution-plane-python/Dockerfile"
-execution_plane_rust_dockerfile="${repo_root}/containers/execution-plane-rust/Dockerfile"
-execution_plane_smoke_dockerfile="${repo_root}/containers/execution-plane-smoke/Dockerfile"
+execution_plane_smoke_dir="${repo_root}/containers/execution-plane-smoke"
+legacy_yamllint_installer="${repo_root}/containers/control-plane/build/install-yamllint-wheel.py"
+legacy_execution_plane_go_dockerfile="${repo_root}/containers/execution-plane-go/Dockerfile"
+legacy_execution_plane_node_dockerfile="${repo_root}/containers/execution-plane-node/Dockerfile"
+legacy_execution_plane_python_dockerfile="${repo_root}/containers/execution-plane-python/Dockerfile"
+legacy_execution_plane_rust_dockerfile="${repo_root}/containers/execution-plane-rust/Dockerfile"
+legacy_yamllint_dockerfile="${repo_root}/containers/yamllint/Dockerfile"
 
 assert_file_contains "${control_plane_dockerfile}" "USER \${CONTROL_PLANE_USER}"
 assert_file_not_matches "${control_plane_dockerfile}" '^USER root$'
-assert_healthcheck_cmd "${control_plane_dockerfile}" '    CMD ["bash", "-lc", "node --version >/dev/null && gh --version >/dev/null && podman --version >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]'
+assert_healthcheck_cmd "${control_plane_dockerfile}" '    CMD ["bash", "-lc", "node --version >/dev/null && cargo --version >/dev/null && yamllint --version >/dev/null && control-plane-exec-api --help >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]'
+assert_file_contains "${control_plane_dockerfile}" 'YAMLLINT_VIRTUAL_ENV=/opt/yamllint'
+assert_file_contains "${control_plane_dockerfile}" 'python3-venv'
+assert_file_contains "${control_plane_dockerfile}" "python3 -m venv \"\${YAMLLINT_VIRTUAL_ENV}\""
+assert_file_contains "${control_plane_dockerfile}" '/tmp/yamllint-requirements.txt'
+assert_file_contains "${control_plane_dockerfile}" '--only-binary=:all: --require-hashes -r /tmp/yamllint-requirements.txt'
+assert_file_not_matches "${control_plane_dockerfile}" 'install-yamllint-wheel\.py|python3-pathspec|python3-yaml|YAMLLINT_WHEEL_SHA256'
+assert_file_not_matches "${control_plane_dockerfile}" 'cpulimit|gcc|libc6-dev|libssl-dev|locales|ncurses-term|pkg-config|vim'
 
-assert_file_contains "${yamllint_dockerfile}" 'HOME=/tmp'
-assert_file_contains "${yamllint_dockerfile}" 'USER 65532:65532'
-assert_healthcheck_cmd "${yamllint_dockerfile}" '    CMD ["yamllint", "--version"]'
-
-assert_healthcheck_cmd "${sccache_dockerfile}" '    CMD ["/usr/local/bin/sccache", "--version"]'
-assert_healthcheck_cmd "${execution_plane_go_dockerfile}" '    CMD ["bash", "-lc", "go version >/dev/null && dlv version >/dev/null"]'
-assert_healthcheck_cmd "${execution_plane_node_dockerfile}" '    CMD ["bash", "-lc", "node --version >/dev/null && npm --version >/dev/null && corepack --version >/dev/null"]'
-assert_healthcheck_cmd "${execution_plane_python_dockerfile}" '    CMD ["bash", "-lc", "python --version >/dev/null && python -m venv --help >/dev/null"]'
-assert_healthcheck_cmd "${execution_plane_rust_dockerfile}" '    CMD ["bash", "-lc", "rustc --version >/dev/null && cargo --version >/dev/null && /usr/local/cargo/bin/sccache --version >/dev/null"]'
-assert_healthcheck_cmd "${execution_plane_smoke_dockerfile}" '    CMD ["/usr/local/bin/execution-plane-smoke", "report"]'
+assert_path_absent "${execution_plane_smoke_dir}"
+assert_path_absent "${legacy_yamllint_installer}"
+assert_path_absent "${legacy_execution_plane_go_dockerfile}"
+assert_path_absent "${legacy_execution_plane_node_dockerfile}"
+assert_path_absent "${legacy_execution_plane_python_dockerfile}"
+assert_path_absent "${legacy_execution_plane_rust_dockerfile}"
+assert_path_absent "${legacy_yamllint_dockerfile}"
 
 printf '%s\n' 'dockerfile-hardening-test: dockerfile hardening ok' >&2
