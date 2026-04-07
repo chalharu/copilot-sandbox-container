@@ -397,6 +397,13 @@ if [[ "$(grep -Fc "printf 'host = %s\\n' \"\${CONTROL_PLANE_TRANSFER_HOST}\"" "$
   grep -n 'rclone.conf\|host = %s\|user = %s\|port = %s' "${workdir}/k8s-job-manifest.yaml" >&2 || true
   exit 1
 fi
+if grep -Fq 'curl -fsS' "${workdir}/k8s-job-manifest.yaml"; then
+  printf 'Expected job-transfer-sync to avoid curl and use kubectl in-cluster polling\n' >&2
+  grep -n 'curl -fsS\|kubectl get pod\|jsonpath=' "${workdir}/k8s-job-manifest.yaml" >&2 || true
+  exit 1
+fi
+grep -Fq "kubectl get pod \"\${pod_name}\" --namespace \"\${namespace}\" -o jsonpath=" "${workdir}/k8s-job-manifest.yaml"
+grep -Fq ".status.containerStatuses[?(@.name==\"execution\")].state.terminated.exitCode" "${workdir}/k8s-job-manifest.yaml"
 grep -Fq "printf 'user = %s\\n' \"\${CONTROL_PLANE_TRANSFER_USER}\"" "${workdir}/k8s-job-manifest.yaml"
 grep -Fq "printf 'port = %s\\n' \"\${CONTROL_PLANE_TRANSFER_PORT}\"" "${workdir}/k8s-job-manifest.yaml"
 if [[ "$(grep -Fc -- '--transfers 1' "${workdir}/k8s-job-manifest.yaml")" -ne 2 ]]; then
