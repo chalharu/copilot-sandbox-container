@@ -35,11 +35,15 @@ copilot session PVC へまとめるもの:
 - `~/.copilot/session-state/session-exec.json`
 - `~/.copilot/session-state/audit/audit-log.db`
 - `~/.config/gh`
+- `~/.config/control-plane/ssh-auth/authorized_keys`
 - `~/.ssh`
 - `/var/lib/control-plane/ssh-host-keys`
 
 `session-exec.json` には、hook rewrite が使う session key ごとの Execution Pod
-名 / Pod IP / auth token / environment PVC 名 が入ります。
+名 / Pod IP / auth token / environment PVC 名 が入ります。incoming SSH auth は
+`~/.config/control-plane/ssh-auth/authorized_keys` へ切り出して同じ PVC に残し、
+`~/.ssh/authorized_keys` は互換 symlink にとどめることで、delegated exec pod が
+共有する client-side SSH state から切り離します。
 
 監査ログの保持件数は `control-plane-env` ConfigMap の
 `CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）で調整し、
