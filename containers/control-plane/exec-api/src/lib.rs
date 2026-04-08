@@ -14,7 +14,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::process::Command as TokioCommand;
 use tokio_stream::wrappers::TcpListenerStream;
-use tonic::metadata::MetadataValue;
+use tonic::metadata::{Ascii, MetadataValue};
 use tonic::transport::{Channel, Endpoint, Server};
 use tonic::{Code, Request, Response, Status};
 use tonic_health::ServingStatus;
@@ -48,6 +48,31 @@ pub struct ServerConfig {
     pub run_as_gid: u32,
 }
 
+#[derive(Debug)]
+struct RawServerConfig<'a> {
+    port: &'a str,
+    workspace: &'a Path,
+    chroot_root: Option<&'a Path>,
+    environment_mount: Option<&'a Path>,
+    git_hooks_source: Option<&'a Path>,
+    remote_home: &'a Path,
+    git_user_name: Option<String>,
+    git_user_email: Option<String>,
+    exec_api_token: String,
+    timeout_sec: &'a str,
+    run_as_uid: &'a str,
+    run_as_gid: &'a str,
+}
+
+#[derive(Debug)]
+struct ResolvedEnvironmentPaths {
+    workspace_root: PathBuf,
+    logical_workspace_root: PathBuf,
+    chroot_root: Option<PathBuf>,
+    environment_mount_path: Option<PathBuf>,
+    git_hooks_source: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecResult {
     pub stdout: String,
@@ -62,7 +87,7 @@ struct ExecApiService {
     logical_workspace_root: PathBuf,
     chroot_root: Option<PathBuf>,
     remote_home: PathBuf,
-    exec_api_token: String,
+    expected_exec_api_token: MetadataValue<Ascii>,
     exec_timeout: Duration,
     run_as_uid: u32,
     run_as_gid: u32,
@@ -74,6 +99,17 @@ struct ResolvedCwd {
     logical: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TokenValidationError {
+    MissingOrInvalid,
+}
+
+impl From<TokenValidationError> for Status {
+    fn from(_: TokenValidationError) -> Self {
+        Status::permission_denied("missing or invalid exec API token")
+    }
+}
+
 impl ExecApiService {
     fn new(config: &ServerConfig) -> Self {
         Self {
@@ -81,7 +117,8 @@ impl ExecApiService {
             logical_workspace_root: config.logical_workspace_root.clone(),
             chroot_root: config.chroot_root.clone(),
             remote_home: config.remote_home.clone(),
-            exec_api_token: config.exec_api_token.clone(),
+            expected_exec_api_token: parse_exec_api_token(&config.exec_api_token)
+                .expect("CONTROL_PLANE_EXEC_API_TOKEN should be validated before serving"),
             exec_timeout: config.exec_timeout,
             run_as_uid: config.run_as_uid,
             run_as_gid: config.run_as_gid,
@@ -95,7 +132,7 @@ impl proto::exec_service_server::ExecService for ExecApiService {
         &self,
         request: Request<proto::ExecuteRequest>,
     ) -> Result<Response<proto::ExecuteResponse>, Status> {
-        validate_token(request.metadata(), &self.exec_api_token)?;
+        validate_token(request.metadata(), &self.expected_exec_api_token).map_err(Status::from)?;
 
         let request = request.into_inner();
         if request.command.is_empty() {
@@ -131,26 +168,15 @@ impl proto::exec_service_server::ExecService for ExecApiService {
 
 fn validate_token(
     metadata: &tonic::metadata::MetadataMap,
-    exec_api_token: &str,
-) -> Result<(), Status> {
-    if exec_api_token.is_empty() {
-        return Ok(());
-    }
-
+    expected_exec_api_token: &MetadataValue<Ascii>,
+) -> Result<(), TokenValidationError> {
     let Some(token) = metadata.get(EXEC_API_TOKEN_METADATA_KEY) else {
-        return Err(Status::permission_denied(
-            "missing or invalid exec API token",
-        ));
+        return Err(TokenValidationError::MissingOrInvalid);
     };
-    let expected = MetadataValue::try_from(exec_api_token).map_err(|_| {
-        Status::internal("execution API token could not be encoded as gRPC metadata")
-    })?;
-    if token == expected {
+    if token == expected_exec_api_token {
         Ok(())
     } else {
-        Err(Status::permission_denied(
-            "missing or invalid exec API token",
-        ))
+        Err(TokenValidationError::MissingOrInvalid)
     }
 }
 
@@ -180,69 +206,51 @@ pub fn load_server_config_from_env() -> Result<ServerConfig, String> {
     let run_as_gid = env::var("CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID")
         .unwrap_or_else(|_| String::from("1000"));
 
-    build_server_config(
-        &raw_port,
-        Path::new(&raw_workspace),
-        raw_chroot_root.as_deref().map(Path::new),
-        raw_environment_mount.as_deref().map(Path::new),
-        raw_git_hooks_source.as_deref().map(Path::new),
-        Path::new(&raw_remote_home),
+    build_server_config(RawServerConfig {
+        port: &raw_port,
+        workspace: Path::new(&raw_workspace),
+        chroot_root: raw_chroot_root.as_deref().map(Path::new),
+        environment_mount: raw_environment_mount.as_deref().map(Path::new),
+        git_hooks_source: raw_git_hooks_source.as_deref().map(Path::new),
+        remote_home: Path::new(&raw_remote_home),
         git_user_name,
         git_user_email,
         exec_api_token,
-        &timeout_sec,
-        &run_as_uid,
-        &run_as_gid,
-    )
+        timeout_sec: &timeout_sec,
+        run_as_uid: &run_as_uid,
+        run_as_gid: &run_as_gid,
+    })
 }
 
-fn build_server_config(
-    raw_port: &str,
-    raw_workspace: &Path,
-    raw_chroot_root: Option<&Path>,
-    raw_environment_mount: Option<&Path>,
-    raw_git_hooks_source: Option<&Path>,
-    raw_remote_home: &Path,
-    git_user_name: Option<String>,
-    git_user_email: Option<String>,
-    exec_api_token: String,
-    timeout_sec: &str,
-    run_as_uid: &str,
-    run_as_gid: &str,
-) -> Result<ServerConfig, String> {
-    let port = parse_port(raw_port)?;
+fn build_server_config(raw: RawServerConfig<'_>) -> Result<ServerConfig, String> {
+    let port = parse_port(raw.port)?;
     let remote_home =
-        normalize_absolute_path(raw_remote_home, "CONTROL_PLANE_FAST_EXECUTION_HOME")?;
-    let (
-        workspace_root,
-        logical_workspace_root,
-        chroot_root,
-        environment_mount_path,
-        git_hooks_source,
-    ) = resolve_environment_paths(
-        raw_workspace,
-        raw_chroot_root,
-        raw_environment_mount,
-        raw_git_hooks_source,
+        normalize_absolute_path(raw.remote_home, "CONTROL_PLANE_FAST_EXECUTION_HOME")?;
+    let paths = resolve_environment_paths(
+        raw.workspace,
+        raw.chroot_root,
+        raw.environment_mount,
+        raw.git_hooks_source,
     )?;
     let exec_timeout = Duration::from_secs(parse_positive_u64(
-        timeout_sec,
+        raw.timeout_sec,
         "CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC",
     )?);
-    let run_as_uid = parse_non_root_u32(run_as_uid, "CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID")?;
-    let run_as_gid = parse_non_root_u32(run_as_gid, "CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID")?;
-    let exec_api_token = require_non_empty(exec_api_token, "CONTROL_PLANE_EXEC_API_TOKEN")?;
+    let run_as_uid = parse_non_root_u32(raw.run_as_uid, "CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID")?;
+    let run_as_gid = parse_non_root_u32(raw.run_as_gid, "CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID")?;
+    let exec_api_token = require_non_empty(raw.exec_api_token, "CONTROL_PLANE_EXEC_API_TOKEN")?;
+    parse_exec_api_token(&exec_api_token)?;
 
     Ok(ServerConfig {
         port,
-        workspace_root,
-        logical_workspace_root,
-        chroot_root,
-        environment_mount_path,
-        git_hooks_source,
+        workspace_root: paths.workspace_root,
+        logical_workspace_root: paths.logical_workspace_root,
+        chroot_root: paths.chroot_root,
+        environment_mount_path: paths.environment_mount_path,
+        git_hooks_source: paths.git_hooks_source,
         remote_home,
-        git_user_name,
-        git_user_email,
+        git_user_name: raw.git_user_name,
+        git_user_email: raw.git_user_email,
         exec_api_token,
         exec_timeout,
         run_as_uid,
@@ -255,16 +263,7 @@ fn resolve_environment_paths(
     raw_chroot_root: Option<&Path>,
     raw_environment_mount: Option<&Path>,
     raw_git_hooks_source: Option<&Path>,
-) -> Result<
-    (
-        PathBuf,
-        PathBuf,
-        Option<PathBuf>,
-        Option<PathBuf>,
-        Option<PathBuf>,
-    ),
-    String,
-> {
+) -> Result<ResolvedEnvironmentPaths, String> {
     if let Some(raw_chroot_root) = raw_chroot_root {
         let logical_workspace_root =
             normalize_absolute_path(raw_workspace, "CONTROL_PLANE_WORKSPACE")?;
@@ -280,16 +279,22 @@ fn resolve_environment_paths(
             })
             .transpose()?;
         let workspace_root = host_path_for_logical(&chroot_root, &logical_workspace_root)?;
-        Ok((
+        Ok(ResolvedEnvironmentPaths {
             workspace_root,
             logical_workspace_root,
-            Some(chroot_root),
-            Some(environment_mount_path),
+            chroot_root: Some(chroot_root),
+            environment_mount_path: Some(environment_mount_path),
             git_hooks_source,
-        ))
+        })
     } else {
         let workspace_root = canonicalize_absolute_path(raw_workspace, "CONTROL_PLANE_WORKSPACE")?;
-        Ok((workspace_root.clone(), workspace_root, None, None, None))
+        Ok(ResolvedEnvironmentPaths {
+            workspace_root: workspace_root.clone(),
+            logical_workspace_root: workspace_root,
+            chroot_root: None,
+            environment_mount_path: None,
+            git_hooks_source: None,
+        })
     }
 }
 
@@ -338,6 +343,11 @@ fn require_non_empty(value: String, variable_name: &str) -> Result<String, Strin
     } else {
         Ok(value)
     }
+}
+
+fn parse_exec_api_token(raw_token: &str) -> Result<MetadataValue<Ascii>, String> {
+    MetadataValue::try_from(raw_token)
+        .map_err(|_| String::from("CONTROL_PLANE_EXEC_API_TOKEN must be valid gRPC metadata"))
 }
 
 pub async fn serve_with_listener<F>(
@@ -995,7 +1005,8 @@ async fn run_shell_command(
         chroot_root,
         &cwd.host,
         &cwd.logical,
-    )?;
+    )
+    .map_err(|error| Status::new(Code::Internal, error.to_string()))?;
     let output = tokio::time::timeout(exec_timeout, process.output())
         .await
         .map_err(|_| {
@@ -1021,7 +1032,7 @@ fn configure_command_identity(
     chroot_root: Option<&Path>,
     host_cwd: &Path,
     logical_cwd: &Path,
-) -> Result<(), Status> {
+) -> io::Result<()> {
     if let Some(chroot_root) = chroot_root {
         configure_chroot_command(
             process.as_std_mut(),
@@ -1029,8 +1040,7 @@ fn configure_command_identity(
             logical_cwd,
             Some(run_as_uid),
             Some(run_as_gid),
-        )
-        .map_err(|error| Status::new(Code::Internal, error.to_string()))?;
+        )?;
     } else {
         process.current_dir(host_cwd);
         process.uid(run_as_uid);
@@ -1073,7 +1083,7 @@ fn configure_command_identity(
     _chroot_root: Option<&Path>,
     _host_cwd: &Path,
     _logical_cwd: &Path,
-) -> Result<(), Status> {
+) -> io::Result<()> {
     Ok(())
 }
 
@@ -1095,6 +1105,7 @@ fn exit_code_from_status(status: std::process::ExitStatus) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{build_server_config, normalize_path, render_remote_git_config, resolve_cwd};
+    use crate::RawServerConfig;
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
 
@@ -1120,20 +1131,20 @@ mod tests {
     #[test]
     fn rejects_empty_exec_api_token() {
         let workspace = TempDir::new().unwrap();
-        let error = build_server_config(
-            "8080",
-            workspace.path(),
-            None,
-            None,
-            None,
-            Path::new("/root"),
-            None,
-            None,
-            String::new(),
-            "3600",
-            "1000",
-            "1000",
-        )
+        let error = build_server_config(RawServerConfig {
+            port: "8080",
+            workspace: workspace.path(),
+            chroot_root: None,
+            environment_mount: None,
+            git_hooks_source: None,
+            remote_home: Path::new("/root"),
+            git_user_name: None,
+            git_user_email: None,
+            exec_api_token: String::new(),
+            timeout_sec: "3600",
+            run_as_uid: "1000",
+            run_as_gid: "1000",
+        })
         .unwrap_err();
         assert_eq!(error, "CONTROL_PLANE_EXEC_API_TOKEN must not be empty");
     }
@@ -1170,20 +1181,20 @@ mod tests {
     #[test]
     fn chroot_config_derives_host_workspace_under_chroot_root() {
         let workspace = TempDir::new().unwrap();
-        let config = build_server_config(
-            "8080",
-            Path::new("/workspace"),
-            Some(&workspace.path().join("cache/root")),
-            Some(Path::new("/environment")),
-            Some(Path::new("/environment/cache/hooks/git")),
-            Path::new("/root"),
-            Some(String::from("Copilot")),
-            Some(String::from("copilot@example.com")),
-            String::from("token"),
-            "3600",
-            "1000",
-            "1000",
-        )
+        let config = build_server_config(RawServerConfig {
+            port: "8080",
+            workspace: Path::new("/workspace"),
+            chroot_root: Some(&workspace.path().join("cache/root")),
+            environment_mount: Some(Path::new("/environment")),
+            git_hooks_source: Some(Path::new("/environment/cache/hooks/git")),
+            remote_home: Path::new("/root"),
+            git_user_name: Some(String::from("Copilot")),
+            git_user_email: Some(String::from("copilot@example.com")),
+            exec_api_token: String::from("token"),
+            timeout_sec: "3600",
+            run_as_uid: "1000",
+            run_as_gid: "1000",
+        })
         .unwrap();
         assert_eq!(config.logical_workspace_root, PathBuf::from("/workspace"));
         assert_eq!(
