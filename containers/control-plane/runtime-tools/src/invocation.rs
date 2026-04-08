@@ -9,6 +9,7 @@ use crate::exec_forward;
 use crate::install_skills;
 use crate::k8s_job;
 use crate::post_tool_use;
+use crate::session_exec_command;
 
 const RUNTIME_TOOL: &str = "control-plane-runtime-tool";
 
@@ -56,6 +57,7 @@ fn dispatch(invocation: &str, args: &mut Vec<String>) -> ToolResult<i32> {
         "audit" => audit::run(args),
         "exec-forward" => exec_forward::run(args),
         "cleanup" => cleanup::run(args),
+        "control-plane-session-exec" => session_exec_command::run(args),
         "k8s-job-wait" => k8s_job::run_wait(args),
         "k8s-job-pod" => k8s_job::run_pod(args),
         "k8s-job-logs" => k8s_job::run_logs(args),

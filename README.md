@@ -129,8 +129,10 @@ runtime / state / config 注入の具体的な path は
 sample manifest の既定値では `CONTROL_PLANE_FAST_EXECUTION_ENABLED=1` により、
 bundled `preToolUse` hook が Copilot CLI の `bash` tool を
 session-scoped Execution Pod へ書き換えます。Execution Pod は同じ
-`/workspace` PVC を mount し、`sessionEnd` hook と OwnerReference の両方で
-cleanup されます。これは explicit に呼ぶ `control-plane-run` とは別経路です。
+`/workspace` PVC を mount しつつ、同じ node 上の `/environment` RWO PVC に
+保持した chroot runtime を再利用します。session pod 自体は `sessionEnd` hook と
+OwnerReference の両方で cleanup されます。これは explicit に呼ぶ
+`control-plane-run` とは別経路です。
 
 すでに Control Plane Pod の中から作業している場合は、追加の spot check として次も使えます。
 

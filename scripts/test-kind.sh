@@ -16,6 +16,8 @@ workdir="$(mktemp -d)"
 ssh_key="${workdir}/id_ed25519"
 kubeconfig_path="${workdir}/kubeconfig"
 rust_hook_image="${CONTROL_PLANE_TEST_RUST_HOOK_IMAGE:-docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895}"
+fast_execution_image="${CONTROL_PLANE_TEST_FAST_EXECUTION_IMAGE:-docker.io/library/ubuntu:24.04}"
+fast_execution_image_pull_policy="${CONTROL_PLANE_TEST_FAST_EXECUTION_IMAGE_PULL_POLICY:-IfNotPresent}"
 port_forward_pid=""
 created_cluster=0
 kind_uses_sudo=0
@@ -206,6 +208,7 @@ control_plane_pod_name() {
 
 dump_control_plane_diagnostics() {
   local pod_name=""
+  local exec_pod=""
 
   kubectl get deployment,replicaset,pods,svc --namespace "${namespace}" -l "${control_plane_selector}" -o wide >&2 || true
   kubectl describe deployment/control-plane --namespace "${namespace}" >&2 || true
@@ -216,6 +219,18 @@ dump_control_plane_diagnostics() {
     kubectl logs --namespace "${namespace}" pod/"${pod_name}" -c init-state >&2 || true
     kubectl logs --namespace "${namespace}" pod/"${pod_name}" -c control-plane >&2 || true
   fi
+  while read -r exec_pod; do
+    [[ -n "${exec_pod}" ]] || continue
+    kubectl describe "${exec_pod}" --namespace "${namespace}" >&2 || true
+    kubectl logs --namespace "${namespace}" "${exec_pod}" -c bootstrap-assets >&2 || true
+    kubectl logs --namespace "${namespace}" "${exec_pod}" -c execution >&2 || true
+    kubectl logs --namespace "${namespace}" "${exec_pod}" -c execution --previous >&2 || true
+  done < <(
+    kubectl get pods \
+      --namespace "${namespace}" \
+      -l app.kubernetes.io/name=control-plane-fast-exec \
+      -o name 2>/dev/null || true
+  )
   kubectl get events --namespace "${namespace}" --sort-by=.lastTimestamp >&2 || true
 }
 
@@ -245,7 +260,9 @@ load_kind_images() {
 
 apply_resources() {
   local public_key
+  local environment_pvc_name
   public_key="$(cat "${ssh_key}.pub")"
+  environment_pvc_name="node-workspace-${cluster_name}-control-plane"
   cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: Namespace
@@ -278,6 +295,9 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["create", "get", "list", "watch"]
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
@@ -365,7 +385,7 @@ spec:
   persistentVolumeReclaimPolicy: Delete
   storageClassName: control-plane-copilot-session-manual
   hostPath:
-    path: /tmp/control-plane-copilot-session
+    path: /var/lib/control-plane-copilot-session
     type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -380,7 +400,9 @@ spec:
   persistentVolumeReclaimPolicy: Delete
   storageClassName: control-plane-control-workspace-manual
   hostPath:
-    path: /tmp/control-plane-workspace
+    # Kind nodes can mount /tmp with noexec, which breaks running cached shells,
+    # package managers, and workspace scripts from hostPath-backed volumes.
+    path: /var/lib/control-plane-workspace
     type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -425,7 +447,25 @@ spec:
   # Intentionally use the same hostPath as the control-plane workspace PV so
   # the Kind test can simulate a shared RW filesystem across namespaces.
   hostPath:
-    path: /tmp/control-plane-workspace
+    path: /var/lib/control-plane-workspace
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: control-plane-fast-exec-environment-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: control-plane-fast-exec-environment-manual
+  claimRef:
+    name: ${environment_pvc_name}
+    namespace: ${namespace}
+  hostPath:
+    path: /var/lib/control-plane-fast-exec-environment
     type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -499,14 +539,17 @@ data:
   CONTROL_PLANE_WORKSPACE_PVC: control-plane-workspace-pvc
   CONTROL_PLANE_WORKSPACE_SUBPATH: workspace
   CONTROL_PLANE_FAST_EXECUTION_ENABLED: "1"
-  CONTROL_PLANE_FAST_EXECUTION_IMAGE: ${control_plane_image}
-  CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: Never
+  CONTROL_PLANE_FAST_EXECUTION_IMAGE: ${fast_execution_image}
+  CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: ${fast_execution_image_pull_policy}
   CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ${control_plane_image}
   CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: Never
-  CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 120s
+  CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 300s
   CONTROL_PLANE_FAST_EXECUTION_PORT: "8080"
   CONTROL_PLANE_FAST_EXECUTION_HOME: /root
-  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_ROOT: /var/run/control-plane-bootstrap
+  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX: node-workspace
+  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS: control-plane-fast-exec-environment-manual
+  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE: 10Gi
+  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH: /environment
   CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST: 250m
   CONTROL_PLANE_FAST_EXECUTION_CPU_LIMIT: "1"
   CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST: 256Mi
@@ -840,7 +883,7 @@ test "\${LANG}" = "C.UTF-8"
 test "\${LC_CTYPE}" = "C.UTF-8"
 test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
 test "\${CONTROL_PLANE_FAST_EXECUTION_ENABLED}" = "1"
-test "\${CONTROL_PLANE_FAST_EXECUTION_IMAGE}" = "${control_plane_image}"
+test "\${CONTROL_PLANE_FAST_EXECUTION_IMAGE}" = "${fast_execution_image}"
 test "\${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE}" = "${control_plane_image}"
 test "\${CONTROL_PLANE_COPILOT_SESSION_PVC}" = "control-plane-copilot-session-pvc"
 test "\${CONTROL_PLANE_RUST_HOOK_IMAGE}" = "${rust_hook_image}"
@@ -921,6 +964,17 @@ if [[ "\${pods_status}" -ne 0 ]] || [[ "\${pods_access}" != "yes" ]]; then
   kubectl config current-context >&2 || true
   exit 1
 fi
+set +e
+pvcs_access="\$(kubectl auth can-i create persistentvolumeclaims --namespace ${namespace} 2>&1)"
+pvcs_status=\$?
+set -e
+if [[ "\${pvcs_status}" -ne 0 ]] || [[ "\${pvcs_access}" != "yes" ]]; then
+  printf 'Expected control-plane service account to create persistentvolumeclaims in namespace %s\n' "${namespace}" >&2
+  printf 'kubectl auth can-i exit status: %s\n' "\${pvcs_status}" >&2
+  printf '%s\n' "\${pvcs_access}" >&2
+  kubectl config current-context >&2 || true
+  exit 1
+fi
 EOF
   printf '%s\n' 'kind-test: rbac assertions ok' >&2
 
@@ -944,19 +998,30 @@ jq -e --arg key "${session_key}" '.sessions[$key].podName != null and .sessions[
   ~/.copilot/session-state/session-exec.json >/dev/null
 pod_name="$(jq -r --arg key "${session_key}" '.sessions[$key].podName' ~/.copilot/session-state/session-exec.json)"
 pod_ip="$(jq -r --arg key "${session_key}" '.sessions[$key].podIp' ~/.copilot/session-state/session-exec.json)"
+environment_pvc="$(jq -r --arg key "${session_key}" '.sessions[$key].environmentPvcName' ~/.copilot/session-state/session-exec.json)"
 test -n "${pod_name}"
 test -n "${pod_ip}"
+test -n "${environment_pvc}"
 kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${pod_name}" -o json > /workspace/k8s-fast-exec-pod.json
 test "$(jq -r '.metadata.ownerReferences[0].kind' /workspace/k8s-fast-exec-pod.json)" = "Pod"
 test "$(jq -r '.metadata.ownerReferences[0].name' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_POD_NAME}"
 test "$(jq -r '.metadata.ownerReferences[0].uid' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_POD_UID}"
-test "$(jq -r '.spec.nodeName' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_NODE_NAME}"
+test "$(jq -r '.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchFields[] | select(.key == "metadata.name").values[0]' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_NODE_NAME}"
 test "$(jq -r '.spec.containers[0].image' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_FAST_EXECUTION_IMAGE}"
 test "$(jq -r '.spec.initContainers[0].image' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE}"
 test "$(jq -r '.spec.volumes[] | select(.name == "workspace").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "control-plane-workspace-pvc"
 test "$(jq -r '.spec.volumes[] | select(.name == "copilot-session").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "control-plane-copilot-session-pvc"
-test "$(jq -r '.spec.volumes[] | select(.name == "bootstrap").emptyDir | type' /workspace/k8s-fast-exec-pod.json)" = "object"
-test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "bootstrap").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/var/run/control-plane-bootstrap"
+test "$(jq -r '.spec.volumes[] | select(.name == "environment").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "${environment_pvc}"
+test "$(jq -r '.spec.volumes[] | select(.name == "runtime-bin").emptyDir | type' /workspace/k8s-fast-exec-pod.json)" = "object"
+test "$(jq -r '.spec.containers[0].command[0]' /workspace/k8s-fast-exec-pod.json)" = "/control-plane/bin/control-plane-exec-api"
+test "$(jq -r '.spec.containers[0].startupProbe.grpc.port' /workspace/k8s-fast-exec-pod.json)" = "8080"
+test "$(jq -r '.spec.containers[0].startupProbe.periodSeconds' /workspace/k8s-fast-exec-pod.json)" = "5"
+test "$(jq -r '.spec.containers[0].startupProbe.failureThreshold' /workspace/k8s-fast-exec-pod.json)" = "62"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "environment").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/environment"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "runtime-bin").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/control-plane/bin"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "workspace").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/environment/root/workspace"
+test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/root"
+test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/hooks/git"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOME").value' /workspace/k8s-fast-exec-pod.json)" = "/root"
 command_text=$'printf "fast-exec-stdout\\n"; printf "fast-exec-stderr\\n" >&2; printf "delegated\\n" > /workspace/fast-exec-marker.txt; exit 7'
 command_base64="$(printf '%s' "${command_text}" | base64 | tr -d '\n')"
@@ -1224,6 +1289,7 @@ cleanup() {
   kubectl delete pv control-plane-copilot-session-pv --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete pv control-plane-workspace-control-pv --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete pv control-plane-workspace-job-pv --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete pv control-plane-fast-exec-environment-pv --ignore-not-found >/dev/null 2>&1 || true
   if [[ "${created_cluster}" -eq 1 ]]; then
     kind_cmd delete cluster --name "${cluster_name}" >/dev/null 2>&1 || true
   fi

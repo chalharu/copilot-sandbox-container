@@ -1,4 +1,5 @@
 use control_plane_exec_api::{ServerConfig, check_health, execute_remote, serve_with_listener};
+use std::fs;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
@@ -13,9 +14,18 @@ async fn start_server(temp_dir: &TempDir, token: &str) -> (String, oneshot::Send
         listener.local_addr().expect("listener address")
     );
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let remote_home = temp_dir.path().join("home");
+    fs::create_dir_all(&remote_home).expect("home directory");
     let config = ServerConfig {
         port: listener.local_addr().expect("listener address").port(),
         workspace_root: temp_dir.path().to_path_buf(),
+        logical_workspace_root: temp_dir.path().to_path_buf(),
+        chroot_root: None,
+        environment_mount_path: None,
+        git_hooks_source: None,
+        remote_home,
+        git_user_name: None,
+        git_user_email: None,
         exec_api_token: token.to_owned(),
         exec_timeout: Duration::from_secs(5),
         run_as_uid: unsafe { libc::geteuid() },
