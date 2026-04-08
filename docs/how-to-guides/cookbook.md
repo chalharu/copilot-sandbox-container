@@ -92,8 +92,8 @@ ConfigMap / Secret / write-back の具体的な path は
    `CONTROL_PLANE_POD_UID` / `CONTROL_PLANE_NODE_NAME` は Deployment の
    downward API `env:` で注入し、Execution Pod の OwnerReference / node pin
    に使う
-8. control-plane ServiceAccount には同じ namespace の Pod を
-   `create/delete/get/list/watch` できる Role / RoleBinding
+8. control-plane ServiceAccount には同じ namespace の Pod と ExecPod 用 PVC を
+   `create/get/list/watch` でき、Pod は `delete` できる Role / RoleBinding
    (`control-plane-exec-pods`) を付ける。ただし shared namespace ではなく、
    control-plane 専用 namespace に閉じ込める
 9. `CONTROL_PLANE_FAST_EXECUTION_IMAGE` には delegated bash を実行したい
@@ -101,6 +101,9 @@ ConfigMap / Secret / write-back の具体的な path は
    本番では digest-pinned ref を使う。
    `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` には Rust 製 exec-plane
    binary と bundled Git hook を持つ control-plane image を置く。
+   node-scoped cache は `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX` /
+   `..._STORAGE_CLASS` / `..._SIZE` / `..._MOUNT_PATH` で調整し、既定では
+   `/environment/root` を chroot 先として使う。
    delegated command を非 root で走らせたい場合は
    `CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID` /
    `CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID` も合わせて定義する

@@ -506,7 +506,10 @@ data:
   CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 120s
   CONTROL_PLANE_FAST_EXECUTION_PORT: "8080"
   CONTROL_PLANE_FAST_EXECUTION_HOME: /root
-  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_ROOT: /var/run/control-plane-bootstrap
+  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX: node-workspace
+  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS: standard
+  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE: 10Gi
+  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH: /environment
   CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST: 250m
   CONTROL_PLANE_FAST_EXECUTION_CPU_LIMIT: "1"
   CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST: 256Mi
@@ -921,6 +924,17 @@ if [[ "\${pods_status}" -ne 0 ]] || [[ "\${pods_access}" != "yes" ]]; then
   kubectl config current-context >&2 || true
   exit 1
 fi
+set +e
+pvcs_access="\$(kubectl auth can-i create persistentvolumeclaims --namespace ${namespace} 2>&1)"
+pvcs_status=\$?
+set -e
+if [[ "\${pvcs_status}" -ne 0 ]] || [[ "\${pvcs_access}" != "yes" ]]; then
+  printf 'Expected control-plane service account to create persistentvolumeclaims in namespace %s\n' "${namespace}" >&2
+  printf 'kubectl auth can-i exit status: %s\n' "\${pvcs_status}" >&2
+  printf '%s\n' "\${pvcs_access}" >&2
+  kubectl config current-context >&2 || true
+  exit 1
+fi
 EOF
   printf '%s\n' 'kind-test: rbac assertions ok' >&2
 
@@ -944,8 +958,10 @@ jq -e --arg key "${session_key}" '.sessions[$key].podName != null and .sessions[
   ~/.copilot/session-state/session-exec.json >/dev/null
 pod_name="$(jq -r --arg key "${session_key}" '.sessions[$key].podName' ~/.copilot/session-state/session-exec.json)"
 pod_ip="$(jq -r --arg key "${session_key}" '.sessions[$key].podIp' ~/.copilot/session-state/session-exec.json)"
+environment_pvc="$(jq -r --arg key "${session_key}" '.sessions[$key].environmentPvcName' ~/.copilot/session-state/session-exec.json)"
 test -n "${pod_name}"
 test -n "${pod_ip}"
+test -n "${environment_pvc}"
 kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${pod_name}" -o json > /workspace/k8s-fast-exec-pod.json
 test "$(jq -r '.metadata.ownerReferences[0].kind' /workspace/k8s-fast-exec-pod.json)" = "Pod"
 test "$(jq -r '.metadata.ownerReferences[0].name' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_POD_NAME}"
@@ -955,8 +971,12 @@ test "$(jq -r '.spec.containers[0].image' /workspace/k8s-fast-exec-pod.json)" = 
 test "$(jq -r '.spec.initContainers[0].image' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE}"
 test "$(jq -r '.spec.volumes[] | select(.name == "workspace").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "control-plane-workspace-pvc"
 test "$(jq -r '.spec.volumes[] | select(.name == "copilot-session").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "control-plane-copilot-session-pvc"
-test "$(jq -r '.spec.volumes[] | select(.name == "bootstrap").emptyDir | type' /workspace/k8s-fast-exec-pod.json)" = "object"
-test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "bootstrap").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/var/run/control-plane-bootstrap"
+test "$(jq -r '.spec.volumes[] | select(.name == "environment").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "${environment_pvc}"
+test "$(jq -r '.spec.containers[0].command[0]' /workspace/k8s-fast-exec-pod.json)" = "/environment/control-plane-exec-api"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "environment").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/environment"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "workspace").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/environment/root/workspace"
+test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/root"
+test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/hooks/git"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOME").value' /workspace/k8s-fast-exec-pod.json)" = "/root"
 command_text=$'printf "fast-exec-stdout\\n"; printf "fast-exec-stderr\\n" >&2; printf "delegated\\n" > /workspace/fast-exec-marker.txt; exit 7'
 command_base64="$(printf '%s' "${command_text}" | base64 | tr -d '\n')"

@@ -33,6 +33,10 @@ FROM ${RUST_BASE_IMAGE} AS runtime-tools-builder
 
 WORKDIR /build/control-plane-runtime-tools
 COPY runtime-tools/Cargo.toml runtime-tools/Cargo.lock ./
+COPY exec-api/Cargo.toml /build/exec-api/Cargo.toml
+COPY exec-api/build.rs /build/exec-api/build.rs
+COPY exec-api/proto /build/exec-api/proto
+COPY exec-api/src /build/exec-api/src
 COPY runtime-tools/src ./src
 COPY runtime-tools/tests ./tests
 COPY hooks/postToolUse/linters.json /build/hooks/postToolUse/linters.json

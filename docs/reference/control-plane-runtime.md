@@ -39,7 +39,7 @@ copilot session PVC へまとめるもの:
 - `/var/lib/control-plane/ssh-host-keys`
 
 `session-exec.json` には、hook rewrite が使う session key ごとの Execution Pod
-名 / Pod IP / auth token / owner metadata / node 名 / runtime image が入ります。
+名 / Pod IP / auth token / environment PVC 名 が入ります。
 
 監査ログの保持件数は `control-plane-env` ConfigMap の
 `CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）で調整し、
@@ -86,11 +86,15 @@ copilot session PVC へまとめるもの:
 
 sample manifest の fast execution pod では、runtime image とは別に
 `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` を指定し、initContainer が
-Rust 製 `control-plane-exec-api` と bundled Git hook を `emptyDir` へ展開します。
-本体 container はその staged binary を起動し、gRPC 経由の bootstrap で
-`bash` / `git` / `gh` を必要に応じて導入します。Pod 自体の OwnerReference /
-node pin には Deployment の downward API env (`CONTROL_PLANE_POD_*`,
-`CONTROL_PLANE_NODE_NAME`) を使います。
+Rust 製 `control-plane-exec-api` と bundled Git hook を node-scoped な
+RWO PVC (`CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX` で命名) の
+`/environment` へ初回 staging します。本体 container は
+`/environment/control-plane-exec-api` だけを起動し、`/environment/root` を
+chroot 先として初回だけ runtime image の rootfs を複製し、そこへ
+`bash` / `git` / `gh` / `openssh-client` を入れます。以後の session pod は
+同じノード上でその chroot を再利用するため、毎回の package install を避けられます。
+Pod 自体の OwnerReference / node pin には Deployment の downward API env
+(`CONTROL_PLANE_POD_*`, `CONTROL_PLANE_NODE_NAME`) を使います。
 
 ## 5. Hook と Git policy surface
 
@@ -124,7 +128,9 @@ bundled `preToolUse/exec-forward` は、`CONTROL_PLANE_FAST_EXECUTION_ENABLED=1`
 書き換えます。helper は same-namespace / same-node の Execution Pod を
 on-demand で作成または再利用し、`/workspace` PVC を共有したまま
 gRPC 経由で転送します。Execution Pod は任意の Linux image を起点にしつつ、
-bootstrap image から受け取った Rust binary と Git hook を使って初期化されます。
+node-scoped な `/environment` PVC を同じ node 上で共有し、`/environment/root`
+の chroot runtime と `/environment/control-plane-exec-api`、`/environment/hooks/git`
+を再利用します。
 Exec API は per-pod token が必須で、delegated command 自体は
 `CONTROL_PLANE_FAST_EXECUTION_RUN_AS_{UID,GID}` で指定した非 root UID/GID へ
 drop してから実行します。gRPC 経路は cluster 内 plaintext を前提にしているため、
