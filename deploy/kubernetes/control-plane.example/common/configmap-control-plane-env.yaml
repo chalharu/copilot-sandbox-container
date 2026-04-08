@@ -51,6 +51,10 @@ data:
   CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID: "1000"
   CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID: "1000"
   CONTROL_PLANE_FAST_EXECUTION_HOME: /root
+  # Optional: run extra setup inside the chroot on every exec-pod start before
+  # delegated commands execute. This can be an inline shell snippet or a script
+  # path that /bin/sh -lc can execute inside the chroot.
+  # CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: apt-get update && apt-get install -y ripgrep
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX: node-workspace
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS: standard
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE: 10Gi

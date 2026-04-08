@@ -104,6 +104,9 @@ ConfigMap / Secret / write-back の具体的な path は
    node-scoped cache は `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX` /
    `..._STORAGE_CLASS` / `..._SIZE` / `..._MOUNT_PATH` で調整し、既定では
    `/environment/root` を chroot 先として使う。
+   各 exec-pod 起動時に chroot 内で追加セットアップを走らせたい場合は
+   `CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT` に inline shell snippet か
+   script path を入れる。
    delegated command を非 root で走らせたい場合は
    `CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID` /
    `CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID` も合わせて定義する

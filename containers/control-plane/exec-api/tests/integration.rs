@@ -26,6 +26,7 @@ async fn start_server(temp_dir: &TempDir, token: &str) -> (String, oneshot::Send
         remote_home,
         git_user_name: None,
         git_user_email: None,
+        startup_script: None,
         exec_api_token: token.to_owned(),
         exec_timeout: Duration::from_secs(5),
         run_as_uid: unsafe { libc::geteuid() },
@@ -78,7 +79,10 @@ async fn exec_api_rejects_requests_without_the_session_token_and_runs_authorized
     )
     .await
     .expect("authorized request should succeed");
-    assert_eq!(allowed.stdout, "api stdout\n");
+    assert_eq!(
+        allowed.stdout,
+        "$ printf 'api stdout\\n'; printf 'api stderr\\n' >&2; printf ok > api-marker.txt\napi stdout\n"
+    );
     assert_eq!(allowed.stderr, "api stderr\n");
     assert_eq!(allowed.exit_code, 0);
     assert_eq!(

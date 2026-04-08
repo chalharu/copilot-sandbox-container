@@ -52,6 +52,7 @@ pub struct ServerConfig {
     pub remote_home: PathBuf,
     pub git_user_name: Option<String>,
     pub git_user_email: Option<String>,
+    pub startup_script: Option<String>,
     pub exec_api_token: String,
     pub exec_timeout: Duration,
     pub run_as_uid: u32,
@@ -68,6 +69,7 @@ struct RawServerConfig<'a> {
     remote_home: &'a Path,
     git_user_name: Option<String>,
     git_user_email: Option<String>,
+    startup_script: Option<&'a str>,
     exec_api_token: String,
     timeout_sec: &'a str,
     run_as_uid: &'a str,
@@ -214,6 +216,7 @@ pub fn load_server_config_from_env() -> Result<ServerConfig, String> {
     let git_user_email = env::var("CONTROL_PLANE_GIT_USER_EMAIL")
         .ok()
         .filter(|value| !value.trim().is_empty());
+    let raw_startup_script = env::var("CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT").ok();
     let exec_api_token = env::var("CONTROL_PLANE_EXEC_API_TOKEN")
         .map_err(|_| String::from("CONTROL_PLANE_EXEC_API_TOKEN is required"))?;
     let timeout_sec = env::var("CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC")
@@ -232,6 +235,7 @@ pub fn load_server_config_from_env() -> Result<ServerConfig, String> {
         remote_home: Path::new(&raw_remote_home),
         git_user_name,
         git_user_email,
+        startup_script: raw_startup_script.as_deref(),
         exec_api_token,
         timeout_sec: &timeout_sec,
         run_as_uid: &run_as_uid,
@@ -255,6 +259,11 @@ fn build_server_config(raw: RawServerConfig<'_>) -> Result<ServerConfig, String>
     )?);
     let run_as_uid = parse_non_root_u32(raw.run_as_uid, "CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID")?;
     let run_as_gid = parse_non_root_u32(raw.run_as_gid, "CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID")?;
+    let startup_script = raw
+        .startup_script
+        .filter(|value| !value.is_empty())
+        .filter(|value| !value.trim().is_empty())
+        .map(String::from);
     let exec_api_token = require_non_empty(raw.exec_api_token, "CONTROL_PLANE_EXEC_API_TOKEN")?;
     parse_exec_api_token(&exec_api_token)?;
 
@@ -268,6 +277,7 @@ fn build_server_config(raw: RawServerConfig<'_>) -> Result<ServerConfig, String>
         remote_home,
         git_user_name: raw.git_user_name,
         git_user_email: raw.git_user_email,
+        startup_script,
         exec_api_token,
         exec_timeout,
         run_as_uid,
@@ -499,6 +509,14 @@ fn prepare_server_environment(config: &ServerConfig) -> Result<(), DynError> {
             chroot_root.display()
         )
     })?;
+    if let Some(startup_script) = config.startup_script.as_deref() {
+        run_startup_script(chroot_root, startup_script).map_err(|error| {
+            format!(
+                "failed to run startup script in {}: {error}",
+                chroot_root.display()
+            )
+        })?;
+    }
     Ok(())
 }
 
@@ -812,6 +830,21 @@ fn install_required_packages(chroot_root: &Path) -> Result<(), DynError> {
     }
 
     Err(io::Error::other("unsupported execution image package manager: need apk or apt-get").into())
+}
+
+fn run_startup_script(chroot_root: &Path, startup_script: &str) -> Result<(), DynError> {
+    if startup_script.trim().is_empty() {
+        return Ok(());
+    }
+
+    let shell = resolve_shell(Some(chroot_root))
+        .ok_or_else(|| io::Error::other("no supported shell found for startup script"))?;
+    run_in_chroot(
+        chroot_root,
+        &shell,
+        &[OsString::from("-lc"), OsString::from(startup_script)],
+        &[],
+    )
 }
 
 fn required_commands_present(chroot_root: &Path) -> bool {
@@ -1251,6 +1284,16 @@ fn managed_shell_environment(remote_home: &Path, chrooted: bool) -> Vec<(&'stati
     env
 }
 
+fn stdout_with_command_line(command: &str, stdout: &[u8]) -> String {
+    let mut rendered = String::from("$ ");
+    rendered.push_str(command);
+    if !command.ends_with('\n') {
+        rendered.push('\n');
+    }
+    rendered.push_str(&String::from_utf8_lossy(stdout));
+    rendered
+}
+
 async fn run_shell_command(
     command: &str,
     cwd: &ResolvedCwd,
@@ -1294,7 +1337,7 @@ async fn run_shell_command(
         .map_err(|error| Status::new(Code::Internal, error.to_string()))?;
 
     Ok(ExecResult {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stdout: stdout_with_command_line(command, &output.stdout),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         exit_code: exit_code_from_status(output.status),
     })
@@ -1384,7 +1427,7 @@ mod tests {
         CHROOT_EXEC_POLICY_LIBRARY_PATH, CHROOT_EXEC_POLICY_RULES_PATH, DEFAULT_EXEC_PATH,
         build_rootfs_extract_command, build_server_config, ensure_runtime_dirs,
         managed_shell_environment, normalize_path, render_remote_git_config, resolve_cwd,
-        sync_git_config,
+        stdout_with_command_line, sync_git_config,
     };
     use crate::RawServerConfig;
     use std::ffi::OsString;
@@ -1423,6 +1466,7 @@ mod tests {
             remote_home: Path::new("/root"),
             git_user_name: None,
             git_user_email: None,
+            startup_script: None,
             exec_api_token: String::new(),
             timeout_sec: "3600",
             run_as_uid: "1000",
@@ -1473,6 +1517,7 @@ mod tests {
             remote_home: Path::new("/root"),
             git_user_name: Some(String::from("Copilot")),
             git_user_email: Some(String::from("copilot@example.com")),
+            startup_script: Some("apt-get update && apt-get install -y ripgrep"),
             exec_api_token: String::from("token"),
             timeout_sec: "3600",
             run_as_uid: "1000",
@@ -1487,6 +1532,10 @@ mod tests {
         assert_eq!(
             config.chroot_root.as_deref(),
             Some(workspace.path().join("cache/root").as_path())
+        );
+        assert_eq!(
+            config.startup_script.as_deref(),
+            Some("apt-get update && apt-get install -y ripgrep")
         );
     }
 
@@ -1574,6 +1623,14 @@ mod tests {
         );
     }
 
+    #[test]
+    fn stdout_with_command_line_prefixes_command_output() {
+        assert_eq!(
+            stdout_with_command_line("printf 'hello\\n'", b"hello\n"),
+            "$ printf 'hello\\n'\nhello\n"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn sync_git_config_handles_reused_runtime_owned_home() {
@@ -1595,6 +1652,7 @@ mod tests {
             remote_home: Path::new("/root"),
             git_user_name: Some(String::from("Copilot")),
             git_user_email: Some(String::from("copilot@example.com")),
+            startup_script: None,
             exec_api_token: String::from("token"),
             timeout_sec: "3600",
             run_as_uid: "1000",

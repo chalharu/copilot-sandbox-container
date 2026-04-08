@@ -51,6 +51,7 @@ struct SessionExecConfig {
     git_user_name: Option<String>,
     git_user_email: Option<String>,
     request_timeout: Duration,
+    startup_script: Option<String>,
     environment_pvc_prefix: String,
     environment_storage_class: Option<String>,
     environment_size: String,
@@ -287,6 +288,7 @@ fn load_config() -> ToolResult<SessionExecConfig> {
         &env_or_default("CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC", "3600"),
         "CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC",
     )?);
+    let startup_script = optional_env("CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT");
     let environment_pvc_prefix = env_or_default(
         "CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX",
         "node-workspace",
@@ -335,6 +337,7 @@ fn load_config() -> ToolResult<SessionExecConfig> {
         git_user_name: optional_env("CONTROL_PLANE_GIT_USER_NAME"),
         git_user_email: optional_env("CONTROL_PLANE_GIT_USER_EMAIL"),
         request_timeout,
+        startup_script,
         environment_pvc_prefix,
         environment_storage_class,
         environment_size,
@@ -1166,6 +1169,9 @@ fn build_exec_pod(
                     "name": "CONTROL_PLANE_FAST_EXECUTION_HOME",
                     "value": config.remote_home
                 }, {
+                    "name": "CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT",
+                    "value": config.startup_script.clone().unwrap_or_default()
+                }, {
                     "name": "HOME",
                     "value": config.remote_home
                 }, {
@@ -1316,6 +1322,10 @@ mod tests {
             git_user_name: Some("Copilot".to_string()),
             git_user_email: Some("copilot@example.com".to_string()),
             request_timeout: std::time::Duration::from_secs(3600),
+            startup_script: Some(
+                "printf \"fast-exec-startup\\n\" > /workspace/fast-exec-startup-marker.txt"
+                    .to_string(),
+            ),
             environment_pvc_prefix: "node-workspace".to_string(),
             environment_storage_class: Some("standard".to_string()),
             environment_size: "10Gi".to_string(),
@@ -1507,6 +1517,10 @@ mod tests {
         assert!(env.iter().any(|value| value.name
             == "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE"
             && value.value.as_deref() == Some("/environment/hooks/git")));
+        assert!(env.iter().any(|value| value.name
+            == "CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT"
+            && value.value.as_deref()
+                == Some("printf \"fast-exec-startup\\n\" > /workspace/fast-exec-startup-marker.txt")));
         let volumes = spec.volumes.as_ref().unwrap();
         assert!(volumes.iter().any(|volume| volume.name == "environment"));
         assert!(volumes.iter().any(|volume| volume.name == "runtime-bin"));

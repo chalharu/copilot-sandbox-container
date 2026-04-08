@@ -546,6 +546,7 @@ data:
   CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 300s
   CONTROL_PLANE_FAST_EXECUTION_PORT: "8080"
   CONTROL_PLANE_FAST_EXECUTION_HOME: /root
+  CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: 'printf "fast-exec-startup\n" > /workspace/fast-exec-startup-marker.txt'
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX: node-workspace
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS: control-plane-fast-exec-environment-manual
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE: 10Gi
@@ -891,6 +892,7 @@ test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
 test "\${CONTROL_PLANE_FAST_EXECUTION_ENABLED}" = "1"
 test "\${CONTROL_PLANE_FAST_EXECUTION_IMAGE}" = "${fast_execution_image}"
 test "\${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE}" = "${control_plane_image}"
+test "\${CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT}" = 'printf "fast-exec-startup\n" > /workspace/fast-exec-startup-marker.txt'
 test "\${CONTROL_PLANE_COPILOT_SESSION_PVC}" = "control-plane-copilot-session-pvc"
 test "\${CONTROL_PLANE_RUST_HOOK_IMAGE}" = "${rust_hook_image}"
 cat /proc/self/uid_map > /workspace/k8s-pod-uid-map.txt
@@ -999,6 +1001,7 @@ run_fast_exec_assertions() {
 set -euo pipefail
 session_key=kind-fast-exec
 control-plane-session-exec cleanup --session-key "${session_key}" >/dev/null 2>&1 || true
+rm -f /workspace/fast-exec-startup-marker.txt
 control-plane-session-exec prepare --session-key "${session_key}" >/dev/null
 jq -e --arg key "${session_key}" '.sessions[$key].podName != null and .sessions[$key].podIp != null' \
   ~/.copilot/session-state/session-exec.json >/dev/null
@@ -1008,6 +1011,7 @@ environment_pvc="$(jq -r --arg key "${session_key}" '.sessions[$key].environment
 test -n "${pod_name}"
 test -n "${pod_ip}"
 test -n "${environment_pvc}"
+test "$(cat /workspace/fast-exec-startup-marker.txt)" = "fast-exec-startup"
 kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${pod_name}" -o json > /workspace/k8s-fast-exec-pod.json
 test "$(jq -r '.metadata.ownerReferences[0].kind' /workspace/k8s-fast-exec-pod.json)" = "Pod"
 test "$(jq -r '.metadata.ownerReferences[0].name' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_POD_NAME}"
@@ -1030,6 +1034,7 @@ test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/envir
 test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/environment/root/root/.ssh") | (.readOnly // false)' /workspace/k8s-fast-exec-pod.json)" = "true"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/root"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/hooks/git"
+test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT").value' /workspace/k8s-fast-exec-pod.json)" = 'printf "fast-exec-startup\n" > /workspace/fast-exec-startup-marker.txt'
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOME").value' /workspace/k8s-fast-exec-pod.json)" = "/root"
 command_text=$'printf "fast-exec-stdout\\n"; printf "fast-exec-stderr\\n" >&2; printf "delegated\\n" > /workspace/fast-exec-marker.txt; exit 7'
 command_base64="$(printf '%s' "${command_text}" | base64 | tr -d '\n')"
@@ -1039,7 +1044,8 @@ control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace
 proxy_status=$?
 set -e
 test "${proxy_status}" -eq 7
-grep -qx 'fast-exec-stdout' /workspace/k8s-fast-exec-stdout.txt
+test "$(sed -n '1p' /workspace/k8s-fast-exec-stdout.txt)" = "\$ ${command_text}"
+test "$(sed -n '2p' /workspace/k8s-fast-exec-stdout.txt)" = 'fast-exec-stdout'
 grep -qx 'fast-exec-stderr' /workspace/k8s-fast-exec-stderr.txt
 grep -qx 'delegated' /workspace/fast-exec-marker.txt
 blocked_command_base64="$(printf '%s' 'cat /root/.config/gh/hosts.yml' | base64 | tr -d '\n')"
