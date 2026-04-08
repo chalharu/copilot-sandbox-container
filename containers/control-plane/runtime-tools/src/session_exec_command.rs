@@ -1013,6 +1013,9 @@ fn build_exec_pod(
                 "app.kubernetes.io/name": "control-plane-fast-exec",
                 "control-plane.github.io/session-key": session_key,
             },
+            "annotations": {
+                "container.apparmor.security.beta.kubernetes.io/execution": "unconfined"
+            },
             "ownerReferences": [{
                 "apiVersion": "v1",
                 "kind": "Pod",
@@ -1420,6 +1423,15 @@ mod tests {
             .and_then(|context| context.seccomp_profile.as_ref())
             .map(|profile| profile.type_.as_str())
             .unwrap();
+        let execution_apparmor_annotation = pod
+            .metadata
+            .annotations
+            .as_ref()
+            .and_then(|annotations| {
+                annotations.get("container.apparmor.security.beta.kubernetes.io/execution")
+            })
+            .map(String::as_str)
+            .unwrap();
         let execution_apparmor = execution
             .security_context
             .as_ref()
@@ -1434,6 +1446,7 @@ mod tests {
         assert!(execution_capabilities.contains(&"SYS_CHROOT".to_string()));
         assert_eq!(execution_seccomp, "Unconfined");
         assert_eq!(execution_apparmor, "Unconfined");
+        assert_eq!(execution_apparmor_annotation, "unconfined");
         assert!(mounts.iter().any(|mount| mount.name == "copilot-session"
             && mount.mount_path == "/environment/root/root/.config/gh"));
         let init_container = spec
