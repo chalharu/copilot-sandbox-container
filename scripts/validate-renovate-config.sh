@@ -7,7 +7,7 @@ source "${script_dir}/lib-container-toolchain.sh"
 
 container_bin=""
 # renovate: datasource=docker depName=ghcr.io/renovatebot/renovate versioning=docker
-renovate_image="${CONTROL_PLANE_RENOVATE_IMAGE:-ghcr.io/renovatebot/renovate:43.104.4@sha256:54369958207b06c85398d8c4dffc70997c89f07546fa0a4703b3774f48f48dab}"
+renovate_image="${CONTROL_PLANE_RENOVATE_IMAGE:-ghcr.io/renovatebot/renovate:43.110.5@sha256:199a007f85a4f80f7b6a5cf5e7655a828cab13eb12e4b2b3a847fec8446d33e6}"
 base_dir=""
 log_file=""
 # Use container root so restrictive workspace mounts remain readable across
