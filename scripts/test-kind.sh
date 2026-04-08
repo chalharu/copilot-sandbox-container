@@ -1020,6 +1020,8 @@ test "$(jq -r '.spec.containers[0].startupProbe.failureThreshold' /workspace/k8s
 test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "environment").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/environment"
 test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "runtime-bin").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/control-plane/bin"
 test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "workspace").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/environment/root/workspace"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/environment/root/root/.config/gh") | (.readOnly // false)' /workspace/k8s-fast-exec-pod.json)" = "false"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/environment/root/root/.ssh") | (.readOnly // false)' /workspace/k8s-fast-exec-pod.json)" = "true"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/root"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/hooks/git"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOME").value' /workspace/k8s-fast-exec-pod.json)" = "/root"
@@ -1034,6 +1036,16 @@ test "${proxy_status}" -eq 7
 grep -qx 'fast-exec-stdout' /workspace/k8s-fast-exec-stdout.txt
 grep -qx 'fast-exec-stderr' /workspace/k8s-fast-exec-stderr.txt
 grep -qx 'delegated' /workspace/fast-exec-marker.txt
+blocked_command_base64="$(printf '%s' 'cat /root/.config/gh/hosts.yml' | base64 | tr -d '\n')"
+set +e
+control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${blocked_command_base64}" \
+  > /workspace/k8s-fast-exec-blocked-stdout.txt 2> /workspace/k8s-fast-exec-blocked-stderr.txt
+blocked_status=$?
+set -e
+test "${blocked_status}" -ne 0
+! [ -s /workspace/k8s-fast-exec-blocked-stdout.txt ]
+grep -Fq 'Direct reads of ~/.config/gh/hosts.yml are blocked by control-plane policy.' \
+  /workspace/k8s-fast-exec-blocked-stderr.txt
 control-plane-session-exec cleanup --session-key "${session_key}"
 ! kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${pod_name}" >/dev/null 2>&1
 jq -e --arg key "${session_key}" '.sessions[$key] == null' ~/.copilot/session-state/session-exec.json >/dev/null
@@ -1046,6 +1058,8 @@ cat ~/.copilot/session-state/session-exec.json || true
 cat /workspace/k8s-fast-exec-pod.json || true
 cat /workspace/k8s-fast-exec-stdout.txt || true
 cat /workspace/k8s-fast-exec-stderr.txt || true
+cat /workspace/k8s-fast-exec-blocked-stdout.txt || true
+cat /workspace/k8s-fast-exec-blocked-stderr.txt || true
 kubectl get pods --namespace "${CONTROL_PLANE_POD_NAMESPACE:-default}" -o wide || true
 EOF
     dump_control_plane_diagnostics

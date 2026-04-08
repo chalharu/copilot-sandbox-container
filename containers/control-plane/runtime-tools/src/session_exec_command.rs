@@ -97,6 +97,9 @@ struct PreparedPod {
 
 const STARTUP_PROBE_PERIOD_SECONDS: u64 = 5;
 const STARTUP_PROBE_GRACE_SECONDS: u64 = 10;
+const CHROOT_EXEC_POLICY_LIBRARY_PATH: &str = "/usr/local/lib/libcontrol_plane_exec_policy.so";
+const CHROOT_EXEC_POLICY_RULES_PATH: &str =
+    "/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml";
 
 pub fn run(args: &[String]) -> ToolResult<i32> {
     if args.len() == 1 && matches!(args[0].as_str(), "--help" | "-h") {
@@ -896,27 +899,37 @@ fn build_environment_pvc(
 }
 
 fn build_bootstrap_assets_init_command(environment_root: &str, runtime_bin_dir: &str) -> String {
+    let chroot_root = format!("{environment_root}/root");
+    let policy_library_source = CHROOT_EXEC_POLICY_LIBRARY_PATH;
+    let policy_rules_source = CHROOT_EXEC_POLICY_RULES_PATH;
+    let policy_library_path = format!("{chroot_root}{CHROOT_EXEC_POLICY_LIBRARY_PATH}");
+    let policy_rules_path = format!("{chroot_root}{CHROOT_EXEC_POLICY_RULES_PATH}");
     format!(
         concat!(
             "set -eu\n",
             "environment_root={environment_root:?}\n",
             "runtime_bin_dir={runtime_bin_dir:?}\n",
-            "install -d -m 0755 \"$environment_root/hooks/git\" \"$environment_root/root\" \"$runtime_bin_dir\"\n",
-            "if [ ! -x \"$environment_root/control-plane-exec-api\" ]; then\n",
-            "  install -m 0755 /usr/local/bin/control-plane-exec-api \"$environment_root/control-plane-exec-api\"\n",
-            "fi\n",
-            "install -m 0755 \"$environment_root/control-plane-exec-api\" \"$runtime_bin_dir/control-plane-exec-api\"\n",
-            "if [ ! -x \"$environment_root/hooks/git/pre-commit\" ] || [ ! -x \"$environment_root/hooks/git/pre-push\" ]; then\n",
-            "  rm -rf \"$environment_root/hooks/git\"\n",
-            "  install -d -m 0755 \"$environment_root/hooks/git\"\n",
-            "  cp -R /usr/local/share/control-plane/hooks/git/. \"$environment_root/hooks/git/\"\n",
-            "  find \"$environment_root/hooks/git\" -type d -exec chmod 755 {{}} +\n",
-            "  find \"$environment_root/hooks/git\" -type f -exec chmod 644 {{}} +\n",
-            "  chmod 755 \"$environment_root/hooks/git/pre-commit\" \"$environment_root/hooks/git/pre-push\"\n",
-            "fi\n",
+            "policy_library_path={policy_library_path:?}\n",
+            "policy_rules_path={policy_rules_path:?}\n",
+            "policy_library_dir=\"$(dirname \"$policy_library_path\")\"\n",
+            "policy_rules_dir=\"$(dirname \"$policy_rules_path\")\"\n",
+            "install -d -m 0755 \"$environment_root/root\" \"$environment_root/hooks/git\" \"$runtime_bin_dir\" \"$policy_library_dir\" \"$policy_rules_dir\"\n",
+            "install -m 0755 /usr/local/bin/control-plane-exec-api \"$runtime_bin_dir/control-plane-exec-api\"\n",
+            "rm -rf \"$environment_root/hooks/git\"\n",
+            "install -d -m 0755 \"$environment_root/hooks/git\"\n",
+            "cp -R /usr/local/share/control-plane/hooks/git/. \"$environment_root/hooks/git/\"\n",
+            "find \"$environment_root/hooks/git\" -type d -exec chmod 755 {{}} +\n",
+            "find \"$environment_root/hooks/git\" -type f -exec chmod 644 {{}} +\n",
+            "chmod 755 \"$environment_root/hooks/git/pre-commit\" \"$environment_root/hooks/git/pre-push\"\n",
+            "install -m 0644 {policy_library_source:?} \"$policy_library_path\"\n",
+            "install -m 0644 {policy_rules_source:?} \"$policy_rules_path\"\n",
         ),
         environment_root = environment_root,
         runtime_bin_dir = runtime_bin_dir,
+        policy_library_source = policy_library_source,
+        policy_rules_source = policy_rules_source,
+        policy_library_path = policy_library_path,
+        policy_rules_path = policy_rules_path,
     )
 }
 
@@ -987,7 +1000,7 @@ fn build_exec_pod(
             "name": "copilot-session",
             "mountPath": gh_mount,
             "subPath": config.copilot_session_gh_subpath,
-            "readOnly": true
+            "readOnly": false
         }));
         volume_mounts.push(json!({
             "name": "copilot-session",
@@ -1269,8 +1282,8 @@ impl Drop for StateLock {
 #[cfg(test)]
 mod tests {
     use super::{
-        PreparedPod, SessionExecConfig, build_environment_pvc, build_exec_pod, entry_from_prepared,
-        environment_pvc_name, pod_name_for_session,
+        PreparedPod, SessionExecConfig, build_bootstrap_assets_init_command, build_environment_pvc,
+        build_exec_pod, entry_from_prepared, environment_pvc_name, pod_name_for_session,
     };
 
     fn config() -> SessionExecConfig {
@@ -1447,8 +1460,21 @@ mod tests {
         assert_eq!(execution_seccomp, "Unconfined");
         assert_eq!(execution_apparmor, "Unconfined");
         assert_eq!(execution_apparmor_annotation, "unconfined");
-        assert!(mounts.iter().any(|mount| mount.name == "copilot-session"
-            && mount.mount_path == "/environment/root/root/.config/gh"));
+        let gh_mount = mounts
+            .iter()
+            .find(|mount| {
+                mount.name == "copilot-session"
+                    && mount.mount_path == "/environment/root/root/.config/gh"
+            })
+            .unwrap();
+        assert_eq!(gh_mount.read_only, Some(false));
+        let ssh_mount = mounts
+            .iter()
+            .find(|mount| {
+                mount.name == "copilot-session" && mount.mount_path == "/environment/root/root/.ssh"
+            })
+            .unwrap();
+        assert_eq!(ssh_mount.read_only, Some(true));
         let init_container = spec
             .init_containers
             .as_ref()
@@ -1485,6 +1511,24 @@ mod tests {
         assert!(volumes.iter().any(|volume| volume.name == "environment"));
         assert!(volumes.iter().any(|volume| volume.name == "runtime-bin"));
         assert!(!volumes.iter().any(|volume| volume.name == "bootstrap"));
+    }
+
+    #[test]
+    fn bootstrap_assets_refresh_exec_policy_files() {
+        let command = build_bootstrap_assets_init_command("/environment", "/control-plane/bin");
+        assert!(
+            command.contains(
+                "install -m 0755 /usr/local/bin/control-plane-exec-api \"$runtime_bin_dir/control-plane-exec-api\""
+            )
+        );
+        assert!(!command.contains("/environment/control-plane-exec-api"));
+        assert!(command.contains("rm -rf \"$environment_root/hooks/git\""));
+        assert!(command.contains(
+            "install -m 0644 \"/usr/local/lib/libcontrol_plane_exec_policy.so\" \"$policy_library_path\""
+        ));
+        assert!(command.contains(
+            "install -m 0644 \"/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml\" \"$policy_rules_path\""
+        ));
     }
 
     #[test]
