@@ -11,7 +11,7 @@ Use this repo-local skill as the repository-specific companion to the bundled `r
 
 1. Read `references/validation-and-delivery.md` before choosing commands.
 2. Keep repository-specific validation here:
-   - baseline lint and build/test commands
+   - baseline build/test commands and the external lint surface
    - Kubernetes and current-cluster verification paths
    - skill validation for both repo-local and bundled skills
    - authoritative CI workflow names and job expectations
@@ -24,7 +24,7 @@ Use this repo-local skill as the repository-specific companion to the bundled `r
 
 ## Repository anchors
 
-- Use `./scripts/lint.sh` and `./scripts/build-test.sh` for the standard validation baseline in this repository.
+- Use `./scripts/build-test.sh` for the standard repo-managed validation baseline in this repository; hosted lint comes from the external `linter-service`.
 - When the change touches `.github/skills/` or `containers/control-plane/skills/`, validate every changed skill and the control-plane runtime surfaces that expose bundled skills.
 - Use `./scripts/test-k8s-job.sh` or the current-cluster checks when runtime or Kubernetes behavior changes.
 - Read `references/validation-and-delivery.md` for the exact commands and CI surfaces in this repository.

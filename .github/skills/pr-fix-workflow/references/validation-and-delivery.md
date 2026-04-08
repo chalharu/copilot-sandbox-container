@@ -9,10 +9,12 @@
 
 ## Local validation baseline
 
-Run the repository baseline with Docker:
+Run the repository-managed baseline with Docker:
 
-- `./scripts/lint.sh`
 - `./scripts/build-test.sh`
+
+Hosted lint is provided by the external `linter-service`, including the Renovate
+dry-run coverage that used to live in `lint.sh`.
 
 Add a focused `scripts/test-*.sh` regression check for the behavior you changed and run it directly during iteration. Wire it into `scripts/build-test.sh` when it is deterministic and worth covering in the standard regression path.
 
@@ -51,5 +53,5 @@ That script:
 
 The authoritative hosted validation definition lives in `.github/workflows/control-plane-ci.yml`.
 
-- `pull_request` starts `lint` and `Integration Images` in parallel, then fans out `Integration Smoke`, `Integration Regressions`, `Integration Kind Session`, `Integration Kind Jobs Core`, and `Integration Kind Jobs Transfer`
-- `push` to `main` additionally gates `Publish Architecture Images`, `publish-manifests`, and `cleanup-packages` on the lint and integration fan-out results
+- `pull_request` relies on the external `linter-service`, builds integration images for both x64 and aarch64, then fans out dual-arch `Integration Smoke` plus x64-only `Integration Regressions`, `Integration Kind Session`, `Integration Kind Jobs Core`, and `Integration Kind Jobs Transfer`
+- `push` to `main` additionally gates `Publish Architecture Images`, `publish-manifests`, and `cleanup-packages` on the integration fan-out results

@@ -1,25 +1,52 @@
 ARG RUST_BASE_IMAGE=docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895
+# renovate: datasource=crate depName=cargo-chef
+ARG CARGO_CHEF_VERSION=0.1.77
 
-FROM ${RUST_BASE_IMAGE} AS exec-policy-builder
+FROM ${RUST_BASE_IMAGE} AS cargo-chef
+
+ARG CARGO_CHEF_VERSION
+RUN cargo install cargo-chef --locked --version "${CARGO_CHEF_VERSION}"
+
+FROM cargo-chef AS exec-policy-planner
 
 WORKDIR /build/control-plane-exec-policy
+COPY exec-policy-preload/Cargo.toml exec-policy-preload/Cargo.lock ./
+COPY exec-policy-preload/src ./src
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM cargo-chef AS exec-policy-builder
+
+WORKDIR /build/control-plane-exec-policy
+COPY --from=exec-policy-planner /build/control-plane-exec-policy/recipe.json ./recipe.json
+RUN cargo chef cook --locked --release --recipe-path recipe.json
 COPY exec-policy-preload/Cargo.toml exec-policy-preload/Cargo.lock ./
 COPY exec-policy-preload/src ./src
 COPY hooks/preToolUse/deny-rules.yaml ./hooks/preToolUse/deny-rules.yaml
 RUN cargo test --locked --release \
     && cargo build --locked --release
 
-FROM ${RUST_BASE_IMAGE} AS exec-api-builder
+FROM cargo-chef AS exec-api-planner
+
+WORKDIR /build/control-plane-exec-api
+COPY exec-api/Cargo.toml exec-api/Cargo.lock exec-api/build.rs ./
+COPY exec-api/proto ./proto
+COPY exec-api/src ./src
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM cargo-chef AS exec-api-builder
 
 # hadolint ignore=DL3008
 RUN apt-get update -o Acquire::Retries=3 \
     && apt-get install -y --no-install-recommends \
-        musl-tools \
-        protobuf-compiler \
-    && rm -rf /var/lib/apt/lists/*
+         musl-tools \
+     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build/control-plane-exec-api
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+COPY --from=exec-api-planner /build/control-plane-exec-api/recipe.json ./recipe.json
+RUN target="$(rustc -vV | awk '/^host:/ { print $2 }' | sed 's/-unknown-linux-gnu/-unknown-linux-musl/')" \
+    && rustup target add "${target}" \
+    && cargo chef cook --locked --release --target "${target}" --recipe-path recipe.json
 COPY exec-api/Cargo.toml exec-api/Cargo.lock exec-api/build.rs ./
 COPY exec-api/proto ./proto
 COPY exec-api/src ./src
@@ -29,9 +56,24 @@ RUN target="$(rustc -vV | awk '/^host:/ { print $2 }' | sed 's/-unknown-linux-gn
     && cargo build --locked --release --target "${target}" \
     && cp "target/${target}/release/control-plane-exec-api" "target/release/control-plane-exec-api"
 
-FROM ${RUST_BASE_IMAGE} AS runtime-tools-builder
+FROM cargo-chef AS runtime-tools-planner
 
 WORKDIR /build/control-plane-runtime-tools
+COPY runtime-tools/Cargo.toml runtime-tools/Cargo.lock ./
+COPY exec-api/Cargo.toml /build/exec-api/Cargo.toml
+COPY exec-api/build.rs /build/exec-api/build.rs
+COPY exec-api/proto /build/exec-api/proto
+COPY exec-api/src /build/exec-api/src
+COPY runtime-tools/src ./src
+COPY runtime-tools/tests ./tests
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM cargo-chef AS runtime-tools-builder
+
+WORKDIR /build/control-plane-runtime-tools
+COPY --from=runtime-tools-planner /build/exec-api /build/exec-api
+COPY --from=runtime-tools-planner /build/control-plane-runtime-tools/recipe.json ./recipe.json
+RUN cargo chef cook --locked --release --recipe-path recipe.json
 COPY runtime-tools/Cargo.toml runtime-tools/Cargo.lock ./
 COPY exec-api/Cargo.toml /build/exec-api/Cargo.toml
 COPY exec-api/build.rs /build/exec-api/build.rs

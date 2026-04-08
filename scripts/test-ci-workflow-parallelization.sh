@@ -104,6 +104,11 @@ integration_kind_jobs_block="$(job_block integration-kind-jobs)"
 integration_kind_jobs_transfer_block="$(job_block integration-kind-jobs-transfer)"
 publish_block="$(job_block publish-architecture-images)"
 
+if grep -Fqx '  lint:' "${workflow_path}"; then
+  printf 'Did not expect lint job to remain in %s\n' "${workflow_path}" >&2
+  exit 1
+fi
+
 [[ -n "${integration_block}" ]] || {
   printf 'Expected integration job in %s\n' "${workflow_path}" >&2
   exit 1
@@ -133,9 +138,13 @@ publish_block="$(job_block publish-architecture-images)"
   exit 1
 }
 
-assert_block_not_contains "${integration_block}" 'needs: lint' 'integration job block'
+assert_block_contains "${integration_block}" 'path: /tmp/control-plane-buildx-cache-${{ matrix.image_arch }}' 'integration job block'
+assert_block_contains "${integration_block}" 'CONTROL_PLANE_BUILDX_CACHE_ROOT: /tmp/control-plane-buildx-cache-${{ matrix.image_arch }}' 'integration job block'
 assert_block_contains "${integration_smoke_block}" 'Load integration images' 'integration-smoke job block'
 assert_block_contains "${integration_smoke_block}" 'docker load -i downloaded-images/control-plane-images.tar' 'integration-smoke job block'
+assert_block_contains "${integration_regressions_block}" 'runs-on: ubuntu-24.04' 'integration-regressions job block'
+assert_block_not_contains "${integration_regressions_block}" 'strategy:' 'integration-regressions job block'
+assert_block_contains "${integration_regressions_block}" 'name: control-plane-images-amd64' 'integration-regressions job block'
 assert_block_contains_one_of \
   "${integration_regressions_block}" \
   'integration-regressions job block' \
@@ -146,27 +155,36 @@ assert_block_contains_one_of \
   'integration-regressions job block' \
   'docker load -i downloaded-images/control-plane-images.tar' \
   '*load-integration-images'
+assert_block_contains "${integration_kind_session_block}" 'runs-on: ubuntu-24.04' 'integration-kind-session job block'
+assert_block_not_contains "${integration_kind_session_block}" 'strategy:' 'integration-kind-session job block'
 assert_block_contains "${integration_kind_session_block}" 'skipClusterCreation: true' 'integration-kind-session job block'
 assert_block_not_contains "${integration_kind_session_block}" 'Load integration images' 'integration-kind-session job block'
+assert_block_contains "${integration_kind_session_block}" '*download-integration-images-amd64' 'integration-kind-session job block'
 assert_block_contains "${integration_kind_session_block}" 'CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar' 'integration-kind-session job block'
 assert_block_contains "${integration_kind_session_block}" './scripts/build-test.sh --skip-image-build --group kind-session' 'integration-kind-session job block'
+assert_block_contains "${integration_kind_jobs_block}" 'runs-on: ubuntu-24.04' 'integration-kind-jobs job block'
+assert_block_not_contains "${integration_kind_jobs_block}" 'strategy:' 'integration-kind-jobs job block'
 assert_block_contains_one_of \
   "${integration_kind_jobs_block}" \
   'integration-kind-jobs job block' \
   'skipClusterCreation: true' \
   '*setup-kind'
 assert_block_not_contains "${integration_kind_jobs_block}" 'Load integration images' 'integration-kind-jobs job block'
+assert_block_contains "${integration_kind_jobs_block}" '*download-integration-images-amd64' 'integration-kind-jobs job block'
 assert_block_contains "${integration_kind_jobs_block}" 'CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar' 'integration-kind-jobs job block'
 assert_block_contains "${integration_kind_jobs_block}" './scripts/build-test.sh --skip-image-build --group kind-jobs-core' 'integration-kind-jobs job block'
+assert_block_contains "${integration_kind_jobs_transfer_block}" 'runs-on: ubuntu-24.04' 'integration-kind-jobs-transfer job block'
+assert_block_not_contains "${integration_kind_jobs_transfer_block}" 'strategy:' 'integration-kind-jobs-transfer job block'
 assert_block_contains_one_of \
   "${integration_kind_jobs_transfer_block}" \
   'integration-kind-jobs-transfer job block' \
   'skipClusterCreation: true' \
   '*setup-kind'
 assert_block_not_contains "${integration_kind_jobs_transfer_block}" 'Load integration images' 'integration-kind-jobs-transfer job block'
+assert_block_contains "${integration_kind_jobs_transfer_block}" '*download-integration-images-amd64' 'integration-kind-jobs-transfer job block'
 assert_block_contains "${integration_kind_jobs_transfer_block}" 'CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar' 'integration-kind-jobs-transfer job block'
 assert_block_contains "${integration_kind_jobs_transfer_block}" './scripts/build-test.sh --skip-image-build --group kind-jobs-transfer' 'integration-kind-jobs-transfer job block'
-assert_block_contains "${publish_block}" '- lint' 'publish-architecture-images job block'
+assert_block_not_contains "${publish_block}" '- lint' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" '- integration-kind-session' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" '- integration-kind-jobs' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" '- integration-kind-jobs-transfer' 'publish-architecture-images job block'

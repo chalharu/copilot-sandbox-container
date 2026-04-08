@@ -6,10 +6,9 @@
 `docs/reference/control-plane-runtime.md`、代表ログは
 `docs/reference/debug-log.md` を参照してください。
 
-## 1. 標準の lint / build / test を回す
+## 1. 標準の build / test を回す
 
 ```bash
-./scripts/lint.sh
 ./scripts/build-test.sh
 ```
 
@@ -21,9 +20,9 @@ CONTROL_PLANE_TOOLCHAIN=docker ./scripts/build-test.sh
 
 ### current-cluster で詰まりやすい点
 
-- `lint.sh` は bundled control-plane image を使って `yamllint` を実行する
+- PR lint は external `linter-service` が担当し、repo-managed な baseline は `build-test.sh` から始まる
 - `control-plane-run` は Kubernetes Job 専用で、Copilot CLI の `bash` tool delegation とは別経路
-- `hadolint` と `shellcheck` は fully-qualified image 名で pull する
+- focused rerun では `--build-only` と `--skip-image-build --group ...` を組み合わせると速い
 
 runtime / cache / hook の具体的な path は
 `docs/reference/control-plane-runtime.md` を参照してください。

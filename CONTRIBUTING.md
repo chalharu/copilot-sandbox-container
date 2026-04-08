@@ -38,11 +38,8 @@ Types:
 
 ## 4. Local and Containerized Validation
 
-- `scripts/lint.sh` is the supported lint entry point.
-- `scripts/lint.sh` runs `hadolint` and `shellcheck` through their upstream
-  container images, validates `renovate.json5` with `ghcr.io/biomejs/biome`,
-  runs a local Renovate dry-run for scope validation, and uses the bundled
-  control-plane image to run `yamllint` v1.38.0.
+- Hosted lint is provided by the external `linter-service`; the repository-managed
+  local validation baseline starts at `scripts/build-test.sh`.
 - `scripts/build-test.sh` is the supported local build/test entry point.
 - `scripts/build-test.sh` expects a working Docker Buildx toolchain.
 - Use `CONTROL_PLANE_TOOLCHAIN=docker` to force Docker / BuildKit explicitly.
