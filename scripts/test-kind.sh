@@ -208,6 +208,7 @@ control_plane_pod_name() {
 
 dump_control_plane_diagnostics() {
   local pod_name=""
+  local exec_pod=""
 
   kubectl get deployment,replicaset,pods,svc --namespace "${namespace}" -l "${control_plane_selector}" -o wide >&2 || true
   kubectl describe deployment/control-plane --namespace "${namespace}" >&2 || true
@@ -218,6 +219,18 @@ dump_control_plane_diagnostics() {
     kubectl logs --namespace "${namespace}" pod/"${pod_name}" -c init-state >&2 || true
     kubectl logs --namespace "${namespace}" pod/"${pod_name}" -c control-plane >&2 || true
   fi
+  while read -r exec_pod; do
+    [[ -n "${exec_pod}" ]] || continue
+    kubectl describe "${exec_pod}" --namespace "${namespace}" >&2 || true
+    kubectl logs --namespace "${namespace}" "${exec_pod}" -c bootstrap-assets >&2 || true
+    kubectl logs --namespace "${namespace}" "${exec_pod}" -c execution >&2 || true
+    kubectl logs --namespace "${namespace}" "${exec_pod}" -c execution --previous >&2 || true
+  done < <(
+    kubectl get pods \
+      --namespace "${namespace}" \
+      -l app.kubernetes.io/name=control-plane-fast-exec \
+      -o name 2>/dev/null || true
+  )
   kubectl get events --namespace "${namespace}" --sort-by=.lastTimestamp >&2 || true
 }
 
