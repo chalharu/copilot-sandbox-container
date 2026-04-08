@@ -385,7 +385,7 @@ spec:
   persistentVolumeReclaimPolicy: Delete
   storageClassName: control-plane-copilot-session-manual
   hostPath:
-    path: /tmp/control-plane-copilot-session
+    path: /var/lib/control-plane-copilot-session
     type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -400,7 +400,9 @@ spec:
   persistentVolumeReclaimPolicy: Delete
   storageClassName: control-plane-control-workspace-manual
   hostPath:
-    path: /tmp/control-plane-workspace
+    # Kind nodes can mount /tmp with noexec, which breaks running cached shells,
+    # package managers, and workspace scripts from hostPath-backed volumes.
+    path: /var/lib/control-plane-workspace
     type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -445,7 +447,7 @@ spec:
   # Intentionally use the same hostPath as the control-plane workspace PV so
   # the Kind test can simulate a shared RW filesystem across namespaces.
   hostPath:
-    path: /tmp/control-plane-workspace
+    path: /var/lib/control-plane-workspace
     type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -463,7 +465,7 @@ spec:
     name: ${environment_pvc_name}
     namespace: ${namespace}
   hostPath:
-    path: /tmp/control-plane-fast-exec-environment
+    path: /var/lib/control-plane-fast-exec-environment
     type: DirectoryOrCreate
 ---
 apiVersion: v1
