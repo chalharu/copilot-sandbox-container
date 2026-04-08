@@ -279,6 +279,9 @@ rules:
     resources: ["pods"]
     verbs: ["create", "delete", "get", "list", "watch"]
   - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["create", "get", "list", "watch"]
+  - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
 ---
