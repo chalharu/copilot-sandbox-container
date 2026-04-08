@@ -555,33 +555,32 @@ async fn ensure_pod_ready(
     let mut state = read_state(&config.state_file)?;
     let pod_name = pod_name_for_session(&config.owner_pod_name, session_key);
 
-    if !refresh {
-        if let Some(entry) = state.sessions.get(session_key) {
-            if !entry.auth_token.is_empty() && healthcheck(config, &entry.pod_ip).await {
-                return Ok(prepared_from_entry(entry));
-            }
-        }
+    if !refresh
+        && let Some(entry) = state.sessions.get(session_key)
+        && !entry.auth_token.is_empty()
+        && healthcheck(config, &entry.pod_ip).await
+    {
+        return Ok(prepared_from_entry(entry));
     }
 
     if let Ok(pod) = pods.get(&pod_name).await {
-        if pod_ready(&pod) {
-            if let Some(entry) = state.sessions.get(session_key) {
-                if let Some(pod_ip) = pod_ip(&pod) {
-                    if !entry.auth_token.is_empty() && wait_for_healthcheck(config, &pod_ip).await {
-                        let prepared = PreparedPod {
-                            pod_name: pod_name.clone(),
-                            pod_ip,
-                            auth_token: entry.auth_token.clone(),
-                            environment_pvc_name: entry.environment_pvc_name.clone(),
-                        };
-                        state
-                            .sessions
-                            .insert(session_key.to_string(), entry_from_prepared(&prepared));
-                        write_state(&config.state_file, &state)?;
-                        return Ok(prepared);
-                    }
-                }
-            }
+        if pod_ready(&pod)
+            && let Some(entry) = state.sessions.get(session_key)
+            && let Some(pod_ip) = pod_ip(&pod)
+            && !entry.auth_token.is_empty()
+            && wait_for_healthcheck(config, &pod_ip).await
+        {
+            let prepared = PreparedPod {
+                pod_name: pod_name.clone(),
+                pod_ip,
+                auth_token: entry.auth_token.clone(),
+                environment_pvc_name: entry.environment_pvc_name.clone(),
+            };
+            state
+                .sessions
+                .insert(session_key.to_string(), entry_from_prepared(&prepared));
+            write_state(&config.state_file, &state)?;
+            return Ok(prepared);
         }
         delete_pod(client, &config.namespace, &pod_name).await?;
     }
@@ -748,12 +747,11 @@ async fn wait_for_pod(
             }
         };
 
-        if pod_ready(&pod) {
-            if let Some(pod_ip) = pod_ip(&pod) {
-                if wait_for_healthcheck(config, &pod_ip).await {
-                    return Ok(pod_ip);
-                }
-            }
+        if pod_ready(&pod)
+            && let Some(pod_ip) = pod_ip(&pod)
+            && wait_for_healthcheck(config, &pod_ip).await
+        {
+            return Ok(pod_ip);
         }
 
         sleep(Duration::from_secs(1)).await;
