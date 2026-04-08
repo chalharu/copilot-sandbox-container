@@ -67,8 +67,6 @@ CONTROL_PLANE_TOOLCHAIN=docker ./scripts/build-test.sh
 - standalone / regressions: `scripts/test-standalone.sh`,
   `scripts/test-regressions.sh`
 - config / runtime / permissions:
-  `scripts/test-renovate-config-permissions.sh`,
-  `scripts/test-config-injection.sh`,
   `scripts/test-k8s-sample-storage-layout.sh`,
   `scripts/test-entrypoint-capabilities.sh`
 - audit / bundled skill: `scripts/test-audit-logging.sh`,
