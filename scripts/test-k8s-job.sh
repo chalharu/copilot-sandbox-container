@@ -197,10 +197,9 @@ ${service_account_yaml}
                   printf "%s\n" "job-check: runtime-cache=ok"
 
                 ssh-keygen -q -t ed25519 -N "" -f /tmp/id_ed25519
-                authorized_keys_path=/home/copilot/.config/control-plane/ssh-auth/authorized_keys
-                cat /tmp/id_ed25519.pub >> "${authorized_keys_path}"
-                cat /var/run/control-plane-test/job-ssh-public-key >> "${authorized_keys_path}"
-                chmod 600 "${authorized_keys_path}"
+                cat /tmp/id_ed25519.pub >> /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+                cat /var/run/control-plane-test/job-ssh-public-key >> /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+                chmod 600 /home/copilot/.config/control-plane/ssh-auth/authorized_keys
                 /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config >/tmp/sshd.log 2>&1 &
                 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
                   if ssh-keyscan -p 2222 127.0.0.1 >/dev/null 2>&1; then
