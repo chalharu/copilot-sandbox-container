@@ -891,6 +891,31 @@ fn build_environment_pvc(
     .map_err(|error| format!("failed to build environment PVC manifest: {error}"))
 }
 
+fn build_bootstrap_assets_init_command(environment_root: &str, runtime_bin_dir: &str) -> String {
+    format!(
+        concat!(
+            "set -eu\n",
+            "environment_root={environment_root:?}\n",
+            "runtime_bin_dir={runtime_bin_dir:?}\n",
+            "install -d -m 0755 \"$environment_root/hooks/git\" \"$environment_root/root\" \"$runtime_bin_dir\"\n",
+            "if [ ! -x \"$environment_root/control-plane-exec-api\" ]; then\n",
+            "  install -m 0755 /usr/local/bin/control-plane-exec-api \"$environment_root/control-plane-exec-api\"\n",
+            "fi\n",
+            "install -m 0755 \"$environment_root/control-plane-exec-api\" \"$runtime_bin_dir/control-plane-exec-api\"\n",
+            "if [ ! -x \"$environment_root/hooks/git/pre-commit\" ] || [ ! -x \"$environment_root/hooks/git/pre-push\" ]; then\n",
+            "  rm -rf \"$environment_root/hooks/git\"\n",
+            "  install -d -m 0755 \"$environment_root/hooks/git\"\n",
+            "  cp -R /usr/local/share/control-plane/hooks/git/. \"$environment_root/hooks/git/\"\n",
+            "  find \"$environment_root/hooks/git\" -type d -exec chmod 755 {{}} +\n",
+            "  find \"$environment_root/hooks/git\" -type f -exec chmod 644 {{}} +\n",
+            "  chmod 755 \"$environment_root/hooks/git/pre-commit\" \"$environment_root/hooks/git/pre-push\"\n",
+            "fi\n",
+        ),
+        environment_root = environment_root,
+        runtime_bin_dir = runtime_bin_dir,
+    )
+}
+
 fn build_exec_pod(
     config: &SessionExecConfig,
     session_key: &str,
@@ -901,21 +926,24 @@ fn build_exec_pod(
 ) -> Result<Pod, String> {
     let environment_root = config.environment_mount_path.trim_end_matches('/');
     let chroot_root = format!("{environment_root}/root");
-    let exec_api_path = format!("{environment_root}/control-plane-exec-api");
+    let runtime_bin_dir = "/control-plane/bin";
+    let exec_api_path = format!("{runtime_bin_dir}/control-plane-exec-api");
     let hooks_source = format!("{environment_root}/hooks/git");
     let workspace_mount = nested_mount_path(&chroot_root, &config.workspace_mount_path)?;
     let remote_home_mount = nested_mount_path(&chroot_root, &config.remote_home)?;
     let gh_mount = format!("{remote_home_mount}/.config/gh");
     let ssh_mount = format!("{remote_home_mount}/.ssh");
-
-    let init_command = format!(
-        "set -eu\nenvironment_root={environment_root:?}\ninstall -d -m 0755 \"$environment_root/hooks/git\" \"$environment_root/root\"\nif [ ! -x \"$environment_root/control-plane-exec-api\" ]; then\n  cp /usr/local/bin/control-plane-exec-api \"$environment_root/control-plane-exec-api\"\n  chmod 755 \"$environment_root/control-plane-exec-api\"\nfi\nif [ ! -x \"$environment_root/hooks/git/pre-commit\" ] || [ ! -x \"$environment_root/hooks/git/pre-push\" ]; then\n  rm -rf \"$environment_root/hooks/git\"\n  install -d -m 0755 \"$environment_root/hooks/git\"\n  cp -R /usr/local/share/control-plane/hooks/git/. \"$environment_root/hooks/git/\"\n  find \"$environment_root/hooks/git\" -type d -exec chmod 755 {{}} +\n  find \"$environment_root/hooks/git\" -type f -exec chmod 644 {{}} +\n  chmod 755 \"$environment_root/hooks/git/pre-commit\" \"$environment_root/hooks/git/pre-push\"\nfi\n"
-    );
+    let init_command = build_bootstrap_assets_init_command(environment_root, runtime_bin_dir);
 
     let mut volume_mounts = vec![
         json!({
             "name": "environment",
             "mountPath": config.environment_mount_path,
+        }),
+        json!({
+            "name": "runtime-bin",
+            "mountPath": runtime_bin_dir,
+            "readOnly": true,
         }),
         json!({
             "name": "workspace",
@@ -929,6 +957,10 @@ fn build_exec_pod(
             "persistentVolumeClaim": {
                 "claimName": environment_pvc_name
             }
+        }),
+        json!({
+            "name": "runtime-bin",
+            "emptyDir": {}
         }),
         json!({
             "name": "workspace",
@@ -1006,6 +1038,9 @@ fn build_exec_pod(
                 "volumeMounts": [{
                     "name": "environment",
                     "mountPath": config.environment_mount_path,
+                }, {
+                    "name": "runtime-bin",
+                    "mountPath": runtime_bin_dir,
                 }]
             }],
             "containers": [{
@@ -1326,7 +1361,7 @@ mod tests {
         assert_eq!(
             execution.command.as_ref().unwrap(),
             &vec![
-                "/environment/control-plane-exec-api".to_string(),
+                "/control-plane/bin/control-plane-exec-api".to_string(),
                 "serve".to_string()
             ]
         );
@@ -1340,8 +1375,30 @@ mod tests {
             mounts.iter().any(|mount| mount.name == "workspace"
                 && mount.mount_path == "/environment/root/workspace")
         );
+        assert!(mounts.iter().any(|mount| {
+            mount.name == "runtime-bin"
+                && mount.mount_path == "/control-plane/bin"
+                && mount.read_only == Some(true)
+        }));
         assert!(mounts.iter().any(|mount| mount.name == "copilot-session"
             && mount.mount_path == "/environment/root/root/.config/gh"));
+        let init_container = spec
+            .init_containers
+            .as_ref()
+            .unwrap()
+            .iter()
+            .find(|container| container.name == "bootstrap-assets")
+            .unwrap();
+        assert!(
+            init_container
+                .volume_mounts
+                .as_ref()
+                .unwrap()
+                .iter()
+                .any(
+                    |mount| mount.name == "runtime-bin" && mount.mount_path == "/control-plane/bin"
+                )
+        );
         let env = execution.env.as_ref().unwrap();
         assert!(env.iter().any(
             |value| value.name == "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT"
@@ -1355,6 +1412,7 @@ mod tests {
             && value.value.as_deref() == Some("/environment/hooks/git")));
         let volumes = spec.volumes.as_ref().unwrap();
         assert!(volumes.iter().any(|volume| volume.name == "environment"));
+        assert!(volumes.iter().any(|volume| volume.name == "runtime-bin"));
         assert!(!volumes.iter().any(|volume| volume.name == "bootstrap"));
     }
 

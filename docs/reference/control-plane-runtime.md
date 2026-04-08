@@ -88,8 +88,9 @@ sample manifest の fast execution pod では、runtime image とは別に
 `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` を指定し、initContainer が
 Rust 製 `control-plane-exec-api` と bundled Git hook を node-scoped な
 RWO PVC (`CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX` で命名) の
-`/environment` へ初回 staging します。本体 container は
-`/environment/control-plane-exec-api` だけを起動し、`/environment/root` を
+`/environment` へ初回 staging します。本体 container は cached binary を
+pod-local な `/control-plane/bin/control-plane-exec-api` へ staging して起動し、
+`/environment/root` を
 chroot 先として初回だけ runtime image の rootfs を複製し、そこへ
 `bash` / `git` / `gh` / `openssh-client` を入れます。以後の session pod は
 同じノード上でその chroot を再利用するため、毎回の package install を避けられます。
@@ -129,7 +130,7 @@ bundled `preToolUse/exec-forward` は、`CONTROL_PLANE_FAST_EXECUTION_ENABLED=1`
 on-demand で作成または再利用し、`/workspace` PVC を共有したまま
 gRPC 経由で転送します。Execution Pod は任意の Linux image を起点にしつつ、
 node-scoped な `/environment` PVC を同じ node 上で共有し、`/environment/root`
-の chroot runtime と `/environment/control-plane-exec-api`、`/environment/hooks/git`
+の chroot runtime と cached `control-plane-exec-api`、`/environment/hooks/git`
 を再利用します。
 Exec API は per-pod token が必須で、delegated command 自体は
 `CONTROL_PLANE_FAST_EXECUTION_RUN_AS_{UID,GID}` で指定した非 root UID/GID へ
