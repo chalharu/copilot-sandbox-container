@@ -138,7 +138,9 @@ fi
   exit 1
 }
 
+# shellcheck disable=SC2016
 assert_block_contains "${integration_block}" 'path: /tmp/control-plane-buildx-cache-${{ matrix.image_arch }}' 'integration job block'
+# shellcheck disable=SC2016
 assert_block_contains "${integration_block}" 'CONTROL_PLANE_BUILDX_CACHE_ROOT: /tmp/control-plane-buildx-cache-${{ matrix.image_arch }}' 'integration job block'
 assert_block_contains "${integration_block}" 'docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd' 'integration job block'
 assert_block_contains "${integration_block}" 'driver: docker-container' 'integration job block'
