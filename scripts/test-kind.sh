@@ -969,7 +969,7 @@ kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${pod_name}" -o js
 test "$(jq -r '.metadata.ownerReferences[0].kind' /workspace/k8s-fast-exec-pod.json)" = "Pod"
 test "$(jq -r '.metadata.ownerReferences[0].name' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_POD_NAME}"
 test "$(jq -r '.metadata.ownerReferences[0].uid' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_POD_UID}"
-test "$(jq -r '.spec.nodeName' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_NODE_NAME}"
+test "$(jq -r '.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchFields[] | select(.key == "metadata.name").values[0]' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_NODE_NAME}"
 test "$(jq -r '.spec.containers[0].image' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_FAST_EXECUTION_IMAGE}"
 test "$(jq -r '.spec.initContainers[0].image' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE}"
 test "$(jq -r '.spec.volumes[] | select(.name == "workspace").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "control-plane-workspace-pvc"

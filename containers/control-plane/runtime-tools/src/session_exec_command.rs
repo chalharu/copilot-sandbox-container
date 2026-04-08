@@ -981,7 +981,7 @@ fn build_exec_pod(
         "spec": {
             "automountServiceAccountToken": false,
             "restartPolicy": "Always",
-            "nodeName": config.node_name,
+            "affinity": required_node_affinity(&config.node_name),
             "securityContext": {
                 "fsGroup": i64::from(config.run_as_gid)
             },
@@ -1104,6 +1104,22 @@ fn build_exec_pod(
         }
     }))
     .map_err(|error| format!("failed to build execution pod manifest: {error}"))
+}
+
+fn required_node_affinity(node_name: &str) -> Value {
+    json!({
+        "nodeAffinity": {
+            "requiredDuringSchedulingIgnoredDuringExecution": {
+                "nodeSelectorTerms": [{
+                    "matchFields": [{
+                        "key": "metadata.name",
+                        "operator": "In",
+                        "values": [node_name]
+                    }]
+                }]
+            }
+        }
+    })
 }
 
 fn nested_mount_path(root: &str, absolute_path: &str) -> Result<String, String> {
@@ -1278,6 +1294,30 @@ mod tests {
         )
         .unwrap();
         let spec = pod.spec.unwrap();
+        let node_affinity = spec
+            .affinity
+            .as_ref()
+            .and_then(|affinity| affinity.node_affinity.as_ref())
+            .and_then(|affinity| {
+                affinity
+                    .required_during_scheduling_ignored_during_execution
+                    .as_ref()
+            })
+            .expect("node affinity should be configured");
+        let node_requirement = node_affinity.node_selector_terms[0]
+            .match_fields
+            .as_ref()
+            .and_then(|requirements| {
+                requirements
+                    .iter()
+                    .find(|entry| entry.key == "metadata.name")
+            })
+            .expect("node affinity should target the owner node");
+        assert_eq!(node_requirement.operator, "In");
+        assert_eq!(
+            node_requirement.values.as_ref().unwrap(),
+            &vec![config.node_name.clone()]
+        );
         let execution = spec
             .containers
             .iter()
