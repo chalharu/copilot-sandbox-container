@@ -44,6 +44,9 @@ copilot session PVC へまとめるもの:
 `~/.config/control-plane/ssh-auth/authorized_keys` へ切り出して同じ PVC に残し、
 `~/.ssh/authorized_keys` は互換 symlink にとどめることで、delegated exec pod が
 共有する client-side SSH state から切り離します。
+`sshd` 自体は PVC 上の private host key をそのまま読まず、startup ごとに
+`/run/control-plane/ssh-host-keys` へ root-only copy を staging してから使います。
+これで、storage backend が persistent file に group bit を残す場合でも再起動を壊しません。
 
 監査ログの保持件数は `control-plane-env` ConfigMap の
 `CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）で調整し、
