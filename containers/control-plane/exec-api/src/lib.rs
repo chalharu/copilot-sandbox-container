@@ -28,6 +28,9 @@ const HEALTH_SERVICE_NAME: &str = "";
 const EXEC_API_TOKEN_METADATA_KEY: &str = "x-control-plane-exec-token";
 const DEFAULT_EXEC_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 const CHROOT_GIT_HOOKS_DIR: &str = "/usr/local/share/control-plane/hooks/git";
+const CHROOT_EXEC_POLICY_LIBRARY_PATH: &str = "/usr/local/lib/libcontrol_plane_exec_policy.so";
+const CHROOT_EXEC_POLICY_RULES_PATH: &str =
+    "/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml";
 
 pub type DynError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -1226,6 +1229,28 @@ fn resolve_shell(chroot_root: Option<&Path>) -> Option<PathBuf> {
     })
 }
 
+fn managed_shell_environment(remote_home: &Path, chrooted: bool) -> Vec<(&'static str, OsString)> {
+    let mut env = vec![
+        ("PATH", OsString::from(DEFAULT_EXEC_PATH)),
+        ("HOME", remote_home.as_os_str().to_os_string()),
+        (
+            "GIT_CONFIG_GLOBAL",
+            remote_home.join(".gitconfig").into_os_string(),
+        ),
+    ];
+    if chrooted {
+        env.push((
+            "LD_PRELOAD",
+            OsString::from(CHROOT_EXEC_POLICY_LIBRARY_PATH),
+        ));
+        env.push((
+            "CONTROL_PLANE_EXEC_POLICY_RULES_FILE",
+            OsString::from(CHROOT_EXEC_POLICY_RULES_PATH),
+        ));
+    }
+    env
+}
+
 async fn run_shell_command(
     command: &str,
     cwd: &ResolvedCwd,
@@ -1244,13 +1269,10 @@ async fn run_shell_command(
         .arg(command)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .env("PATH", DEFAULT_EXEC_PATH)
-        .env("HOME", remote_home)
-        .env(
-            "GIT_CONFIG_GLOBAL",
-            format!("{}/.gitconfig", remote_home.display()),
-        );
+        .stderr(Stdio::piped());
+    for (key, value) in managed_shell_environment(remote_home, chroot_root.is_some()) {
+        process.env(key, value);
+    }
     process.kill_on_drop(true);
     configure_command_identity(
         &mut process,
@@ -1359,8 +1381,10 @@ fn exit_code_from_status(status: std::process::ExitStatus) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_rootfs_extract_command, build_server_config, ensure_runtime_dirs, normalize_path,
-        render_remote_git_config, resolve_cwd, sync_git_config,
+        CHROOT_EXEC_POLICY_LIBRARY_PATH, CHROOT_EXEC_POLICY_RULES_PATH, DEFAULT_EXEC_PATH,
+        build_rootfs_extract_command, build_server_config, ensure_runtime_dirs,
+        managed_shell_environment, normalize_path, render_remote_git_config, resolve_cwd,
+        sync_git_config,
     };
     use crate::RawServerConfig;
     use std::ffi::OsString;
@@ -1475,6 +1499,40 @@ mod tests {
         assert!(rendered.contains("hooksPath = /usr/local/share/control-plane/hooks/git"));
         assert!(rendered.contains("name = Copilot"));
         assert!(rendered.contains("email = copilot@example.com"));
+    }
+
+    #[test]
+    fn managed_shell_environment_enables_exec_policy_for_chroot() {
+        let env = managed_shell_environment(Path::new("/root"), true);
+        assert_eq!(
+            env,
+            vec![
+                ("PATH", OsString::from(DEFAULT_EXEC_PATH)),
+                ("HOME", OsString::from("/root")),
+                ("GIT_CONFIG_GLOBAL", OsString::from("/root/.gitconfig")),
+                (
+                    "LD_PRELOAD",
+                    OsString::from(CHROOT_EXEC_POLICY_LIBRARY_PATH),
+                ),
+                (
+                    "CONTROL_PLANE_EXEC_POLICY_RULES_FILE",
+                    OsString::from(CHROOT_EXEC_POLICY_RULES_PATH),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn managed_shell_environment_skips_exec_policy_without_chroot() {
+        let env = managed_shell_environment(Path::new("/root"), false);
+        assert_eq!(
+            env,
+            vec![
+                ("PATH", OsString::from(DEFAULT_EXEC_PATH)),
+                ("HOME", OsString::from("/root")),
+                ("GIT_CONFIG_GLOBAL", OsString::from("/root/.gitconfig")),
+            ]
+        );
     }
 
     #[test]
