@@ -31,6 +31,13 @@ const CHROOT_GIT_HOOKS_DIR: &str = "/usr/local/share/control-plane/hooks/git";
 
 pub type DynError = Box<dyn std::error::Error + Send + Sync>;
 
+fn with_context<T, E>(result: Result<T, E>, context: impl FnOnce() -> String) -> Result<T, DynError>
+where
+    E: std::fmt::Display,
+{
+    result.map_err(|error| format!("{}: {error}", context()).into())
+}
+
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
     pub port: u16,
@@ -439,19 +446,49 @@ fn prepare_server_environment(config: &ServerConfig) -> Result<(), DynError> {
         return Ok(());
     };
 
-    fs::create_dir_all(chroot_root)?;
+    with_context(fs::create_dir_all(chroot_root), || {
+        format!("failed to create chroot root {}", chroot_root.display())
+    })?;
     let needs_bootstrap = !bootstrap_marker_path(chroot_root).is_file();
     if needs_bootstrap {
         seed_chroot_root(chroot_root, config)?;
     }
-    ensure_runtime_dirs(chroot_root, &config.remote_home)?;
-    mount_runtime_filesystems(chroot_root)?;
+    ensure_runtime_dirs(chroot_root, &config.remote_home).map_err(|error| {
+        format!(
+            "failed to prepare runtime directories under {}: {error}",
+            chroot_root.display()
+        )
+    })?;
+    mount_runtime_filesystems(chroot_root).map_err(|error| {
+        format!(
+            "failed to mount runtime filesystems under {}: {error}",
+            chroot_root.display()
+        )
+    })?;
     if needs_bootstrap {
-        install_required_packages(chroot_root)?;
-        fs::write(bootstrap_marker_path(chroot_root), b"ready\n")?;
+        install_required_packages(chroot_root).map_err(|error| {
+            format!(
+                "failed to install required packages in {}: {error}",
+                chroot_root.display()
+            )
+        })?;
+        let marker_path = bootstrap_marker_path(chroot_root);
+        with_context(fs::write(&marker_path, b"ready\n"), || {
+            format!("failed to write bootstrap marker {}", marker_path.display())
+        })?;
     }
-    sync_git_hooks_into_chroot(config)?;
-    sync_git_config(config)?;
+    sync_git_hooks_into_chroot(config).map_err(|error| {
+        format!(
+            "failed to sync git hooks into {}: {error}",
+            chroot_root.display()
+        )
+    })?;
+    sync_git_config(config).map_err(|error| {
+        format!(
+            "failed to sync git config into {}: {error}",
+            chroot_root.display()
+        )
+    })?;
     Ok(())
 }
 
@@ -460,8 +497,15 @@ fn bootstrap_marker_path(chroot_root: &Path) -> PathBuf {
 }
 
 fn seed_chroot_root(chroot_root: &Path, config: &ServerConfig) -> Result<(), DynError> {
-    fs::create_dir_all(chroot_root)?;
-    copy_rootfs(chroot_root, config)?;
+    with_context(fs::create_dir_all(chroot_root), || {
+        format!("failed to create bootstrap root {}", chroot_root.display())
+    })?;
+    copy_rootfs(chroot_root, config).map_err(|error| {
+        format!(
+            "failed to seed execution rootfs into {}: {error}",
+            chroot_root.display()
+        )
+    })?;
     Ok(())
 }
 
@@ -480,21 +524,37 @@ fn copy_rootfs(chroot_root: &Path, config: &ServerConfig) -> Result<(), DynError
     }
     archive.stdout(Stdio::piped());
 
-    let mut archive_child = archive.spawn()?;
+    let mut archive_child = with_context(archive.spawn(), || {
+        String::from("failed to start tar archive process")
+    })?;
     let archive_stdout = archive_child
         .stdout
         .take()
         .ok_or_else(|| io::Error::other("missing tar stdout"))?;
-    let extract_status = build_rootfs_extract_command(chroot_root)
-        .stdin(Stdio::from(archive_stdout))
-        .status()?;
-    let archive_status = archive_child.wait()?;
+    let extract_status = with_context(
+        build_rootfs_extract_command(chroot_root)
+            .stdin(Stdio::from(archive_stdout))
+            .status(),
+        || {
+            format!(
+                "failed to extract execution image rootfs into {}",
+                chroot_root.display()
+            )
+        },
+    )?;
+    let archive_status = with_context(archive_child.wait(), || {
+        String::from("failed to wait for tar archive process")
+    })?;
 
     if !archive_status.success() {
-        return Err(io::Error::other("failed to archive execution image rootfs").into());
+        return Err(format!("tar archive process failed with status {archive_status}").into());
     }
     if !extract_status.success() {
-        return Err(io::Error::other("failed to extract execution image rootfs").into());
+        return Err(format!(
+            "tar extract process failed with status {extract_status} while seeding {}",
+            chroot_root.display()
+        )
+        .into());
     }
     Ok(())
 }
@@ -540,35 +600,51 @@ fn excluded_rootfs_paths(config: &ServerConfig) -> Vec<&Path> {
 }
 
 fn ensure_runtime_dirs(chroot_root: &Path, remote_home: &Path) -> Result<(), DynError> {
-    fs::create_dir_all(chroot_root.join("proc"))?;
-    fs::create_dir_all(chroot_root.join("dev"))?;
-    fs::create_dir_all(chroot_root.join("run"))?;
-    fs::create_dir_all(chroot_root.join("tmp"))?;
-    fs::create_dir_all(chroot_root.join("var/tmp"))?;
-    fs::set_permissions(chroot_root.join("tmp"), fs::Permissions::from_mode(0o1777))?;
-    fs::set_permissions(
-        chroot_root.join("var/tmp"),
-        fs::Permissions::from_mode(0o1777),
-    )?;
+    for relative in ["proc", "dev", "run", "tmp", "var/tmp"] {
+        let path = chroot_root.join(relative);
+        with_context(fs::create_dir_all(&path), || {
+            format!("failed to create runtime directory {}", path.display())
+        })?;
+    }
+    for relative in ["tmp", "var/tmp"] {
+        let path = chroot_root.join(relative);
+        with_context(
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o1777)),
+            || format!("failed to set sticky permissions on {}", path.display()),
+        )?;
+    }
 
     let home_dir = nested_absolute_path(chroot_root, remote_home)?;
     let config_dir = home_dir.join(".config");
-    fs::create_dir_all(&config_dir)?;
-    fs::set_permissions(&home_dir, fs::Permissions::from_mode(0o700))?;
-    fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o700))?;
+    with_context(fs::create_dir_all(&config_dir), || {
+        format!(
+            "failed to create remote config directory {}",
+            config_dir.display()
+        )
+    })?;
+    with_context(
+        fs::set_permissions(&home_dir, fs::Permissions::from_mode(0o700)),
+        || format!("failed to secure remote home {}", home_dir.display()),
+    )?;
+    with_context(
+        fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o700)),
+        || {
+            format!(
+                "failed to secure remote config directory {}",
+                config_dir.display()
+            )
+        },
+    )?;
     Ok(())
 }
 
 fn mount_runtime_filesystems(chroot_root: &Path) -> Result<(), DynError> {
-    bind_mount_if_missing(
-        Path::new("/dev"),
-        &nested_absolute_path(chroot_root, Path::new("/dev"))?,
-    )?;
-    mount_proc_if_missing(&nested_absolute_path(chroot_root, Path::new("/proc"))?)?;
-    mount_tmpfs_if_missing(
-        &nested_absolute_path(chroot_root, Path::new("/run"))?,
-        "mode=0755",
-    )?;
+    let dev_target = nested_absolute_path(chroot_root, Path::new("/dev"))?;
+    let proc_target = nested_absolute_path(chroot_root, Path::new("/proc"))?;
+    let run_target = nested_absolute_path(chroot_root, Path::new("/run"))?;
+    bind_mount_if_missing(Path::new("/dev"), &dev_target)?;
+    mount_proc_if_missing(&proc_target)?;
+    mount_tmpfs_if_missing(&run_target, "mode=0755")?;
     Ok(())
 }
 
@@ -627,12 +703,21 @@ fn bind_mount_if_missing(source: &Path, target: &Path) -> Result<(), DynError> {
         return Ok(());
     }
 
-    mount(
-        Some(source),
-        target,
-        Option::<&str>::None,
-        MsFlags::MS_BIND | MsFlags::MS_REC,
-        Option::<&str>::None,
+    with_context(
+        mount(
+            Some(source),
+            target,
+            Option::<&str>::None,
+            MsFlags::MS_BIND | MsFlags::MS_REC,
+            Option::<&str>::None,
+        ),
+        || {
+            format!(
+                "failed to bind-mount {} onto {}",
+                source.display(),
+                target.display()
+            )
+        },
     )?;
     Ok(())
 }
@@ -642,12 +727,15 @@ fn mount_proc_if_missing(target: &Path) -> Result<(), DynError> {
         return Ok(());
     }
 
-    mount(
-        Some("proc"),
-        target,
-        Some("proc"),
-        MsFlags::empty(),
-        Option::<&str>::None,
+    with_context(
+        mount(
+            Some("proc"),
+            target,
+            Some("proc"),
+            MsFlags::empty(),
+            Option::<&str>::None,
+        ),
+        || format!("failed to mount proc at {}", target.display()),
     )?;
     Ok(())
 }
@@ -657,12 +745,20 @@ fn mount_tmpfs_if_missing(target: &Path, options: &str) -> Result<(), DynError> 
         return Ok(());
     }
 
-    mount(
-        Some("tmpfs"),
-        target,
-        Some("tmpfs"),
-        MsFlags::empty(),
-        Some(options),
+    with_context(
+        mount(
+            Some("tmpfs"),
+            target,
+            Some("tmpfs"),
+            MsFlags::empty(),
+            Some(options),
+        ),
+        || {
+            format!(
+                "failed to mount tmpfs at {} with options {options}",
+                target.display()
+            )
+        },
     )?;
     Ok(())
 }
@@ -758,12 +854,31 @@ fn run_in_chroot(
     command.stdin(Stdio::null());
     command.stdout(Stdio::inherit());
     command.stderr(Stdio::inherit());
-    configure_chroot_command(&mut command, chroot_root, Path::new("/"), None, None)?;
-    let status = command.status()?;
+    configure_chroot_command(&mut command, chroot_root, Path::new("/"), None, None).map_err(
+        |error| {
+            format!(
+                "failed to configure chroot command {} in {}: {error}",
+                program.display(),
+                chroot_root.display()
+            )
+        },
+    )?;
+    let status = with_context(command.status(), || {
+        format!(
+            "failed to execute {} inside chroot {}",
+            program.display(),
+            chroot_root.display()
+        )
+    })?;
     if status.success() {
         Ok(())
     } else {
-        Err(io::Error::other(format!("command {} failed in chroot", program.display())).into())
+        Err(format!(
+            "command {} failed in chroot {} with status {status}",
+            program.display(),
+            chroot_root.display()
+        )
+        .into())
     }
 }
 
