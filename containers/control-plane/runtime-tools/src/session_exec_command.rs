@@ -1111,6 +1111,11 @@ fn build_exec_pod(
                         // Kubernetes runtime-default seccomp denies mount syscalls even with
                         // CAP_SYS_ADMIN, so the exec pod needs an unconfined profile here.
                         "type": "Unconfined"
+                    },
+                    "appArmorProfile": {
+                        // AppArmor can also deny mount syscalls with EACCES, so the exec pod
+                        // opts out while it prepares the chroot runtime filesystems.
+                        "type": "Unconfined"
                     }
                 },
                 "volumeMounts": volume_mounts,
@@ -1415,6 +1420,12 @@ mod tests {
             .and_then(|context| context.seccomp_profile.as_ref())
             .map(|profile| profile.type_.as_str())
             .unwrap();
+        let execution_apparmor = execution
+            .security_context
+            .as_ref()
+            .and_then(|context| context.app_armor_profile.as_ref())
+            .map(|profile| profile.type_.as_str())
+            .unwrap();
         assert!(execution_capabilities.contains(&"CHOWN".to_string()));
         assert!(execution_capabilities.contains(&"DAC_OVERRIDE".to_string()));
         assert!(execution_capabilities.contains(&"SETGID".to_string()));
@@ -1422,6 +1433,7 @@ mod tests {
         assert!(execution_capabilities.contains(&"SYS_ADMIN".to_string()));
         assert!(execution_capabilities.contains(&"SYS_CHROOT".to_string()));
         assert_eq!(execution_seccomp, "Unconfined");
+        assert_eq!(execution_apparmor, "Unconfined");
         assert!(mounts.iter().any(|mount| mount.name == "copilot-session"
             && mount.mount_path == "/environment/root/root/.config/gh"));
         let init_container = spec
