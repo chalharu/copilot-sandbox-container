@@ -16,6 +16,8 @@ workdir="$(mktemp -d)"
 ssh_key="${workdir}/id_ed25519"
 kubeconfig_path="${workdir}/kubeconfig"
 rust_hook_image="${CONTROL_PLANE_TEST_RUST_HOOK_IMAGE:-docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895}"
+fast_execution_image="${CONTROL_PLANE_TEST_FAST_EXECUTION_IMAGE:-docker.io/library/ubuntu:24.04}"
+fast_execution_image_pull_policy="${CONTROL_PLANE_TEST_FAST_EXECUTION_IMAGE_PULL_POLICY:-IfNotPresent}"
 port_forward_pid=""
 created_cluster=0
 kind_uses_sudo=0
@@ -522,8 +524,8 @@ data:
   CONTROL_PLANE_WORKSPACE_PVC: control-plane-workspace-pvc
   CONTROL_PLANE_WORKSPACE_SUBPATH: workspace
   CONTROL_PLANE_FAST_EXECUTION_ENABLED: "1"
-  CONTROL_PLANE_FAST_EXECUTION_IMAGE: ${control_plane_image}
-  CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: Never
+  CONTROL_PLANE_FAST_EXECUTION_IMAGE: ${fast_execution_image}
+  CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: ${fast_execution_image_pull_policy}
   CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ${control_plane_image}
   CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: Never
   CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 300s
@@ -866,7 +868,7 @@ test "\${LANG}" = "C.UTF-8"
 test "\${LC_CTYPE}" = "C.UTF-8"
 test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
 test "\${CONTROL_PLANE_FAST_EXECUTION_ENABLED}" = "1"
-test "\${CONTROL_PLANE_FAST_EXECUTION_IMAGE}" = "${control_plane_image}"
+test "\${CONTROL_PLANE_FAST_EXECUTION_IMAGE}" = "${fast_execution_image}"
 test "\${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE}" = "${control_plane_image}"
 test "\${CONTROL_PLANE_COPILOT_SESSION_PVC}" = "control-plane-copilot-session-pvc"
 test "\${CONTROL_PLANE_RUST_HOOK_IMAGE}" = "${rust_hook_image}"

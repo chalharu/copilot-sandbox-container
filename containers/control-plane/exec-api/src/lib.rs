@@ -1,4 +1,4 @@
-use nix::sys::stat::{Mode, SFlag, makedev, mknod};
+use nix::mount::{MsFlags, mount};
 use nix::unistd::{Gid, Uid, chdir, chown, chroot, setgid, setuid};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -440,14 +440,16 @@ fn prepare_server_environment(config: &ServerConfig) -> Result<(), DynError> {
     };
 
     fs::create_dir_all(chroot_root)?;
-    if !bootstrap_marker_path(chroot_root).is_file() {
+    let needs_bootstrap = !bootstrap_marker_path(chroot_root).is_file();
+    if needs_bootstrap {
         seed_chroot_root(chroot_root, config)?;
-        ensure_runtime_dirs(chroot_root, &config.remote_home)?;
-        ensure_device_nodes(chroot_root)?;
+    }
+    ensure_runtime_dirs(chroot_root, &config.remote_home)?;
+    mount_runtime_filesystems(chroot_root)?;
+    if needs_bootstrap {
         install_required_packages(chroot_root)?;
         fs::write(bootstrap_marker_path(chroot_root), b"ready\n")?;
     }
-    ensure_runtime_dirs(chroot_root, &config.remote_home)?;
     sync_git_hooks_into_chroot(config)?;
     sync_git_config(config)?;
     Ok(())
@@ -473,7 +475,9 @@ fn copy_rootfs(chroot_root: &Path, config: &ServerConfig) -> Result<(), DynError
             strip_leading_slash(path).display()
         ));
     }
-    archive.arg(".");
+    for entry in rootfs_archive_paths()? {
+        archive.arg(entry);
+    }
     archive.stdout(Stdio::piped());
 
     let mut archive_child = archive.spawn()?;
@@ -481,11 +485,7 @@ fn copy_rootfs(chroot_root: &Path, config: &ServerConfig) -> Result<(), DynError
         .stdout
         .take()
         .ok_or_else(|| io::Error::other("missing tar stdout"))?;
-    let extract_status = StdCommand::new("tar")
-        .arg("xpf")
-        .arg("-")
-        .arg("-C")
-        .arg(chroot_root)
+    let extract_status = build_rootfs_extract_command(chroot_root)
         .stdin(Stdio::from(archive_stdout))
         .status()?;
     let archive_status = archive_child.wait()?;
@@ -497,6 +497,30 @@ fn copy_rootfs(chroot_root: &Path, config: &ServerConfig) -> Result<(), DynError
         return Err(io::Error::other("failed to extract execution image rootfs").into());
     }
     Ok(())
+}
+
+fn rootfs_archive_paths() -> Result<Vec<PathBuf>, DynError> {
+    let mut entries = fs::read_dir("/")?
+        .map(|entry| entry.map(|value| Path::new(".").join(value.file_name())))
+        .collect::<Result<Vec<_>, _>>()?;
+    entries.sort();
+    Ok(entries)
+}
+
+fn build_rootfs_extract_command(chroot_root: &Path) -> StdCommand {
+    let mut command = StdCommand::new("tar");
+    command
+        .arg("xmf")
+        .arg("-")
+        // PVC-backed paths can reject restoring source owners, modes, or mtimes.
+        // The chroot only needs a runnable filesystem; required runtime paths are
+        // normalized explicitly after extraction.
+        .arg("--no-same-owner")
+        .arg("--no-same-permissions")
+        .arg("--no-overwrite-dir")
+        .arg("-C")
+        .arg(chroot_root);
+    command
 }
 
 fn excluded_rootfs_paths(config: &ServerConfig) -> Vec<&Path> {
@@ -518,6 +542,7 @@ fn excluded_rootfs_paths(config: &ServerConfig) -> Vec<&Path> {
 fn ensure_runtime_dirs(chroot_root: &Path, remote_home: &Path) -> Result<(), DynError> {
     fs::create_dir_all(chroot_root.join("proc"))?;
     fs::create_dir_all(chroot_root.join("dev"))?;
+    fs::create_dir_all(chroot_root.join("run"))?;
     fs::create_dir_all(chroot_root.join("tmp"))?;
     fs::create_dir_all(chroot_root.join("var/tmp"))?;
     fs::set_permissions(chroot_root.join("tmp"), fs::Permissions::from_mode(0o1777))?;
@@ -534,47 +559,110 @@ fn ensure_runtime_dirs(chroot_root: &Path, remote_home: &Path) -> Result<(), Dyn
     Ok(())
 }
 
-fn ensure_device_nodes(chroot_root: &Path) -> Result<(), DynError> {
-    create_device_node(
-        &nested_absolute_path(chroot_root, Path::new("/dev/null"))?,
-        1,
-        3,
+fn mount_runtime_filesystems(chroot_root: &Path) -> Result<(), DynError> {
+    bind_mount_if_missing(
+        Path::new("/dev"),
+        &nested_absolute_path(chroot_root, Path::new("/dev"))?,
     )?;
-    create_device_node(
-        &nested_absolute_path(chroot_root, Path::new("/dev/zero"))?,
-        1,
-        5,
-    )?;
-    create_device_node(
-        &nested_absolute_path(chroot_root, Path::new("/dev/random"))?,
-        1,
-        8,
-    )?;
-    create_device_node(
-        &nested_absolute_path(chroot_root, Path::new("/dev/urandom"))?,
-        1,
-        9,
-    )?;
-    create_device_node(
-        &nested_absolute_path(chroot_root, Path::new("/dev/tty"))?,
-        5,
-        0,
+    mount_proc_if_missing(&nested_absolute_path(chroot_root, Path::new("/proc"))?)?;
+    mount_tmpfs_if_missing(
+        &nested_absolute_path(chroot_root, Path::new("/run"))?,
+        "mode=0755",
     )?;
     Ok(())
 }
 
-fn create_device_node(path: &Path, major: u64, minor: u64) -> Result<(), DynError> {
-    if path.exists() {
+fn mountinfo_contains(target: &Path) -> Result<bool, DynError> {
+    let target = target
+        .to_str()
+        .ok_or_else(|| io::Error::other("mount target must be valid UTF-8"))?;
+    let mountinfo = fs::read_to_string("/proc/self/mountinfo")?;
+    Ok(mountinfo
+        .lines()
+        .filter_map(parse_mountinfo_mount_point)
+        .any(|mount_point| mount_point == target))
+}
+
+fn parse_mountinfo_mount_point(line: &str) -> Option<String> {
+    let mount_point = line.split(" ").nth(4)?;
+    decode_mountinfo_field(mount_point).ok()
+}
+
+fn decode_mountinfo_field(field: &str) -> io::Result<String> {
+    let bytes = field.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if let Some(value) = parse_mountinfo_escape(bytes, index)? {
+            decoded.push(value);
+            index += 4;
+            continue;
+        }
+
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+
+    String::from_utf8(decoded).map_err(io::Error::other)
+}
+
+fn parse_mountinfo_escape(bytes: &[u8], index: usize) -> io::Result<Option<u8>> {
+    if bytes.get(index) != Some(&b'\\') || index + 3 >= bytes.len() {
+        return Ok(None);
+    }
+
+    let octal = &bytes[index + 1..index + 4];
+    if !octal.iter().all(|value| matches!(value, b'0'..=b'7')) {
+        return Ok(None);
+    }
+
+    let octal = std::str::from_utf8(octal).map_err(io::Error::other)?;
+    let value = u8::from_str_radix(octal, 8).map_err(io::Error::other)?;
+    Ok(Some(value))
+}
+
+fn bind_mount_if_missing(source: &Path, target: &Path) -> Result<(), DynError> {
+    if mountinfo_contains(target)? {
         return Ok(());
     }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+
+    mount(
+        Some(source),
+        target,
+        Option::<&str>::None,
+        MsFlags::MS_BIND | MsFlags::MS_REC,
+        Option::<&str>::None,
+    )?;
+    Ok(())
+}
+
+fn mount_proc_if_missing(target: &Path) -> Result<(), DynError> {
+    if mountinfo_contains(target)? {
+        return Ok(());
     }
-    mknod(
-        path,
-        SFlag::S_IFCHR,
-        Mode::from_bits_truncate(0o666),
-        makedev(major, minor),
+
+    mount(
+        Some("proc"),
+        target,
+        Some("proc"),
+        MsFlags::empty(),
+        Option::<&str>::None,
+    )?;
+    Ok(())
+}
+
+fn mount_tmpfs_if_missing(target: &Path, options: &str) -> Result<(), DynError> {
+    if mountinfo_contains(target)? {
+        return Ok(());
+    }
+
+    mount(
+        Some("tmpfs"),
+        target,
+        Some("tmpfs"),
+        MsFlags::empty(),
+        Some(options),
     )?;
     Ok(())
 }
@@ -1104,8 +1192,12 @@ fn exit_code_from_status(status: std::process::ExitStatus) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_server_config, normalize_path, render_remote_git_config, resolve_cwd};
+    use super::{
+        build_rootfs_extract_command, build_server_config, ensure_runtime_dirs, normalize_path,
+        render_remote_git_config, resolve_cwd,
+    };
     use crate::RawServerConfig;
+    use std::ffi::OsString;
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
 
@@ -1216,5 +1308,44 @@ mod tests {
         assert!(rendered.contains("hooksPath = /usr/local/share/control-plane/hooks/git"));
         assert!(rendered.contains("name = Copilot"));
         assert!(rendered.contains("email = copilot@example.com"));
+    }
+
+    #[test]
+    fn rootfs_extract_command_skips_preserving_host_metadata() {
+        let command = build_rootfs_extract_command(Path::new("/environment/root"));
+        let args = command.get_args().map(OsString::from).collect::<Vec<_>>();
+
+        assert_eq!(
+            args,
+            vec![
+                OsString::from("xmf"),
+                OsString::from("-"),
+                OsString::from("--no-same-owner"),
+                OsString::from("--no-same-permissions"),
+                OsString::from("--no-overwrite-dir"),
+                OsString::from("-C"),
+                OsString::from("/environment/root"),
+            ]
+        );
+    }
+
+    #[test]
+    fn ensure_runtime_dirs_creates_run_directory() {
+        let tempdir = TempDir::new().unwrap();
+        ensure_runtime_dirs(tempdir.path(), Path::new("/root")).unwrap();
+
+        assert!(tempdir.path().join("run").is_dir());
+        assert!(tempdir.path().join("tmp").is_dir());
+        assert!(tempdir.path().join("var/tmp").is_dir());
+    }
+
+    #[test]
+    fn parse_mountinfo_mount_point_decodes_escaped_paths() {
+        let line = "29 23 0:26 / /environment/root\\040with\\040spaces rw,nosuid - tmpfs tmpfs rw";
+
+        assert_eq!(
+            super::parse_mountinfo_mount_point(line).as_deref(),
+            Some("/environment/root with spaces")
+        );
     }
 }

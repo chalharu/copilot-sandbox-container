@@ -1103,7 +1103,9 @@ fn build_exec_pod(
                     "allowPrivilegeEscalation": false,
                     "capabilities": {
                         "drop": ["ALL"],
-                        "add": ["CHOWN", "DAC_OVERRIDE", "MKNOD", "SETGID", "SETUID", "SYS_CHROOT"]
+                        // control-plane-exec-api bind-mounts /dev, mounts proc, and mounts
+                        // tmpfs /run inside the chroot before it serves delegated commands.
+                        "add": ["CHOWN", "DAC_OVERRIDE", "SETGID", "SETUID", "SYS_ADMIN", "SYS_CHROOT"]
                     },
                     "seccompProfile": {
                         "type": "RuntimeDefault"
@@ -1399,6 +1401,18 @@ mod tests {
                 && mount.mount_path == "/control-plane/bin"
                 && mount.read_only == Some(true)
         }));
+        let execution_capabilities = execution
+            .security_context
+            .as_ref()
+            .and_then(|context| context.capabilities.as_ref())
+            .and_then(|capabilities| capabilities.add.as_ref())
+            .unwrap();
+        assert!(execution_capabilities.contains(&"CHOWN".to_string()));
+        assert!(execution_capabilities.contains(&"DAC_OVERRIDE".to_string()));
+        assert!(execution_capabilities.contains(&"SETGID".to_string()));
+        assert!(execution_capabilities.contains(&"SETUID".to_string()));
+        assert!(execution_capabilities.contains(&"SYS_ADMIN".to_string()));
+        assert!(execution_capabilities.contains(&"SYS_CHROOT".to_string()));
         assert!(mounts.iter().any(|mount| mount.name == "copilot-session"
             && mount.mount_path == "/environment/root/root/.config/gh"));
         let init_container = spec
