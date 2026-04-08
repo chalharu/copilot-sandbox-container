@@ -106,6 +106,13 @@ struct ResolvedCwd {
     logical: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RemoteHomePaths {
+    home_dir: PathBuf,
+    config_dir: PathBuf,
+    gitconfig_path: PathBuf,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TokenValidationError {
     MissingOrInvalid,
@@ -614,27 +621,7 @@ fn ensure_runtime_dirs(chroot_root: &Path, remote_home: &Path) -> Result<(), Dyn
         )?;
     }
 
-    let home_dir = nested_absolute_path(chroot_root, remote_home)?;
-    let config_dir = home_dir.join(".config");
-    with_context(fs::create_dir_all(&config_dir), || {
-        format!(
-            "failed to create remote config directory {}",
-            config_dir.display()
-        )
-    })?;
-    with_context(
-        fs::set_permissions(&home_dir, fs::Permissions::from_mode(0o700)),
-        || format!("failed to secure remote home {}", home_dir.display()),
-    )?;
-    with_context(
-        fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o700)),
-        || {
-            format!(
-                "failed to secure remote config directory {}",
-                config_dir.display()
-            )
-        },
-    )?;
+    ensure_remote_home_dirs(&resolve_remote_home_paths(chroot_root, remote_home)?)?;
     Ok(())
 }
 
@@ -944,31 +931,95 @@ fn sync_git_config(config: &ServerConfig) -> Result<(), DynError> {
         return Ok(());
     };
 
-    let home_dir = nested_absolute_path(chroot_root, &config.remote_home)?;
+    let paths = resolve_remote_home_paths(chroot_root, &config.remote_home)?;
+    ensure_remote_home_dirs(&paths)?;
+    prepare_remote_home_for_update(&paths)?;
+    with_context(
+        fs::write(
+            &paths.gitconfig_path,
+            render_remote_git_config(&config.git_user_name, &config.git_user_email),
+        ),
+        || {
+            format!(
+                "failed to write remote git config {}",
+                paths.gitconfig_path.display()
+            )
+        },
+    )?;
+    set_path_mode(&paths.gitconfig_path, 0o600, "remote git config")?;
+    assign_remote_home_owner(&paths, config.run_as_uid, config.run_as_gid)?;
+    Ok(())
+}
+
+fn resolve_remote_home_paths(
+    chroot_root: &Path,
+    remote_home: &Path,
+) -> Result<RemoteHomePaths, DynError> {
+    let home_dir = nested_absolute_path(chroot_root, remote_home)?;
     let config_dir = home_dir.join(".config");
     let gitconfig_path = home_dir.join(".gitconfig");
-    fs::create_dir_all(&config_dir)?;
-    fs::write(
-        &gitconfig_path,
-        render_remote_git_config(&config.git_user_name, &config.git_user_email),
+    Ok(RemoteHomePaths {
+        home_dir,
+        config_dir,
+        gitconfig_path,
+    })
+}
+
+fn ensure_remote_home_dirs(paths: &RemoteHomePaths) -> Result<(), DynError> {
+    with_context(fs::create_dir_all(&paths.config_dir), || {
+        format!(
+            "failed to create remote config directory {}",
+            paths.config_dir.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn prepare_remote_home_for_update(paths: &RemoteHomePaths) -> Result<(), DynError> {
+    for path in [&paths.home_dir, &paths.config_dir] {
+        set_path_owner(path, 0, 0, "remote home path")?;
+    }
+    if paths.gitconfig_path.exists() {
+        set_path_owner(&paths.gitconfig_path, 0, 0, "remote git config")?;
+    }
+    set_path_mode(&paths.home_dir, 0o700, "remote home")?;
+    set_path_mode(&paths.config_dir, 0o700, "remote config directory")?;
+    Ok(())
+}
+
+fn assign_remote_home_owner(paths: &RemoteHomePaths, uid: u32, gid: u32) -> Result<(), DynError> {
+    for (path, description) in [
+        (&paths.home_dir, "remote home"),
+        (&paths.config_dir, "remote config directory"),
+        (&paths.gitconfig_path, "remote git config"),
+    ] {
+        set_path_owner(path, uid, gid, description)?;
+    }
+    Ok(())
+}
+
+fn set_path_owner(path: &Path, uid: u32, gid: u32, description: &str) -> Result<(), DynError> {
+    with_context(
+        chown(path, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid))),
+        || {
+            format!(
+                "failed to set ownership on {description} {}",
+                path.display()
+            )
+        },
     )?;
-    fs::set_permissions(&home_dir, fs::Permissions::from_mode(0o700))?;
-    fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o700))?;
-    fs::set_permissions(&gitconfig_path, fs::Permissions::from_mode(0o600))?;
-    chown(
-        &home_dir,
-        Some(Uid::from_raw(config.run_as_uid)),
-        Some(Gid::from_raw(config.run_as_gid)),
-    )?;
-    chown(
-        &config_dir,
-        Some(Uid::from_raw(config.run_as_uid)),
-        Some(Gid::from_raw(config.run_as_gid)),
-    )?;
-    chown(
-        &gitconfig_path,
-        Some(Uid::from_raw(config.run_as_uid)),
-        Some(Gid::from_raw(config.run_as_gid)),
+    Ok(())
+}
+
+fn set_path_mode(path: &Path, mode: u32, description: &str) -> Result<(), DynError> {
+    with_context(
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)),
+        || {
+            format!(
+                "failed to set mode {mode:o} on {description} {}",
+                path.display()
+            )
+        },
     )?;
     Ok(())
 }
@@ -1309,10 +1360,11 @@ fn exit_code_from_status(status: std::process::ExitStatus) -> i32 {
 mod tests {
     use super::{
         build_rootfs_extract_command, build_server_config, ensure_runtime_dirs, normalize_path,
-        render_remote_git_config, resolve_cwd,
+        render_remote_git_config, resolve_cwd, sync_git_config,
     };
     use crate::RawServerConfig;
     use std::ffi::OsString;
+    use std::fs;
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
 
@@ -1462,5 +1514,70 @@ mod tests {
             super::parse_mountinfo_mount_point(line).as_deref(),
             Some("/environment/root with spaces")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_git_config_handles_reused_runtime_owned_home() {
+        use nix::unistd::{Gid, Uid, chown};
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        if !Uid::effective().is_root() {
+            return;
+        }
+
+        let workspace = TempDir::new().unwrap();
+        let chroot_root = TempDir::new().unwrap();
+        let config = build_server_config(RawServerConfig {
+            port: "8080",
+            workspace: workspace.path(),
+            chroot_root: Some(chroot_root.path()),
+            environment_mount: None,
+            git_hooks_source: None,
+            remote_home: Path::new("/root"),
+            git_user_name: Some(String::from("Copilot")),
+            git_user_email: Some(String::from("copilot@example.com")),
+            exec_api_token: String::from("token"),
+            timeout_sec: "3600",
+            run_as_uid: "1000",
+            run_as_gid: "1000",
+        })
+        .unwrap();
+        let home_dir = chroot_root.path().join("root");
+        let config_dir = home_dir.join(".config");
+        let gitconfig_path = home_dir.join(".gitconfig");
+
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(&gitconfig_path, "stale\n").unwrap();
+        chown(
+            &home_dir,
+            Some(Uid::from_raw(1000)),
+            Some(Gid::from_raw(1000)),
+        )
+        .unwrap();
+        chown(
+            &config_dir,
+            Some(Uid::from_raw(1000)),
+            Some(Gid::from_raw(1000)),
+        )
+        .unwrap();
+        chown(
+            &gitconfig_path,
+            Some(Uid::from_raw(1000)),
+            Some(Gid::from_raw(1000)),
+        )
+        .unwrap();
+
+        sync_git_config(&config).unwrap();
+
+        let home_metadata = fs::metadata(&home_dir).unwrap();
+        let config_metadata = fs::metadata(&config_dir).unwrap();
+        let gitconfig_metadata = fs::metadata(&gitconfig_path).unwrap();
+        assert_eq!(home_metadata.uid(), 1000);
+        assert_eq!(config_metadata.uid(), 1000);
+        assert_eq!(gitconfig_metadata.uid(), 1000);
+        assert_eq!(home_metadata.permissions().mode() & 0o777, 0o700);
+        assert_eq!(config_metadata.permissions().mode() & 0o777, 0o700);
+        assert_eq!(gitconfig_metadata.permissions().mode() & 0o777, 0o600);
     }
 }
