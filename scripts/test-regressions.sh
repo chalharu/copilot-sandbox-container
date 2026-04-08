@@ -209,6 +209,43 @@ if [[ "${runtime_env_status}" -ne 0 ]]; then
 fi
 grep -qx 'runtime-env-no-sccache-ok' <<<"${runtime_env_output}"
 
+printf '%s\n' 'regression-test: verifying runtime env preserves fast execution startup script' >&2
+mkdir -p \
+  "${workdir}/runtime-fast-exec-env-state/copilot" \
+  "${workdir}/runtime-fast-exec-env-state/gh" \
+  "${workdir}/runtime-fast-exec-env-state/ssh" \
+  "${workdir}/runtime-fast-exec-env-state/ssh-host-keys" \
+  "${workdir}/runtime-fast-exec-env-state/workspace"
+
+set +e
+runtime_fast_exec_env_output="$("${container_bin}" run --rm \
+  --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
+  "${startup_caps[@]}" \
+  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForRegressionOnly control-plane-regression' \
+  -e 'CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT=printf runtime-startup-ok' \
+  -v "${workdir}/runtime-fast-exec-env-state/copilot:/home/copilot/.copilot" \
+  -v "${workdir}/runtime-fast-exec-env-state/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/runtime-fast-exec-env-state/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/runtime-fast-exec-env-state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/runtime-fast-exec-env-state/workspace:/workspace" \
+  "${control_plane_image}" \
+  bash -lc "set -euo pipefail
+su -l -s /bin/bash copilot -c 'set -euo pipefail
+runtime_env=\"\$HOME/.config/control-plane/runtime.env\"
+grep -q \"^CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT=\" \"\$runtime_env\"
+[[ \"\${CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT:-}\" == \"printf runtime-startup-ok\" ]]
+printf \"%s\n\" runtime-fast-exec-startup-ok'" 2>&1)"
+runtime_fast_exec_env_status=$?
+set -e
+
+if [[ "${runtime_fast_exec_env_status}" -ne 0 ]]; then
+  printf 'Expected control-plane startup to preserve fast execution startup script in runtime.env\n' >&2
+  printf '%s\n' "${runtime_fast_exec_env_output}" >&2
+  exit 1
+fi
+grep -qx 'runtime-fast-exec-startup-ok' <<<"${runtime_fast_exec_env_output}"
+
 printf '%s\n' 'regression-test: verifying startup omits legacy registry auth surfaces' >&2
 mkdir -p \
   "${workdir}/runtime-legacy-surface-state/copilot" \
