@@ -140,6 +140,8 @@ fi
 
 assert_block_contains "${integration_block}" 'path: /tmp/control-plane-buildx-cache-${{ matrix.image_arch }}' 'integration job block'
 assert_block_contains "${integration_block}" 'CONTROL_PLANE_BUILDX_CACHE_ROOT: /tmp/control-plane-buildx-cache-${{ matrix.image_arch }}' 'integration job block'
+assert_block_contains "${integration_block}" 'docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd' 'integration job block'
+assert_block_contains "${integration_block}" 'driver: docker-container' 'integration job block'
 assert_block_contains "${integration_smoke_block}" 'Load integration images' 'integration-smoke job block'
 assert_block_contains "${integration_smoke_block}" 'docker load -i downloaded-images/control-plane-images.tar' 'integration-smoke job block'
 assert_block_contains "${integration_regressions_block}" 'runs-on: ubuntu-24.04' 'integration-regressions job block'
