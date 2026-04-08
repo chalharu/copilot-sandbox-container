@@ -1520,7 +1520,9 @@ mod tests {
         assert!(env.iter().any(|value| value.name
             == "CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT"
             && value.value.as_deref()
-                == Some("printf \"fast-exec-startup\\n\" > /workspace/fast-exec-startup-marker.txt")));
+                == Some(
+                    "printf \"fast-exec-startup\\n\" > /workspace/fast-exec-startup-marker.txt"
+                )));
         let volumes = spec.volumes.as_ref().unwrap();
         assert!(volumes.iter().any(|volume| volume.name == "environment"));
         assert!(volumes.iter().any(|volume| volume.name == "runtime-bin"));
