@@ -8,7 +8,7 @@ if [[ -f "${runtime_config_file}" ]]; then
 fi
 
 transfer_root="${CONTROL_PLANE_JOB_TRANSFER_ROOT:-${TMPDIR:-/tmp}/job-transfers}"
-authorized_keys_path="${HOME:-/home/${USER:-copilot}}/.ssh/authorized_keys"
+authorized_keys_path="${HOME:-/home/${USER:-copilot}}/.config/control-plane/ssh-auth/authorized_keys"
 
 usage() {
   cat <<'USAGE'
@@ -30,13 +30,21 @@ manifest_path_for() {
 
 remove_authorized_key_block() {
   local marker="$1"
-  local lock_file="${authorized_keys_path}.lock"
+  local real_authorized_keys_path=""
+  local lock_file=""
+  local real_authorized_keys_is_mount=0
   local tmp
 
   [[ -n "${marker}" ]] || return 0
   [[ -f "${authorized_keys_path}" ]] || return 0
+  real_authorized_keys_path="$(readlink -f -- "${authorized_keys_path}")" || return 0
+  lock_file="${real_authorized_keys_path}.lock"
+  if [[ -r /proc/self/mountinfo ]] \
+    && awk -v target="${real_authorized_keys_path}" '$5 == target { found = 1 } END { exit(found ? 0 : 1) }' /proc/self/mountinfo; then
+    real_authorized_keys_is_mount=1
+  fi
 
-  tmp="$(mktemp "${authorized_keys_path}.XXXXXX")"
+  tmp="$(mktemp "${real_authorized_keys_path}.XXXXXX")"
   (
     flock -x 9
     awk -v marker="${marker}" '
@@ -44,10 +52,15 @@ remove_authorized_key_block() {
       $0 == "# BEGIN " marker { skipping = 1; next }
       $0 == "# END " marker { skipping = 0; next }
       skipping == 0 { print }
-    ' "${authorized_keys_path}" > "${tmp}"
-    mv "${tmp}" "${authorized_keys_path}"
-    chmod 600 "${authorized_keys_path}"
+    ' "${real_authorized_keys_path}" > "${tmp}"
+    if [[ "${real_authorized_keys_is_mount}" -eq 1 ]]; then
+      cat "${tmp}" > "${real_authorized_keys_path}"
+    else
+      mv "${tmp}" "${real_authorized_keys_path}"
+    fi
+    chmod 600 "${real_authorized_keys_path}"
   ) 9>"${lock_file}"
+  rm -f "${tmp}"
 }
 
 delete_secret_object() {

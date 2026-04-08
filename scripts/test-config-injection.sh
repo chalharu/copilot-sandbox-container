@@ -91,6 +91,7 @@ github.com:
   user: secret-bot
 EOF
 printf '%s' 'unused-secret-fallback-token' > "${workdir}/file-backed/auth/gh-github-token"
+printf '%s\n' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILegacyConfigInjectionKey legacy-config-injection' > "${workdir}/file-backed/state/ssh/authorized_keys"
 printf '%s\n' legacy-rsa-private > "${workdir}/file-backed/state/ssh-host-keys/ssh_host_rsa_key"
 printf '%s\n' legacy-rsa-public > "${workdir}/file-backed/state/ssh-host-keys/ssh_host_rsa_key.pub"
 printf '%s\n' legacy-ecdsa-private > "${workdir}/file-backed/state/ssh-host-keys/ssh_host_ecdsa_key"
@@ -135,8 +136,15 @@ test "$(stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519
 ! test -e /var/lib/control-plane/ssh-host-keys/ssh_host_rsa_key.pub
 ! test -e /var/lib/control-plane/ssh-host-keys/ssh_host_ecdsa_key.pub
 grep -Fxq 'HostKey /etc/ssh/ssh_host_ed25519_key' /etc/ssh/sshd_config
+grep -Fxq 'AuthorizedKeysFile .config/control-plane/ssh-auth/authorized_keys' /etc/ssh/sshd_config
 ! grep -Fq 'HostKey /etc/ssh/ssh_host_rsa_key' /etc/ssh/sshd_config
 ! grep -Fq 'HostKey /etc/ssh/ssh_host_ecdsa_key' /etc/ssh/sshd_config
+test "$(stat -Lc '%a %U %G' /home/copilot/.config/control-plane/ssh-auth/authorized_keys)" = '600 copilot copilot'
+grep -Fqx 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILegacyConfigInjectionKey legacy-config-injection' /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+test -L /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+test "$(readlink /home/copilot/.config/control-plane/ssh-auth/authorized_keys)" = '../../../.ssh/authorized_keys'
+! test -L /home/copilot/.ssh/authorized_keys
+grep -Fqx 'CONTROL_PLANE_AUTHORIZED_KEYS_PATH=/home/copilot/.config/control-plane/ssh-auth/authorized_keys' /home/copilot/.config/control-plane/runtime.env
 grep -Fqx 'CONTROL_PLANE_EXEC_POLICY_LIBRARY=/usr/local/lib/libcontrol_plane_exec_policy.so' /home/copilot/.config/control-plane/runtime.env
 grep -Fqx 'CONTROL_PLANE_EXEC_POLICY_RULES_FILE=/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml' /home/copilot/.config/control-plane/runtime.env
 grep -Fqx 'LD_PRELOAD=/usr/local/lib/libcontrol_plane_exec_policy.so' /home/copilot/.config/control-plane/runtime.env
@@ -347,5 +355,258 @@ if [[ "${token_backed_status}" -ne 0 ]]; then
   exit 1
 fi
 grep -qx 'token-backed-ok' <<<"${token_backed_output}"
+
+printf '%s\n' 'config-injection-test: verifying authorized_keys cleanup works with directory mounts' >&2
+mkdir -p "${workdir}/authorized-keys-cleanup/ssh-auth" "${workdir}/authorized-keys-cleanup/transfers/cleanup-test"
+cat > "${workdir}/authorized-keys-cleanup/ssh-auth/authorized_keys" <<'EOF'
+# BEGIN cleanup-marker
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICleanupEphemeralKey cleanup-ephemeral
+# END cleanup-marker
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICleanupKeeperKey cleanup-keeper
+EOF
+cat > "${workdir}/authorized-keys-cleanup/transfers/cleanup-test/manifest.json" <<'EOF'
+{
+  "authorized_key_marker": "cleanup-marker"
+}
+EOF
+
+set +e
+authorized_keys_cleanup_output="$("${container_bin}" run --rm \
+  --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
+  -i \
+  "${startup_caps[@]}" \
+  -e CONTROL_PLANE_JOB_TRANSFER_ROOT=/tmp/job-transfers \
+  -v "${workdir}/authorized-keys-cleanup/ssh-auth:/home/copilot/.config/control-plane/ssh-auth" \
+  -v "${workdir}/authorized-keys-cleanup/transfers:/tmp/job-transfers" \
+  "${control_plane_image}" \
+  bash -l -se 2>&1 <<'EOF'
+set -euo pipefail
+control-plane-job-transfer release-access --transfer-id cleanup-test --remove-transfer-dir
+test -L /home/copilot/.ssh/authorized_keys
+test "$(readlink /home/copilot/.ssh/authorized_keys)" = '../.config/control-plane/ssh-auth/authorized_keys'
+grep -Fqx 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICleanupKeeperKey cleanup-keeper' /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+! grep -Fq 'cleanup-marker' /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+! grep -Fq 'cleanup-ephemeral' /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+test ! -e /tmp/job-transfers/cleanup-test
+printf '%s\n' authorized-keys-cleanup-ok
+EOF
+)"
+authorized_keys_cleanup_status=$?
+set -e
+
+if [[ "${authorized_keys_cleanup_status}" -ne 0 ]]; then
+  printf 'Expected authorized_keys cleanup to work when the ssh-auth directory is mounted directly\n' >&2
+  printf '%s\n' "${authorized_keys_cleanup_output}" >&2
+  exit 1
+fi
+grep -qx 'authorized-keys-cleanup-ok' <<<"${authorized_keys_cleanup_output}"
+
+printf '%s\n' 'config-injection-test: verifying ssh-auth mount upgrades fallback symlink state' >&2
+prepare_state_tree ssh-auth-upgrade
+mkdir -p "${workdir}/ssh-auth-upgrade/state/ssh-auth"
+printf '%s\n' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIUpgradeLegacyKey upgrade-legacy' > "${workdir}/ssh-auth-upgrade/state/ssh/authorized_keys"
+ln -s ../../../.ssh/authorized_keys "${workdir}/ssh-auth-upgrade/state/ssh-auth/authorized_keys"
+
+set +e
+ssh_auth_upgrade_output="$("${container_bin}" run --rm \
+  --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
+  -i \
+  "${startup_caps[@]}" \
+  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIUpgradeInjectedKey upgrade-injected' \
+  -v "${workdir}/ssh-auth-upgrade/state/copilot:/home/copilot/.copilot" \
+  -v "${workdir}/ssh-auth-upgrade/state/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/ssh-auth-upgrade/state/ssh-auth:/home/copilot/.config/control-plane/ssh-auth" \
+  -v "${workdir}/ssh-auth-upgrade/state/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/ssh-auth-upgrade/state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/ssh-auth-upgrade/state/workspace:/workspace" \
+  "${control_plane_image}" \
+  bash -l -se 2>&1 <<'EOF'
+set -euo pipefail
+! test -L /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+test -L /home/copilot/.ssh/authorized_keys
+test "$(readlink /home/copilot/.ssh/authorized_keys)" = '../.config/control-plane/ssh-auth/authorized_keys'
+grep -Fqx 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIUpgradeLegacyKey upgrade-legacy' /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+grep -Fqx 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIUpgradeInjectedKey upgrade-injected' /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+printf '%s\n' ssh-auth-upgrade-ok
+EOF
+)"
+ssh_auth_upgrade_status=$?
+set -e
+
+if [[ "${ssh_auth_upgrade_status}" -ne 0 ]]; then
+  printf 'Expected ssh-auth directory mounts to upgrade fallback symlink state safely\n' >&2
+  printf '%s\n' "${ssh_auth_upgrade_output}" >&2
+  exit 1
+fi
+grep -qx 'ssh-auth-upgrade-ok' <<<"${ssh_auth_upgrade_output}"
+
+printf '%s\n' 'config-injection-test: verifying ssh-auth mounts accept legacy authorized_keys file mounts' >&2
+prepare_state_tree legacy-file-mount-upgrade
+mkdir -p "${workdir}/legacy-file-mount-upgrade/state/ssh-auth"
+printf '%s\n' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINewAuthMountKey new-auth-mounted' > "${workdir}/legacy-file-mount-upgrade/state/ssh-auth/authorized_keys"
+printf '%s\n' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILegacyFileMountKey legacy-file-mount' > "${workdir}/legacy-file-mount-upgrade/authorized_keys"
+
+set +e
+legacy_file_mount_upgrade_output="$("${container_bin}" run --rm \
+  --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
+  -i \
+  "${startup_caps[@]}" \
+  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILegacyFileMountInjectedKey legacy-file-mount-injected' \
+  -v "${workdir}/legacy-file-mount-upgrade/state/copilot:/home/copilot/.copilot" \
+  -v "${workdir}/legacy-file-mount-upgrade/state/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/legacy-file-mount-upgrade/state/ssh-auth:/home/copilot/.config/control-plane/ssh-auth" \
+  -v "${workdir}/legacy-file-mount-upgrade/authorized_keys:/home/copilot/.ssh/authorized_keys" \
+  -v "${workdir}/legacy-file-mount-upgrade/state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/legacy-file-mount-upgrade/state/workspace:/workspace" \
+  "${control_plane_image}" \
+  bash -l -se 2>&1 <<'EOF'
+set -euo pipefail
+test -L /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+test "$(readlink /home/copilot/.config/control-plane/ssh-auth/authorized_keys)" = '../../../.ssh/authorized_keys'
+! test -L /home/copilot/.ssh/authorized_keys
+test "$(stat -Lc '%a %U %G' /home/copilot/.ssh/authorized_keys)" = '600 copilot copilot'
+grep -Fqx 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINewAuthMountKey new-auth-mounted' /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+grep -Fqx 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILegacyFileMountKey legacy-file-mount' /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+grep -Fqx 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILegacyFileMountInjectedKey legacy-file-mount-injected' /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+printf '%s\n' legacy-file-mount-upgrade-ok
+EOF
+)"
+legacy_file_mount_upgrade_status=$?
+set -e
+
+if [[ "${legacy_file_mount_upgrade_status}" -ne 0 ]]; then
+  printf 'Expected ssh-auth mounts to accept legacy authorized_keys file mounts during upgrade\n' >&2
+  printf '%s\n' "${legacy_file_mount_upgrade_output}" >&2
+  exit 1
+fi
+grep -qx 'legacy-file-mount-upgrade-ok' <<<"${legacy_file_mount_upgrade_output}"
+
+printf '%s\n' 'config-injection-test: verifying direct ssh-auth file mounts stay authoritative' >&2
+prepare_state_tree direct-ssh-auth-file-mounted
+printf '%s\n' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDirectAuthFileKey direct-auth-file' > "${workdir}/direct-ssh-auth-file-mounted/authorized_keys"
+
+set +e
+direct_ssh_auth_file_output="$("${container_bin}" run --rm \
+  --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
+  -i \
+  "${startup_caps[@]}" \
+  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDirectAuthInjectedKey direct-auth-injected' \
+  -v "${workdir}/direct-ssh-auth-file-mounted/state/copilot:/home/copilot/.copilot" \
+  -v "${workdir}/direct-ssh-auth-file-mounted/state/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/direct-ssh-auth-file-mounted/authorized_keys:/home/copilot/.config/control-plane/ssh-auth/authorized_keys" \
+  -v "${workdir}/direct-ssh-auth-file-mounted/state/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/direct-ssh-auth-file-mounted/state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/direct-ssh-auth-file-mounted/state/workspace:/workspace" \
+  "${control_plane_image}" \
+  bash -l -se 2>&1 <<'EOF'
+set -euo pipefail
+! test -L /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+test -L /home/copilot/.ssh/authorized_keys
+test "$(readlink /home/copilot/.ssh/authorized_keys)" = '../.config/control-plane/ssh-auth/authorized_keys'
+grep -Fqx 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDirectAuthFileKey direct-auth-file' /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+grep -Fqx 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDirectAuthInjectedKey direct-auth-injected' /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+printf '%s\n' direct-ssh-auth-file-ok
+EOF
+)"
+direct_ssh_auth_file_status=$?
+set -e
+
+if [[ "${direct_ssh_auth_file_status}" -ne 0 ]]; then
+  printf 'Expected direct ssh-auth authorized_keys file mounts to stay authoritative\n' >&2
+  printf '%s\n' "${direct_ssh_auth_file_output}" >&2
+  exit 1
+fi
+grep -qx 'direct-ssh-auth-file-ok' <<<"${direct_ssh_auth_file_output}"
+
+printf '%s\n' 'config-injection-test: verifying direct ssh-auth file mounts support cleanup' >&2
+prepare_state_tree direct-ssh-auth-file-cleanup
+mkdir -p "${workdir}/direct-ssh-auth-file-cleanup/transfers/cleanup-test"
+cat > "${workdir}/direct-ssh-auth-file-cleanup/authorized_keys" <<'EOF'
+# BEGIN cleanup-marker
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDirectFileCleanupEphemeralKey direct-file-cleanup-ephemeral
+# END cleanup-marker
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDirectFileCleanupKeeperKey direct-file-cleanup-keeper
+EOF
+cat > "${workdir}/direct-ssh-auth-file-cleanup/transfers/cleanup-test/manifest.json" <<'EOF'
+{
+  "authorized_key_marker": "cleanup-marker"
+}
+EOF
+
+set +e
+direct_ssh_auth_file_cleanup_output="$("${container_bin}" run --rm \
+  --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
+  -i \
+  "${startup_caps[@]}" \
+  -e CONTROL_PLANE_JOB_TRANSFER_ROOT=/tmp/job-transfers \
+  -v "${workdir}/direct-ssh-auth-file-cleanup/state/copilot:/home/copilot/.copilot" \
+  -v "${workdir}/direct-ssh-auth-file-cleanup/state/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/direct-ssh-auth-file-cleanup/authorized_keys:/home/copilot/.config/control-plane/ssh-auth/authorized_keys" \
+  -v "${workdir}/direct-ssh-auth-file-cleanup/state/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/direct-ssh-auth-file-cleanup/state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/direct-ssh-auth-file-cleanup/state/workspace:/workspace" \
+  -v "${workdir}/direct-ssh-auth-file-cleanup/transfers:/tmp/job-transfers" \
+  "${control_plane_image}" \
+  bash -l -se 2>&1 <<'EOF'
+set -euo pipefail
+control-plane-job-transfer release-access --transfer-id cleanup-test --remove-transfer-dir
+grep -Fqx 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDirectFileCleanupKeeperKey direct-file-cleanup-keeper' /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+! grep -Fq 'cleanup-marker' /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+! grep -Fq 'direct-file-cleanup-ephemeral' /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+test ! -e /tmp/job-transfers/cleanup-test
+printf '%s\n' direct-ssh-auth-file-cleanup-ok
+EOF
+)"
+direct_ssh_auth_file_cleanup_status=$?
+set -e
+
+if [[ "${direct_ssh_auth_file_cleanup_status}" -ne 0 ]]; then
+  printf 'Expected direct ssh-auth authorized_keys file mounts to support cleanup\n' >&2
+  printf '%s\n' "${direct_ssh_auth_file_cleanup_output}" >&2
+  exit 1
+fi
+grep -qx 'direct-ssh-auth-file-cleanup-ok' <<<"${direct_ssh_auth_file_cleanup_output}"
+
+printf '%s\n' 'config-injection-test: verifying full runtime config mounts keep ssh-auth authoritative' >&2
+prepare_state_tree runtime-config-mounted
+mkdir -p "${workdir}/runtime-config-mounted/runtime-config"
+
+set +e
+runtime_config_mount_output="$("${container_bin}" run --rm \
+  --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
+  -i \
+  "${startup_caps[@]}" \
+  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIRuntimeConfigMountKey runtime-config-mounted' \
+  -v "${workdir}/runtime-config-mounted/state/copilot:/home/copilot/.copilot" \
+  -v "${workdir}/runtime-config-mounted/state/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/runtime-config-mounted/runtime-config:/home/copilot/.config/control-plane" \
+  -v "${workdir}/runtime-config-mounted/state/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/runtime-config-mounted/state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/runtime-config-mounted/state/workspace:/workspace" \
+  "${control_plane_image}" \
+  bash -l -se 2>&1 <<'EOF'
+set -euo pipefail
+! test -L /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+test -L /home/copilot/.ssh/authorized_keys
+test "$(readlink /home/copilot/.ssh/authorized_keys)" = '../.config/control-plane/ssh-auth/authorized_keys'
+grep -Fqx 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIRuntimeConfigMountKey runtime-config-mounted' /home/copilot/.config/control-plane/ssh-auth/authorized_keys
+printf '%s\n' runtime-config-mounted-ok
+EOF
+)"
+runtime_config_mount_status=$?
+set -e
+
+if [[ "${runtime_config_mount_status}" -ne 0 ]]; then
+  printf 'Expected full runtime config mounts to keep ssh-auth authoritative\n' >&2
+  printf '%s\n' "${runtime_config_mount_output}" >&2
+  exit 1
+fi
+grep -qx 'runtime-config-mounted-ok' <<<"${runtime_config_mount_output}"
 
 printf '%s\n' 'config-injection-test: config injection regressions ok' >&2

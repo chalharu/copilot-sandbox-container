@@ -34,12 +34,15 @@ spec:
               umask 077
               mkdir -p \
                 /copilot-session/state/gh \
+                /copilot-session/state/ssh-auth \
                 /copilot-session/state/ssh \
                 /copilot-session/state/ssh-host-keys \
                 /copilot-session/session-state \
                 /workspace-state/workspace \
                 /cache/runtime-tmp
-              touch /copilot-session/state/copilot-config.json /copilot-session/state/command-history-state.json
+              touch \
+                /copilot-session/state/copilot-config.json \
+                /copilot-session/state/command-history-state.json
               chown -R 1000:1000 /copilot-session/state /copilot-session/session-state
               find /copilot-session/state /copilot-session/session-state -type d -exec chmod 700 {} +
               find /copilot-session/state /copilot-session/session-state -type f -exec chmod 600 {} +
@@ -184,6 +187,9 @@ spec:
             - name: copilot-session
               mountPath: /home/copilot/.ssh
               subPath: state/ssh
+            - name: copilot-session
+              mountPath: /home/copilot/.config/control-plane/ssh-auth
+              subPath: state/ssh-auth
             - name: copilot-session
               mountPath: /var/lib/control-plane/ssh-host-keys
               subPath: state/ssh-host-keys

@@ -614,12 +614,15 @@ spec:
               umask 077
               mkdir -p \
                 /copilot-session/state/gh \
+                /copilot-session/state/ssh-auth \
                 /copilot-session/state/ssh \
                 /copilot-session/state/ssh-host-keys \
                 /copilot-session/session-state \
                 /workspace-state/workspace \
                 /cache/runtime-tmp
-              touch /copilot-session/state/copilot-config.json /copilot-session/state/command-history-state.json
+              touch \
+                /copilot-session/state/copilot-config.json \
+                /copilot-session/state/command-history-state.json
               chown -R 1000:1000 /copilot-session/state /copilot-session/session-state
               find /copilot-session/state /copilot-session/session-state -type d -exec chmod 700 {} +
               find /copilot-session/state /copilot-session/session-state -type f -exec chmod 600 {} +
@@ -785,6 +788,9 @@ spec:
             - name: copilot-session
               mountPath: /home/copilot/.ssh
               subPath: state/ssh
+            - name: copilot-session
+              mountPath: /home/copilot/.config/control-plane/ssh-auth
+              subPath: state/ssh-auth
             - name: copilot-session
               mountPath: /var/lib/control-plane/ssh-host-keys
               subPath: state/ssh-host-keys
@@ -1144,6 +1150,19 @@ EOF
     exit 1
   fi
 
+  if ! ssh_bash <<'EOF'
+set -euo pipefail
+session_key=kind-ssh-reconnect-fast-exec
+control-plane-session-exec cleanup --session-key "${session_key}" >/dev/null 2>&1 || true
+control-plane-session-exec prepare --session-key "${session_key}" >/dev/null
+command_base64="$(printf '%s' 'printf kind-fast-exec-reconnect > /workspace/k8s-fast-exec-reconnect.txt' | base64 | tr -d '\n')"
+control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${command_base64}" >/dev/null
+EOF
+  then
+    printf 'Expected kind fast-exec bootstrap to succeed before SSH reconnect probe\n' >&2
+    exit 1
+  fi
+
   set +e
   "${script_dir}/test-ssh-session-persistence.sh" \
     --identity "${ssh_key}" \
@@ -1159,6 +1178,8 @@ cp /workspace/k8s-runtime.env.bak ~/.config/control-plane/runtime.env
 chmod 600 ~/.config/control-plane/runtime.env
 rm -f /workspace/k8s-runtime.env.bak
 rm -f /workspace/test-copilot-shell
+control-plane-session-exec cleanup --session-key kind-ssh-reconnect-fast-exec >/dev/null 2>&1 || true
+rm -f /workspace/k8s-fast-exec-reconnect.txt
 EOF
   then
     printf 'Expected kind runtime.env restore to succeed after SSH Copilot probe\n' >&2

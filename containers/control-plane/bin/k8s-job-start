@@ -128,21 +128,26 @@ job_transfer_secret_name() {
 append_authorized_key_block() {
   local marker="$1"
   local public_key_path="$2"
-  local lock_file="${authorized_keys_path}.lock"
+  local real_authorized_keys_path=""
+  local lock_file=""
 
-  touch "${authorized_keys_path}"
-  chmod 600 "${authorized_keys_path}"
+  real_authorized_keys_path="$(readlink -f -- "${authorized_keys_path}")" || real_authorized_keys_path="${authorized_keys_path}"
+  lock_file="${real_authorized_keys_path}.lock"
+
+  mkdir -p "$(dirname "${real_authorized_keys_path}")"
+  touch "${real_authorized_keys_path}"
+  chmod 600 "${real_authorized_keys_path}"
 
   (
     flock -x 9
-    if grep -Fxq "# BEGIN ${marker}" "${authorized_keys_path}"; then
+    if grep -Fxq "# BEGIN ${marker}" "${real_authorized_keys_path}"; then
       die "authorized_keys already contains marker ${marker}"
     fi
     {
       printf '# BEGIN %s\n' "${marker}"
       cat "${public_key_path}"
       printf '# END %s\n' "${marker}"
-    } >> "${authorized_keys_path}"
+    } >> "${real_authorized_keys_path}"
   ) 9>"${lock_file}"
 }
 
@@ -167,7 +172,7 @@ job_transfer_port="${CONTROL_PLANE_JOB_TRANSFER_PORT:-2222}"
 job_transfer_user="${CONTROL_PLANE_JOB_TRANSFER_USER:-${USER:-copilot}}"
 job_transfer_root="${CONTROL_PLANE_JOB_TRANSFER_ROOT:-${TMPDIR:-/tmp}/job-transfers}"
 host_key_dir="${CONTROL_PLANE_HOST_KEY_DIR:-/var/lib/control-plane/ssh-host-keys}"
-authorized_keys_path="${HOME:-/home/${USER:-copilot}}/.ssh/authorized_keys"
+authorized_keys_path="${HOME:-/home/${USER:-copilot}}/.config/control-plane/ssh-auth/authorized_keys"
 mount_files=()
 created_transfer_secret=""
 created_transfer_id=""

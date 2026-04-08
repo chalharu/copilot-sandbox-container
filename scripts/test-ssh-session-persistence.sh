@@ -14,9 +14,11 @@ workdir=""
 ssh_log=""
 marker_token_pre=""
 marker_token_post=""
+shell_state_dir=""
 local_screen_session=""
 local_screen_pid=""
 use_remote_check=1
+remote_session_id=""
 
 usage() {
   cat <<'EOF' >&2
@@ -29,7 +31,7 @@ Options:
   --identity <path>          SSH private key to use
   --session-name <name>      Expected GNU Screen session name created by login
   --marker-path <path>       Remote file path updated through the interactive SSH session
-  --hold-seconds <seconds>   Idle time to keep the SSH session attached before the second probe (default: 5)
+  --hold-seconds <seconds>   Idle time to keep the first SSH session attached before reconnecting (default: 5)
   --attempts <count>         Poll/write attempts for the session and marker checks (default: 20)
   --no-remote-check          Skip extra SSH probes and rely on the interactive session itself
 EOF
@@ -72,12 +74,31 @@ remote_screen_session_exists() {
   run_remote_script "${script}" >/dev/null
 }
 
-remote_marker_matches() {
-  local token="$1"
+remote_screen_session_id() {
+  local script
+  local session_line
+  local session_id
+
+  printf -v script 'set -euo pipefail\nscreen -list 2>/dev/null | grep -- %q | head -n 1\n' "${session_name}"
+  session_line="$(run_remote_script "${script}")" || return 1
+  session_id="$(awk '{ print $1 }' <<<"${session_line}")"
+  [[ -n "${session_id}" ]] || return 1
+  printf '%s\n' "${session_id}"
+}
+
+remote_path_matches() {
+  local target_path="$1"
+  local token="$2"
   local script
 
-  printf -v script 'set -euo pipefail\ntest -f %q\ngrep -qx -- %q %q\n' "${marker_path}" "${token}" "${marker_path}"
+  printf -v script 'set -euo pipefail\ntest -f %q\ngrep -qx -- %q %q\n' "${target_path}" "${token}" "${target_path}"
   run_remote_script "${script}" >/dev/null
+}
+
+remote_marker_matches() {
+  local token="$1"
+
+  remote_path_matches "${marker_path}" "${token}"
 }
 
 print_remote_debug() {
@@ -105,6 +126,7 @@ fail() {
 }
 
 local_ssh_session_exists() {
+  [[ -n "${local_screen_session}" ]] || return 1
   screen -list 2>/dev/null | grep -q -- "[.]${local_screen_session}[[:space:]]"
 }
 
@@ -117,6 +139,19 @@ wait_for_local_ssh_session() {
   done
 
   fail "local SSH screen session ${local_screen_session} did not start"
+}
+
+wait_for_local_ssh_exit() {
+  local exited_session="${local_screen_session}"
+
+  for _ in $(seq 1 "${attempts}"); do
+    if ! local_ssh_session_exists; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  fail "local SSH screen session ${exited_session} did not exit after disconnect"
 }
 
 ssh_log_has_prompt() {
@@ -156,14 +191,38 @@ wait_for_screen_session() {
   fail "screen session ${session_name} did not appear within ${attempts} attempts"
 }
 
+capture_remote_session_id() {
+  [[ "${use_remote_check}" -eq 1 ]] || return 0
+
+  if ! remote_session_id="$(remote_screen_session_id)"; then
+    fail "screen session ${session_name} did not expose a stable session id"
+  fi
+  [[ -n "${remote_session_id}" ]] || fail "screen session ${session_name} did not expose a stable session id"
+}
+
 send_probe_command() {
   local token="$1"
   local probe_command=""
 
   printf -v probe_command 'echo %q > %q' "${token}" "${marker_path}"
-  screen -S "${local_screen_session}" -X stuff "${probe_command}" >/dev/null 2>&1
+  send_interactive_command "${probe_command}"
+}
+
+send_interactive_command() {
+  local command="$1"
+
+  screen -S "${local_screen_session}" -X stuff "${command}" >/dev/null 2>&1
   # GNU Screen expects carriage return here to emulate an actual Enter keypress.
   screen -S "${local_screen_session}" -X stuff $'\r' >/dev/null 2>&1
+}
+
+prime_shell_state() {
+  local shell_state_command=""
+
+  [[ "${use_remote_check}" -eq 1 ]] || return 0
+
+  printf -v shell_state_command 'mkdir -p %q && cd %q' "${shell_state_dir}" "${shell_state_dir}"
+  send_interactive_command "${shell_state_command}"
 }
 
 wait_for_marker() {
@@ -197,6 +256,52 @@ wait_for_marker() {
   done
 
   fail "interactive SSH did not apply the ${label} marker to ${marker_path}"
+}
+
+wait_for_shell_state() {
+  local label="$1"
+  local state_command=""
+  local shell_state_marker_path="${marker_path}.${label}.shell-state"
+
+  [[ "${use_remote_check}" -eq 1 ]] || return 0
+
+  printf -v state_command 'pwd > %q' "${shell_state_marker_path}"
+  for _ in $(seq 1 "${attempts}"); do
+    send_interactive_command "${state_command}"
+    sleep 1
+    if remote_path_matches "${shell_state_marker_path}" "${shell_state_dir}"; then
+      return 0
+    fi
+    if ! local_ssh_session_exists; then
+      fail "interactive SSH exited before ${label} shell state reached ${shell_state_marker_path}"
+    fi
+  done
+
+  fail "interactive SSH did not preserve shell state across ${label}"
+}
+
+start_interactive_ssh() {
+  local label="$1"
+
+  ssh_log="${workdir}/ssh-${label}.log"
+  local_screen_session="ssh-persistence-${label}-${RANDOM}-${RANDOM}"
+  screen -DmL -Logfile "${ssh_log}" -S "${local_screen_session}" bash "${workdir}/run-ssh.sh" &
+  local_screen_pid=$!
+  wait_for_local_ssh_session
+  wait_for_screen_session
+  capture_remote_session_id
+}
+
+disconnect_interactive_ssh() {
+  [[ -n "${local_screen_session}" ]] || return 0
+  screen -S "${local_screen_session}" -X quit >/dev/null 2>&1 || true
+  wait_for_local_ssh_exit
+  if [[ -n "${local_screen_pid}" ]]; then
+    wait "${local_screen_pid}" >/dev/null 2>&1 || true
+  fi
+  local_screen_session=""
+  local_screen_pid=""
+  ssh_log=""
 }
 
 while [[ $# -gt 0 ]]; do
@@ -263,10 +368,9 @@ require_command ssh
 require_command screen
 
 workdir="$(mktemp -d)"
-ssh_log="${workdir}/ssh.log"
 marker_token_pre="ssh-persistence-pre-${RANDOM}-${RANDOM}"
 marker_token_post="ssh-persistence-post-${RANDOM}-${RANDOM}"
-local_screen_session="ssh-persistence-${RANDOM}-${RANDOM}"
+shell_state_dir="/workspace/.ssh-persistence-shell-${RANDOM}-${RANDOM}"
 
 ssh_opts=(
   -o StrictHostKeyChecking=no
@@ -289,19 +393,27 @@ done
 printf -v ssh_command '%s %q' "${ssh_command}" "${user}@${host}"
 printf '#!/usr/bin/env bash\n%s\n' "${ssh_command}" > "${workdir}/run-ssh.sh"
 chmod 700 "${workdir}/run-ssh.sh"
-screen -DmL -Logfile "${ssh_log}" -S "${local_screen_session}" bash "${workdir}/run-ssh.sh" &
-local_screen_pid=$!
 
-wait_for_local_ssh_session
-wait_for_screen_session
+start_interactive_ssh initial
+initial_remote_session_id="${remote_session_id}"
 wait_for_marker "${marker_token_pre}" "initial"
+prime_shell_state
+wait_for_shell_state "initialization"
 sleep "${hold_seconds}"
 if ! local_ssh_session_exists; then
   fail "interactive SSH exited during the ${hold_seconds}-second hold period"
 fi
-wait_for_marker "${marker_token_post}" "post-hold"
+disconnect_interactive_ssh
 
-if grep -q 'cannot change locale' "${ssh_log}"; then
+printf 'ssh-persistence: reconnecting SSH session to %s@%s:%s\n' "${user}" "${host}" "${port}" >&2
+start_interactive_ssh reconnect
+if [[ "${use_remote_check}" -eq 1 ]] && [[ "${remote_session_id}" != "${initial_remote_session_id}" ]]; then
+  fail "screen session ${session_name} was recreated across reconnect (${initial_remote_session_id} -> ${remote_session_id})"
+fi
+wait_for_shell_state "reconnect"
+wait_for_marker "${marker_token_post}" "reconnect"
+
+if grep -q 'cannot change locale' "${workdir}"/ssh-*.log 2>/dev/null; then
   fail 'unexpected locale warning during SSH login'
 fi
 

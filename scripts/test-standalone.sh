@@ -153,6 +153,7 @@ start_container() {
   run_args+=(
     -v "${state_root}/copilot:/home/copilot/.copilot"
     -v "${state_root}/gh:/home/copilot/.config/gh"
+    -v "${state_root}/ssh-auth:/home/copilot/.config/control-plane/ssh-auth"
     -v "${state_root}/ssh:/home/copilot/.ssh"
     -v "${state_root}/ssh-host-keys:/var/lib/control-plane/ssh-host-keys"
     -v "${state_root}/workspace:/workspace"
@@ -170,7 +171,7 @@ require_command ssh-keyscan
 
 configure_container_runtime
 
-mkdir -p "${state_root}/copilot" "${state_root}/gh" "${state_root}/ssh" "${state_root}/ssh-host-keys" "${state_root}/workspace"
+mkdir -p "${state_root}/copilot" "${state_root}/gh" "${state_root}/ssh-auth" "${state_root}/ssh" "${state_root}/ssh-host-keys" "${state_root}/workspace"
 ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"
 set_ssh_opts
 
@@ -272,6 +273,7 @@ if ! ssh_bash <<'EOF'
 set -euo pipefail
 test -f ~/.copilot/state.txt
 test -f ~/.config/gh/state.txt
+test -s ~/.config/control-plane/ssh-auth/authorized_keys
 test -f ~/.ssh/state.txt
 test -f /workspace/screen.txt
 EOF
@@ -280,6 +282,8 @@ then
 set -euo pipefail
 ls -la ~/.copilot || true
 ls -la ~/.config/gh || true
+ls -la ~/.config/control-plane || true
+ls -la ~/.config/control-plane/ssh-auth || true
 ls -la ~/.ssh || true
 ls -la /workspace || true
 cat /workspace/screen-term.txt || true

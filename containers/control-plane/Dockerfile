@@ -208,6 +208,7 @@ RUN existing_group="$(getent group "${CONTROL_PLANE_GID}" | cut -d: -f1 || true)
     && mkdir -p \
         "/home/${CONTROL_PLANE_USER}/.copilot" \
         "/home/${CONTROL_PLANE_USER}/.cargo" \
+        "/home/${CONTROL_PLANE_USER}/.config/control-plane" \
         "/home/${CONTROL_PLANE_USER}/.config/gh" \
         "/home/${CONTROL_PLANE_USER}/.ssh" \
         /run/sshd \

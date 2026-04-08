@@ -35,13 +35,18 @@ copilot_hooks_dir="${copilot_state_dir}/hooks"
 copilot_logs_dir="${copilot_state_dir}/logs"
 copilot_agents_dir="${copilot_state_dir}/agents"
 copilot_mcp_config_path="${copilot_state_dir}/mcp-config.json"
-authorized_keys_path="${control_plane_home}/.ssh/authorized_keys"
 kube_dir="${control_plane_home}/.kube"
 kubeconfig_path="${kube_dir}/config"
 service_account_dir="/var/run/secrets/kubernetes.io/serviceaccount"
 runtime_config_dir="${control_plane_home}/.config/control-plane"
+runtime_config_parent_dir="$(dirname "${runtime_config_dir}")"
 runtime_config_path="${runtime_config_dir}/runtime.env"
 copilot_token_path="${runtime_config_dir}/copilot-github-token"
+authorized_keys_dir="${runtime_config_dir}/ssh-auth"
+authorized_keys_path="${authorized_keys_dir}/authorized_keys"
+legacy_authorized_keys_path="${control_plane_home}/.ssh/authorized_keys"
+legacy_authorized_keys_compat_target="../.config/control-plane/ssh-auth/authorized_keys"
+authorized_keys_fallback_target="../../../.ssh/authorized_keys"
 managed_runtime_dir="${CONTROL_PLANE_MANAGED_RUNTIME_DIR:-/var/lib/control-plane/managed-runtime}"
 managed_copilot_home="${CONTROL_PLANE_MANAGED_COPILOT_HOME:-${managed_runtime_dir}/copilot-home}"
 managed_copilot_hooks_dir="${managed_copilot_home}/hooks"
@@ -616,9 +621,77 @@ export COPILOT_HOME="${managed_copilot_home}"
 export GIT_CONFIG_GLOBAL="${git_config_path}"
 export CONTROL_PLANE_RUNTIME_ENV_FILE="${runtime_config_path}"
 
-touch "${authorized_keys_path}"
-chmod 600 "${authorized_keys_path}"
-chown "${control_plane_user}:${control_plane_user}" "${authorized_keys_path}"
+mkdir -p "${authorized_keys_dir}"
+chown "${control_plane_user}:${control_plane_user}" "${authorized_keys_dir}"
+chmod 700 "${authorized_keys_dir}"
+
+authorized_keys_path_is_mount=0
+if [[ -r /proc/self/mountinfo ]] \
+  && awk -v target="${authorized_keys_path}" '$5 == target { found = 1 } END { exit(found ? 0 : 1) }' /proc/self/mountinfo; then
+  authorized_keys_path_is_mount=1
+fi
+
+if [[ "${authorized_keys_path_is_mount}" -eq 1 ]] \
+  || [[ "$(stat -c '%d' "${authorized_keys_dir}")" != "$(stat -c '%d' "${runtime_config_dir}")" ]] \
+  || [[ "$(stat -c '%d' "${runtime_config_dir}")" != "$(stat -c '%d' "${runtime_config_parent_dir}")" ]]; then
+  if [[ -L "${authorized_keys_path}" ]]; then
+    rm -f "${authorized_keys_path}"
+  fi
+  touch "${authorized_keys_path}"
+  chmod 600 "${authorized_keys_path}"
+  chown "${control_plane_user}:${control_plane_user}" "${authorized_keys_path}"
+  if [[ -f "${legacy_authorized_keys_path}" ]] && [[ ! -L "${legacy_authorized_keys_path}" ]]; then
+    while IFS= read -r key || [[ -n "${key}" ]]; do
+      [[ -z "${key}" ]] && continue
+      if ! grep -Fxq "${key}" "${authorized_keys_path}"; then
+        printf '%s\n' "${key}" >> "${authorized_keys_path}"
+      fi
+    done < "${legacy_authorized_keys_path}"
+  fi
+  if rm -f "${legacy_authorized_keys_path}" 2>/dev/null; then
+    ln -s "${legacy_authorized_keys_compat_target}" "${legacy_authorized_keys_path}"
+  else
+    while IFS= read -r key || [[ -n "${key}" ]]; do
+      [[ -z "${key}" ]] && continue
+      if ! grep -Fxq "${key}" "${legacy_authorized_keys_path}"; then
+        printf '%s\n' "${key}" >> "${legacy_authorized_keys_path}"
+      fi
+    done < "${authorized_keys_path}"
+    chmod 600 "${legacy_authorized_keys_path}"
+    chown "${control_plane_user}:${control_plane_user}" "${legacy_authorized_keys_path}"
+    rm -f "${authorized_keys_path}"
+    ln -s "${authorized_keys_fallback_target}" "${authorized_keys_path}"
+  fi
+else
+  tmp_legacy_authorized_keys=""
+  if [[ -L "${legacy_authorized_keys_path}" ]]; then
+    legacy_authorized_keys_link_target="$(readlink "${legacy_authorized_keys_path}")"
+    if [[ "${legacy_authorized_keys_link_target}" == "${legacy_authorized_keys_compat_target}" ]]; then
+      tmp_legacy_authorized_keys="$(mktemp)"
+      cat "${legacy_authorized_keys_path}" > "${tmp_legacy_authorized_keys}" 2>/dev/null || true
+    fi
+    rm -f "${legacy_authorized_keys_path}"
+  fi
+  touch "${legacy_authorized_keys_path}"
+  if [[ -n "${tmp_legacy_authorized_keys}" ]] && [[ -s "${tmp_legacy_authorized_keys}" ]]; then
+    cat "${tmp_legacy_authorized_keys}" > "${legacy_authorized_keys_path}"
+  fi
+  if [[ -f "${authorized_keys_path}" ]] && [[ ! -L "${authorized_keys_path}" ]]; then
+    while IFS= read -r key || [[ -n "${key}" ]]; do
+      [[ -z "${key}" ]] && continue
+      if ! grep -Fxq "${key}" "${legacy_authorized_keys_path}"; then
+        printf '%s\n' "${key}" >> "${legacy_authorized_keys_path}"
+      fi
+    done < "${authorized_keys_path}"
+  fi
+  chmod 600 "${legacy_authorized_keys_path}"
+  chown "${control_plane_user}:${control_plane_user}" "${legacy_authorized_keys_path}"
+  rm -f "${authorized_keys_path}"
+  ln -s "${authorized_keys_fallback_target}" "${authorized_keys_path}"
+  if [[ -n "${tmp_legacy_authorized_keys}" ]]; then
+    rm -f "${tmp_legacy_authorized_keys}"
+  fi
+fi
 
 if [[ -n "${SSH_PUBLIC_KEY:-}" ]] && ! grep -Fxq "${SSH_PUBLIC_KEY}" "${authorized_keys_path}"; then
   printf '%s\n' "${SSH_PUBLIC_KEY}" >> "${authorized_keys_path}"
@@ -699,6 +772,7 @@ runtime_config_tmp="$(mktemp "${runtime_config_path}.XXXXXX")"
     write_runtime_var CONTROL_PLANE_NODE_NAME "${CONTROL_PLANE_NODE_NAME}"
   fi
   write_runtime_var CONTROL_PLANE_HOST_KEY_DIR "${host_key_dir}"
+  write_runtime_var CONTROL_PLANE_AUTHORIZED_KEYS_PATH "${authorized_keys_path}"
   if [[ -n "${CONTROL_PLANE_SCREEN_SESSION:-}" ]]; then
     write_runtime_var CONTROL_PLANE_SCREEN_SESSION "${CONTROL_PLANE_SCREEN_SESSION}"
   fi

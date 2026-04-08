@@ -197,9 +197,10 @@ ${service_account_yaml}
                   printf "%s\n" "job-check: runtime-cache=ok"
 
                 ssh-keygen -q -t ed25519 -N "" -f /tmp/id_ed25519
-                cat /tmp/id_ed25519.pub >> /home/copilot/.ssh/authorized_keys
-                cat /var/run/control-plane-test/job-ssh-public-key >> /home/copilot/.ssh/authorized_keys
-                chmod 600 /home/copilot/.ssh/authorized_keys
+                authorized_keys_path=/home/copilot/.config/control-plane/ssh-auth/authorized_keys
+                cat /tmp/id_ed25519.pub >> "${authorized_keys_path}"
+                cat /var/run/control-plane-test/job-ssh-public-key >> "${authorized_keys_path}"
+                chmod 600 "${authorized_keys_path}"
                 /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config >/tmp/sshd.log 2>&1 &
                 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
                   if ssh-keyscan -p 2222 127.0.0.1 >/dev/null 2>&1; then
@@ -349,7 +350,6 @@ set +e
   --port 2222 \
   --session-name k8s-copilot \
   --marker-path /tmp/ssh-interactive-marker.txt \
-  --no-remote-check \
   >"${ssh_probe_log}" 2>&1
 ssh_probe_status=$?
 set -e
