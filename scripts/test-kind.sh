@@ -245,7 +245,9 @@ load_kind_images() {
 
 apply_resources() {
   local public_key
+  local environment_pvc_name
   public_key="$(cat "${ssh_key}.pub")"
+  environment_pvc_name="node-workspace-${cluster_name}-control-plane"
   cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: Namespace
@@ -432,6 +434,24 @@ spec:
     type: DirectoryOrCreate
 ---
 apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: control-plane-fast-exec-environment-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: control-plane-fast-exec-environment-manual
+  claimRef:
+    name: ${environment_pvc_name}
+    namespace: ${namespace}
+  hostPath:
+    path: /tmp/control-plane-fast-exec-environment
+    type: DirectoryOrCreate
+---
+apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: control-plane-workspace-pvc
@@ -510,7 +530,7 @@ data:
   CONTROL_PLANE_FAST_EXECUTION_PORT: "8080"
   CONTROL_PLANE_FAST_EXECUTION_HOME: /root
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX: node-workspace
-  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS: standard
+  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS: control-plane-fast-exec-environment-manual
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE: 10Gi
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH: /environment
   CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST: 250m
@@ -1247,6 +1267,7 @@ cleanup() {
   kubectl delete pv control-plane-copilot-session-pv --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete pv control-plane-workspace-control-pv --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete pv control-plane-workspace-job-pv --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete pv control-plane-fast-exec-environment-pv --ignore-not-found >/dev/null 2>&1 || true
   if [[ "${created_cluster}" -eq 1 ]]; then
     kind_cmd delete cluster --name "${cluster_name}" >/dev/null 2>&1 || true
   fi
