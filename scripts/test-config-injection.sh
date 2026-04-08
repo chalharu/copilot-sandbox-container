@@ -131,10 +131,17 @@ test "$(readlink /home/copilot/.gitconfig)" = "${GIT_CONFIG_GLOBAL}"
 test "$(stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys)" = '711 root root'
 test "$(stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key)" = '600 root root'
 test "$(stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub)" = '644 root root'
+test "$(stat -c '%a %U %G' /run/control-plane/ssh-host-keys)" = '700 root root'
+test "$(stat -c '%a %U %G' /run/control-plane/ssh-host-keys/ssh_host_ed25519_key)" = '600 root root'
+test "$(stat -c '%a %U %G' /run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub)" = '644 root root'
 ! test -e /var/lib/control-plane/ssh-host-keys/ssh_host_rsa_key
 ! test -e /var/lib/control-plane/ssh-host-keys/ssh_host_ecdsa_key
 ! test -e /var/lib/control-plane/ssh-host-keys/ssh_host_rsa_key.pub
 ! test -e /var/lib/control-plane/ssh-host-keys/ssh_host_ecdsa_key.pub
+test -L /etc/ssh/ssh_host_ed25519_key
+test -L /etc/ssh/ssh_host_ed25519_key.pub
+test "$(readlink /etc/ssh/ssh_host_ed25519_key)" = '/run/control-plane/ssh-host-keys/ssh_host_ed25519_key'
+test "$(readlink /etc/ssh/ssh_host_ed25519_key.pub)" = '/run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub'
 grep -Fxq 'HostKey /etc/ssh/ssh_host_ed25519_key' /etc/ssh/sshd_config
 grep -Fxq 'AuthorizedKeysFile .config/control-plane/ssh-auth/authorized_keys' /etc/ssh/sshd_config
 ! grep -Fq 'HostKey /etc/ssh/ssh_host_rsa_key' /etc/ssh/sshd_config
@@ -145,6 +152,7 @@ test -L /home/copilot/.config/control-plane/ssh-auth/authorized_keys
 test "$(readlink /home/copilot/.config/control-plane/ssh-auth/authorized_keys)" = '../../../.ssh/authorized_keys'
 ! test -L /home/copilot/.ssh/authorized_keys
 grep -Fqx 'CONTROL_PLANE_AUTHORIZED_KEYS_PATH=/home/copilot/.config/control-plane/ssh-auth/authorized_keys' /home/copilot/.config/control-plane/runtime.env
+grep -Fqx 'CONTROL_PLANE_RUNTIME_HOST_KEY_DIR=/run/control-plane/ssh-host-keys' /home/copilot/.config/control-plane/runtime.env
 grep -Fqx 'CONTROL_PLANE_EXEC_POLICY_LIBRARY=/usr/local/lib/libcontrol_plane_exec_policy.so' /home/copilot/.config/control-plane/runtime.env
 grep -Fqx 'CONTROL_PLANE_EXEC_POLICY_RULES_FILE=/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml' /home/copilot/.config/control-plane/runtime.env
 grep -Fqx 'LD_PRELOAD=/usr/local/lib/libcontrol_plane_exec_policy.so' /home/copilot/.config/control-plane/runtime.env
@@ -161,6 +169,10 @@ fi
 su -s /bin/bash copilot -lc 'test -r /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub'
 if su -s /bin/bash copilot -lc 'test -r /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key'; then
   printf '%s\n' 'Expected Copilot user to be unable to read the private SSH host key' >&2
+  exit 1
+fi
+if su -s /bin/bash copilot -lc 'test -r /run/control-plane/ssh-host-keys/ssh_host_ed25519_key'; then
+  printf '%s\n' 'Expected Copilot user to be unable to read the runtime SSH host key copy' >&2
   exit 1
 fi
 su -s /bin/bash copilot -lc 'test "${CONTROL_PLANE_EXEC_POLICY_LIBRARY}" = /usr/local/lib/libcontrol_plane_exec_policy.so'

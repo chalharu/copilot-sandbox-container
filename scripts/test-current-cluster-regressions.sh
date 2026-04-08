@@ -101,6 +101,16 @@ fi
   --session-name "${session_name}" \
   --marker-path /tmp/current-cluster-ssh-marker.txt
 
+kubectl exec --namespace "${namespace}" "${pod_name}" -c control-plane -- bash -lc \
+  "set -euo pipefail; \
+   test -L /etc/ssh/ssh_host_ed25519_key; \
+   test -L /etc/ssh/ssh_host_ed25519_key.pub; \
+   test \"\$(readlink /etc/ssh/ssh_host_ed25519_key)\" = '/run/control-plane/ssh-host-keys/ssh_host_ed25519_key'; \
+   test \"\$(readlink /etc/ssh/ssh_host_ed25519_key.pub)\" = '/run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub'; \
+   test \"\$(stat -c '%a %U %G' /run/control-plane/ssh-host-keys)\" = '700 root root'; \
+   test \"\$(stat -c '%a %U %G' /run/control-plane/ssh-host-keys/ssh_host_ed25519_key)\" = '600 root root'; \
+   test \"\$(stat -c '%a %U %G' /run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub)\" = '644 root root'"
+
 cp "${runtime_backup}" "${runtime_config_file}"
 chmod 600 "${runtime_config_file}"
 cp "${authorized_keys_backup}" "${authorized_keys_path}"

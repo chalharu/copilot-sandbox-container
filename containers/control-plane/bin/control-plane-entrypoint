@@ -24,6 +24,7 @@ cargo_home_dir="${CARGO_HOME:-${control_plane_home}/.cargo}"
 cargo_target_dir="${CARGO_TARGET_DIR:-${tmp_root}/cargo-target}"
 rustup_home_dir="${RUSTUP_HOME:-/usr/local/rustup}"
 host_key_dir="${CONTROL_PLANE_HOST_KEY_DIR:-/var/lib/control-plane/ssh-host-keys}"
+runtime_host_key_dir="${CONTROL_PLANE_RUNTIME_HOST_KEY_DIR:-/run/control-plane/ssh-host-keys}"
 bundled_skills_dir="/usr/local/share/control-plane/skills"
 copilot_skills_dir="${copilot_state_dir}/skills"
 bundled_hooks_dir="/usr/local/share/control-plane/hooks"
@@ -369,7 +370,6 @@ ensure_ssh_host_key() {
   local key_type="$1"
   local key_basename="$2"
   local persistent_key_path="${host_key_dir}/${key_basename}"
-  local etc_key_path="/etc/ssh/${key_basename}"
 
   if [[ -e "${persistent_key_path}" ]] && [[ ! -f "${persistent_key_path}" ]]; then
     printf 'Refusing to use non-file SSH host key path at %s\n' "${persistent_key_path}" >&2
@@ -380,21 +380,41 @@ ensure_ssh_host_key() {
     ssh-keygen -q -N '' -t "${key_type}" -f "${persistent_key_path}"
   fi
 
+  chown root:root "${persistent_key_path}"
+  chmod 600 "${persistent_key_path}"
+
   if [[ ! -f "${persistent_key_path}.pub" ]]; then
     ssh-keygen -y -f "${persistent_key_path}" > "${persistent_key_path}.pub"
   fi
 
-  chown root:root "${persistent_key_path}" "${persistent_key_path}.pub"
-  chmod 600 "${persistent_key_path}"
+  chown root:root "${persistent_key_path}.pub"
   chmod 644 "${persistent_key_path}.pub"
+  stage_runtime_ssh_host_key "${key_basename}"
+}
 
-  ln -sfn "${persistent_key_path}" "${etc_key_path}"
-  ln -sfn "${persistent_key_path}.pub" "${etc_key_path}.pub"
+stage_runtime_ssh_host_key() {
+  local key_basename="$1"
+  local persistent_key_path="${host_key_dir}/${key_basename}"
+  local runtime_key_path="${runtime_host_key_dir}/${key_basename}"
+  local etc_key_path="/etc/ssh/${key_basename}"
+
+  require_regular_file "${persistent_key_path}" "SSH host key"
+  require_regular_file "${persistent_key_path}.pub" "SSH host public key"
+
+  rm -f "${runtime_key_path}" "${runtime_key_path}.pub"
+  cp "${persistent_key_path}" "${runtime_key_path}"
+  cp "${persistent_key_path}.pub" "${runtime_key_path}.pub"
+  chown root:root "${runtime_key_path}" "${runtime_key_path}.pub"
+  chmod 600 "${runtime_key_path}"
+  chmod 644 "${runtime_key_path}.pub"
+  ln -sfn "${runtime_key_path}" "${etc_key_path}"
+  ln -sfn "${runtime_key_path}.pub" "${etc_key_path}.pub"
 }
 
 remove_ssh_host_key() {
   local key_basename="$1"
   local persistent_key_path="${host_key_dir}/${key_basename}"
+  local runtime_key_path="${runtime_host_key_dir}/${key_basename}"
   local etc_key_path="/etc/ssh/${key_basename}"
 
   if [[ -e "${persistent_key_path}" ]] && [[ ! -f "${persistent_key_path}" ]]; then
@@ -405,6 +425,8 @@ remove_ssh_host_key() {
   rm -f \
     "${persistent_key_path}" \
     "${persistent_key_path}.pub" \
+    "${runtime_key_path}" \
+    "${runtime_key_path}.pub" \
     "${etc_key_path}" \
     "${etc_key_path}.pub"
 }
@@ -545,6 +567,7 @@ mkdir -p \
   "${cargo_target_dir}" \
   "${job_transfer_root}" \
   "${host_key_dir}" \
+  "${runtime_host_key_dir}" \
   "/run/user/${control_plane_uid}" \
   /run/sshd \
   "${runtime_dir}"
@@ -589,6 +612,7 @@ chown "${control_plane_user}:${control_plane_user}" \
   "${control_plane_home}/.local" \
   "${control_plane_home}/.local/share"
 chown root:root "${host_key_dir}"
+chown root:root "${runtime_host_key_dir}"
 chown root:root /run/sshd
 chmod 755 "${control_plane_home}"
 chmod 700 \
@@ -605,6 +629,7 @@ chmod 700 \
   "${screen_dir}"
 # Jobs need to read the public SSH host key from an unprivileged shell to seed known_hosts.
 chmod 711 "${host_key_dir}"
+chmod 700 "${runtime_host_key_dir}"
 chmod 755 /run/sshd
 
 export XDG_RUNTIME_DIR="${runtime_dir}"
@@ -772,6 +797,7 @@ runtime_config_tmp="$(mktemp "${runtime_config_path}.XXXXXX")"
     write_runtime_var CONTROL_PLANE_NODE_NAME "${CONTROL_PLANE_NODE_NAME}"
   fi
   write_runtime_var CONTROL_PLANE_HOST_KEY_DIR "${host_key_dir}"
+  write_runtime_var CONTROL_PLANE_RUNTIME_HOST_KEY_DIR "${runtime_host_key_dir}"
   write_runtime_var CONTROL_PLANE_AUTHORIZED_KEYS_PATH "${authorized_keys_path}"
   if [[ -n "${CONTROL_PLANE_SCREEN_SESSION:-}" ]]; then
     write_runtime_var CONTROL_PLANE_SCREEN_SESSION "${CONTROL_PLANE_SCREEN_SESSION}"
