@@ -247,7 +247,10 @@ fn load_config() -> ToolResult<SessionExecConfig> {
     let owner_pod_uid = required_env("CONTROL_PLANE_POD_UID")?;
     let node_name = required_env("CONTROL_PLANE_NODE_NAME")?;
     let image = required_env("CONTROL_PLANE_FAST_EXECUTION_IMAGE")?;
-    let image_pull_policy = env_or_default("CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY", "IfNotPresent");
+    let image_pull_policy = env_or_default(
+        "CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY",
+        "IfNotPresent",
+    );
     let bootstrap_image = optional_env("CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE");
     let bootstrap_image_pull_policy = env_or_default(
         "CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY",
@@ -284,8 +287,7 @@ fn load_config() -> ToolResult<SessionExecConfig> {
     );
     let environment_storage_class =
         optional_env("CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS");
-    let environment_size =
-        env_or_default("CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE", "10Gi");
+    let environment_size = env_or_default("CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE", "10Gi");
     let environment_mount_path = absolute_env(
         "CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH",
         "/environment",
@@ -335,7 +337,11 @@ fn load_config() -> ToolResult<SessionExecConfig> {
 }
 
 fn ensure_enabled() -> ToolResult<()> {
-    if env::var("CONTROL_PLANE_FAST_EXECUTION_ENABLED").ok().as_deref() == Some("1") {
+    if env::var("CONTROL_PLANE_FAST_EXECUTION_ENABLED")
+        .ok()
+        .as_deref()
+        == Some("1")
+    {
         Ok(())
     } else {
         Err(ToolError::new(
@@ -360,7 +366,8 @@ fn optional_env(name: &str) -> Option<String> {
 }
 
 fn required_env(name: &str) -> ToolResult<String> {
-    let value = env::var(name).map_err(|_| ToolError::new(64, COMMAND_NAME, format!("{name} is required")))?;
+    let value = env::var(name)
+        .map_err(|_| ToolError::new(64, COMMAND_NAME, format!("{name} is required")))?;
     non_empty_env(name, value)
 }
 
@@ -398,23 +405,31 @@ fn parse_u16(value: &str, name: &str) -> ToolResult<u16> {
 }
 
 fn parse_positive_u64(value: &str, name: &str) -> ToolResult<u64> {
-    value.parse::<u64>().ok().filter(|parsed| *parsed > 0).ok_or_else(|| {
-        ToolError::new(
-            64,
-            COMMAND_NAME,
-            format!("{name} must be a positive integer: {value}"),
-        )
-    })
+    value
+        .parse::<u64>()
+        .ok()
+        .filter(|parsed| *parsed > 0)
+        .ok_or_else(|| {
+            ToolError::new(
+                64,
+                COMMAND_NAME,
+                format!("{name} must be a positive integer: {value}"),
+            )
+        })
 }
 
 fn parse_non_root_u32(value: &str, name: &str) -> ToolResult<u32> {
-    value.parse::<u32>().ok().filter(|parsed| *parsed > 0).ok_or_else(|| {
-        ToolError::new(
-            64,
-            COMMAND_NAME,
-            format!("{name} must be greater than zero: {value}"),
-        )
-    })
+    value
+        .parse::<u32>()
+        .ok()
+        .filter(|parsed| *parsed > 0)
+        .ok_or_else(|| {
+            ToolError::new(
+                64,
+                COMMAND_NAME,
+                format!("{name} must be greater than zero: {value}"),
+            )
+        })
 }
 
 fn parse_duration(value: &str, name: &str) -> ToolResult<Duration> {
@@ -430,9 +445,9 @@ fn parse_duration(value: &str, name: &str) -> ToolResult<Duration> {
         ));
     }
 
-    let amount = digits.parse::<u64>().map_err(|_| {
-        ToolError::new(64, COMMAND_NAME, format!("invalid {name}: {value}"))
-    })?;
+    let amount = digits
+        .parse::<u64>()
+        .map_err(|_| ToolError::new(64, COMMAND_NAME, format!("invalid {name}: {value}")))?;
     let seconds = match suffix {
         "" | "s" => amount,
         "m" => amount.saturating_mul(60),
@@ -559,10 +574,9 @@ async fn ensure_pod_ready(
                             auth_token: entry.auth_token.clone(),
                             environment_pvc_name: entry.environment_pvc_name.clone(),
                         };
-                        state.sessions.insert(
-                            session_key.to_string(),
-                            entry_from_prepared(&prepared),
-                        );
+                        state
+                            .sessions
+                            .insert(session_key.to_string(), entry_from_prepared(&prepared));
                         write_state(&config.state_file, &state)?;
                         return Ok(prepared);
                     }
@@ -701,7 +715,9 @@ async fn delete_pod(client: &Client, namespace: &str, pod_name: &str) -> Result<
     {
         Ok(()) => Ok(()),
         Err(kube::Error::Api(error)) if error.code == 404 => Ok(()),
-        Err(error) => Err(format!("failed to delete execution pod {pod_name}: {error}")),
+        Err(error) => Err(format!(
+            "failed to delete execution pod {pod_name}: {error}"
+        )),
     }
 }
 
@@ -773,18 +789,19 @@ fn pod_ready(pod: &Pod) -> bool {
     if status.phase.as_deref() != Some("Running") {
         return false;
     }
-    status
-        .container_statuses
-        .as_ref()
-        .is_some_and(|statuses| {
-            statuses
-                .iter()
-                .any(|container| container.name == "execution" && container.ready)
-        })
+    status.container_statuses.as_ref().is_some_and(|statuses| {
+        statuses
+            .iter()
+            .any(|container| container.name == "execution" && container.ready)
+    })
 }
 
 fn pod_ip(pod: &Pod) -> Option<String> {
-    pod.status.as_ref()?.pod_ip.clone().filter(|value| !value.is_empty())
+    pod.status
+        .as_ref()?
+        .pod_ip
+        .clone()
+        .filter(|value| !value.is_empty())
 }
 
 fn environment_pvc_name(config: &SessionExecConfig) -> String {
@@ -1093,9 +1110,9 @@ fn build_exec_pod(
 
 fn nested_mount_path(root: &str, absolute_path: &str) -> Result<String, String> {
     let trimmed_root = root.trim_end_matches('/');
-    let suffix = absolute_path.strip_prefix('/').ok_or_else(|| {
-        format!("expected absolute nested mount path, got {absolute_path}")
-    })?;
+    let suffix = absolute_path
+        .strip_prefix('/')
+        .ok_or_else(|| format!("expected absolute nested mount path, got {absolute_path}"))?;
     Ok(format!("{trimmed_root}/{suffix}"))
 }
 
@@ -1152,7 +1169,11 @@ impl StateLock {
         if status == 0 {
             Ok(Self { file })
         } else {
-            Err(format!("failed to lock {}: {}", path.display(), std::io::Error::last_os_error()))
+            Err(format!(
+                "failed to lock {}: {}",
+                path.display(),
+                std::io::Error::last_os_error()
+            ))
         }
     }
 }
@@ -1168,8 +1189,8 @@ impl Drop for StateLock {
 #[cfg(test)]
 mod tests {
     use super::{
-        PreparedPod, SessionExecConfig, build_environment_pvc, build_exec_pod,
-        entry_from_prepared, environment_pvc_name, pod_name_for_session,
+        PreparedPod, SessionExecConfig, build_environment_pvc, build_exec_pod, entry_from_prepared,
+        environment_pvc_name, pod_name_for_session,
     };
 
     fn config() -> SessionExecConfig {
@@ -1259,7 +1280,11 @@ mod tests {
         )
         .unwrap();
         let spec = pod.spec.unwrap();
-        let execution = spec.containers.iter().find(|container| container.name == "execution").unwrap();
+        let execution = spec
+            .containers
+            .iter()
+            .find(|container| container.name == "execution")
+            .unwrap();
         assert_eq!(
             execution.command.as_ref().unwrap(),
             &vec![
@@ -1268,17 +1293,27 @@ mod tests {
             ]
         );
         let mounts = execution.volume_mounts.as_ref().unwrap();
-        assert!(mounts.iter().any(|mount| mount.name == "environment" && mount.mount_path == "/environment"));
-        assert!(mounts.iter().any(|mount| mount.name == "workspace"
-            && mount.mount_path == "/environment/root/workspace"));
+        assert!(
+            mounts
+                .iter()
+                .any(|mount| mount.name == "environment" && mount.mount_path == "/environment")
+        );
+        assert!(
+            mounts.iter().any(|mount| mount.name == "workspace"
+                && mount.mount_path == "/environment/root/workspace")
+        );
         assert!(mounts.iter().any(|mount| mount.name == "copilot-session"
             && mount.mount_path == "/environment/root/root/.config/gh"));
         let env = execution.env.as_ref().unwrap();
-        assert!(env.iter().any(|value| value.name == "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT"
-            && value.value.as_deref() == Some("/environment/root")));
-        assert!(env.iter().any(|value| value.name == "CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH"
+        assert!(env.iter().any(
+            |value| value.name == "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT"
+                && value.value.as_deref() == Some("/environment/root")
+        ));
+        assert!(env.iter().any(|value| value.name
+            == "CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH"
             && value.value.as_deref() == Some("/environment")));
-        assert!(env.iter().any(|value| value.name == "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE"
+        assert!(env.iter().any(|value| value.name
+            == "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE"
             && value.value.as_deref() == Some("/environment/hooks/git")));
         let volumes = spec.volumes.as_ref().unwrap();
         assert!(volumes.iter().any(|volume| volume.name == "environment"));

@@ -3,8 +3,8 @@ use nix::unistd::{Gid, Uid, chdir, chown, chroot, setgid, setuid};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::ffi::OsString;
-use std::future::Future;
 use std::fs;
+use std::future::Future;
 use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
@@ -142,8 +142,9 @@ fn validate_token(
             "missing or invalid exec API token",
         ));
     };
-    let expected = MetadataValue::try_from(exec_api_token)
-        .map_err(|_| Status::internal("execution API token could not be encoded as gRPC metadata"))?;
+    let expected = MetadataValue::try_from(exec_api_token).map_err(|_| {
+        Status::internal("execution API token could not be encoded as gRPC metadata")
+    })?;
     if token == expected {
         Ok(())
     } else {
@@ -154,15 +155,14 @@ fn validate_token(
 }
 
 pub fn load_server_config_from_env() -> Result<ServerConfig, String> {
-    let raw_port = env::var("CONTROL_PLANE_FAST_EXECUTION_PORT")
-        .unwrap_or_else(|_| String::from("8080"));
+    let raw_port =
+        env::var("CONTROL_PLANE_FAST_EXECUTION_PORT").unwrap_or_else(|_| String::from("8080"));
     let raw_workspace =
         env::var("CONTROL_PLANE_WORKSPACE").unwrap_or_else(|_| String::from("/workspace"));
     let raw_chroot_root = env::var("CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT").ok();
     let raw_environment_mount =
         env::var("CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH").ok();
-    let raw_git_hooks_source =
-        env::var("CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE").ok();
+    let raw_git_hooks_source = env::var("CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE").ok();
     let raw_remote_home =
         env::var("CONTROL_PLANE_FAST_EXECUTION_HOME").unwrap_or_else(|_| String::from("/root"));
     let git_user_name = env::var("CONTROL_PLANE_GIT_USER_NAME")
@@ -211,14 +211,20 @@ fn build_server_config(
     run_as_gid: &str,
 ) -> Result<ServerConfig, String> {
     let port = parse_port(raw_port)?;
-    let remote_home = normalize_absolute_path(raw_remote_home, "CONTROL_PLANE_FAST_EXECUTION_HOME")?;
-    let (workspace_root, logical_workspace_root, chroot_root, environment_mount_path, git_hooks_source) =
-        resolve_environment_paths(
-            raw_workspace,
-            raw_chroot_root,
-            raw_environment_mount,
-            raw_git_hooks_source,
-        )?;
+    let remote_home =
+        normalize_absolute_path(raw_remote_home, "CONTROL_PLANE_FAST_EXECUTION_HOME")?;
+    let (
+        workspace_root,
+        logical_workspace_root,
+        chroot_root,
+        environment_mount_path,
+        git_hooks_source,
+    ) = resolve_environment_paths(
+        raw_workspace,
+        raw_chroot_root,
+        raw_environment_mount,
+        raw_git_hooks_source,
+    )?;
     let exec_timeout = Duration::from_secs(parse_positive_u64(
         timeout_sec,
         "CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC",
@@ -269,7 +275,9 @@ fn resolve_environment_paths(
             "CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH",
         )?;
         let git_hooks_source = raw_git_hooks_source
-            .map(|path| normalize_absolute_path(path, "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE"))
+            .map(|path| {
+                normalize_absolute_path(path, "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE")
+            })
             .transpose()?;
         let workspace_root = host_path_for_logical(&chroot_root, &logical_workspace_root)?;
         Ok((
@@ -281,13 +289,7 @@ fn resolve_environment_paths(
         ))
     } else {
         let workspace_root = canonicalize_absolute_path(raw_workspace, "CONTROL_PLANE_WORKSPACE")?;
-        Ok((
-            workspace_root.clone(),
-            workspace_root,
-            None,
-            None,
-            None,
-        ))
+        Ok((workspace_root.clone(), workspace_root, None, None, None))
     }
 }
 
@@ -296,7 +298,9 @@ fn parse_port(raw_port: &str) -> Result<u16, String> {
         .parse::<u16>()
         .map_err(|_| format!("invalid CONTROL_PLANE_FAST_EXECUTION_PORT: {raw_port}"))?;
     if port == 0 {
-        Err(format!("invalid CONTROL_PLANE_FAST_EXECUTION_PORT: {raw_port}"))
+        Err(format!(
+            "invalid CONTROL_PLANE_FAST_EXECUTION_PORT: {raw_port}"
+        ))
     } else {
         Ok(port)
     }
@@ -454,7 +458,10 @@ fn copy_rootfs(chroot_root: &Path, config: &ServerConfig) -> Result<(), DynError
     archive.current_dir("/");
     archive.arg("cf").arg("-");
     for path in excluded_rootfs_paths(config) {
-        archive.arg(format!("--exclude=./{}", strip_leading_slash(path).display()));
+        archive.arg(format!(
+            "--exclude=./{}",
+            strip_leading_slash(path).display()
+        ));
     }
     archive.arg(".");
     archive.stdout(Stdio::piped());
@@ -504,7 +511,10 @@ fn ensure_runtime_dirs(chroot_root: &Path, remote_home: &Path) -> Result<(), Dyn
     fs::create_dir_all(chroot_root.join("tmp"))?;
     fs::create_dir_all(chroot_root.join("var/tmp"))?;
     fs::set_permissions(chroot_root.join("tmp"), fs::Permissions::from_mode(0o1777))?;
-    fs::set_permissions(chroot_root.join("var/tmp"), fs::Permissions::from_mode(0o1777))?;
+    fs::set_permissions(
+        chroot_root.join("var/tmp"),
+        fs::Permissions::from_mode(0o1777),
+    )?;
 
     let home_dir = nested_absolute_path(chroot_root, remote_home)?;
     let config_dir = home_dir.join(".config");
@@ -515,11 +525,31 @@ fn ensure_runtime_dirs(chroot_root: &Path, remote_home: &Path) -> Result<(), Dyn
 }
 
 fn ensure_device_nodes(chroot_root: &Path) -> Result<(), DynError> {
-    create_device_node(&nested_absolute_path(chroot_root, Path::new("/dev/null"))?, 1, 3)?;
-    create_device_node(&nested_absolute_path(chroot_root, Path::new("/dev/zero"))?, 1, 5)?;
-    create_device_node(&nested_absolute_path(chroot_root, Path::new("/dev/random"))?, 1, 8)?;
-    create_device_node(&nested_absolute_path(chroot_root, Path::new("/dev/urandom"))?, 1, 9)?;
-    create_device_node(&nested_absolute_path(chroot_root, Path::new("/dev/tty"))?, 5, 0)?;
+    create_device_node(
+        &nested_absolute_path(chroot_root, Path::new("/dev/null"))?,
+        1,
+        3,
+    )?;
+    create_device_node(
+        &nested_absolute_path(chroot_root, Path::new("/dev/zero"))?,
+        1,
+        5,
+    )?;
+    create_device_node(
+        &nested_absolute_path(chroot_root, Path::new("/dev/random"))?,
+        1,
+        8,
+    )?;
+    create_device_node(
+        &nested_absolute_path(chroot_root, Path::new("/dev/urandom"))?,
+        1,
+        9,
+    )?;
+    create_device_node(
+        &nested_absolute_path(chroot_root, Path::new("/dev/tty"))?,
+        5,
+        0,
+    )?;
     Ok(())
 }
 
@@ -562,7 +592,8 @@ fn install_required_packages(chroot_root: &Path) -> Result<(), DynError> {
         return Ok(());
     }
 
-    if let Some(apt_get_path) = resolve_chroot_command(chroot_root, &["/usr/bin/apt-get", "/bin/apt-get"])
+    if let Some(apt_get_path) =
+        resolve_chroot_command(chroot_root, &["/usr/bin/apt-get", "/bin/apt-get"])
     {
         let noninteractive = [(
             OsString::from("DEBIAN_FRONTEND"),
@@ -596,10 +627,7 @@ fn install_required_packages(chroot_root: &Path) -> Result<(), DynError> {
         return Ok(());
     }
 
-    Err(io::Error::other(
-        "unsupported execution image package manager: need apk or apt-get",
-    )
-    .into())
+    Err(io::Error::other("unsupported execution image package manager: need apk or apt-get").into())
 }
 
 fn required_commands_present(chroot_root: &Path) -> bool {
@@ -637,11 +665,7 @@ fn run_in_chroot(
     if status.success() {
         Ok(())
     } else {
-        Err(io::Error::other(format!(
-            "command {} failed in chroot",
-            program.display()
-        ))
-        .into())
+        Err(io::Error::other(format!("command {} failed in chroot", program.display())).into())
     }
 }
 
@@ -718,9 +742,21 @@ fn sync_git_config(config: &ServerConfig) -> Result<(), DynError> {
     fs::set_permissions(&home_dir, fs::Permissions::from_mode(0o700))?;
     fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o700))?;
     fs::set_permissions(&gitconfig_path, fs::Permissions::from_mode(0o600))?;
-    chown(&home_dir, Some(Uid::from_raw(config.run_as_uid)), Some(Gid::from_raw(config.run_as_gid)))?;
-    chown(&config_dir, Some(Uid::from_raw(config.run_as_uid)), Some(Gid::from_raw(config.run_as_gid)))?;
-    chown(&gitconfig_path, Some(Uid::from_raw(config.run_as_uid)), Some(Gid::from_raw(config.run_as_gid)))?;
+    chown(
+        &home_dir,
+        Some(Uid::from_raw(config.run_as_uid)),
+        Some(Gid::from_raw(config.run_as_gid)),
+    )?;
+    chown(
+        &config_dir,
+        Some(Uid::from_raw(config.run_as_uid)),
+        Some(Gid::from_raw(config.run_as_gid)),
+    )?;
+    chown(
+        &gitconfig_path,
+        Some(Uid::from_raw(config.run_as_uid)),
+        Some(Gid::from_raw(config.run_as_gid)),
+    )?;
     Ok(())
 }
 
@@ -751,8 +787,12 @@ fn canonicalize_absolute_path(path: &Path, variable_name: &str) -> Result<PathBu
             .map_err(|error| format!("failed to determine current directory: {error}"))?
             .join(path)
     };
-    fs::canonicalize(&absolute)
-        .map_err(|error| format!("failed to resolve {variable_name} {}: {error}", absolute.display()))
+    fs::canonicalize(&absolute).map_err(|error| {
+        format!(
+            "failed to resolve {variable_name} {}: {error}",
+            absolute.display()
+        )
+    })
 }
 
 fn normalize_absolute_path(path: &Path, variable_name: &str) -> Result<PathBuf, String> {
@@ -824,17 +864,22 @@ fn host_path_for_cwd(
     logical_workspace_root: &Path,
     logical_cwd: &Path,
 ) -> Result<PathBuf, String> {
-    let relative = logical_cwd.strip_prefix(logical_workspace_root).map_err(|_| {
-        format!(
-            "cwd must stay within {}: {}",
-            logical_workspace_root.display(),
-            logical_cwd.display()
-        )
-    })?;
+    let relative = logical_cwd
+        .strip_prefix(logical_workspace_root)
+        .map_err(|_| {
+            format!(
+                "cwd must stay within {}: {}",
+                logical_workspace_root.display(),
+                logical_cwd.display()
+            )
+        })?;
     Ok(workspace_root.join(relative))
 }
 
-fn host_path_for_logical(chroot_root: &Path, logical_workspace_root: &Path) -> Result<PathBuf, String> {
+fn host_path_for_logical(
+    chroot_root: &Path,
+    logical_workspace_root: &Path,
+) -> Result<PathBuf, String> {
     nested_absolute_path(chroot_root, logical_workspace_root)
         .map_err(|error| format!("failed to derive chroot workspace root: {error}"))
 }
@@ -1049,9 +1094,7 @@ fn exit_code_from_status(status: std::process::ExitStatus) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_server_config, normalize_path, render_remote_git_config, resolve_cwd,
-    };
+    use super::{build_server_config, normalize_path, render_remote_git_config, resolve_cwd};
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
 
@@ -1065,8 +1108,12 @@ mod tests {
 
     #[test]
     fn resolve_cwd_rejects_paths_outside_workspace() {
-        let error = resolve_cwd(Path::new("/workspace"), Path::new("/workspace"), "/workspace/../tmp")
-            .expect_err("path should be rejected");
+        let error = resolve_cwd(
+            Path::new("/workspace"),
+            Path::new("/workspace"),
+            "/workspace/../tmp",
+        )
+        .expect_err("path should be rejected");
         assert_eq!(error, "cwd must stay within /workspace: /tmp");
     }
 
@@ -1104,8 +1151,12 @@ mod tests {
         symlink(&outside, workspace.join("escape")).unwrap();
         let workspace = std::fs::canonicalize(&workspace).unwrap();
 
-        let error = resolve_cwd(&workspace, &workspace, workspace.join("escape").to_str().unwrap())
-            .unwrap_err();
+        let error = resolve_cwd(
+            &workspace,
+            &workspace,
+            workspace.join("escape").to_str().unwrap(),
+        )
+        .unwrap_err();
         assert_eq!(
             error,
             format!(
