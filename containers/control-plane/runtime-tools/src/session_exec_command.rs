@@ -95,6 +95,9 @@ struct PreparedPod {
     environment_pvc_name: String,
 }
 
+const STARTUP_PROBE_PERIOD_SECONDS: u64 = 5;
+const STARTUP_PROBE_GRACE_SECONDS: u64 = 10;
+
 pub fn run(args: &[String]) -> ToolResult<i32> {
     if args.len() == 1 && matches!(args[0].as_str(), "--help" | "-h") {
         print_usage();
@@ -257,7 +260,7 @@ fn load_config() -> ToolResult<SessionExecConfig> {
         "IfNotPresent",
     );
     let start_timeout = parse_duration(
-        &env_or_default("CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT", "120s"),
+        &env_or_default("CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT", "300s"),
         "CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT",
     )?;
     let port = parse_u16(
@@ -726,7 +729,8 @@ async fn wait_for_pod(
     pod_name: &str,
 ) -> Result<String, String> {
     let pods: Api<Pod> = Api::namespaced(client.clone(), &config.namespace);
-    let deadline = Instant::now() + config.start_timeout;
+    let deadline =
+        Instant::now() + config.start_timeout + Duration::from_secs(STARTUP_PROBE_GRACE_SECONDS);
     loop {
         if Instant::now() > deadline {
             return Err(format!(
@@ -916,6 +920,14 @@ fn build_bootstrap_assets_init_command(environment_root: &str, runtime_bin_dir: 
     )
 }
 
+fn startup_probe_failure_threshold(start_timeout: Duration) -> u64 {
+    let timeout_seconds = start_timeout
+        .as_secs()
+        .saturating_add(STARTUP_PROBE_GRACE_SECONDS)
+        .max(STARTUP_PROBE_PERIOD_SECONDS);
+    timeout_seconds.saturating_add(STARTUP_PROBE_PERIOD_SECONDS - 1) / STARTUP_PROBE_PERIOD_SECONDS
+}
+
 fn build_exec_pod(
     config: &SessionExecConfig,
     session_key: &str,
@@ -1052,6 +1064,13 @@ fn build_exec_pod(
                     "name": "grpc",
                     "containerPort": config.port
                 }],
+                "startupProbe": {
+                    "grpc": {
+                        "port": config.port
+                    },
+                    "periodSeconds": STARTUP_PROBE_PERIOD_SECONDS,
+                    "failureThreshold": startup_probe_failure_threshold(config.start_timeout)
+                },
                 "readinessProbe": {
                     "grpc": {
                         "port": config.port
@@ -1404,6 +1423,10 @@ mod tests {
             |value| value.name == "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT"
                 && value.value.as_deref() == Some("/environment/root")
         ));
+        let startup_probe = execution.startup_probe.as_ref().unwrap();
+        assert_eq!(startup_probe.grpc.as_ref().unwrap().port, 8080);
+        assert_eq!(startup_probe.period_seconds, Some(5));
+        assert_eq!(startup_probe.failure_threshold, Some(26));
         assert!(env.iter().any(|value| value.name
             == "CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH"
             && value.value.as_deref() == Some("/environment")));

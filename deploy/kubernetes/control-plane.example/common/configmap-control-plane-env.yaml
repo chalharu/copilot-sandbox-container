@@ -42,7 +42,9 @@ data:
   # Prefer a digest-pinned ref here too.
   CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha@sha256:replace-with-digest
   CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: IfNotPresent
-  CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 120s
+  # Fresh-node bootstrap can take a few minutes while the cached chroot installs
+  # the initial runtime packages.
+  CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 300s
   CONTROL_PLANE_FAST_EXECUTION_PORT: "8080"
   # Delegated commands run as this unprivileged UID/GID even though the startup
   # step may briefly need root to install packages in the cached chroot.
