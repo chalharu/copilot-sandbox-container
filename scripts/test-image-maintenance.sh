@@ -191,6 +191,24 @@ grep -Fq -- "--cache-from type=local,src=${cache_dir} --cache-to type=local,dest
 [[ ! -e "${cache_dir}-new" ]]
 unset CONTROL_PLANE_BUILDX_CACHE_ROOT
 
+printf '%s\n' 'image-maintenance-test: verifying rust container cache wiring' >&2
+export CONTROL_PLANE_RUST_CONTAINER_CACHE_ROOT="${workdir}/rust-cache"
+prepare_rust_container_cache control-plane-rust-regressions rust_cache_home_dir rust_cache_target_dir rust_cache_temp_root
+rust_cache_dir="$(rust_container_cache_dir_for_scope control-plane-rust-regressions)"
+[[ "${rust_cache_home_dir}" == "${rust_cache_dir}/home" ]]
+[[ "${rust_cache_target_dir}" == "${rust_cache_dir}/target" ]]
+[[ -d "${rust_cache_home_dir}/.cargo" ]]
+[[ -d "${rust_cache_target_dir}" ]]
+[[ -z "${rust_cache_temp_root}" ]]
+unset CONTROL_PLANE_RUST_CONTAINER_CACHE_ROOT
+
+prepare_rust_container_cache control-plane-rust-regressions rust_temp_home_dir rust_temp_target_dir rust_temp_root
+[[ -n "${rust_temp_root}" ]]
+[[ "${rust_temp_home_dir}" == "${rust_temp_root}/home" ]]
+[[ "${rust_temp_target_dir}" == "${rust_temp_root}/target" ]]
+[[ -d "${rust_temp_home_dir}/.cargo" ]]
+[[ -d "${rust_temp_target_dir}" ]]
+
 printf '%s\n' 'image-maintenance-test: verifying retired helper image contexts were removed' >&2
 [[ ! -e "${sccache_dockerfile_path}" ]]
 

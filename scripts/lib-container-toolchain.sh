@@ -206,6 +206,45 @@ finalize_buildx_local_cache() {
   mv "${new_cache_dir}" "${cache_dir}"
 }
 
+rust_container_cache_dir_for_scope() {
+  local cache_scope="$1"
+  local cache_root="${CONTROL_PLANE_RUST_CONTAINER_CACHE_ROOT:-}"
+
+  [[ -n "${cache_root}" ]] || {
+    printf '%s\n' ''
+    return 0
+  }
+
+  require_command sha256sum
+  printf '%s/%s\n' "${cache_root}" "$(printf '%s' "${cache_scope}" | sha256sum | awk '{print $1}')"
+}
+
+prepare_rust_container_cache() {
+  local cache_scope="$1"
+  local home_dir_name="$2"
+  local target_dir_name="$3"
+  local temp_root_name="$4"
+  local cache_dir
+  local home_dir
+  local target_dir
+  local temp_root=''
+
+  cache_dir="$(rust_container_cache_dir_for_scope "${cache_scope}")"
+  if [[ -n "${cache_dir}" ]]; then
+    home_dir="${cache_dir}/home"
+    target_dir="${cache_dir}/target"
+  else
+    temp_root="$(mktemp -d)"
+    home_dir="${temp_root}/home"
+    target_dir="${temp_root}/target"
+  fi
+
+  mkdir -p "${home_dir}/.cargo" "${target_dir}"
+  printf -v "${home_dir_name}" '%s' "${home_dir}"
+  printf -v "${target_dir_name}" '%s' "${target_dir}"
+  printf -v "${temp_root_name}" '%s' "${temp_root}"
+}
+
 build_image_for_toolchain() {
   local toolchain="$1"
   local image_tag="$2"
