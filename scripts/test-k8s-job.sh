@@ -2,6 +2,8 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/.." && pwd)"
+control_plane_root="${repo_root}/containers/control-plane"
 current_namespace_file="/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 control_plane_namespace="${CONTROL_PLANE_K8S_NAMESPACE:-}"
 job_namespace="${2:-${CONTROL_PLANE_JOB_NAMESPACE:-${control_plane_namespace}}}"
@@ -110,18 +112,18 @@ kubectl delete configmap "${configmap_name}" -n "${active_namespace}" --ignore-n
 
 kubectl create configmap "${configmap_name}" \
   -n "${active_namespace}" \
-  --from-file=control-plane-entrypoint=/workspace/containers/control-plane/bin/control-plane-entrypoint \
-  --from-file=control-plane-copilot=/workspace/containers/control-plane/bin/control-plane-copilot \
-  --from-file=control-plane-job-transfer=/workspace/containers/control-plane/bin/control-plane-job-transfer \
-  --from-file=control-plane-screen=/workspace/containers/control-plane/bin/control-plane-screen \
-  --from-file=control-plane-session=/workspace/containers/control-plane/bin/control-plane-session \
-  --from-file=control-plane-ssh-shell=/workspace/containers/control-plane/bin/control-plane-ssh-shell \
+  --from-file=control-plane-entrypoint="${control_plane_root}/bin/control-plane-entrypoint" \
+  --from-file=control-plane-copilot="${control_plane_root}/bin/control-plane-copilot" \
+  --from-file=control-plane-job-transfer="${control_plane_root}/bin/control-plane-job-transfer" \
+  --from-file=control-plane-screen="${control_plane_root}/bin/control-plane-screen" \
+  --from-file=control-plane-session="${control_plane_root}/bin/control-plane-session" \
+  --from-file=control-plane-ssh-shell="${control_plane_root}/bin/control-plane-ssh-shell" \
   --from-file=job-ssh-public-key="${ssh_key}.pub" \
-  --from-file=profile-control-plane-env.sh=/workspace/containers/control-plane/config/profile-control-plane-env.sh \
-  --from-file=profile-control-plane-session.sh=/workspace/containers/control-plane/config/profile-control-plane-session.sh \
-  --from-file=repo-change-delivery-skill.md=/workspace/containers/control-plane/skills/repo-change-delivery/SKILL.md \
-  --from-file=git-commit-skill.md=/workspace/containers/control-plane/skills/git-commit/SKILL.md \
-  --from-file=pull-request-workflow-skill.md=/workspace/containers/control-plane/skills/pull-request-workflow/SKILL.md
+  --from-file=profile-control-plane-env.sh="${control_plane_root}/config/profile-control-plane-env.sh" \
+  --from-file=profile-control-plane-session.sh="${control_plane_root}/config/profile-control-plane-session.sh" \
+  --from-file=repo-change-delivery-skill.md="${control_plane_root}/skills/repo-change-delivery/SKILL.md" \
+  --from-file=git-commit-skill.md="${control_plane_root}/skills/git-commit/SKILL.md" \
+  --from-file=pull-request-workflow-skill.md="${control_plane_root}/skills/pull-request-workflow/SKILL.md"
 
 service_account_yaml=''
 if [[ -n "${service_account}" ]]; then

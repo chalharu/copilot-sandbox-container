@@ -59,13 +59,18 @@ ConfigMap / Secret / write-back の具体的な path は
 
 ### image と tag を決める
 
-1. `deploy/kubernetes/control-plane.example/` 配下には
-   `replace-me-with-commit-sha` の placeholder が残っているので、
-   使いたい published commit SHA tag にそろえて更新する
-2. 再現性を重視するなら `latest` ではなく commit SHA tag を使う
-3. `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` と
-   `CONTROL_PLANE_JOB_TRANSFER_IMAGE` も Control Plane image と同じ
-   published tag に合わせる
+1. sample manifest の既定値は
+   `ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest`
+   なので、そのまま初回導入に使える
+2. 再現性を重視するなら GitHub Packages の
+   `copilot-sandbox-container-v2/control-plane`
+   （<https://github.com/chalharu/copilot-sandbox-container-v2/pkgs/container/copilot-sandbox-container-v2%2Fcontrol-plane>）
+   から full commit SHA tag を選び、`Deployment/control-plane`、
+   `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE`、
+   `CONTROL_PLANE_JOB_TRANSFER_IMAGE` の 3 箇所を同じ tag にそろえる
+3. `CONTROL_PLANE_FAST_EXECUTION_IMAGE` の sample 既定は
+   `docker.io/library/ubuntu:24.04`。別の image に変える場合は `/bin/sh` と
+   `apt-get` または `apk` を含め、shared cluster では digest-pinned ref を使う
 
 ### Secret と ConfigMap をそろえる
 
@@ -96,8 +101,9 @@ ConfigMap / Secret / write-back の具体的な path は
    (`control-plane-exec-pods`) を付ける。ただし shared namespace ではなく、
    control-plane 専用 namespace に閉じ込める
 9. `CONTROL_PLANE_FAST_EXECUTION_IMAGE` には delegated bash を実行したい
-   任意の Linux image（例: `ubuntu:24.04` や `alpine:3.22`）を置き、
-   本番では digest-pinned ref を使う。
+   任意の Linux image（例: `ubuntu:24.04` や `alpine:3.22`）を置けるが、
+   `/bin/sh` と `apt-get` または `apk` を必ず含め、本番では digest-pinned ref
+   を使う。
    `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` には Rust 製 exec-plane
    binary と bundled Git hook を持つ control-plane image を置く。
    node-scoped cache は `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX` /
@@ -116,7 +122,9 @@ ConfigMap / Secret / write-back の具体的な path は
 
 1. 永続化は、初回導入時だけ `deploy/kubernetes/control-plane.example/install/`
    で apply する `copilot-sandbox` Namespace、RWX の copilot session PVC、
-   そして通常 sample 側に含まれる RWO の `/workspace` PVC を基本にする
+   通常 sample 側に含まれる RWO の `/workspace` PVC、そして
+   `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS` で作る node-local
+   cache PVC を基本にする
 2. `~/.copilot/tmp` と Podman cache は emptyDir の ephemeral storage に
    逃がし、再生成可能な container cache が session PVC を食い潰さない
    ようにする
@@ -127,7 +135,10 @@ ConfigMap / Secret / write-back の具体的な path は
    `replace-me-with-rwx-storage-class` を実クラスタ向けに置き換える
 4. `control-plane-workspace-pvc` も PVC spec なので、`base/` や
    `overlays/default/` で storage class / サイズを変えるなら、
-   初回導入前に反映しておく
+   初回導入前に反映しておく。sample 既定の `ReadWriteOnce` のままでも、
+   Execution Pod は control-plane Pod と同じ node に pin されるため共有できる。
+   cluster に `standard` が無い場合は、workspace PVC 側だけでなく
+   `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS` も同時に見直す
 5. Rust Job の `cargo` / `rustup` / `target` などの再生成可能な state は
    `/var/tmp/containerized-rust/...` に寄せ、shared `/workspace` PVC に cache を
    溜めない

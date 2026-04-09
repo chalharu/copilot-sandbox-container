@@ -105,9 +105,10 @@ spec:
               subPath: state
       containers:
         - name: control-plane
-          # Pin deployments to a published commit SHA tag so the running image
-          # matches the revision you intend to operate.
-          image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha
+          # The sample starts with the repository's published latest tag so a
+          # first install works without editing image refs. Pin this to a full
+          # commit SHA tag when you want revision-stable rollouts.
+          image: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:

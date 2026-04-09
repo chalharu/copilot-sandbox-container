@@ -33,14 +33,16 @@ data:
   # Enable session-scoped execution pods for Copilot CLI bash commands.
   CONTROL_PLANE_FAST_EXECUTION_ENABLED: "1"
   # Choose the runtime image that should actually execute delegated bash
-  # commands. Use digest-pinned images in shared clusters. Alpine / Ubuntu both
-  # work as long as they provide /bin/sh and either apk or apt-get so the
-  # startup step can install bash, git, and gh before serving requests.
-  CONTROL_PLANE_FAST_EXECUTION_IMAGE: docker.io/library/ubuntu:24.04@sha256:replace-with-digest
+  # commands. The sample starts with Ubuntu 24.04 because it already provides
+  # /bin/sh and apt-get. Use digest-pinned images in shared clusters. Any
+  # replacement image must still provide /bin/sh and either apk or apt-get so
+  # the startup step can install bash, git, and gh before serving requests.
+  CONTROL_PLANE_FAST_EXECUTION_IMAGE: docker.io/library/ubuntu:24.04
   CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: IfNotPresent
-  # The bootstrap image provides the Rust exec-plane binary and bundled git hooks.
-  # Prefer a digest-pinned ref here too.
-  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha@sha256:replace-with-digest
+  # The bootstrap image provides the Rust exec-plane binary and bundled git
+  # hooks. The sample starts with the repository's published latest tag; pin to
+  # a full commit SHA tag when you want reproducible rollouts.
+  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest
   CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: IfNotPresent
   # Fresh-node bootstrap can take a few minutes while the cached chroot installs
   # the initial runtime packages.
@@ -56,6 +58,9 @@ data:
   # path that /bin/sh -lc can execute inside the chroot.
   # CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: apt-get update && apt-get install -y ripgrep
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX: node-workspace
+  # This node-local cache PVC is separate from the shared /workspace PVC.
+  # Change the storage class before first deploy if your cluster does not expose
+  # the sample default `standard`.
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS: standard
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE: 10Gi
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH: /environment
@@ -75,7 +80,7 @@ data:
   # Compile-heavy Rust hooks should run through a dedicated toolchain image
   # instead of the slim control-plane image.
   CONTROL_PLANE_RUST_HOOK_IMAGE: docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895
-  CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha
+  CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest
   CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane.copilot-sandbox.svc.cluster.local
   CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"
   CONTROL_PLANE_JOB_SERVICE_ACCOUNT: control-plane-job
