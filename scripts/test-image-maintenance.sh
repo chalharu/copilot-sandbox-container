@@ -162,6 +162,8 @@ chmod +x "${fake_bin_dir}/docker"
 export PATH="${fake_bin_dir}:${PATH}"
 export TEST_IMAGE_MAINTENANCE_DOCKER_LOG="${docker_log}"
 export TEST_IMAGE_MAINTENANCE_LABEL_STORE="${label_store}"
+unset CONTROL_PLANE_BUILDX_CACHE_ROOT
+unset CONTROL_PLANE_RUST_CONTAINER_CACHE_ROOT
 
 printf '%s\n' 'image-maintenance-test: verifying unchanged build contexts are reused' >&2
 first_hash="$(build_context_hash "${context_dir}")"
