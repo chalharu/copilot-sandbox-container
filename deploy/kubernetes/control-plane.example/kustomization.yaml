@@ -9,6 +9,8 @@ resources:
   - common/namespace-copilot-sandbox-jobs.yaml
   - common/serviceaccount-control-plane.yaml
   - common/serviceaccount-control-plane-job.yaml
+  - common/role-control-plane-exec-pods.yaml
+  - common/rolebinding-control-plane-exec-pods.yaml
   - common/role-control-plane-jobs.yaml
   - common/rolebinding-control-plane-jobs.yaml
   - common/role-control-plane-job-self-read.yaml
