@@ -1,6 +1,7 @@
 # Kubernetes サンプルマニフェスト
 
-`deploy/kubernetes/control-plane.example/` は、control plane を Kubernetes へ
+`deploy/kubernetes/control-plane.example/` は、
+`ghcr.io/chalharu/copilot-sandbox-container/control-plane:<tag>` を Kubernetes へ
 配置するための sample manifest です。はじめて導入する場合は
 `docs/tutorials/first-deployment.md` を先に読み、このページは
 「どのファイルをどう編集するか」を確認する reference として使ってください。
