@@ -83,6 +83,8 @@ struct SessionState {
 #[serde(rename_all = "camelCase")]
 struct SessionEntry {
     pod_name: String,
+    #[serde(default)]
+    pod_uid: String,
     pod_ip: String,
     auth_token: String,
     environment_pvc_name: String,
@@ -91,9 +93,16 @@ struct SessionEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PreparedPod {
     pod_name: String,
+    pod_uid: String,
     pod_ip: String,
     auth_token: String,
     environment_pvc_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReadyExecutionPod {
+    pod_uid: String,
+    pod_ip: String,
 }
 
 const STARTUP_PROBE_PERIOD_SECONDS: u64 = 5;
@@ -563,34 +572,31 @@ async fn ensure_pod_ready(
     ensure_environment_pvc(client, config, &environment_pvc_name).await?;
     let mut state = read_state(&config.state_file)?;
     let pod_name = pod_name_for_session(&config.owner_pod_name, session_key);
+    let existing_pod = get_existing_pod(&pods, &pod_name).await?;
 
     if !refresh
+        && let Some(pod) = existing_pod.as_ref()
         && let Some(entry) = state.sessions.get(session_key)
-        && !entry.auth_token.is_empty()
-        && healthcheck(config, &entry.pod_ip).await
+        && pod_matches_session_entry(pod, entry)
+        && let Some(pod_uid) = pod_uid(pod)
+        && let Some(pod_ip) = pod_ip(pod)
+        && wait_for_healthcheck(config, &pod_ip).await
     {
-        return Ok(prepared_from_entry(entry));
+        let prepared = PreparedPod {
+            pod_name: pod_name.clone(),
+            pod_uid: pod_uid.to_string(),
+            pod_ip,
+            auth_token: entry.auth_token.clone(),
+            environment_pvc_name: entry.environment_pvc_name.clone(),
+        };
+        state
+            .sessions
+            .insert(session_key.to_string(), entry_from_prepared(&prepared));
+        write_state(&config.state_file, &state)?;
+        return Ok(prepared);
     }
 
-    if let Ok(pod) = pods.get(&pod_name).await {
-        if pod_ready(&pod)
-            && let Some(entry) = state.sessions.get(session_key)
-            && let Some(pod_ip) = pod_ip(&pod)
-            && !entry.auth_token.is_empty()
-            && wait_for_healthcheck(config, &pod_ip).await
-        {
-            let prepared = PreparedPod {
-                pod_name: pod_name.clone(),
-                pod_ip,
-                auth_token: entry.auth_token.clone(),
-                environment_pvc_name: entry.environment_pvc_name.clone(),
-            };
-            state
-                .sessions
-                .insert(session_key.to_string(), entry_from_prepared(&prepared));
-            write_state(&config.state_file, &state)?;
-            return Ok(prepared);
-        }
+    if existing_pod.is_some() {
         delete_pod(client, &config.namespace, &pod_name).await?;
     }
 
@@ -604,11 +610,12 @@ async fn ensure_pod_ready(
         &bootstrap_image,
         &environment_pvc_name,
     )?;
-    create_pod(&pods, &pod).await?;
-    let pod_ip = wait_for_pod(client, config, &pod_name).await?;
+    create_pod(&pods, &pod, config.start_timeout).await?;
+    let ready_pod = wait_for_pod(client, config, &pod_name).await?;
     let prepared = PreparedPod {
         pod_name,
-        pod_ip,
+        pod_uid: ready_pod.pod_uid,
+        pod_ip: ready_pod.pod_ip,
         auth_token,
         environment_pvc_name,
     };
@@ -631,6 +638,7 @@ fn read_prepared_pod(config: &SessionExecConfig, session_key: &str) -> Result<Pr
 fn prepared_from_entry(entry: &SessionEntry) -> PreparedPod {
     PreparedPod {
         pod_name: entry.pod_name.clone(),
+        pod_uid: entry.pod_uid.clone(),
         pod_ip: entry.pod_ip.clone(),
         auth_token: entry.auth_token.clone(),
         environment_pvc_name: entry.environment_pvc_name.clone(),
@@ -640,6 +648,7 @@ fn prepared_from_entry(entry: &SessionEntry) -> PreparedPod {
 fn entry_from_prepared(prepared: &PreparedPod) -> SessionEntry {
     SessionEntry {
         pod_name: prepared.pod_name.clone(),
+        pod_uid: prepared.pod_uid.clone(),
         pod_ip: prepared.pod_ip.clone(),
         auth_token: prepared.auth_token.clone(),
         environment_pvc_name: prepared.environment_pvc_name.clone(),
@@ -703,14 +712,36 @@ async fn resolve_bootstrap_image(
         })
 }
 
-async fn create_pod(pods: &Api<Pod>, pod: &Pod) -> Result<(), String> {
-    match pods.create(&PostParams::default(), pod).await {
-        Ok(_) => Ok(()),
-        Err(kube::Error::Api(error)) if error.code == 409 => Ok(()),
+async fn get_existing_pod(pods: &Api<Pod>, pod_name: &str) -> Result<Option<Pod>, String> {
+    match pods.get(pod_name).await {
+        Ok(pod) => Ok(Some(pod)),
+        Err(kube::Error::Api(error)) if error.code == 404 => Ok(None),
         Err(error) => Err(format!(
-            "failed to create execution pod {}: {error}",
-            pod.metadata.name.as_deref().unwrap_or("unknown")
+            "failed to inspect execution pod {pod_name}: {error}"
         )),
+    }
+}
+
+async fn create_pod(pods: &Api<Pod>, pod: &Pod, timeout: Duration) -> Result<(), String> {
+    let pod_name = pod.metadata.name.as_deref().unwrap_or("unknown");
+    let deadline = Instant::now() + timeout + Duration::from_secs(STARTUP_PROBE_GRACE_SECONDS);
+    loop {
+        match pods.create(&PostParams::default(), pod).await {
+            Ok(_) => return Ok(()),
+            Err(kube::Error::Api(error)) if error.code == 409 => {
+                if Instant::now() > deadline {
+                    return Err(format!(
+                        "timed out waiting to create execution pod {pod_name}: a pod with the same name is still terminating"
+                    ));
+                }
+                sleep(Duration::from_secs(1)).await;
+            }
+            Err(error) => {
+                return Err(format!(
+                    "failed to create execution pod {pod_name}: {error}"
+                ));
+            }
+        }
     }
 }
 
@@ -733,7 +764,7 @@ async fn wait_for_pod(
     client: &Client,
     config: &SessionExecConfig,
     pod_name: &str,
-) -> Result<String, String> {
+) -> Result<ReadyExecutionPod, String> {
     let pods: Api<Pod> = Api::namespaced(client.clone(), &config.namespace);
     let deadline =
         Instant::now() + config.start_timeout + Duration::from_secs(STARTUP_PROBE_GRACE_SECONDS);
@@ -758,10 +789,14 @@ async fn wait_for_pod(
         };
 
         if pod_ready(&pod)
+            && let Some(pod_uid) = pod_uid(&pod)
             && let Some(pod_ip) = pod_ip(&pod)
             && wait_for_healthcheck(config, &pod_ip).await
         {
-            return Ok(pod_ip);
+            return Ok(ReadyExecutionPod {
+                pod_uid: pod_uid.to_string(),
+                pod_ip,
+            });
         }
 
         sleep(Duration::from_secs(1)).await;
@@ -790,7 +825,17 @@ async fn healthcheck(config: &SessionExecConfig, pod_ip: &str) -> bool {
     .is_ok()
 }
 
+fn pod_matches_session_entry(pod: &Pod, entry: &SessionEntry) -> bool {
+    !entry.auth_token.is_empty()
+        && !entry.pod_uid.is_empty()
+        && pod_uid(pod).is_some_and(|pod_uid| pod_uid == entry.pod_uid.as_str())
+        && pod_ready(pod)
+}
+
 fn pod_ready(pod: &Pod) -> bool {
+    if pod_is_terminating(pod) {
+        return false;
+    }
     let Some(status) = &pod.status else {
         return false;
     };
@@ -802,6 +847,17 @@ fn pod_ready(pod: &Pod) -> bool {
             .iter()
             .any(|container| container.name == "execution" && container.ready)
     })
+}
+
+fn pod_is_terminating(pod: &Pod) -> bool {
+    pod.metadata.deletion_timestamp.is_some()
+}
+
+fn pod_uid(pod: &Pod) -> Option<&str> {
+    pod.metadata
+        .uid
+        .as_deref()
+        .filter(|value| !value.is_empty())
 }
 
 fn pod_ip(pod: &Pod) -> Option<String> {
@@ -1288,9 +1344,11 @@ impl Drop for StateLock {
 #[cfg(test)]
 mod tests {
     use super::{
-        PreparedPod, SessionExecConfig, build_bootstrap_assets_init_command, build_environment_pvc,
-        build_exec_pod, entry_from_prepared, environment_pvc_name, pod_name_for_session,
+        PreparedPod, SessionEntry, SessionExecConfig, build_bootstrap_assets_init_command,
+        build_environment_pvc, build_exec_pod, entry_from_prepared, environment_pvc_name,
+        pod_matches_session_entry, pod_name_for_session, pod_ready,
     };
+    use k8s_openapi::api::core::v1::Pod;
 
     fn config() -> SessionExecConfig {
         SessionExecConfig {
@@ -1333,6 +1391,37 @@ mod tests {
         }
     }
 
+    fn ready_execution_pod(uid: &str, terminating: bool) -> Pod {
+        let mut value = serde_json::json!({
+            "metadata": {
+                "name": "control-plane-exec-test",
+                "uid": uid
+            },
+            "status": {
+                "phase": "Running",
+                "podIP": "10.0.0.42",
+                "containerStatuses": [{
+                    "name": "execution",
+                    "ready": true,
+                    "restartCount": 0,
+                    "image": "ghcr.io/example/control-plane:test",
+                    "imageID": "ghcr.io/example/control-plane:test@sha256:test",
+                    "started": true,
+                    "state": {
+                        "running": {
+                            "startedAt": "2026-04-09T00:00:00Z"
+                        }
+                    },
+                    "lastState": {}
+                }]
+            }
+        });
+        if terminating {
+            value["metadata"]["deletionTimestamp"] = serde_json::json!("2026-04-09T00:00:00Z");
+        }
+        serde_json::from_value(value).unwrap()
+    }
+
     #[test]
     fn pvc_name_tracks_node_name() {
         let config = config();
@@ -1348,6 +1437,36 @@ mod tests {
             pod_name_for_session("control-plane-0", "Session_42"),
             "control-plane-exec-f6373fc203-session-42"
         );
+    }
+
+    #[test]
+    fn pod_readiness_rejects_terminating_pods() {
+        assert!(pod_ready(&ready_execution_pod("pod-uid-1", false)));
+        assert!(!pod_ready(&ready_execution_pod("pod-uid-1", true)));
+    }
+
+    #[test]
+    fn session_entries_only_reuse_the_same_pod_instance() {
+        let entry = SessionEntry {
+            pod_name: "control-plane-exec-test".to_string(),
+            pod_uid: "pod-uid-1".to_string(),
+            pod_ip: "10.0.0.42".to_string(),
+            auth_token: "session-token".to_string(),
+            environment_pvc_name: "node-workspace-kind-control-plane".to_string(),
+        };
+
+        assert!(pod_matches_session_entry(
+            &ready_execution_pod("pod-uid-1", false),
+            &entry
+        ));
+        assert!(!pod_matches_session_entry(
+            &ready_execution_pod("pod-uid-2", false),
+            &entry
+        ));
+        assert!(!pod_matches_session_entry(
+            &ready_execution_pod("pod-uid-1", true),
+            &entry
+        ));
     }
 
     #[test]
@@ -1551,6 +1670,7 @@ mod tests {
     fn session_state_keeps_only_runtime_routing_fields() {
         let entry = entry_from_prepared(&PreparedPod {
             pod_name: "control-plane-exec-test".to_string(),
+            pod_uid: "pod-uid-1".to_string(),
             pod_ip: "10.0.0.42".to_string(),
             auth_token: "session-token".to_string(),
             environment_pvc_name: "node-workspace-kind-control-plane".to_string(),
@@ -1561,6 +1681,7 @@ mod tests {
             value,
             serde_json::json!({
                 "podName": "control-plane-exec-test",
+                "podUid": "pod-uid-1",
                 "podIp": "10.0.0.42",
                 "authToken": "session-token",
                 "environmentPvcName": "node-workspace-kind-control-plane"
