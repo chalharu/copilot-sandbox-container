@@ -5,7 +5,7 @@
 
 ## よくある目的
 
-- 最短で lint / build / test を通したい: `README.md`
+- 最短で build / test / current-cluster smoke を通したい: `README.md`
 - current-cluster の smoke と manifest 更新を進めたい: `docs/how-to-guides/cookbook.md`
 - runtime.env、永続 state、`session-exec.json`、hook / Git policy の path を引きたい: `docs/reference/control-plane-runtime.md`
 - なぜ rootful-service fallback、Kubernetes Job 既定、session-scoped bash delegation を併用するのか知りたい: `docs/explanation/knowledge.md`
@@ -17,7 +17,7 @@
 
 ### Tutorial
 
-- `README.md`: このリポジトリで最初に通す lint / build /
+- `README.md`: このリポジトリで最初に通す build / test /
   current-cluster smoke の最短導線
 
 ### How-to guides

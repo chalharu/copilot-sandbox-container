@@ -131,11 +131,13 @@ fi
 
 if [[ "$#" -ge 2 ]] && [[ "$1" == "buildx" ]] && [[ "$2" == "build" ]]; then
   label_value=""
+  cache_to=""
   previous=""
   for arg in "$@"; do
     if [[ "${previous}" == "--label" ]]; then
       label_value="${arg#*=}"
-      break
+    elif [[ "${previous}" == "--cache-to" ]]; then
+      cache_to="${arg}"
     fi
     previous="${arg}"
   done
@@ -143,6 +145,11 @@ if [[ "$#" -ge 2 ]] && [[ "$1" == "buildx" ]] && [[ "$2" == "build" ]]; then
     printf 'missing --label in fake docker buildx build\n' >&2
     exit 1
   }
+  if [[ -n "${cache_to}" ]]; then
+    cache_to_dir="${cache_to#type=local,dest=}"
+    cache_to_dir="${cache_to_dir%%,*}"
+    mkdir -p "${cache_to_dir}"
+  fi
   printf '%s\n' "${label_value}" > "${TEST_IMAGE_MAINTENANCE_LABEL_STORE:?}"
   exit 0
 fi
@@ -172,6 +179,17 @@ second_hash="$(build_context_hash "${context_dir}")"
 build_image_for_toolchain docker localhost/image-maintenance:test "${context_dir}"
 [[ "${first_hash}" != "${second_hash}" ]]
 grep -Fq "buildx build --load --label $(build_context_hash_label_key)=${second_hash} -t localhost/image-maintenance:test ${context_dir}" "${docker_log}"
+
+printf '%s\n' 'image-maintenance-test: verifying local buildx cache wiring' >&2
+: > "${docker_log}"
+rm -f "${label_store}"
+export CONTROL_PLANE_BUILDX_CACHE_ROOT="${workdir}/buildx-cache"
+build_image_for_toolchain docker localhost/image-maintenance-cache:test "${context_dir}"
+cache_dir="$(buildx_local_cache_dir_for_context "${context_dir}")"
+grep -Fq -- "--cache-from type=local,src=${cache_dir} --cache-to type=local,dest=${cache_dir}-new,mode=max" "${docker_log}"
+[[ -d "${cache_dir}" ]]
+[[ ! -e "${cache_dir}-new" ]]
+unset CONTROL_PLANE_BUILDX_CACHE_ROOT
 
 printf '%s\n' 'image-maintenance-test: verifying retired helper image contexts were removed' >&2
 [[ ! -e "${sccache_dockerfile_path}" ]]

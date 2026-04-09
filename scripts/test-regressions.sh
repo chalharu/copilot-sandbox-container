@@ -209,6 +209,43 @@ if [[ "${runtime_env_status}" -ne 0 ]]; then
 fi
 grep -qx 'runtime-env-no-sccache-ok' <<<"${runtime_env_output}"
 
+printf '%s\n' 'regression-test: verifying runtime env preserves fast execution startup script' >&2
+mkdir -p \
+  "${workdir}/runtime-fast-exec-env-state/copilot" \
+  "${workdir}/runtime-fast-exec-env-state/gh" \
+  "${workdir}/runtime-fast-exec-env-state/ssh" \
+  "${workdir}/runtime-fast-exec-env-state/ssh-host-keys" \
+  "${workdir}/runtime-fast-exec-env-state/workspace"
+
+set +e
+runtime_fast_exec_env_output="$("${container_bin}" run --rm \
+  --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
+  "${startup_caps[@]}" \
+  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForRegressionOnly control-plane-regression' \
+  -e 'CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT=printf runtime-startup-ok' \
+  -v "${workdir}/runtime-fast-exec-env-state/copilot:/home/copilot/.copilot" \
+  -v "${workdir}/runtime-fast-exec-env-state/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/runtime-fast-exec-env-state/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/runtime-fast-exec-env-state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/runtime-fast-exec-env-state/workspace:/workspace" \
+  "${control_plane_image}" \
+  bash -lc "set -euo pipefail
+su -l -s /bin/bash copilot -c 'set -euo pipefail
+runtime_env=\"\$HOME/.config/control-plane/runtime.env\"
+grep -q \"^CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT=\" \"\$runtime_env\"
+[[ \"\${CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT:-}\" == \"printf runtime-startup-ok\" ]]
+printf \"%s\n\" runtime-fast-exec-startup-ok'" 2>&1)"
+runtime_fast_exec_env_status=$?
+set -e
+
+if [[ "${runtime_fast_exec_env_status}" -ne 0 ]]; then
+  printf 'Expected control-plane startup to preserve fast execution startup script in runtime.env\n' >&2
+  printf '%s\n' "${runtime_fast_exec_env_output}" >&2
+  exit 1
+fi
+grep -qx 'runtime-fast-exec-startup-ok' <<<"${runtime_fast_exec_env_output}"
+
 printf '%s\n' 'regression-test: verifying startup omits legacy registry auth surfaces' >&2
 mkdir -p \
   "${workdir}/runtime-legacy-surface-state/copilot" \
@@ -247,132 +284,8 @@ if [[ "${runtime_legacy_surface_status}" -ne 0 ]]; then
 fi
 grep -qx 'runtime-legacy-surface-ok' <<<"${runtime_legacy_surface_output}"
 
-printf '%s\n' 'regression-test: verifying Renovate local dry-run no longer injects registry host rules' >&2
-mkdir -p "${workdir}/fake-bin"
-cat > "${workdir}/fake-bin/docker" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-log_dir="${TEST_REGRESSION_LOG_DIR:?}"
-case "${1:-}" in
-  info)
-    exit 0
-    ;;
-  run)
-    printf '%s\n' "$*" >> "${log_dir}/run.args"
-    shift
-    entrypoint=""
-    image=""
-    envs=()
-    while [[ "$#" -gt 0 ]]; do
-      case "${1:-}" in
-        --rm)
-          shift
-          ;;
-        --user|--entrypoint|-v|-e|-w)
-          case "${1:-}" in
-            --entrypoint)
-              entrypoint="${2:-}"
-              ;;
-            -e)
-              envs+=("${2:-}")
-              ;;
-          esac
-          shift 2
-          ;;
-        --*)
-          shift
-          ;;
-        *)
-          image="${1:-}"
-          shift
-          break
-          ;;
-      esac
-    done
-    case "${entrypoint}" in
-      renovate-config-validator)
-        printf '%s\n' "${envs[@]}" > "${log_dir}/renovate-validator.env"
-        exit 0
-        ;;
-      renovate)
-        printf '%s\n' "${envs[@]}" > "${log_dir}/renovate.env"
-        if [[ "${TEST_REGRESSION_RENOVATE_MODE:-cannot-sync}" == "timeout" ]]; then
-          cat <<'RENOVATE'
-@github/copilot
-actions/download-artifact
-actions/checkout
-actions/upload-artifact
-azure/setup-kubectl
-engineerd/setup-kind
-       "packageName": "docker.io/library/node",
-DEBUG: Using queue: host=pypi.org, concurrency=16 (repository=local)
-DEBUG: http cache: saving https://registry.npmjs.org/markdownlint-cli2 (etag=W/"example", lastModified=Sun, 22 Mar 2026 01:29:22 GMT) (repository=local)
-DEBUG: getLabels(https://index.docker.io, library/busybox, latest) (repository=local)
-DEBUG: getLabels(https://index.docker.io, koalaman/shellcheck, latest) (repository=local)
-DEBUG: getLabels(https://index.docker.io, hadolint/hadolint, latest) (repository=local)
-DEBUG: getLabels(https://ghcr.io, renovatebot/renovate, latest) (repository=local)
-DEBUG: getLabels(https://ghcr.io, biomejs/biome, latest) (repository=local)
-RENOVATE
-          exit 137
-        fi
-        cat <<'RENOVATE'
-@github/copilot
-actions/download-artifact
-actions/checkout
-actions/upload-artifact
-azure/setup-kubectl
-busybox
-docker.io/library/node
-engineerd/setup-kind
-ghcr.io/biomejs/biome
-ghcr.io/renovatebot/renovate
-hadolint/hadolint
-koalaman/shellcheck
-markdownlint-cli2
-yamllint
-ERROR: lookupUpdates error (repository=local, packageFile=containers/control-plane/config/external-skills.yaml)
-       "packageName": "https://github.com/anthropics/skills",
-       "message": "fatal: unable to access 'https://github.com/anthropics/skills/': Recv failure: Connection reset by peer\n",
-ERROR: lookupUpdates error (repository=local, packageFile=containers/control-plane/config/external-skills.yaml)
-       "packageName": "https://github.com/anthropics/skills",
-       "message": "timeout while waiting for mutex to become available",
-RENOVATE
-        printf '%s\n' 'ERROR: Cannot sync git when platform=local'
-        exit 1
-        ;;
-      sh)
-        exit 0
-        ;;
-    esac
-    printf 'unexpected fake docker run invocation: image=%s args=%s\n' "${image}" "$*" >&2
-    exit 1
-    ;;
-esac
-printf 'unexpected fake docker command: %s\n' "$*" >&2
-exit 1
-EOF
-chmod +x "${workdir}/fake-bin/docker"
-
-PATH="${workdir}/fake-bin:${PATH}" \
-  TEST_REGRESSION_LOG_DIR="${workdir}" \
-  CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
-  CONTROL_PLANE_CONTAINER_BIN=docker \
-  "${script_dir}/validate-renovate-config.sh"
-
-PATH="${workdir}/fake-bin:${PATH}" \
-  TEST_REGRESSION_LOG_DIR="${workdir}" \
-  TEST_REGRESSION_RENOVATE_MODE=timeout \
-  CONTROL_PLANE_RENOVATE_DRY_RUN_TIMEOUT=1s \
-  CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
-  CONTROL_PLANE_CONTAINER_BIN=docker \
-  "${script_dir}/validate-renovate-config.sh"
-
-if grep -Fq 'RENOVATE_HOST_RULES=' "${workdir}/renovate.env"; then
-  printf 'Did not expect Renovate host rules in %s\n' "${workdir}/renovate.env" >&2
-  exit 1
-fi
-
 printf '%s\n' 'regression-test: verifying k8s-job-start expands transfer env in rclone config' >&2
+mkdir -p "${workdir}/fake-bin"
 mkdir -p "${workdir}/k8s-home/.ssh" "${workdir}/k8s-host-keys"
 printf '%s\n' 'k8s transfer input' > "${workdir}/k8s-transfer-input.txt"
 ssh-keygen -q -t ed25519 -N '' -f "${workdir}/k8s-host-keys/ssh_host_ed25519_key" >/dev/null

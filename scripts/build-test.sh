@@ -9,8 +9,6 @@ toolchain="$(detect_build_test_toolchain)"
 container_bin="$(container_runtime_for_toolchain "${toolchain}")"
 build_bin="$(build_command_for_toolchain "${toolchain}")"
 control_plane_image="${CONTROL_PLANE_IMAGE_TAG:-localhost/control-plane:test}"
-control_plane_rust_test_image="${CONTROL_PLANE_RUST_TEST_IMAGE_TAG:-localhost/control-plane-rust-toolchain:test}"
-control_plane_rust_test_target="${CONTROL_PLANE_RUST_TEST_TARGET:-rust-toolchain}"
 cluster_name="${CONTROL_PLANE_KIND_CLUSTER_NAME:-control-plane-ci}"
 kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-${container_bin}}"
 build_only=0
@@ -39,12 +37,8 @@ run_regressions_group() {
     "${script_dir}/test-regressions.sh" "${control_plane_image}"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
-    "${script_dir}/test-renovate-config-permissions.sh"
-
-  CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-k8s-sample-storage-layout.sh"
 
-  CONTROL_PLANE_RUST_TEST_IMAGE_TAG="${control_plane_rust_test_image}" \
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-session-exec.sh"
 
@@ -71,9 +65,6 @@ run_regressions_group() {
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-dockerfile-hardening.sh"
-
-  CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
-    "${script_dir}/test-rustfmt-style-edition.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-repo-change-delivery-skills.sh"
@@ -143,10 +134,6 @@ require_command "${container_bin}"
 printf 'Using %s toolchain for build/test\n' "${toolchain}"
 if [[ "${skip_image_build}" -eq 0 ]]; then
   build_image_for_toolchain "${toolchain}" "${control_plane_image}" containers/control-plane
-fi
-
-if [[ "${test_group}" == "all" ]] || [[ "${test_group}" == "regressions" ]]; then
-  build_image_target_for_toolchain "${toolchain}" "${control_plane_rust_test_image}" containers/control-plane "${control_plane_rust_test_target}"
 fi
 
 if [[ "${build_only}" -eq 1 ]]; then

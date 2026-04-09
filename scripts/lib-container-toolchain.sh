@@ -155,6 +155,57 @@ image_context_hash_for_toolchain() {
   "${container_bin}" image inspect --format "{{ index .Config.Labels \"${label_key}\" }}" "${image_tag}" 2>/dev/null
 }
 
+buildx_local_cache_dir_for_context() {
+  local context_dir="$1"
+  local cache_root="${CONTROL_PLANE_BUILDX_CACHE_ROOT:-}"
+  local context_path
+
+  [[ -n "${cache_root}" ]] || {
+    printf '%s\n' ''
+    return 0
+  }
+
+  require_command sha256sum
+  context_path="$(cd "${context_dir}" && pwd -P)"
+  printf '%s/%s\n' "${cache_root}" "$(printf '%s' "${context_path}" | sha256sum | awk '{print $1}')"
+}
+
+prepare_buildx_local_cache() {
+  local context_dir="$1"
+  local args_name="$2"
+  local cache_dir_name="$3"
+  local new_cache_dir_name="$4"
+  local cache_root="${CONTROL_PLANE_BUILDX_CACHE_ROOT:-}"
+  local cache_dir_value
+  local new_cache_dir_value
+  local -n args_ref="${args_name}"
+
+  if [[ -z "${cache_root}" ]]; then
+    printf -v "${cache_dir_name}" '%s' ''
+    printf -v "${new_cache_dir_name}" '%s' ''
+    return 0
+  fi
+
+  cache_dir_value="$(buildx_local_cache_dir_for_context "${context_dir}")"
+  new_cache_dir_value="${cache_dir_value}-new"
+  mkdir -p "${cache_root}" "${cache_dir_value}"
+  rm -rf "${new_cache_dir_value}"
+  args_ref+=(--cache-from "type=local,src=${cache_dir_value}" --cache-to "type=local,dest=${new_cache_dir_value},mode=max")
+  printf -v "${cache_dir_name}" '%s' "${cache_dir_value}"
+  printf -v "${new_cache_dir_name}" '%s' "${new_cache_dir_value}"
+}
+
+finalize_buildx_local_cache() {
+  local cache_dir="$1"
+  local new_cache_dir="$2"
+
+  [[ -n "${cache_dir}" ]] || return 0
+  [[ -d "${new_cache_dir}" ]] || return 0
+
+  rm -rf "${cache_dir}"
+  mv "${new_cache_dir}" "${cache_dir}"
+}
+
 build_image_for_toolchain() {
   local toolchain="$1"
   local image_tag="$2"
@@ -163,6 +214,9 @@ build_image_for_toolchain() {
   local context_hash
   local context_hash_label_key
   local existing_context_hash
+  local cache_dir=""
+  local new_cache_dir=""
+  local buildx_args=()
 
   build_bin="$(build_command_for_toolchain "${toolchain}")"
   context_hash="$(build_context_hash "${context_dir}")"
@@ -176,10 +230,13 @@ build_image_for_toolchain() {
 
   case "${toolchain}" in
     docker)
+      prepare_buildx_local_cache "${context_dir}" buildx_args cache_dir new_cache_dir
       "${build_bin}" buildx build --load \
+        "${buildx_args[@]}" \
         --label "${context_hash_label_key}=${context_hash}" \
         -t "${image_tag}" \
         "${context_dir}"
+      finalize_buildx_local_cache "${cache_dir}" "${new_cache_dir}"
       ;;
     *)
       printf 'Unsupported toolchain: %s\n' "${toolchain}" >&2
@@ -197,6 +254,9 @@ build_image_target_for_toolchain() {
   local context_hash
   local context_hash_label_key
   local existing_context_hash
+  local cache_dir=""
+  local new_cache_dir=""
+  local buildx_args=()
 
   build_bin="$(build_command_for_toolchain "${toolchain}")"
   context_hash="$(build_context_hash "${context_dir}")"
@@ -210,11 +270,14 @@ build_image_target_for_toolchain() {
 
   case "${toolchain}" in
     docker)
+      prepare_buildx_local_cache "${context_dir}" buildx_args cache_dir new_cache_dir
       "${build_bin}" buildx build --load \
+        "${buildx_args[@]}" \
         --target "${target_name}" \
         --label "${context_hash_label_key}=${context_hash}" \
         -t "${image_tag}" \
         "${context_dir}"
+      finalize_buildx_local_cache "${cache_dir}" "${new_cache_dir}"
       ;;
     *)
       printf 'Unsupported toolchain: %s\n' "${toolchain}" >&2

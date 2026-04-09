@@ -28,7 +28,6 @@
 # No dev server. Edit the container images and shell scripts directly.
 
 # Testing
-./scripts/lint.sh
 ./scripts/build-test.sh
 
 # Build

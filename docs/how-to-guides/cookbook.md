@@ -6,10 +6,9 @@
 `docs/reference/control-plane-runtime.md`、代表ログは
 `docs/reference/debug-log.md` を参照してください。
 
-## 1. 標準の lint / build / test を回す
+## 1. 標準の build / test を回す
 
 ```bash
-./scripts/lint.sh
 ./scripts/build-test.sh
 ```
 
@@ -21,9 +20,9 @@ CONTROL_PLANE_TOOLCHAIN=docker ./scripts/build-test.sh
 
 ### current-cluster で詰まりやすい点
 
-- `lint.sh` は bundled control-plane image を使って `yamllint` を実行する
+- PR lint は external `linter-service` が担当し、repo-managed な baseline は `build-test.sh` から始まる
 - `control-plane-run` は Kubernetes Job 専用で、Copilot CLI の `bash` tool delegation とは別経路
-- `hadolint` と `shellcheck` は fully-qualified image 名で pull する
+- focused rerun では `--build-only` と `--skip-image-build --group ...` を組み合わせると速い
 
 runtime / cache / hook の具体的な path は
 `docs/reference/control-plane-runtime.md` を参照してください。
@@ -104,6 +103,9 @@ ConfigMap / Secret / write-back の具体的な path は
    node-scoped cache は `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX` /
    `..._STORAGE_CLASS` / `..._SIZE` / `..._MOUNT_PATH` で調整し、既定では
    `/environment/root` を chroot 先として使う。
+   各 exec-pod 起動時に chroot 内で追加セットアップを走らせたい場合は
+   `CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT` に inline shell snippet か
+   script path を入れる。
    delegated command を非 root で走らせたい場合は
    `CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID` /
    `CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID` も合わせて定義する
