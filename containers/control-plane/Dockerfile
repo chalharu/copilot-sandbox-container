@@ -85,7 +85,7 @@ COPY hooks/postToolUse/linters.json /build/hooks/postToolUse/linters.json
 RUN cargo test --locked --release \
     && cargo build --locked --release
 
-FROM ${RUST_BASE_IMAGE} AS rust-toolchain
+FROM cargo-chef AS rust-toolchain
 
 RUN rustup component add clippy rustfmt
 

@@ -103,6 +103,9 @@ docker_log="${workdir}/docker.log"
 label_store="${workdir}/docker-label"
 workflow_path="${repo_root}/.github/workflows/control-plane-ci.yml"
 renovate_config_path="${repo_root}/renovate.json5"
+validate_renovate_script_path="${repo_root}/scripts/validate-renovate-config.sh"
+git_skills_manifest_installer_path="${repo_root}/scripts/install-git-skills-from-manifest.sh"
+session_exec_test_path="${repo_root}/scripts/test-session-exec.sh"
 sccache_dockerfile_path="${repo_root}/containers/sccache/Dockerfile"
 legacy_execution_plane_go_dockerfile_path="${repo_root}/containers/execution-plane-go/Dockerfile"
 legacy_execution_plane_node_dockerfile_path="${repo_root}/containers/execution-plane-node/Dockerfile"
@@ -219,6 +222,7 @@ prepare_rust_container_cache control-plane-rust-regressions rust_temp_home_dir r
 
 printf '%s\n' 'image-maintenance-test: verifying retired helper image contexts were removed' >&2
 [[ ! -e "${sccache_dockerfile_path}" ]]
+[[ ! -e "${validate_renovate_script_path}" ]]
 
 printf '%s\n' 'image-maintenance-test: verifying legacy helper images were removed' >&2
 [[ ! -e "${legacy_execution_plane_go_dockerfile_path}" ]]
@@ -246,11 +250,18 @@ assert_file_contains "${renovate_config_path}" 'separateMultipleMajor: true'
 assert_file_contains "${renovate_config_path}" 'separateMultipleMinor: true'
 assert_file_contains "${renovate_config_path}" '"{{{depNameSanitized}}}{{#if newVersion}}__v{{{newVersion}}}{{/if}}{{#if newDigestShort}}__d{{{newDigestShort}}}{{/if}}",'
 assert_file_not_contains "${renovate_config_path}" '__{{updateType}}'
+assert_file_not_contains "${renovate_config_path}" 'validate-renovate-config'
 assert_file_not_contains "${renovate_config_path}" 'containers\\/control-plane\\/bin\\/install-git-skills-from-manifest'
 assert_file_not_contains "${renovate_config_path}" 'mozilla/sccache'
 assert_file_not_contains "${workflow_path}" 'sccache-changes'
 assert_file_not_contains "${workflow_path}" 'containers/sccache'
 assert_file_not_contains "${workflow_path}" 'GHCR_SCCACHE_IMAGE'
+assert_file_contains "${session_exec_test_path}" 'cargo chef prepare'
+assert_file_contains "${session_exec_test_path}" 'cargo chef cook'
+assert_file_contains "${git_skills_manifest_installer_path}" '/usr/local/bin/control-plane-runtime-tool'
+assert_file_not_contains "${git_skills_manifest_installer_path}" 'cargo build --release'
+assert_file_contains "${workflow_path}" 'path: /tmp/control-plane-rust-regression-cache'
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" 'FROM cargo-chef AS rust-toolchain'
 assert_file_not_contains "${workflow_path}" 'SCCACHE_COMPONENT_TAG'
 assert_file_not_contains "${workflow_path}" 'PUBLISH_SCCACHE'
 assert_file_not_matches "${workflow_path}" '^[[:space:]]+- sccache$'

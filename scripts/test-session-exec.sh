@@ -37,4 +37,16 @@ printf '%s\n' 'test-session-exec.sh: verifying exec-api integration coverage' >&
   -v "${PWD}:/workspace" \
   -w /workspace \
   "${rust_test_image}" \
-  bash -lc "export PATH=/usr/local/cargo/bin:\$PATH && cargo test --manifest-path containers/control-plane/exec-api/Cargo.toml"
+  bash -lc "export PATH=/usr/local/cargo/bin:\$PATH \
+    && rm -rf /tmp/control-plane-exec-api \
+    && mkdir -p /tmp/control-plane-exec-api \
+    && cp /workspace/containers/control-plane/exec-api/Cargo.toml /tmp/control-plane-exec-api/Cargo.toml \
+    && cp /workspace/containers/control-plane/exec-api/Cargo.lock /tmp/control-plane-exec-api/Cargo.lock \
+    && cp /workspace/containers/control-plane/exec-api/build.rs /tmp/control-plane-exec-api/build.rs \
+    && cp -R /workspace/containers/control-plane/exec-api/proto /tmp/control-plane-exec-api/proto \
+    && cp -R /workspace/containers/control-plane/exec-api/src /tmp/control-plane-exec-api/src \
+    && cp -R /workspace/containers/control-plane/exec-api/tests /tmp/control-plane-exec-api/tests \
+    && cd /tmp/control-plane-exec-api \
+    && cargo chef prepare --recipe-path /control-plane-rust-target/exec-api-recipe.json \
+    && cargo chef cook --locked --recipe-path /control-plane-rust-target/exec-api-recipe.json \
+    && cargo test --locked"
