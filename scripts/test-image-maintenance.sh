@@ -103,6 +103,9 @@ docker_log="${workdir}/docker.log"
 label_store="${workdir}/docker-label"
 workflow_path="${repo_root}/.github/workflows/control-plane-ci.yml"
 renovate_config_path="${repo_root}/renovate.json5"
+validate_renovate_script_path="${repo_root}/scripts/validate-renovate-config.sh"
+git_skills_manifest_installer_path="${repo_root}/scripts/install-git-skills-from-manifest.sh"
+session_exec_test_path="${repo_root}/scripts/test-session-exec.sh"
 sccache_dockerfile_path="${repo_root}/containers/sccache/Dockerfile"
 legacy_execution_plane_go_dockerfile_path="${repo_root}/containers/execution-plane-go/Dockerfile"
 legacy_execution_plane_node_dockerfile_path="${repo_root}/containers/execution-plane-node/Dockerfile"
@@ -162,6 +165,8 @@ chmod +x "${fake_bin_dir}/docker"
 export PATH="${fake_bin_dir}:${PATH}"
 export TEST_IMAGE_MAINTENANCE_DOCKER_LOG="${docker_log}"
 export TEST_IMAGE_MAINTENANCE_LABEL_STORE="${label_store}"
+unset CONTROL_PLANE_BUILDX_CACHE_ROOT
+unset CONTROL_PLANE_RUST_CONTAINER_CACHE_ROOT
 
 printf '%s\n' 'image-maintenance-test: verifying unchanged build contexts are reused' >&2
 first_hash="$(build_context_hash "${context_dir}")"
@@ -191,8 +196,33 @@ grep -Fq -- "--cache-from type=local,src=${cache_dir} --cache-to type=local,dest
 [[ ! -e "${cache_dir}-new" ]]
 unset CONTROL_PLANE_BUILDX_CACHE_ROOT
 
+printf '%s\n' 'image-maintenance-test: verifying rust container cache wiring' >&2
+export CONTROL_PLANE_RUST_CONTAINER_CACHE_ROOT="${workdir}/rust-cache"
+rust_cache_home_dir=''
+rust_cache_target_dir=''
+rust_cache_temp_root=''
+prepare_rust_container_cache control-plane-rust-regressions rust_cache_home_dir rust_cache_target_dir rust_cache_temp_root
+rust_cache_dir="$(rust_container_cache_dir_for_scope control-plane-rust-regressions)"
+[[ "${rust_cache_home_dir}" == "${rust_cache_dir}/home" ]]
+[[ "${rust_cache_target_dir}" == "${rust_cache_dir}/target" ]]
+[[ -d "${rust_cache_home_dir}/.cargo" ]]
+[[ -d "${rust_cache_target_dir}" ]]
+[[ -z "${rust_cache_temp_root}" ]]
+unset CONTROL_PLANE_RUST_CONTAINER_CACHE_ROOT
+
+rust_temp_home_dir=''
+rust_temp_target_dir=''
+rust_temp_root=''
+prepare_rust_container_cache control-plane-rust-regressions rust_temp_home_dir rust_temp_target_dir rust_temp_root
+[[ -n "${rust_temp_root}" ]]
+[[ "${rust_temp_home_dir}" == "${rust_temp_root}/home" ]]
+[[ "${rust_temp_target_dir}" == "${rust_temp_root}/target" ]]
+[[ -d "${rust_temp_home_dir}/.cargo" ]]
+[[ -d "${rust_temp_target_dir}" ]]
+
 printf '%s\n' 'image-maintenance-test: verifying retired helper image contexts were removed' >&2
 [[ ! -e "${sccache_dockerfile_path}" ]]
+[[ ! -e "${validate_renovate_script_path}" ]]
 
 printf '%s\n' 'image-maintenance-test: verifying legacy helper images were removed' >&2
 [[ ! -e "${legacy_execution_plane_go_dockerfile_path}" ]]
@@ -220,11 +250,18 @@ assert_file_contains "${renovate_config_path}" 'separateMultipleMajor: true'
 assert_file_contains "${renovate_config_path}" 'separateMultipleMinor: true'
 assert_file_contains "${renovate_config_path}" '"{{{depNameSanitized}}}{{#if newVersion}}__v{{{newVersion}}}{{/if}}{{#if newDigestShort}}__d{{{newDigestShort}}}{{/if}}",'
 assert_file_not_contains "${renovate_config_path}" '__{{updateType}}'
+assert_file_not_contains "${renovate_config_path}" 'validate-renovate-config'
 assert_file_not_contains "${renovate_config_path}" 'containers\\/control-plane\\/bin\\/install-git-skills-from-manifest'
 assert_file_not_contains "${renovate_config_path}" 'mozilla/sccache'
 assert_file_not_contains "${workflow_path}" 'sccache-changes'
 assert_file_not_contains "${workflow_path}" 'containers/sccache'
 assert_file_not_contains "${workflow_path}" 'GHCR_SCCACHE_IMAGE'
+assert_file_contains "${session_exec_test_path}" 'cargo chef prepare'
+assert_file_contains "${session_exec_test_path}" 'cargo chef cook'
+assert_file_contains "${git_skills_manifest_installer_path}" '/usr/local/bin/control-plane-runtime-tool'
+assert_file_not_contains "${git_skills_manifest_installer_path}" 'cargo build --release'
+assert_file_contains "${workflow_path}" 'path: /tmp/control-plane-rust-regression-cache'
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" 'FROM cargo-chef AS rust-toolchain'
 assert_file_not_contains "${workflow_path}" 'SCCACHE_COMPONENT_TAG'
 assert_file_not_contains "${workflow_path}" 'PUBLISH_SCCACHE'
 assert_file_not_matches "${workflow_path}" '^[[:space:]]+- sccache$'

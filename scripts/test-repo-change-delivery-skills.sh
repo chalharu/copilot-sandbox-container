@@ -47,8 +47,6 @@ source "${script_dir}/lib-container-toolchain.sh"
 
 toolchain="$(detect_build_test_toolchain)"
 container_bin="$(container_runtime_for_toolchain "${toolchain}")"
-rust_build_image="${CONTROL_PLANE_RUST_BUILD_IMAGE_TAG:-localhost/control-plane-rust-toolchain:test}"
-rust_build_target="${CONTROL_PLANE_RUST_BUILD_TARGET:-rust-toolchain}"
 
 cleanup() {
   rm -rf "${package_dir}"
@@ -132,11 +130,9 @@ sys.stdout.buffer.write((out_dir / f"{skill_dir.name}.skill").read_bytes())' \
 
 require_command "${container_bin}"
 build_image_for_toolchain "${toolchain}" "${control_plane_image}" containers/control-plane
-build_image_target_for_toolchain "${toolchain}" "${rust_build_image}" containers/control-plane "${rust_build_target}"
 
 printf '%s\n' 'repo-change-delivery-skills-test: fetching pinned upstream skills' >&2
-CONTROL_PLANE_RUST_BUILD_IMAGE_TAG="${rust_build_image}" \
-  "${git_skills_manifest_installer}" "${external_skills_manifest}" "${external_skill_dir}"
+"${git_skills_manifest_installer}" "${external_skills_manifest}" "${external_skill_dir}"
 
 printf '%s\n' 'repo-change-delivery-skills-test: checking skill files' >&2
 assert_file_present "${external_skills_manifest}"
@@ -172,6 +168,9 @@ assert_file_contains "${external_skills_manifest}" 'repository: https://github.c
 assert_file_contains "${external_skills_manifest}" 'skills/doc-coauthoring'
 assert_file_contains "${external_skills_manifest}" 'skills/skill-creator'
 assert_file_contains "${external_skills_manifest}" 'currentValue=main'
+assert_file_contains "${git_skills_manifest_installer}" '/usr/local/bin/control-plane-runtime-tool'
+assert_file_not_contains "${git_skills_manifest_installer}" 'cargo build --release'
+assert_file_not_contains "${git_skills_manifest_installer}" 'CONTROL_PLANE_RUST_BUILD_IMAGE_TAG'
 assert_file_contains "${git_skills_runtime_dispatch}" '"install-git-skills-from-manifest"'
 assert_file_not_contains "${git_skills_runtime_dispatch}" 'js-yaml'
 assert_file_contains "${skill_creator_skill_file}" 'name: skill-creator'
