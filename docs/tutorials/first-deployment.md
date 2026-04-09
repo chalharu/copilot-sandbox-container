@@ -1,7 +1,7 @@
 # はじめての control plane 導入
 
 この tutorial では、sample manifest を自分のクラスタ向けに調整し、
-`ghcr.io/chalharu/copilot-sandbox-container/control-plane:<tag>` を deploy して
+`ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:<tag>` を deploy して
 SSH で入れるところまでを通します。最後に `./scripts/test-k8s-job.sh` を使い、
 Kubernetes Job 経路まで確認します。
 
@@ -19,9 +19,12 @@ Kubernetes Job 経路まで確認します。
 - `kubectl`, `ssh`, `ssh-keygen`, `ssh-keyscan`
 - deploy 先 cluster への `kubectl` 権限
 - session 用の `ReadWriteMany` storage class
-- workspace 用の storage class
+- workspace PVC 用の storage class（sample の既定は `standard`）
+- Execution Pod が node ごとに使う environment PVC 用の storage class
+  （`CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS`。sample の既定は
+  `standard`）
 - SSH 公開鍵
-- 利用したい published control-plane image tag
+- `latest` 以外へ pin したい場合だけ published control-plane image tag
 - `./scripts/test-k8s-job.sh` を実行するなら、このリポジトリの local checkout
 
 ## 1. sample manifest の置き場所を確認する
@@ -57,7 +60,9 @@ storage: 5Gi
 storageClassName: standard
 ```
 
-既定の `ReadWriteOnce` 想定で十分なら、そのまま使えます。
+sample 既定の `ReadWriteOnce` 想定で十分なら、そのまま使えます。Execution Pod は
+control-plane Pod と同じ node に pin されるため、同じ PVC を mount しても
+矛盾しません。
 
 ## 4. SSH 公開鍵と必要な認証情報を入れる
 
@@ -75,22 +80,30 @@ stringData:
 
 ## 5. 環境変数と image をそろえる
 
-`common/configmap-control-plane-env.yaml` では、少なくとも次を見直します。
+`common/configmap-control-plane-env.yaml` では、まず cluster 固有の名前を確認します。
 
 - `CONTROL_PLANE_K8S_NAMESPACE`
 - `CONTROL_PLANE_JOB_NAMESPACE`
 - `CONTROL_PLANE_COPILOT_SESSION_PVC`
 - `CONTROL_PLANE_WORKSPACE_PVC`
+
+次に、storage class / runtime image を cluster に合わせます。
+
 - `CONTROL_PLANE_FAST_EXECUTION_IMAGE`
-- `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE`
 - `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS`
-- `CONTROL_PLANE_JOB_TRANSFER_IMAGE`
 
 `CONTROL_PLANE_FAST_EXECUTION_IMAGE` には、delegated `bash` を実行したい
-runtime image を入れます。shared cluster では digest pin を推奨します。
+runtime image を入れます。別の image に変える場合は、bootstrap が使えるように
+`/bin/sh` と `apt-get` または `apk` を含む image を使ってください。shared
+cluster では digest pin を推奨します。
 
-`base/deployment-control-plane.yaml` 側の `Deployment/control-plane` image も、
-使いたい published revision に合わせて置き換えてください。
+`base/deployment-control-plane.yaml`、`CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE`、
+`CONTROL_PLANE_JOB_TRANSFER_IMAGE` は、sample の既定では
+`ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest` にそろえて
+あります。まずはそのまま deploy でき、再現性を上げたい場合だけ GitHub
+Packages の `copilot-sandbox-container-v2/control-plane`
+（<https://github.com/chalharu/copilot-sandbox-container-v2/pkgs/container/copilot-sandbox-container-v2%2Fcontrol-plane>）
+から同じ full commit SHA tag を選び、3 箇所まとめて pin します。
 
 ## 6. 初回導入を apply する
 
@@ -137,7 +150,7 @@ ssh -p 2222 copilot@127.0.0.1
 
 ## 9. Kubernetes Job 経路まで smoke を取る
 
-このリポジトリを checkout している端末から、次を実行します。
+このリポジトリを任意の path に checkout している端末から、次を実行します。
 
 ```bash
 ./scripts/test-k8s-job.sh

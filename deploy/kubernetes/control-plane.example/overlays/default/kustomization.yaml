@@ -84,7 +84,7 @@ resources: []
 # Candidate `deployment-image-patch.yaml`:
 # - op: replace
 #   path: /spec/template/spec/containers/0/image
-#   value: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha
+#   value: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest
 # Keep the same tag aligned in `../../common/configmap-control-plane-env.yaml`
 # for `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` and
 # `CONTROL_PLANE_JOB_TRANSFER_IMAGE`.

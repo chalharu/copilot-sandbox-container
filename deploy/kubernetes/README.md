@@ -1,7 +1,7 @@
 # Kubernetes サンプルマニフェスト
 
 `deploy/kubernetes/control-plane.example/` は、
-`ghcr.io/chalharu/copilot-sandbox-container/control-plane:<tag>` を Kubernetes へ
+`ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:<tag>` を Kubernetes へ
 配置するための sample manifest です。はじめて導入する場合は
 `docs/tutorials/first-deployment.md` を先に読み、このページは
 「どのファイルをどう編集するか」を確認する reference として使ってください。
@@ -30,28 +30,42 @@ kubectl apply -k deploy/kubernetes/control-plane.example
 
 1. session 用 shared PVC に使う RWX storage class
 2. workspace PVC の storage class とサイズ
-3. `control-plane-auth` Secret に入れる SSH 公開鍵
-4. `control-plane` image tag、fast execution 用 image ref、
-   `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS`
+3. Execution Pod が node ごとに使う environment PVC の storage class
+   （`CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS`）
+4. `control-plane-auth` Secret に入れる SSH 公開鍵
 5. namespace や PVC 名を既定値のまま使うかどうか
+6. `latest` のまま試すか、published image を full commit SHA tag へ pin するか
 
 ## 最初に書き換える場所
 
 1. `control-plane.example/install/pvc-control-plane-copilot-session.yaml`
-   - `ReadWriteMany` を満たす storage class へ置き換える
-2. `control-plane.example/base/pvc-control-plane-workspace.yaml`
-   - workspace PVC の storage class / サイズをクラスタに合わせる
-3. `control-plane.example/common/secret-control-plane-auth.yaml`
-   - `ssh-public-key` を自分の公開鍵へ差し替える
+   - `replace-me-with-rwx-storage-class` を、`ReadWriteMany` を満たす
+     storage class へ必ず置き換える
+2. `control-plane.example/common/secret-control-plane-auth.yaml`
+   - `ssh-public-key` を自分の公開鍵へ必ず差し替える
    - 必要なら `gh-github-token` / `gh-hosts.yml` /
      `copilot-github-token` を追加する
+3. `control-plane.example/base/pvc-control-plane-workspace.yaml`
+   - workspace PVC の storage class / サイズをクラスタに合わせる
+   - sample 既定の `ReadWriteOnce` のままでも、Execution Pod が
+     control-plane Pod と同じ node に pin されるため共有できる
 4. `control-plane.example/common/configmap-control-plane-env.yaml`
-   - namespace、PVC 名、fast execution image、bootstrap image、
-     job transfer image、exec-pod 用 environment PVC の storage class などを
-     環境に合わせる
+   - namespace / PVC 名を変えるならここで更新する
+   - `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS` を、cluster に
+     `standard` が無い場合は導入前に置き換える
+   - `CONTROL_PLANE_FAST_EXECUTION_IMAGE` を変える場合は `/bin/sh` と
+     `apt-get` または `apk` を持つ image を使う
 5. `control-plane.example/base/deployment-control-plane.yaml`
-   - `Deployment/control-plane` の image tag を published revision に合わせる
-6. `control-plane.example/overlays/default/kustomization.yaml`
+   - sample 既定は
+     `ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest`
+6. `control-plane.example/common/configmap-control-plane-env.yaml`
+   - `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` と
+     `CONTROL_PLANE_JOB_TRANSFER_IMAGE` も sample 既定では上と同じ `:latest`
+   - 再現性が必要なら GitHub Packages の
+     `copilot-sandbox-container-v2/control-plane`
+     （<https://github.com/chalharu/copilot-sandbox-container-v2/pkgs/container/copilot-sandbox-container-v2%2Fcontrol-plane>）
+     から同じ full commit SHA tag を選び、3 箇所をまとめて pin する
+7. `control-plane.example/overlays/default/kustomization.yaml`
    - 既定名以外で運用したい場合の叩き台として使う
 
 ## 構成
