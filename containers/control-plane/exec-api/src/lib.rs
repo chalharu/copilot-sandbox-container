@@ -2,15 +2,17 @@ use nix::mount::{MsFlags, mount};
 use nix::unistd::{Gid, Uid, chdir, chown, chroot, setgid, setuid};
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::ffi::OsString;
+use std::ffi::{CString, OsString};
 use std::fs;
 use std::future::Future;
 use std::io;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio};
 use std::time::Duration;
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::process::Command as TokioCommand;
 use tokio_stream::wrappers::TcpListenerStream;
@@ -27,12 +29,19 @@ pub mod proto {
 const HEALTH_SERVICE_NAME: &str = "";
 const EXEC_API_TOKEN_METADATA_KEY: &str = "x-control-plane-exec-token";
 const DEFAULT_EXEC_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+const CHROOT_COPILOT_HOOKS_DIR: &str = "/usr/local/share/control-plane/hooks";
 const CHROOT_GIT_HOOKS_DIR: &str = "/usr/local/share/control-plane/hooks/git";
 const CHROOT_EXEC_POLICY_LIBRARY_PATH: &str = "/usr/local/lib/libcontrol_plane_exec_policy.so";
 const CHROOT_EXEC_POLICY_RULES_PATH: &str =
     "/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml";
 
 pub type DynError = Box<dyn std::error::Error + Send + Sync>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServerMode {
+    Exec,
+    PostToolUse,
+}
 
 fn with_context<T, E>(result: Result<T, E>, context: impl FnOnce() -> String) -> Result<T, DynError>
 where
@@ -53,6 +62,7 @@ pub struct ServerConfig {
     pub git_user_name: Option<String>,
     pub git_user_email: Option<String>,
     pub startup_script: Option<String>,
+    pub mode: ServerMode,
     pub exec_api_token: String,
     pub exec_timeout: Duration,
     pub run_as_uid: u32,
@@ -70,6 +80,7 @@ struct RawServerConfig<'a> {
     git_user_name: Option<String>,
     git_user_email: Option<String>,
     startup_script: Option<&'a str>,
+    mode: &'a str,
     exec_api_token: String,
     timeout_sec: &'a str,
     run_as_uid: &'a str,
@@ -99,6 +110,7 @@ struct ExecApiService {
     logical_workspace_root: PathBuf,
     chroot_root: Option<PathBuf>,
     remote_home: PathBuf,
+    mode: ServerMode,
     expected_exec_api_token: MetadataValue<Ascii>,
     exec_timeout: Duration,
     run_as_uid: u32,
@@ -115,6 +127,8 @@ struct ResolvedCwd {
 struct RemoteHomePaths {
     home_dir: PathBuf,
     config_dir: PathBuf,
+    copilot_dir: PathBuf,
+    copilot_hooks_path: PathBuf,
     gitconfig_path: PathBuf,
 }
 
@@ -136,6 +150,7 @@ impl ExecApiService {
             logical_workspace_root: config.logical_workspace_root.clone(),
             chroot_root: config.chroot_root.clone(),
             remote_home: config.remote_home.clone(),
+            mode: config.mode,
             expected_exec_api_token: parse_exec_api_token(&config.exec_api_token)
                 .expect("CONTROL_PLANE_EXEC_API_TOKEN should be validated before serving"),
             exec_timeout: config.exec_timeout,
@@ -166,16 +181,32 @@ impl proto::exec_service_server::ExecService for ExecApiService {
             &request.cwd,
         )
         .map_err(Status::invalid_argument)?;
-        let result = run_shell_command(
-            &request.command,
-            &cwd,
-            self.exec_timeout,
-            self.run_as_uid,
-            self.run_as_gid,
-            self.chroot_root.as_deref(),
-            &self.remote_home,
-        )
-        .await?;
+        let result = match self.mode {
+            ServerMode::Exec => {
+                run_shell_command(
+                    &request.command,
+                    &cwd,
+                    self.exec_timeout,
+                    self.run_as_uid,
+                    self.run_as_gid,
+                    self.chroot_root.as_deref(),
+                    &self.remote_home,
+                )
+                .await?
+            }
+            ServerMode::PostToolUse => {
+                run_post_tool_use_hook(
+                    &request.command,
+                    &cwd,
+                    self.exec_timeout,
+                    self.run_as_uid,
+                    self.run_as_gid,
+                    self.chroot_root.as_deref(),
+                    &self.remote_home,
+                )
+                .await?
+            }
+        };
 
         Ok(Response::new(proto::ExecuteResponse {
             stdout: result.stdout,
@@ -217,6 +248,7 @@ pub fn load_server_config_from_env() -> Result<ServerConfig, String> {
         .ok()
         .filter(|value| !value.trim().is_empty());
     let raw_startup_script = env::var("CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT").ok();
+    let raw_mode = env::var("CONTROL_PLANE_EXEC_API_MODE").unwrap_or_else(|_| String::from("exec"));
     let exec_api_token = env::var("CONTROL_PLANE_EXEC_API_TOKEN")
         .map_err(|_| String::from("CONTROL_PLANE_EXEC_API_TOKEN is required"))?;
     let timeout_sec = env::var("CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC")
@@ -236,6 +268,7 @@ pub fn load_server_config_from_env() -> Result<ServerConfig, String> {
         git_user_name,
         git_user_email,
         startup_script: raw_startup_script.as_deref(),
+        mode: &raw_mode,
         exec_api_token,
         timeout_sec: &timeout_sec,
         run_as_uid: &run_as_uid,
@@ -264,6 +297,7 @@ fn build_server_config(raw: RawServerConfig<'_>) -> Result<ServerConfig, String>
         .filter(|value| !value.is_empty())
         .filter(|value| !value.trim().is_empty())
         .map(String::from);
+    let mode = parse_server_mode(raw.mode)?;
     let exec_api_token = require_non_empty(raw.exec_api_token, "CONTROL_PLANE_EXEC_API_TOKEN")?;
     parse_exec_api_token(&exec_api_token)?;
 
@@ -278,6 +312,7 @@ fn build_server_config(raw: RawServerConfig<'_>) -> Result<ServerConfig, String>
         git_user_name: raw.git_user_name,
         git_user_email: raw.git_user_email,
         startup_script,
+        mode,
         exec_api_token,
         exec_timeout,
         run_as_uid,
@@ -348,6 +383,14 @@ fn parse_positive_u64(raw_value: &str, variable_name: &str) -> Result<u64, Strin
         ))
     } else {
         Ok(value)
+    }
+}
+
+fn parse_server_mode(raw_mode: &str) -> Result<ServerMode, String> {
+    match raw_mode {
+        "exec" => Ok(ServerMode::Exec),
+        "post-tool-use" => Ok(ServerMode::PostToolUse),
+        _ => Err(format!("invalid CONTROL_PLANE_EXEC_API_MODE: {raw_mode}")),
     }
 }
 
@@ -970,6 +1013,7 @@ fn sync_git_config(config: &ServerConfig) -> Result<(), DynError> {
     let paths = resolve_remote_home_paths(chroot_root, &config.remote_home)?;
     ensure_remote_home_dirs(&paths)?;
     prepare_remote_home_for_update(&paths)?;
+    ensure_symlink_path(&paths.copilot_hooks_path, Path::new(CHROOT_COPILOT_HOOKS_DIR))?;
     with_context(
         fs::write(
             &paths.gitconfig_path,
@@ -993,10 +1037,14 @@ fn resolve_remote_home_paths(
 ) -> Result<RemoteHomePaths, DynError> {
     let home_dir = nested_absolute_path(chroot_root, remote_home)?;
     let config_dir = home_dir.join(".config");
+    let copilot_dir = home_dir.join(".copilot");
+    let copilot_hooks_path = copilot_dir.join("hooks");
     let gitconfig_path = home_dir.join(".gitconfig");
     Ok(RemoteHomePaths {
         home_dir,
         config_dir,
+        copilot_dir,
+        copilot_hooks_path,
         gitconfig_path,
     })
 }
@@ -1008,18 +1056,29 @@ fn ensure_remote_home_dirs(paths: &RemoteHomePaths) -> Result<(), DynError> {
             paths.config_dir.display()
         )
     })?;
+    with_context(fs::create_dir_all(&paths.copilot_dir), || {
+        format!(
+            "failed to create remote Copilot directory {}",
+            paths.copilot_dir.display()
+        )
+    })?;
     Ok(())
 }
 
 fn prepare_remote_home_for_update(paths: &RemoteHomePaths) -> Result<(), DynError> {
-    for path in [&paths.home_dir, &paths.config_dir] {
+    for path in [&paths.home_dir, &paths.config_dir, &paths.copilot_dir] {
         set_path_owner(path, 0, 0, "remote home path")?;
     }
     if paths.gitconfig_path.exists() {
         set_path_owner(&paths.gitconfig_path, 0, 0, "remote git config")?;
     }
-    set_path_mode(&paths.home_dir, 0o700, "remote home")?;
-    set_path_mode(&paths.config_dir, 0o700, "remote config directory")?;
+    for (path, description) in [
+        (&paths.home_dir, "remote home"),
+        (&paths.config_dir, "remote config directory"),
+        (&paths.copilot_dir, "remote Copilot directory"),
+    ] {
+        set_path_mode(path, 0o700, description)?;
+    }
     Ok(())
 }
 
@@ -1027,10 +1086,35 @@ fn assign_remote_home_owner(paths: &RemoteHomePaths, uid: u32, gid: u32) -> Resu
     for (path, description) in [
         (&paths.home_dir, "remote home"),
         (&paths.config_dir, "remote config directory"),
+        (&paths.copilot_dir, "remote Copilot directory"),
         (&paths.gitconfig_path, "remote git config"),
     ] {
         set_path_owner(path, uid, gid, description)?;
     }
+    set_symlink_owner(
+        &paths.copilot_hooks_path,
+        uid,
+        gid,
+        "remote Copilot hooks symlink",
+    )?;
+    Ok(())
+}
+
+fn ensure_symlink_path(link_path: &Path, target_path: &Path) -> Result<(), DynError> {
+    if let Ok(metadata) = fs::symlink_metadata(link_path) {
+        if metadata.file_type().is_symlink() {
+            if fs::read_link(link_path)? == target_path {
+                return Ok(());
+            }
+            fs::remove_file(link_path)?;
+        } else if metadata.is_dir() {
+            fs::remove_dir_all(link_path)?;
+        } else {
+            fs::remove_file(link_path)?;
+        }
+    }
+
+    std::os::unix::fs::symlink(target_path, link_path)?;
     Ok(())
 }
 
@@ -1044,6 +1128,25 @@ fn set_path_owner(path: &Path, uid: u32, gid: u32, description: &str) -> Result<
             )
         },
     )?;
+    Ok(())
+}
+
+fn set_symlink_owner(path: &Path, uid: u32, gid: u32, description: &str) -> Result<(), DynError> {
+    let path_bytes = path.as_os_str().as_bytes();
+    let path_cstr = CString::new(path_bytes).map_err(|_| {
+        format!(
+            "failed to prepare {description} {} for ownership update",
+            path.display()
+        )
+    })?;
+    if unsafe { libc::lchown(path_cstr.as_ptr(), uid, gid) } != 0 {
+        return Err(format!(
+            "failed to set ownership on {description} {}: {}",
+            path.display(),
+            io::Error::last_os_error()
+        )
+        .into());
+    }
     Ok(())
 }
 
@@ -1343,6 +1446,65 @@ async fn run_shell_command(
     })
 }
 
+fn post_tool_use_hook_path(remote_home: &Path) -> PathBuf {
+    remote_home.join(".copilot/hooks/postToolUse/main")
+}
+
+async fn run_post_tool_use_hook(
+    raw_input: &str,
+    cwd: &ResolvedCwd,
+    exec_timeout: Duration,
+    run_as_uid: u32,
+    run_as_gid: u32,
+    chroot_root: Option<&Path>,
+    remote_home: &Path,
+) -> Result<ExecResult, Status> {
+    let hook_path = post_tool_use_hook_path(remote_home);
+    let mut process = TokioCommand::new(&hook_path);
+    process
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (key, value) in managed_shell_environment(remote_home, chroot_root.is_some()) {
+        process.env(key, value);
+    }
+    process.env("CONTROL_PLANE_POST_TOOL_USE_FORWARD_ACTIVE", "1");
+    process.kill_on_drop(true);
+    configure_command_identity(
+        &mut process,
+        run_as_uid,
+        run_as_gid,
+        chroot_root,
+        &cwd.host,
+        &cwd.logical,
+    )
+    .map_err(|error| Status::new(Code::Internal, error.to_string()))?;
+    let mut child = process
+        .spawn()
+        .map_err(|error| Status::new(Code::Internal, error.to_string()))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(raw_input.as_bytes())
+            .await
+            .map_err(|error| Status::new(Code::Internal, error.to_string()))?;
+    }
+    let output = tokio::time::timeout(exec_timeout, child.wait_with_output())
+        .await
+        .map_err(|_| {
+            Status::deadline_exceeded(format!(
+                "postToolUse hook exceeded execution timeout of {} seconds",
+                exec_timeout.as_secs()
+            ))
+        })?
+        .map_err(|error| Status::new(Code::Internal, error.to_string()))?;
+
+    Ok(ExecResult {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        exit_code: exit_code_from_status(output.status),
+    })
+}
+
 #[cfg(unix)]
 fn configure_command_identity(
     process: &mut TokioCommand,
@@ -1424,10 +1586,10 @@ fn exit_code_from_status(status: std::process::ExitStatus) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        CHROOT_EXEC_POLICY_LIBRARY_PATH, CHROOT_EXEC_POLICY_RULES_PATH, DEFAULT_EXEC_PATH,
-        build_rootfs_extract_command, build_server_config, ensure_runtime_dirs,
-        managed_shell_environment, normalize_path, render_remote_git_config, resolve_cwd,
-        stdout_with_command_line, sync_git_config,
+        CHROOT_COPILOT_HOOKS_DIR, CHROOT_EXEC_POLICY_LIBRARY_PATH,
+        CHROOT_EXEC_POLICY_RULES_PATH, DEFAULT_EXEC_PATH, build_rootfs_extract_command,
+        build_server_config, ensure_runtime_dirs, managed_shell_environment, normalize_path,
+        render_remote_git_config, resolve_cwd, stdout_with_command_line, sync_git_config,
     };
     use crate::RawServerConfig;
     use std::ffi::OsString;
@@ -1467,6 +1629,7 @@ mod tests {
             git_user_name: None,
             git_user_email: None,
             startup_script: None,
+            mode: "exec",
             exec_api_token: String::new(),
             timeout_sec: "3600",
             run_as_uid: "1000",
@@ -1518,6 +1681,7 @@ mod tests {
             git_user_name: Some(String::from("Copilot")),
             git_user_email: Some(String::from("copilot@example.com")),
             startup_script: Some("apt-get update && apt-get install -y ripgrep"),
+            mode: "exec",
             exec_api_token: String::from("token"),
             timeout_sec: "3600",
             run_as_uid: "1000",
@@ -1611,6 +1775,8 @@ mod tests {
         assert!(tempdir.path().join("run").is_dir());
         assert!(tempdir.path().join("tmp").is_dir());
         assert!(tempdir.path().join("var/tmp").is_dir());
+        assert!(tempdir.path().join("root/.config").is_dir());
+        assert!(tempdir.path().join("root/.copilot").is_dir());
     }
 
     #[test]
@@ -1653,6 +1819,7 @@ mod tests {
             git_user_name: Some(String::from("Copilot")),
             git_user_email: Some(String::from("copilot@example.com")),
             startup_script: None,
+            mode: "exec",
             exec_api_token: String::from("token"),
             timeout_sec: "3600",
             run_as_uid: "1000",
@@ -1661,9 +1828,12 @@ mod tests {
         .unwrap();
         let home_dir = chroot_root.path().join("root");
         let config_dir = home_dir.join(".config");
+        let copilot_dir = home_dir.join(".copilot");
+        let copilot_hooks_path = copilot_dir.join("hooks");
         let gitconfig_path = home_dir.join(".gitconfig");
 
         fs::create_dir_all(&config_dir).unwrap();
+        fs::create_dir_all(&copilot_dir).unwrap();
         fs::write(&gitconfig_path, "stale\n").unwrap();
         chown(
             &home_dir,
@@ -1673,6 +1843,12 @@ mod tests {
         .unwrap();
         chown(
             &config_dir,
+            Some(Uid::from_raw(1000)),
+            Some(Gid::from_raw(1000)),
+        )
+        .unwrap();
+        chown(
+            &copilot_dir,
             Some(Uid::from_raw(1000)),
             Some(Gid::from_raw(1000)),
         )
@@ -1688,12 +1864,63 @@ mod tests {
 
         let home_metadata = fs::metadata(&home_dir).unwrap();
         let config_metadata = fs::metadata(&config_dir).unwrap();
+        let copilot_metadata = fs::metadata(&copilot_dir).unwrap();
+        let copilot_hooks_metadata = fs::symlink_metadata(&copilot_hooks_path).unwrap();
         let gitconfig_metadata = fs::metadata(&gitconfig_path).unwrap();
         assert_eq!(home_metadata.uid(), 1000);
         assert_eq!(config_metadata.uid(), 1000);
+        assert_eq!(copilot_metadata.uid(), 1000);
+        assert_eq!(copilot_hooks_metadata.uid(), 1000);
+        assert_eq!(copilot_hooks_metadata.gid(), 1000);
         assert_eq!(gitconfig_metadata.uid(), 1000);
         assert_eq!(home_metadata.permissions().mode() & 0o777, 0o700);
         assert_eq!(config_metadata.permissions().mode() & 0o777, 0o700);
+        assert_eq!(copilot_metadata.permissions().mode() & 0o777, 0o700);
         assert_eq!(gitconfig_metadata.permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            fs::read_link(&copilot_hooks_path).unwrap(),
+            PathBuf::from(CHROOT_COPILOT_HOOKS_DIR)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_git_config_replaces_stale_copilot_hooks_directory_with_symlink() {
+        use nix::unistd::Uid;
+
+        if !Uid::effective().is_root() {
+            return;
+        }
+
+        let workspace = TempDir::new().unwrap();
+        let chroot_root = TempDir::new().unwrap();
+        let config = build_server_config(RawServerConfig {
+            port: "8080",
+            workspace: workspace.path(),
+            chroot_root: Some(chroot_root.path()),
+            environment_mount: None,
+            git_hooks_source: None,
+            remote_home: Path::new("/root"),
+            git_user_name: Some(String::from("Copilot")),
+            git_user_email: Some(String::from("copilot@example.com")),
+            startup_script: None,
+            mode: "exec",
+            exec_api_token: String::from("token"),
+            timeout_sec: "3600",
+            run_as_uid: "1000",
+            run_as_gid: "1000",
+        })
+        .unwrap();
+        let hooks_dir = chroot_root.path().join("root/.copilot/hooks");
+
+        fs::create_dir_all(&hooks_dir).unwrap();
+        fs::write(hooks_dir.join("stale.txt"), "stale\n").unwrap();
+
+        sync_git_config(&config).unwrap();
+
+        assert_eq!(
+            fs::read_link(&hooks_dir).unwrap(),
+            PathBuf::from(CHROOT_COPILOT_HOOKS_DIR)
+        );
     }
 }

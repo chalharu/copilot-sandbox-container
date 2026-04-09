@@ -1,11 +1,18 @@
-use control_plane_exec_api::{ServerConfig, check_health, execute_remote, serve_with_listener};
+use control_plane_exec_api::{
+    ServerConfig, ServerMode, check_health, execute_remote, serve_with_listener,
+};
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
-async fn start_server(temp_dir: &TempDir, token: &str) -> (String, oneshot::Sender<()>) {
+async fn start_server(
+    temp_dir: &TempDir,
+    token: &str,
+    mode: ServerMode,
+) -> (String, oneshot::Sender<()>) {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("listener should bind");
@@ -27,6 +34,7 @@ async fn start_server(temp_dir: &TempDir, token: &str) -> (String, oneshot::Send
         git_user_name: None,
         git_user_email: None,
         startup_script: None,
+        mode,
         exec_api_token: token.to_owned(),
         exec_timeout: Duration::from_secs(5),
         run_as_uid: unsafe { libc::geteuid() },
@@ -48,7 +56,7 @@ async fn start_server(temp_dir: &TempDir, token: &str) -> (String, oneshot::Send
 async fn exec_api_rejects_requests_without_the_session_token_and_runs_authorized_commands() {
     let workspace_dir = TempDir::new().expect("workspace directory");
     let exec_token = "test-exec-token";
-    let (addr, shutdown_tx) = start_server(&workspace_dir, exec_token).await;
+    let (addr, shutdown_tx) = start_server(&workspace_dir, exec_token, ServerMode::Exec).await;
 
     check_health(&addr, Duration::from_secs(5))
         .await
@@ -88,6 +96,60 @@ async fn exec_api_rejects_requests_without_the_session_token_and_runs_authorized
     assert_eq!(
         std::fs::read_to_string(workspace_dir.path().join("api-marker.txt")).expect("marker file"),
         "ok"
+    );
+
+    shutdown_tx.send(()).expect("shutdown should succeed");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn post_tool_use_mode_runs_bundled_hook_from_remote_home() {
+    let workspace_dir = TempDir::new().expect("workspace directory");
+    let exec_token = "post-tool-use-token";
+    let hook_dir = workspace_dir.path().join("home/.copilot/hooks/postToolUse");
+    let hook_input_path = workspace_dir.path().join("hook-input.json");
+    fs::create_dir_all(&hook_dir).expect("hook directory");
+    let hook_script = hook_dir.join("main");
+    fs::write(
+        &hook_script,
+        format!(
+            "#!/usr/bin/env bash\nset -euo pipefail\ncat > {}\nprintf 'hook-stdout\\n'\nprintf 'hook-stderr\\n' >&2\nexit 7\n",
+            hook_input_path.display()
+        ),
+    )
+    .expect("hook script");
+    let mut permissions = fs::metadata(&hook_script)
+        .expect("hook metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&hook_script, permissions).expect("hook permissions");
+
+    let (addr, shutdown_tx) =
+        start_server(&workspace_dir, exec_token, ServerMode::PostToolUse).await;
+
+    check_health(&addr, Duration::from_secs(5))
+        .await
+        .expect("health check should pass");
+
+    let raw_input = format!(
+        r#"{{"cwd":"{}","toolResult":{{"resultType":"success"}}}}"#,
+        workspace_dir.path().display()
+    );
+    let result = execute_remote(
+        &addr,
+        Duration::from_secs(5),
+        exec_token,
+        workspace_dir.path().to_str().expect("workspace path"),
+        &raw_input,
+    )
+    .await
+    .expect("postToolUse request should succeed");
+
+    assert_eq!(result.stdout, "hook-stdout\n");
+    assert_eq!(result.stderr, "hook-stderr\n");
+    assert_eq!(result.exit_code, 7);
+    assert_eq!(
+        fs::read_to_string(&hook_input_path).expect("hook input"),
+        raw_input
     );
 
     shutdown_tx.send(()).expect("shutdown should succeed");

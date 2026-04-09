@@ -51,6 +51,9 @@ struct SessionExecConfig {
     git_user_name: Option<String>,
     git_user_email: Option<String>,
     request_timeout: Duration,
+    post_tool_use_forward_addr: String,
+    post_tool_use_forward_token: String,
+    post_tool_use_forward_timeout: Duration,
     startup_script: Option<String>,
     environment_pvc_prefix: String,
     environment_storage_class: Option<String>,
@@ -297,6 +300,12 @@ fn load_config() -> ToolResult<SessionExecConfig> {
         &env_or_default("CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC", "3600"),
         "CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC",
     )?);
+    let post_tool_use_forward_addr = required_env("CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR")?;
+    let post_tool_use_forward_token = required_env("CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN")?;
+    let post_tool_use_forward_timeout = Duration::from_secs(parse_positive_u64(
+        &env_or_default("CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC", "3600"),
+        "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC",
+    )?);
     let startup_script = optional_env("CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT");
     let environment_pvc_prefix = env_or_default(
         "CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX",
@@ -346,6 +355,9 @@ fn load_config() -> ToolResult<SessionExecConfig> {
         git_user_name: optional_env("CONTROL_PLANE_GIT_USER_NAME"),
         git_user_email: optional_env("CONTROL_PLANE_GIT_USER_EMAIL"),
         request_timeout,
+        post_tool_use_forward_addr,
+        post_tool_use_forward_token,
+        post_tool_use_forward_timeout,
         startup_script,
         environment_pvc_prefix,
         environment_storage_class,
@@ -1222,6 +1234,15 @@ fn build_exec_pod(
                     "name": "CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID",
                     "value": config.run_as_gid.to_string()
                 }, {
+                    "name": "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR",
+                    "value": config.post_tool_use_forward_addr
+                }, {
+                    "name": "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN",
+                    "value": config.post_tool_use_forward_token
+                }, {
+                    "name": "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC",
+                    "value": config.post_tool_use_forward_timeout.as_secs().to_string()
+                }, {
                     "name": "CONTROL_PLANE_FAST_EXECUTION_HOME",
                     "value": config.remote_home
                 }, {
@@ -1380,6 +1401,9 @@ mod tests {
             git_user_name: Some("Copilot".to_string()),
             git_user_email: Some("copilot@example.com".to_string()),
             request_timeout: std::time::Duration::from_secs(3600),
+            post_tool_use_forward_addr: "http://10.0.0.10:8081".to_string(),
+            post_tool_use_forward_token: "reverse-token".to_string(),
+            post_tool_use_forward_timeout: std::time::Duration::from_secs(3600),
             startup_script: Some(
                 "printf \"fast-exec-startup\\n\" > /workspace/fast-exec-startup-marker.txt"
                     .to_string(),
@@ -1636,6 +1660,15 @@ mod tests {
         assert!(env.iter().any(|value| value.name
             == "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE"
             && value.value.as_deref() == Some("/environment/hooks/git")));
+        assert!(env.iter().any(|value| value.name
+            == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR"
+            && value.value.as_deref() == Some("http://10.0.0.10:8081")));
+        assert!(env.iter().any(|value| value.name
+            == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN"
+            && value.value.as_deref() == Some("reverse-token")));
+        assert!(env.iter().any(|value| value.name
+            == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC"
+            && value.value.as_deref() == Some("3600")));
         assert!(env.iter().any(|value| value.name
             == "CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT"
             && value.value.as_deref()
