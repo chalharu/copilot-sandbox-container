@@ -1,122 +1,85 @@
 # copilot-sandbox-container
 
-`copilot-sandbox-container` は、Copilot CLI 向けの Control Plane イメージ、session-scoped Execution Pod bootstrap、smoke 用 Execution Plane イメージ、Kubernetes 配備サンプル、検証スクリプトをまとめたリポジトリです。sample manifest の既定値では、Copilot CLI の `bash` tool を session 単位の Kubernetes Execution Pod へ自動委譲し、明示的な `control-plane-run` も Kubernetes Job 経由で実行します。
+`copilot-sandbox-container` は、GitHub Copilot CLI を Kubernetes 上で使うための
+Control Plane イメージ、sample manifest、検証スクリプトをまとめた
+リポジトリです。SSH で入れる常駐の control plane、Copilot CLI の `bash`
+tool を session 単位で実行する Execution Pod、明示的に叩く
+`control-plane-run` の Kubernetes Job 経路を一緒に用意できます。
 
-## 読み始める場所
+## このリポジトリが向いている人
 
-- 最短でセットアップと検証を通す: `README.md`（このドキュメント）
-- どの文書を見るべきか迷ったら: `docs/README.md`
-- How-to guides: `docs/how-to-guides/cookbook.md`
-- current-cluster の runtime / hook / 永続化の事実関係: `docs/reference/control-plane-runtime.md`
-- Explanation: `docs/explanation/knowledge.md`
-- History: `docs/explanation/history.md`
-- Reference: `docs/reference/debug-log.md`
-- Contribution rules: `CONTRIBUTING.md`
+- Copilot CLI の作業環境を Kubernetes 上へ置きたい
+- `bash` tool の実行を session-scoped Execution Pod へ委譲したい
+- 一回限りの処理を `control-plane-run` で Kubernetes Job として実行したい
+- sample manifest と検証スクリプトを土台に、自分のクラスタへ導入したい
 
-## この quickstart で通すこと
+## はじめて使うときの最短ルート
 
-この quickstart では、次の 2 つを最短で通します。
+### 1. 前提をそろえる
 
-1. `./scripts/build-test.sh` で build / standalone smoke / Kind integration を回す
-2. Kubernetes 上の current-cluster で `./scripts/test-k8s-job.sh` を使って runtime / SSH / skill surface を確認する
+- `kubectl`, `ssh`, `ssh-keygen`, `ssh-keyscan`
+- deploy 先 namespace と PVC を作成できる Kubernetes 権限
+- session 用の `ReadWriteMany` storage class
+- workspace 用の storage class（既定では `ReadWriteOnce` を想定）
+- SSH 公開鍵
+- 利用したい published image tag
 
-PR 上の lint は external `linter-service` が担当するため、repo-managed な baseline は
-`build-test.sh` から始まります。
+### 2. tutorial を読む
 
-詳細な運用手順や背景説明は、README の下ではなく Diátaxis 配下へ分離しています。困ったらまず上のリンクに移動してください。
+`docs/tutorials/first-deployment.md`
 
-## ステップ 1: 前提をそろえる
+### 3. sample manifest の placeholder を置き換える
 
-最低限、次のコマンドが必要です。
+- `deploy/kubernetes/control-plane.example/install/pvc-control-plane-copilot-session.yaml`
+- `deploy/kubernetes/control-plane.example/base/pvc-control-plane-workspace.yaml`
+- `deploy/kubernetes/control-plane.example/common/secret-control-plane-auth.yaml`
+- `deploy/kubernetes/control-plane.example/common/configmap-control-plane-env.yaml`
+- `deploy/kubernetes/control-plane.example/base/deployment-control-plane.yaml`
 
-- `git`
-- `kubectl`
-- `ssh`, `ssh-keygen`
-- `docker buildx`
-- current-cluster を触る場合は、対象 namespace に対する `kubectl` 権限
-
-current-cluster 上の Control Plane コンテナ内で作業する場合は、先に次の
-3 本を押さえると迷いにくくなります。
-
-- runtime.env、永続 state、hook / Git policy:
-  `docs/reference/control-plane-runtime.md`
-- sample manifest の更新手順:
-  `docs/how-to-guides/cookbook.md#3-sample-manifest-を-current-cluster-向けに更新する`
-- なぜ session-scoped Execution Pod と Kubernetes Job を併用するのか:
-  `docs/explanation/knowledge.md`
-
-## ステップ 2: build とテストを実行する
+### 4. apply する
 
 ```bash
-./scripts/build-test.sh
+kubectl apply -k deploy/kubernetes/control-plane.example/install
+kubectl apply -k deploy/kubernetes/control-plane.example
 ```
 
-必要なら Docker toolchain を明示します。
+### 5. 動作確認する
 
 ```bash
-CONTROL_PLANE_TOOLCHAIN=docker ./scripts/build-test.sh
-```
-
-`--build-only` や `--skip-image-build --group ...` の focused rerun は
-`docs/how-to-guides/cookbook.md#1-標準の-build--test-を回す` を
-参照してください。
-
-既定の baseline は、Control Plane イメージと smoke 用 Execution Plane
-イメージを build したうえで、次の 4 系統を順に確認します。
-
-- standalone / regressions: `scripts/test-standalone.sh`,
-  `scripts/test-regressions.sh`
-- config / runtime / permissions:
-  `scripts/test-k8s-sample-storage-layout.sh`,
-  `scripts/test-entrypoint-capabilities.sh`
-- audit / bundled skill: `scripts/test-audit-logging.sh`,
-  `scripts/test-repo-change-delivery-skills.sh`
-- Kind integration: `scripts/test-kind-image-loading.sh`, `scripts/test-kind.sh`
-  （SSH / current-cluster profile / fast execution pod / Job path）、
-  `scripts/test-job-transfer.sh`
-
-focused rerun では `--build-only` と
-`--skip-image-build --group <smoke|regressions|kind|kind-session|kind-jobs|kind-jobs-core|kind-jobs-transfer>`
-を組み合わせ、image build を 1 回に固定してから必要な test group だけ
-回せます。
-
-## ステップ 3: current-cluster を確認する
-
-Kubernetes 上の current-cluster smoke は次で実行します。
-
-```bash
+kubectl get pods -n copilot-sandbox
+kubectl get pvc -n copilot-sandbox
+kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox
+ssh -p 2222 copilot@127.0.0.1
 ./scripts/test-k8s-job.sh
 ```
 
-このスクリプトでは、少なくとも次を確認します。
+`./scripts/test-k8s-job.sh` は、このリポジトリの checkout と cluster への
+`kubectl`/SSH 到達性を前提に、runtime / SSH / Job path をまとめて確認します。
 
-- `drop: ALL` 系 profile での interactive SSH login が接続維持後も入力を受け付ける
-- bundled skill の `references/` 可読性
-- bundled toolchain と runtime.env が期待どおり生成される
-- current-cluster 上の SSH / session surface が維持される
+## 利用シーン別の入口
 
-sample manifest の更新手順は
-`docs/how-to-guides/cookbook.md#3-sample-manifest-を-current-cluster-向けに更新する`、
-runtime / state / config 注入の具体的な path は
-`docs/reference/control-plane-runtime.md` を参照してください。
+| やりたいこと | 読む文書 |
+| --- | --- |
+| 初回導入を最短で通したい | `docs/tutorials/first-deployment.md` |
+| sample manifest の構成と編集ポイントを見たい | `deploy/kubernetes/README.md` |
+| 既存環境の更新や smoke 手順を知りたい | `docs/how-to-guides/cookbook.md` |
+| runtime.env、永続 state、hook / Git policy の path を引きたい | `docs/reference/control-plane-runtime.md` |
+| 失敗ログから障害点を当たりたい | `docs/reference/debug-log.md` |
+| なぜこの構成なのか知りたい | `docs/explanation/knowledge.md` |
+| どの文書から読むか迷っている | `docs/README.md` |
 
-sample manifest の既定値では `CONTROL_PLANE_FAST_EXECUTION_ENABLED=1` により、
-bundled `preToolUse` hook が Copilot CLI の `bash` tool を
-session-scoped Execution Pod へ書き換えます。Execution Pod は同じ
-`/workspace` PVC を mount しつつ、同じ node 上の `/environment` RWO PVC に
-保持した chroot runtime を再利用します。session pod 自体は `sessionEnd` hook と
-OwnerReference の両方で cleanup されます。これは explicit に呼ぶ
-`control-plane-run` とは別経路です。
+## よく使う操作
 
-すでに Control Plane Pod の中から作業している場合は、追加の spot check として次も使えます。
+### SSH で control plane に入る
+
+Service の `EXTERNAL-IP` がまだ無い場合は port-forward を使います。
 
 ```bash
-./scripts/test-current-cluster-regressions.sh
+kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox
+ssh -p 2222 copilot@127.0.0.1
 ```
 
-## ステップ 5: 基本的な `control-plane-run` を試す
-
-Kubernetes Job 実行:
+### `control-plane-run` で Kubernetes Job を実行する
 
 ```bash
 control-plane-run \
@@ -126,16 +89,37 @@ control-plane-run \
   -- bash -lc 'printf "%s\n" job > /workspace/job.txt'
 ```
 
-`control-plane-run` は Kubernetes Job 専用です。Copilot CLI 自身の `bash`
-tool delegation はこれとは別に、hook が自動で session-scoped Execution Pod
-へ転送します。
+`control-plane-run` は明示的に叩く Job 経路です。Copilot CLI 自身の `bash`
+tool は、bundled hook により別の session-scoped Execution Pod へ自動委譲されます。
 
-## 次に進む
+### current-cluster の smoke を取る
 
-- どの文書を見るべきか迷ったら: `docs/README.md`
-- 具体的な運用手順を見たい: `docs/how-to-guides/cookbook.md`
-- なぜこの構成なのか知りたい: `docs/explanation/knowledge.md`
-- current-cluster へ至る経緯を知りたい: `docs/explanation/history.md`
-- runtime / hook / 永続化の path を引きたい:
-  `docs/reference/control-plane-runtime.md`
-- 代表的な失敗ログを引きたい: `docs/reference/debug-log.md`
+```bash
+./scripts/test-k8s-job.sh
+```
+
+すでに Control Plane Pod の中から spot check したい場合は
+`./scripts/test-current-cluster-regressions.sh` も使えます。
+
+## ドキュメント構成
+
+- Tutorial: `docs/tutorials/first-deployment.md`
+- How-to guides: `docs/how-to-guides/cookbook.md`
+- Explanation: `docs/explanation/knowledge.md`, `docs/explanation/history.md`
+- Reference: `docs/reference/control-plane-runtime.md`,
+  `docs/reference/debug-log.md`
+
+## リポジトリを改修したい場合
+
+この README は利用者向けの入口です。リポジトリ自体を改修する場合は
+`CONTRIBUTING.md` を参照し、repo-managed な baseline として次を使ってください。
+
+```bash
+./scripts/build-test.sh
+```
+
+Docker toolchain を固定したい場合:
+
+```bash
+CONTROL_PLANE_TOOLCHAIN=docker ./scripts/build-test.sh
+```

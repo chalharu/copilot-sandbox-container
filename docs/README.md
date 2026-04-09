@@ -1,49 +1,44 @@
-# Documentation map
+# 利用者向けドキュメント案内
 
-このページは、どの文書から読むべきかを素早く判断するための入口です。
-最初の 1 本だけを選びたい場合は、下の「よくある目的」から入ってください。
+このページは、このリポジトリを「使う人」が次に読む文書を選ぶための入口です。
+初回導入、既存環境の更新、トラブルシュート、設計理解のどこからでも入れるように
+整理しています。
 
-## よくある目的
+## まずはここから
 
-- 最短で build / test / current-cluster smoke を通したい: `README.md`
-- current-cluster の smoke と manifest 更新を進めたい: `docs/how-to-guides/cookbook.md`
-- runtime.env、永続 state、`session-exec.json`、hook / Git policy の path を引きたい: `docs/reference/control-plane-runtime.md`
-- なぜ rootful-service fallback、Kubernetes Job 既定、session-scoped bash delegation を併用するのか知りたい: `docs/explanation/knowledge.md`
-- 現行構成へ至る経緯を追いたい: `docs/explanation/history.md`
-- 代表ログから障害点を引きたい: `docs/reference/debug-log.md`
-- コントリビュート規約を確認したい: `CONTRIBUTING.md`
+| したいこと | 読む文書 |
+| --- | --- |
+| はじめて control plane をデプロイする | `docs/tutorials/first-deployment.md` |
+| sample manifest の構成と編集ポイントを知りたい | `deploy/kubernetes/README.md` |
+| 既存環境で smoke / update を進めたい | `docs/how-to-guides/cookbook.md` |
+| エラー時に症状から当たりを付けたい | `docs/reference/debug-log.md` |
 
-## Diátaxis 別の入口
+## 目的別の入口
 
-### Tutorial
+| 目的 | 文書 |
+| --- | --- |
+| まず README から全体像をつかみたい | `README.md` |
+| runtime.env、永続 state、hook / Git policy の path を引きたい | `docs/reference/control-plane-runtime.md` |
+| なぜ session-scoped Execution Pod と Kubernetes Job を併用するのか知りたい | `docs/explanation/knowledge.md` |
+| 現行構成に至る経緯を追いたい | `docs/explanation/history.md` |
+| リポジトリ自体を改修したい | `CONTRIBUTING.md` |
 
-- `README.md`: このリポジトリで最初に通す build / test /
-  current-cluster smoke の最短導線
+## ドキュメントの役割
 
-### How-to guides
-
-- `docs/how-to-guides/cookbook.md`: current-cluster 運用、sample manifest
-  更新、fast execution pod の前提、`control-plane-run` の使い分け、SSH login 確認
-
-### Explanation
-
-- `docs/explanation/knowledge.md`: Control Plane / Execution Plane 分離、
-  session-scoped bash delegation、SSH + Screen、rootful-service fallback、
-  ConfigMap / Secret 設計
-- `docs/explanation/history.md`: current-cluster 対応や bundled skill 同期、
-  ドキュメント再編に至る判断の履歴
-
-### Reference
-
-- `docs/reference/control-plane-runtime.md`: runtime.env、永続 / 一時 state、
-  ConfigMap / Secret 注入、fast execution pod lifecycle、hook / Git policy、
-  bundled skill 同期の事実関係
-- `docs/reference/debug-log.md`: current-cluster と Control Plane 周辺で重要に
-  なる代表ログ断片と意味
+- Tutorial: `docs/tutorials/first-deployment.md`
+  - はじめての導入を end-to-end で通す
+- How-to guides: `docs/how-to-guides/cookbook.md`
+  - 既存環境で特定の操作だけを進める
+- Explanation: `docs/explanation/knowledge.md`,
+  `docs/explanation/history.md`
+  - 仕組みや判断理由を理解する
+- Reference: `docs/reference/control-plane-runtime.md`,
+  `docs/reference/debug-log.md`
+  - 正確な path、runtime surface、代表ログを引く
 
 ## 読み進め方のおすすめ
 
-1. 初回は `README.md`
-2. 具体的な操作で詰まったら `docs/how-to-guides/cookbook.md`
-3. 設計背景が必要になったら `docs/explanation/knowledge.md`
-4. path やログを正確に引きたいときは `docs/reference/*.md`
+1. 全体像は `README.md`
+2. 初回導入は `docs/tutorials/first-deployment.md`
+3. 運用中の具体手順は `docs/how-to-guides/cookbook.md`
+4. 事実関係やログを引くときは `docs/reference/*.md`
