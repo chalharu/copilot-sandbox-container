@@ -113,6 +113,8 @@ const STARTUP_PROBE_GRACE_SECONDS: u64 = 10;
 const CHROOT_EXEC_POLICY_LIBRARY_PATH: &str = "/usr/local/lib/libcontrol_plane_exec_policy.so";
 const CHROOT_EXEC_POLICY_RULES_PATH: &str =
     "/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml";
+const CHROOT_RUNTIME_TOOL_PATH: &str = "/usr/local/bin/control-plane-runtime-tool";
+const CHROOT_POST_TOOL_USE_HOOKS_PATH: &str = "/usr/local/share/control-plane/hooks/postToolUse";
 
 pub fn run(args: &[String]) -> ToolResult<i32> {
     if args.len() == 1 && matches!(args[0].as_str(), "--help" | "-h") {
@@ -975,6 +977,8 @@ fn build_bootstrap_assets_init_command(environment_root: &str, runtime_bin_dir: 
     let policy_rules_source = CHROOT_EXEC_POLICY_RULES_PATH;
     let policy_library_path = format!("{chroot_root}{CHROOT_EXEC_POLICY_LIBRARY_PATH}");
     let policy_rules_path = format!("{chroot_root}{CHROOT_EXEC_POLICY_RULES_PATH}");
+    let chroot_runtime_tool_path = format!("{chroot_root}{CHROOT_RUNTIME_TOOL_PATH}");
+    let post_tool_use_dir = format!("{chroot_root}{CHROOT_POST_TOOL_USE_HOOKS_PATH}");
     format!(
         concat!(
             "set -eu\n",
@@ -982,16 +986,27 @@ fn build_bootstrap_assets_init_command(environment_root: &str, runtime_bin_dir: 
             "runtime_bin_dir={runtime_bin_dir:?}\n",
             "policy_library_path={policy_library_path:?}\n",
             "policy_rules_path={policy_rules_path:?}\n",
+            "chroot_runtime_tool_path={chroot_runtime_tool_path:?}\n",
+            "post_tool_use_dir={post_tool_use_dir:?}\n",
             "policy_library_dir=\"$(dirname \"$policy_library_path\")\"\n",
             "policy_rules_dir=\"$(dirname \"$policy_rules_path\")\"\n",
-            "install -d -m 0755 \"$environment_root/root\" \"$environment_root/hooks/git\" \"$runtime_bin_dir\" \"$policy_library_dir\" \"$policy_rules_dir\"\n",
+            "chroot_runtime_tool_dir=\"$(dirname \"$chroot_runtime_tool_path\")\"\n",
+            "install -d -m 0755 \"$environment_root/root\" \"$environment_root/hooks/git\" \"$runtime_bin_dir\" \"$policy_library_dir\" \"$policy_rules_dir\" \"$chroot_runtime_tool_dir\" \"$post_tool_use_dir\"\n",
             "install -m 0755 /usr/local/bin/control-plane-exec-api \"$runtime_bin_dir/control-plane-exec-api\"\n",
+            "install -m 0755 /usr/local/bin/control-plane-runtime-tool \"$chroot_runtime_tool_path\"\n",
             "rm -rf \"$environment_root/hooks/git\"\n",
             "install -d -m 0755 \"$environment_root/hooks/git\"\n",
             "cp -R /usr/local/share/control-plane/hooks/git/. \"$environment_root/hooks/git/\"\n",
             "find \"$environment_root/hooks/git\" -type d -exec chmod 755 {{}} +\n",
             "find \"$environment_root/hooks/git\" -type f -exec chmod 644 {{}} +\n",
             "chmod 755 \"$environment_root/hooks/git/pre-commit\" \"$environment_root/hooks/git/pre-push\"\n",
+            "rm -rf \"$post_tool_use_dir\"\n",
+            "install -d -m 0755 \"$post_tool_use_dir\"\n",
+            "cp -R /usr/local/share/control-plane/hooks/postToolUse/. \"$post_tool_use_dir/\"\n",
+            "find \"$post_tool_use_dir\" -type d -exec chmod 755 {{}} +\n",
+            "find \"$post_tool_use_dir\" -type f -exec chmod 644 {{}} +\n",
+            "chmod 755 \"$post_tool_use_dir/control-plane-rust.sh\"\n",
+            "ln -sf {runtime_tool_path:?} \"$post_tool_use_dir/main\"\n",
             "install -m 0644 {policy_library_source:?} \"$policy_library_path\"\n",
             "install -m 0644 {policy_rules_source:?} \"$policy_rules_path\"\n",
         ),
@@ -1001,6 +1016,9 @@ fn build_bootstrap_assets_init_command(environment_root: &str, runtime_bin_dir: 
         policy_rules_source = policy_rules_source,
         policy_library_path = policy_library_path,
         policy_rules_path = policy_rules_path,
+        chroot_runtime_tool_path = chroot_runtime_tool_path,
+        post_tool_use_dir = post_tool_use_dir,
+        runtime_tool_path = CHROOT_RUNTIME_TOOL_PATH,
     )
 }
 
@@ -1689,8 +1707,18 @@ mod tests {
                 "install -m 0755 /usr/local/bin/control-plane-exec-api \"$runtime_bin_dir/control-plane-exec-api\""
             )
         );
+        assert!(command.contains(
+            "install -m 0755 /usr/local/bin/control-plane-runtime-tool \"$chroot_runtime_tool_path\""
+        ));
         assert!(!command.contains("/environment/control-plane-exec-api"));
         assert!(command.contains("rm -rf \"$environment_root/hooks/git\""));
+        assert!(command.contains("rm -rf \"$post_tool_use_dir\""));
+        assert!(command.contains(
+            "cp -R /usr/local/share/control-plane/hooks/postToolUse/. \"$post_tool_use_dir/\""
+        ));
+        assert!(command.contains(
+            "ln -sf \"/usr/local/bin/control-plane-runtime-tool\" \"$post_tool_use_dir/main\""
+        ));
         assert!(command.contains(
             "install -m 0644 \"/usr/local/lib/libcontrol_plane_exec_policy.so\" \"$policy_library_path\""
         ));
