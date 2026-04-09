@@ -851,7 +851,7 @@ command -v screen
 ! command -v cpulimit >/dev/null 2>&1
 ! command -v gcc >/dev/null 2>&1
 ! command -v pkg-config >/dev/null 2>&1
-! command -v vim >/dev/null 2>&1
+command -v vim
 printf '%s\n' 'kind-test remote: command availability ok' >&2
 printf '%s\n' "\${LANG}" | grep -qi 'utf-8'
 printf '%s\n' 'kind-test remote: login env ok' >&2

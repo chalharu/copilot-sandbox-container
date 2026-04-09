@@ -190,7 +190,7 @@ npm ls -g @github/copilot --depth=0 | grep -q "@github/copilot@"
 ! command -v cpulimit >/dev/null 2>&1
 ! command -v gcc >/dev/null 2>&1
 ! command -v pkg-config >/dev/null 2>&1
-! command -v vim >/dev/null 2>&1
+command -v vim
 command -v kubectl
 command -v kind
 command -v cargo
