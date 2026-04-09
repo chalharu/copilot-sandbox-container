@@ -1061,6 +1061,35 @@ grep -Fq 'Direct reads of ~/.config/gh/hosts.yml are blocked by control-plane po
 control-plane-session-exec cleanup --session-key "${session_key}"
 ! kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${pod_name}" >/dev/null 2>&1
 jq -e --arg key "${session_key}" '.sessions[$key] == null' ~/.copilot/session-state/session-exec.json >/dev/null
+terminating_session_key=kind-fast-exec-terminating
+control-plane-session-exec cleanup --session-key "${terminating_session_key}" >/dev/null 2>&1 || true
+rm -f /workspace/fast-exec-terminating-marker.txt
+control-plane-session-exec prepare --session-key "${terminating_session_key}" >/dev/null
+terminating_pod_name="$(jq -r --arg key "${terminating_session_key}" '.sessions[$key].podName' ~/.copilot/session-state/session-exec.json)"
+terminating_pod_uid="$(kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${terminating_pod_name}" -o jsonpath='{.metadata.uid}')"
+kubectl delete pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${terminating_pod_name}" --wait=false >/dev/null
+deletion_timestamp=''
+for _ in $(seq 1 60); do
+  deletion_timestamp="$(kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${terminating_pod_name}" -o jsonpath='{.metadata.deletionTimestamp}' 2>/dev/null || true)"
+  if [ -n "${deletion_timestamp}" ]; then
+    break
+  fi
+  sleep 1
+done
+test -n "${deletion_timestamp}"
+state_temp="$(mktemp)"
+jq --arg key "${terminating_session_key}" 'del(.sessions[$key])' ~/.copilot/session-state/session-exec.json > "${state_temp}"
+mv "${state_temp}" ~/.copilot/session-state/session-exec.json
+control-plane-session-exec prepare --session-key "${terminating_session_key}" >/dev/null
+replacement_pod_uid="$(kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${terminating_pod_name}" -o jsonpath='{.metadata.uid}')"
+test -n "${replacement_pod_uid}"
+test "${replacement_pod_uid}" != "${terminating_pod_uid}"
+terminating_command_base64="$(printf '%s' 'printf "terminating-fast-exec-ok\n" > /workspace/fast-exec-terminating-marker.txt' | base64 | tr -d '\n')"
+control-plane-session-exec proxy --session-key "${terminating_session_key}" --cwd /workspace --command-base64 "${terminating_command_base64}" >/dev/null
+grep -qx 'terminating-fast-exec-ok' /workspace/fast-exec-terminating-marker.txt
+control-plane-session-exec cleanup --session-key "${terminating_session_key}"
+! kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${terminating_pod_name}" >/dev/null 2>&1
+jq -e --arg key "${terminating_session_key}" '.sessions[$key] == null' ~/.copilot/session-state/session-exec.json >/dev/null
 EOF
   then
     ssh_bash <<'EOF' >&2 || true
@@ -1072,6 +1101,7 @@ cat /workspace/k8s-fast-exec-stdout.txt || true
 cat /workspace/k8s-fast-exec-stderr.txt || true
 cat /workspace/k8s-fast-exec-blocked-stdout.txt || true
 cat /workspace/k8s-fast-exec-blocked-stderr.txt || true
+cat /workspace/fast-exec-terminating-marker.txt || true
 kubectl get pods --namespace "${CONTROL_PLANE_POD_NAMESPACE:-default}" -o wide || true
 EOF
     dump_control_plane_diagnostics
