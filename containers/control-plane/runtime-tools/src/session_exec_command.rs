@@ -854,7 +854,10 @@ fn pod_is_terminating(pod: &Pod) -> bool {
 }
 
 fn pod_uid(pod: &Pod) -> Option<&str> {
-    pod.metadata.uid.as_deref().filter(|value| !value.is_empty())
+    pod.metadata
+        .uid
+        .as_deref()
+        .filter(|value| !value.is_empty())
 }
 
 fn pod_ip(pod: &Pod) -> Option<String> {
