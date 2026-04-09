@@ -158,6 +158,7 @@ RUN apt-get update -o Acquire::Retries=3 \
         screen \
         tini \
         unzip \
+        vim \
     && arch="$(dpkg --print-architecture)" \
     && case "${arch}" in \
         amd64) \

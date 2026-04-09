@@ -190,7 +190,7 @@ ${service_account_yaml}
                  printf "job-check: lang=%s\n" "\${lang_report}"
                   [[ "\${lang_report}" == "C.UTF-8" ]]
 
-                  su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; command -v cargo >/dev/null; command -v yamllint >/dev/null; command -v control-plane-run >/dev/null; command -v control-plane-exec-api >/dev/null; ! command -v cpulimit >/dev/null 2>&1; ! command -v gcc >/dev/null 2>&1; ! command -v pkg-config >/dev/null 2>&1; ! command -v vim >/dev/null 2>&1; cargo --version >/dev/null; yamllint --version >/dev/null; control-plane-run --help >/dev/null; control-plane-exec-api --help >/dev/null'"'"'
+                  su -s /bin/bash copilot -c '"'"'set -a; source /home/copilot/.config/control-plane/runtime.env; set +a; command -v cargo >/dev/null; command -v yamllint >/dev/null; command -v control-plane-run >/dev/null; command -v control-plane-exec-api >/dev/null; ! command -v cpulimit >/dev/null 2>&1; ! command -v gcc >/dev/null 2>&1; ! command -v pkg-config >/dev/null 2>&1; command -v vim >/dev/null; cargo --version >/dev/null; yamllint --version >/dev/null; control-plane-run --help >/dev/null; control-plane-exec-api --help >/dev/null'"'"'
                   printf "%s\n" "job-check: bundled-tools=ok"
                   test -d /var/tmp/control-plane
                   test -d /var/tmp/control-plane/cargo-target
