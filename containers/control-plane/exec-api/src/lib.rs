@@ -29,6 +29,8 @@ pub mod proto {
 const HEALTH_SERVICE_NAME: &str = "";
 const EXEC_API_TOKEN_METADATA_KEY: &str = "x-control-plane-exec-token";
 const DEFAULT_EXEC_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+const KUBERNETES_SERVICE_ACCOUNT_DIR: &str = "/var/run/secrets/kubernetes.io/serviceaccount";
+const CHROOT_KUBERNETES_SERVICE_ACCOUNT_DIR: &str = "/run/secrets/kubernetes.io/serviceaccount";
 const CHROOT_COPILOT_HOOKS_DIR: &str = "/usr/local/share/control-plane/hooks";
 const CHROOT_GIT_HOOKS_DIR: &str = "/usr/local/share/control-plane/hooks/git";
 const CHROOT_EXEC_POLICY_LIBRARY_PATH: &str = "/usr/local/lib/libcontrol_plane_exec_policy.so";
@@ -696,7 +698,39 @@ fn mount_runtime_filesystems(chroot_root: &Path) -> Result<(), DynError> {
     bind_mount_if_missing(Path::new("/dev"), &dev_target)?;
     mount_proc_if_missing(&proc_target)?;
     mount_tmpfs_if_missing(&run_target, "mode=0755")?;
+    bind_kubernetes_service_account_if_present(chroot_root)?;
     Ok(())
+}
+
+fn bind_kubernetes_service_account_if_present(chroot_root: &Path) -> Result<(), DynError> {
+    let source = Path::new(KUBERNETES_SERVICE_ACCOUNT_DIR);
+    if !source.is_dir() {
+        return Ok(());
+    }
+
+    let target = nested_absolute_path(
+        chroot_root,
+        Path::new(CHROOT_KUBERNETES_SERVICE_ACCOUNT_DIR),
+    )?;
+    let parent = target.parent().ok_or_else(|| {
+        io::Error::other(format!(
+            "missing parent for Kubernetes service account mount {}",
+            target.display()
+        ))
+    })?;
+    with_context(fs::create_dir_all(parent), || {
+        format!(
+            "failed to create Kubernetes service account mount parent {}",
+            parent.display()
+        )
+    })?;
+    with_context(fs::create_dir_all(&target), || {
+        format!(
+            "failed to create Kubernetes service account mount target {}",
+            target.display()
+        )
+    })?;
+    bind_mount_if_missing(source, &target)
 }
 
 fn mountinfo_contains(target: &Path) -> Result<bool, DynError> {
@@ -820,20 +854,8 @@ fn install_required_packages(chroot_root: &Path) -> Result<(), DynError> {
     }
 
     if let Some(apk_path) = resolve_chroot_command(chroot_root, &["/sbin/apk", "/bin/apk"]) {
-        run_in_chroot(
-            chroot_root,
-            &apk_path,
-            &[
-                OsString::from("add"),
-                OsString::from("--no-cache"),
-                OsString::from("bash"),
-                OsString::from("git"),
-                OsString::from("github-cli"),
-                OsString::from("ca-certificates"),
-                OsString::from("openssh-client"),
-            ],
-            &[],
-        )?;
+        let packages = apk_required_packages();
+        run_in_chroot(chroot_root, &apk_path, &packages, &[])?;
         return Ok(());
     }
 
@@ -844,35 +866,44 @@ fn install_required_packages(chroot_root: &Path) -> Result<(), DynError> {
             OsString::from("DEBIAN_FRONTEND"),
             OsString::from("noninteractive"),
         )];
-        run_in_chroot(
-            chroot_root,
-            &apt_get_path,
-            &[
-                OsString::from("update"),
-                OsString::from("-o"),
-                OsString::from("Acquire::Retries=3"),
-            ],
-            &noninteractive,
-        )?;
-        run_in_chroot(
-            chroot_root,
-            &apt_get_path,
-            &[
-                OsString::from("install"),
-                OsString::from("-y"),
-                OsString::from("--no-install-recommends"),
-                OsString::from("bash"),
-                OsString::from("ca-certificates"),
-                OsString::from("git"),
-                OsString::from("gh"),
-                OsString::from("openssh-client"),
-            ],
-            &noninteractive,
-        )?;
+        let update_args = [
+            OsString::from("update"),
+            OsString::from("-o"),
+            OsString::from("Acquire::Retries=3"),
+        ];
+        let install_args = apt_required_packages();
+        run_in_chroot(chroot_root, &apt_get_path, &update_args, &noninteractive)?;
+        run_in_chroot(chroot_root, &apt_get_path, &install_args, &noninteractive)?;
         return Ok(());
     }
 
     Err(io::Error::other("unsupported execution image package manager: need apk or apt-get").into())
+}
+
+fn apk_required_packages() -> Vec<OsString> {
+    vec![
+        OsString::from("add"),
+        OsString::from("--no-cache"),
+        OsString::from("bash"),
+        OsString::from("git"),
+        OsString::from("github-cli"),
+        OsString::from("kubectl"),
+        OsString::from("ca-certificates"),
+        OsString::from("openssh-client"),
+    ]
+}
+
+fn apt_required_packages() -> Vec<OsString> {
+    vec![
+        OsString::from("install"),
+        OsString::from("-y"),
+        OsString::from("--no-install-recommends"),
+        OsString::from("bash"),
+        OsString::from("ca-certificates"),
+        OsString::from("git"),
+        OsString::from("gh"),
+        OsString::from("openssh-client"),
+    ]
 }
 
 fn run_startup_script(chroot_root: &Path, startup_script: &str) -> Result<(), DynError> {
@@ -894,6 +925,8 @@ fn required_commands_present(chroot_root: &Path) -> bool {
     ["/bin/bash", "/usr/bin/git", "/usr/bin/gh", "/usr/bin/ssh"]
         .iter()
         .all(|candidate| resolve_chroot_command(chroot_root, &[*candidate]).is_some())
+        && resolve_chroot_command(chroot_root, &["/usr/bin/kubectl", "/usr/local/bin/kubectl"])
+            .is_some()
 }
 
 fn resolve_chroot_command(chroot_root: &Path, candidates: &[&str]) -> Option<PathBuf> {
@@ -1377,6 +1410,11 @@ fn managed_shell_environment(remote_home: &Path, chrooted: bool) -> Vec<(&'stati
             remote_home.join(".gitconfig").into_os_string(),
         ),
     ];
+    for key in ["CONTROL_PLANE_K8S_NAMESPACE", "CONTROL_PLANE_JOB_NAMESPACE"] {
+        if let Some(value) = env::var_os(key) {
+            env.push((key, value));
+        }
+    }
     if chrooted {
         env.push((
             "LD_PRELOAD",
@@ -1590,9 +1628,10 @@ fn exit_code_from_status(status: std::process::ExitStatus) -> i32 {
 mod tests {
     use super::{
         CHROOT_COPILOT_HOOKS_DIR, CHROOT_EXEC_POLICY_LIBRARY_PATH, CHROOT_EXEC_POLICY_RULES_PATH,
-        DEFAULT_EXEC_PATH, build_rootfs_extract_command, build_server_config, ensure_runtime_dirs,
-        managed_shell_environment, normalize_path, render_remote_git_config, resolve_cwd,
-        stdout_with_command_line, sync_git_config,
+        CHROOT_KUBERNETES_SERVICE_ACCOUNT_DIR, DEFAULT_EXEC_PATH, apt_required_packages,
+        build_rootfs_extract_command, build_server_config, ensure_runtime_dirs,
+        managed_shell_environment, normalize_path, render_remote_git_config,
+        required_commands_present, resolve_cwd, stdout_with_command_line, sync_git_config,
     };
     use crate::RawServerConfig;
     use std::ffi::OsString;
@@ -1720,35 +1759,55 @@ mod tests {
     #[test]
     fn managed_shell_environment_enables_exec_policy_for_chroot() {
         let env = managed_shell_environment(Path::new("/root"), true);
-        assert_eq!(
-            env,
-            vec![
-                ("PATH", OsString::from(DEFAULT_EXEC_PATH)),
-                ("HOME", OsString::from("/root")),
-                ("GIT_CONFIG_GLOBAL", OsString::from("/root/.gitconfig")),
-                (
-                    "LD_PRELOAD",
-                    OsString::from(CHROOT_EXEC_POLICY_LIBRARY_PATH),
-                ),
-                (
-                    "CONTROL_PLANE_EXEC_POLICY_RULES_FILE",
-                    OsString::from(CHROOT_EXEC_POLICY_RULES_PATH),
-                ),
-            ]
-        );
+        assert!(env.contains(&("PATH", OsString::from(DEFAULT_EXEC_PATH))));
+        assert!(env.contains(&("HOME", OsString::from("/root"))));
+        assert!(env.contains(&("GIT_CONFIG_GLOBAL", OsString::from("/root/.gitconfig"))));
+        assert!(env.contains(&(
+            "LD_PRELOAD",
+            OsString::from(CHROOT_EXEC_POLICY_LIBRARY_PATH),
+        )));
+        assert!(env.contains(&(
+            "CONTROL_PLANE_EXEC_POLICY_RULES_FILE",
+            OsString::from(CHROOT_EXEC_POLICY_RULES_PATH),
+        )));
     }
 
     #[test]
     fn managed_shell_environment_skips_exec_policy_without_chroot() {
         let env = managed_shell_environment(Path::new("/root"), false);
-        assert_eq!(
-            env,
-            vec![
-                ("PATH", OsString::from(DEFAULT_EXEC_PATH)),
-                ("HOME", OsString::from("/root")),
-                ("GIT_CONFIG_GLOBAL", OsString::from("/root/.gitconfig")),
-            ]
+        assert!(env.contains(&("PATH", OsString::from(DEFAULT_EXEC_PATH))));
+        assert!(env.contains(&("HOME", OsString::from("/root"))));
+        assert!(env.contains(&("GIT_CONFIG_GLOBAL", OsString::from("/root/.gitconfig"))));
+        assert!(!env.iter().any(|(key, _)| *key == "LD_PRELOAD"));
+        assert!(
+            !env.iter()
+                .any(|(key, _)| *key == "CONTROL_PLANE_EXEC_POLICY_RULES_FILE")
         );
+    }
+
+    fn write_stub_command(chroot_root: &Path, relative_path: &str) {
+        let full_path = chroot_root.join(relative_path.trim_start_matches('/'));
+        fs::create_dir_all(full_path.parent().unwrap()).unwrap();
+        fs::write(full_path, "").unwrap();
+    }
+
+    #[test]
+    fn required_commands_present_requires_kubectl_in_chroot() {
+        let chroot_root = TempDir::new().unwrap();
+        for command_path in ["/bin/bash", "/usr/bin/git", "/usr/bin/gh", "/usr/bin/ssh"] {
+            write_stub_command(chroot_root.path(), command_path);
+        }
+        assert!(!required_commands_present(chroot_root.path()));
+        write_stub_command(chroot_root.path(), "/usr/local/bin/kubectl");
+        assert!(required_commands_present(chroot_root.path()));
+    }
+
+    #[test]
+    fn apt_required_packages_skip_kubectl_package() {
+        let packages = apt_required_packages();
+
+        assert!(!packages.contains(&OsString::from("kubectl")));
+        assert!(!packages.contains(&OsString::from("kubernetes-client")));
     }
 
     #[test]
@@ -1780,6 +1839,22 @@ mod tests {
         assert!(tempdir.path().join("var/tmp").is_dir());
         assert!(tempdir.path().join("root/.config").is_dir());
         assert!(tempdir.path().join("root/.copilot").is_dir());
+    }
+
+    #[test]
+    fn chroot_kubernetes_service_account_path_uses_run_directory() {
+        let tempdir = TempDir::new().unwrap();
+
+        assert_eq!(
+            super::nested_absolute_path(
+                tempdir.path(),
+                Path::new(CHROOT_KUBERNETES_SERVICE_ACCOUNT_DIR)
+            )
+            .unwrap(),
+            tempdir
+                .path()
+                .join("run/secrets/kubernetes.io/serviceaccount")
+        );
     }
 
     #[test]

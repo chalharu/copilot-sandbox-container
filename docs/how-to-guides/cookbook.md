@@ -100,12 +100,21 @@ ConfigMap / Secret / write-back の具体的な path は
    `create/get/list/watch` でき、Pod は `delete` できる Role / RoleBinding
    (`control-plane-exec-pods`) を付ける。ただし shared namespace ではなく、
    control-plane 専用 namespace に閉じ込める
-9. `CONTROL_PLANE_FAST_EXECUTION_IMAGE` には delegated bash を実行したい
+9. Exec Pod から in-cluster kubectl も使いたい場合は、
+   `CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT` を dedicated な
+   `control-plane-exec` ServiceAccount へ向け、`copilot-sandbox-jobs` 側では
+   Deployment / Service / Job / Pod だけを許す
+   `control-plane-exec-workloads` Role / RoleBinding を別で bind する。
+   delegated shell の default namespace は control-plane 側のままなので、
+   `kubectl -n "${CONTROL_PLANE_JOB_NAMESPACE}" ...` のように明示する
+10. `CONTROL_PLANE_FAST_EXECUTION_IMAGE` には delegated bash を実行したい
    任意の Linux image（例: `ubuntu:24.04` や `alpine:3.22`）を置けるが、
    `/bin/sh` と `apt-get` または `apk` を必ず含め、本番では digest-pinned ref
    を使う。
    `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` には Rust 製 exec-plane
-   binary と bundled Git hook を持つ control-plane image を置く。
+   binary と bundled Git hook を持つ control-plane image を置く。sample
+   既定では bootstrap 時に `bash` / `git` / `gh` / `kubectl` /
+   `openssh-client` を chroot 内へ入れる。
    node-scoped cache は `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX` /
    `..._STORAGE_CLASS` / `..._SIZE` / `..._MOUNT_PATH` で調整し、既定では
    `/environment/root` を chroot 先として使う。
@@ -115,7 +124,7 @@ ConfigMap / Secret / write-back の具体的な path は
    delegated command を非 root で走らせたい場合は
    `CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID` /
    `CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID` も合わせて定義する
-10. 監査ログ DB の保持件数は `control-plane-env` ConfigMap の
+11. 監査ログ DB の保持件数は `control-plane-env` ConfigMap の
    `CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）で調整する
 
 ### 永続化と storage class を合わせる

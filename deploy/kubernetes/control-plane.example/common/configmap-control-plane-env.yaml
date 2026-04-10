@@ -36,7 +36,8 @@ data:
   # commands. The sample starts with Ubuntu 24.04 because it already provides
   # /bin/sh and apt-get. Use digest-pinned images in shared clusters. Any
   # replacement image must still provide /bin/sh and either apk or apt-get so
-  # the startup step can install bash, git, and gh before serving requests.
+  # the startup step can install bash, git, gh, and kubectl before serving
+  # requests.
   CONTROL_PLANE_FAST_EXECUTION_IMAGE: docker.io/library/ubuntu:24.04
   CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: IfNotPresent
   # The bootstrap image provides the Rust exec-plane binary and bundled git
@@ -53,6 +54,10 @@ data:
   CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID: "1000"
   CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID: "1000"
   CONTROL_PLANE_FAST_EXECUTION_HOME: /root
+  # Run delegated exec pods with a dedicated ServiceAccount when they need
+  # in-cluster kubectl access. The sample binds this account only to a limited
+  # workload Role in CONTROL_PLANE_JOB_NAMESPACE.
+  CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT: control-plane-exec
   # Optional: run extra setup inside the chroot on every exec-pod start before
   # delegated commands execute. This can be an inline shell snippet or a script
   # path that /bin/sh -lc can execute inside the chroot.

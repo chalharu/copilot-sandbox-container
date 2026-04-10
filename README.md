@@ -143,6 +143,12 @@ control-plane-run \
 `control-plane-run` は明示的に叩く Job 経路です。Copilot CLI 自身の `bash`
 tool は、bundled hook により別の session-scoped Execution Pod へ自動委譲されます。
 
+sample manifest の既定では、その Execution Pod も `control-plane-exec`
+ServiceAccount で起動し、`copilot-sandbox-jobs` namespace の
+`control-plane-exec-workloads` Role に bind します。Execution Pod 内で
+`kubectl -n copilot-sandbox-jobs ...` を使えば、一時的な Deployment / Service /
+Job / Pod を control-plane 本体とは分離した権限で扱えます。
+
 ### current-cluster の smoke を取る
 
 ```bash

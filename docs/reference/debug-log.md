@@ -149,7 +149,7 @@ unable to retrieve auth token: invalid username/password: unauthorized: authenti
 
 ### 意味
 
-Kubernetes 側の image pull 認証が足りていません。`CONTROL_PLANE_FAST_EXECUTION_IMAGE` や `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` に private registry を使う場合は、Deployment / ServiceAccount に `imagePullSecrets` を付けてください。Control Plane の runtime file や `/run/control-plane-auth` の Secret mount では代替しません。
+Kubernetes 側の image pull 認証が足りていません。`CONTROL_PLANE_FAST_EXECUTION_IMAGE` や `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` に private registry を使う場合は、Deployment / ServiceAccount に `imagePullSecrets` を付けてください。fast exec を dedicated な `control-plane-exec` ServiceAccount で動かすなら、その ServiceAccount 側にも同じ pull secret が必要です。Control Plane の runtime file や `/run/control-plane-auth` の Secret mount では代替しません。
 
 ## 9. Service の `EXTERNAL-IP` が未割当て
 
@@ -202,7 +202,8 @@ unsupported execution image package manager: need apk or apt-get
 
 Execution Pod の base image が `/bin/sh` を持たないか、bootstrap 時に `apk` / `apt-get`
 のどちらも使えません。現行の session-exec bootstrap は、まず staged Rust gRPC binary
-を起動し、その後 gRPC 経由で `bash` / `git` / `gh` を導入する前提です。
+を起動し、その後 gRPC 経由で `bash` / `git` / `gh` / `kubectl` / `openssh-client`
+を導入する前提です。
 
 ### 期待する確認結果
 
