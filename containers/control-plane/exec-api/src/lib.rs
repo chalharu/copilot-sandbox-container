@@ -29,6 +29,8 @@ pub mod proto {
 const HEALTH_SERVICE_NAME: &str = "";
 const EXEC_API_TOKEN_METADATA_KEY: &str = "x-control-plane-exec-token";
 const DEFAULT_EXEC_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+const KUBERNETES_SERVICE_ACCOUNT_DIR: &str = "/var/run/secrets/kubernetes.io/serviceaccount";
+const CHROOT_KUBERNETES_SERVICE_ACCOUNT_DIR: &str = "/run/secrets/kubernetes.io/serviceaccount";
 const CHROOT_COPILOT_HOOKS_DIR: &str = "/usr/local/share/control-plane/hooks";
 const CHROOT_GIT_HOOKS_DIR: &str = "/usr/local/share/control-plane/hooks/git";
 const CHROOT_EXEC_POLICY_LIBRARY_PATH: &str = "/usr/local/lib/libcontrol_plane_exec_policy.so";
@@ -696,7 +698,39 @@ fn mount_runtime_filesystems(chroot_root: &Path) -> Result<(), DynError> {
     bind_mount_if_missing(Path::new("/dev"), &dev_target)?;
     mount_proc_if_missing(&proc_target)?;
     mount_tmpfs_if_missing(&run_target, "mode=0755")?;
+    bind_kubernetes_service_account_if_present(chroot_root)?;
     Ok(())
+}
+
+fn bind_kubernetes_service_account_if_present(chroot_root: &Path) -> Result<(), DynError> {
+    let source = Path::new(KUBERNETES_SERVICE_ACCOUNT_DIR);
+    if !source.is_dir() {
+        return Ok(());
+    }
+
+    let target = nested_absolute_path(
+        chroot_root,
+        Path::new(CHROOT_KUBERNETES_SERVICE_ACCOUNT_DIR),
+    )?;
+    let parent = target.parent().ok_or_else(|| {
+        io::Error::other(format!(
+            "missing parent for Kubernetes service account mount {}",
+            target.display()
+        ))
+    })?;
+    with_context(fs::create_dir_all(parent), || {
+        format!(
+            "failed to create Kubernetes service account mount parent {}",
+            parent.display()
+        )
+    })?;
+    with_context(fs::create_dir_all(&target), || {
+        format!(
+            "failed to create Kubernetes service account mount target {}",
+            target.display()
+        )
+    })?;
+    bind_mount_if_missing(source, &target)
 }
 
 fn mountinfo_contains(target: &Path) -> Result<bool, DynError> {
@@ -1594,10 +1628,10 @@ fn exit_code_from_status(status: std::process::ExitStatus) -> i32 {
 mod tests {
     use super::{
         CHROOT_COPILOT_HOOKS_DIR, CHROOT_EXEC_POLICY_LIBRARY_PATH, CHROOT_EXEC_POLICY_RULES_PATH,
-        DEFAULT_EXEC_PATH, apt_required_packages, build_rootfs_extract_command,
-        build_server_config, ensure_runtime_dirs, managed_shell_environment, normalize_path,
-        render_remote_git_config, required_commands_present, resolve_cwd, stdout_with_command_line,
-        sync_git_config,
+        CHROOT_KUBERNETES_SERVICE_ACCOUNT_DIR, DEFAULT_EXEC_PATH, apt_required_packages,
+        build_rootfs_extract_command, build_server_config, ensure_runtime_dirs,
+        managed_shell_environment, normalize_path, render_remote_git_config,
+        required_commands_present, resolve_cwd, stdout_with_command_line, sync_git_config,
     };
     use crate::RawServerConfig;
     use std::ffi::OsString;
@@ -1805,6 +1839,22 @@ mod tests {
         assert!(tempdir.path().join("var/tmp").is_dir());
         assert!(tempdir.path().join("root/.config").is_dir());
         assert!(tempdir.path().join("root/.copilot").is_dir());
+    }
+
+    #[test]
+    fn chroot_kubernetes_service_account_path_uses_run_directory() {
+        let tempdir = TempDir::new().unwrap();
+
+        assert_eq!(
+            super::nested_absolute_path(
+                tempdir.path(),
+                Path::new(CHROOT_KUBERNETES_SERVICE_ACCOUNT_DIR)
+            )
+            .unwrap(),
+            tempdir
+                .path()
+                .join("run/secrets/kubernetes.io/serviceaccount")
+        );
     }
 
     #[test]

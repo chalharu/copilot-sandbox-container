@@ -1124,6 +1124,9 @@ test "${blocked_status}" -ne 0
 ! [ -s /workspace/k8s-fast-exec-blocked-stdout.txt ]
 grep -Fq 'Direct reads of ~/.config/gh/hosts.yml are blocked by control-plane policy.' \
   /workspace/k8s-fast-exec-blocked-stderr.txt
+service_account_command=$'set -euo pipefail\ntest -n "${KUBERNETES_SERVICE_HOST:-}"\ntest -n "${KUBERNETES_SERVICE_PORT:-}"\ntest -f /var/run/secrets/kubernetes.io/serviceaccount/token\ntest -f /var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
+service_account_command_base64="$(printf '%s' "${service_account_command}" | base64 | tr -d '\n')"
+control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${service_account_command_base64}" >/dev/null
 kubectl_command=$(cat <<'INNER'
 set -euo pipefail
 namespace="${CONTROL_PLANE_JOB_NAMESPACE}"
