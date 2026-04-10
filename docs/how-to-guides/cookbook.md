@@ -18,9 +18,17 @@ toolchain を固定したい場合:
 CONTROL_PLANE_TOOLCHAIN=docker ./scripts/build-test.sh
 ```
 
+Docker daemon が使えず current-cluster で build だけ確認したい場合:
+
+```bash
+./scripts/build-test.sh --build-only
+CONTROL_PLANE_TOOLCHAIN=buildkitd ./scripts/build-test.sh --build-only
+```
+
 ### current-cluster で詰まりやすい点
 
 - PR lint は external `linter-service` が担当し、repo-managed な baseline は `build-test.sh` から始まる
+- `--build-only` は Docker daemon が使えないとき、job namespace に Pod/Service を作れる current-cluster なら ephemeral Buildkitd に fallback できる
 - `control-plane-run` は Kubernetes Job 専用で、Copilot CLI の `bash` tool delegation とは別経路
 - focused rerun では `--build-only` と `--skip-image-build --group ...` を組み合わせると速い
 

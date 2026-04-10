@@ -13,6 +13,11 @@ Run the repository-managed baseline with Docker:
 
 - `./scripts/build-test.sh`
 
+When the Docker daemon is unavailable but the current cluster allows pod/service
+creation in the job namespace, `./scripts/build-test.sh --build-only` can fall
+back to an ephemeral Kubernetes Buildkitd. Use
+`CONTROL_PLANE_TOOLCHAIN=buildkitd` when you need to force that path.
+
 Hosted lint is provided by the external `linter-service`, including the Renovate
 dry-run coverage that used to live in `lint.sh`.
 

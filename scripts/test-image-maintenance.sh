@@ -98,8 +98,11 @@ assert_block_contains() {
 }
 
 context_dir="${workdir}/context"
+buildkit_context_dir="${workdir}/buildkit-context"
 fake_bin_dir="${workdir}/fake-bin"
 docker_log="${workdir}/docker.log"
+kubectl_log="${workdir}/kubectl.log"
+kubectl_create_count="${workdir}/kubectl-create-count"
 label_store="${workdir}/docker-label"
 workflow_path="${repo_root}/.github/workflows/control-plane-ci.yml"
 renovate_config_path="${repo_root}/renovate.json5"
@@ -117,6 +120,11 @@ cat > "${context_dir}/Dockerfile" <<'EOF'
 FROM docker.io/library/busybox:1.37.0
 RUN printf '%s\n' base > /image.txt
 EOF
+mkdir -p "${buildkit_context_dir}"
+cat > "${buildkit_context_dir}/Dockerfile" <<'EOF'
+FROM docker.io/library/busybox:1.37.0
+RUN printf '%s\n' buildkit > /image.txt
+EOF
 
 cat > "${fake_bin_dir}/docker" <<'EOF'
 #!/usr/bin/env bash
@@ -124,12 +132,29 @@ set -euo pipefail
 
 printf '%s\n' "$*" >> "${TEST_IMAGE_MAINTENANCE_DOCKER_LOG:?}"
 
+if [[ "$#" -ge 1 ]] && [[ "$1" == "info" ]]; then
+  exit "${TEST_IMAGE_MAINTENANCE_DOCKER_INFO_EXIT_CODE:-0}"
+fi
+
+if [[ "$#" -ge 2 ]] && [[ "$1" == "buildx" ]] && [[ "$2" == "version" ]]; then
+  printf '%s\n' 'github.com/docker/buildx test'
+  exit 0
+fi
+
 if [[ "$#" -ge 2 ]] && [[ "$1" == "image" ]] && [[ "$2" == "inspect" ]]; then
   if [[ -f "${TEST_IMAGE_MAINTENANCE_LABEL_STORE:?}" ]]; then
     cat "${TEST_IMAGE_MAINTENANCE_LABEL_STORE:?}"
     exit 0
   fi
   exit 1
+fi
+
+if [[ "$#" -ge 2 ]] && [[ "$1" == "buildx" ]] && [[ "$2" == "create" ]]; then
+  exit 0
+fi
+
+if [[ "$#" -ge 2 ]] && [[ "$1" == "buildx" ]] && [[ "$2" == "rm" ]]; then
+  exit 0
 fi
 
 if [[ "$#" -ge 2 ]] && [[ "$1" == "buildx" ]] && [[ "$2" == "build" ]]; then
@@ -162,11 +187,58 @@ exit 1
 EOF
 chmod +x "${fake_bin_dir}/docker"
 
+cat > "${fake_bin_dir}/kubectl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\n' "$*" >> "${TEST_IMAGE_MAINTENANCE_KUBECTL_LOG:?}"
+
+if [[ "$#" -ge 3 ]] && [[ "$1" == "create" ]] && [[ "$2" == "-f" ]] && [[ "$3" == "-" ]]; then
+  cat >/dev/null
+  create_count=0
+  if [[ -f "${TEST_IMAGE_MAINTENANCE_KUBECTL_CREATE_COUNT_FILE:?}" ]]; then
+    create_count="$(cat "${TEST_IMAGE_MAINTENANCE_KUBECTL_CREATE_COUNT_FILE:?}")"
+  fi
+  create_count="$((create_count + 1))"
+  printf '%s\n' "${create_count}" > "${TEST_IMAGE_MAINTENANCE_KUBECTL_CREATE_COUNT_FILE:?}"
+  if [[ -n "${TEST_IMAGE_MAINTENANCE_KUBECTL_FAIL_CREATE_NUMBER:-}" ]] && [[ "${create_count}" -eq "${TEST_IMAGE_MAINTENANCE_KUBECTL_FAIL_CREATE_NUMBER}" ]]; then
+    exit 1
+  fi
+  exit 0
+fi
+
+if [[ "$#" -ge 1 ]] && [[ "$1" == "wait" ]]; then
+  exit 0
+fi
+
+if [[ "$#" -ge 1 ]] && [[ "$1" == "delete" ]]; then
+  exit 0
+fi
+
+if [[ "$#" -ge 1 ]] && [[ "$1" == "logs" ]]; then
+  printf '%s\n' 'fake buildkitd logs'
+  exit 0
+fi
+
+if [[ "$#" -ge 1 ]] && [[ "$1" == "describe" ]]; then
+  printf '%s\n' 'fake buildkitd describe'
+  exit 0
+fi
+
+printf 'unexpected fake kubectl invocation: %s\n' "$*" >&2
+exit 1
+EOF
+chmod +x "${fake_bin_dir}/kubectl"
+
 export PATH="${fake_bin_dir}:${PATH}"
 export TEST_IMAGE_MAINTENANCE_DOCKER_LOG="${docker_log}"
+export TEST_IMAGE_MAINTENANCE_KUBECTL_LOG="${kubectl_log}"
+export TEST_IMAGE_MAINTENANCE_KUBECTL_CREATE_COUNT_FILE="${kubectl_create_count}"
 export TEST_IMAGE_MAINTENANCE_LABEL_STORE="${label_store}"
+export TEST_IMAGE_MAINTENANCE_DOCKER_INFO_EXIT_CODE=0
 unset CONTROL_PLANE_BUILDX_CACHE_ROOT
 unset CONTROL_PLANE_RUST_CONTAINER_CACHE_ROOT
+unset CONTROL_PLANE_BUILDKIT_STATE_ROOT
 
 printf '%s\n' 'image-maintenance-test: verifying unchanged build contexts are reused' >&2
 first_hash="$(build_context_hash "${context_dir}")"
@@ -195,6 +267,59 @@ grep -Fq -- "--cache-from type=local,src=${cache_dir} --cache-to type=local,dest
 [[ -d "${cache_dir}" ]]
 [[ ! -e "${cache_dir}-new" ]]
 unset CONTROL_PLANE_BUILDX_CACHE_ROOT
+
+printf '%s\n' 'image-maintenance-test: verifying buildkitd remote helper wiring and reuse' >&2
+: > "${docker_log}"
+: > "${kubectl_log}"
+export CONTROL_PLANE_BUILDKIT_STATE_ROOT="${workdir}/buildkitd-state"
+buildkit_first_hash="$(build_context_hash "${buildkit_context_dir}")"
+build_image_for_toolchain buildkitd localhost/image-maintenance-buildkitd:test "${buildkit_context_dir}"
+grep -Fq "buildx create --name" "${docker_log}"
+grep -Fq "buildx build --builder" "${docker_log}"
+grep -Fq -- "--output type=image,name=localhost/image-maintenance-buildkitd:test,push=false" "${docker_log}"
+grep -Fq -- "--label $(build_context_hash_label_key)=${buildkit_first_hash}" "${docker_log}"
+grep -Fq "create -f -" "${kubectl_log}"
+grep -Fq "wait -n $(buildkitd_namespace) --for=condition=Ready" "${kubectl_log}"
+buildkit_build_lines_before="$(grep -c '^buildx build ' "${docker_log}")"
+build_image_for_toolchain buildkitd localhost/image-maintenance-buildkitd:test "${buildkit_context_dir}"
+buildkit_build_lines_after="$(grep -c '^buildx build ' "${docker_log}")"
+[[ "${buildkit_build_lines_before}" -eq "${buildkit_build_lines_after}" ]]
+
+printf '%s\n' 'image-maintenance-test: verifying buildkitd rebuilds changed contexts' >&2
+printf '%s\n' 'RUN printf "%s\n" changed >> /image.txt' >> "${buildkit_context_dir}/Dockerfile"
+buildkit_second_hash="$(build_context_hash "${buildkit_context_dir}")"
+build_image_for_toolchain buildkitd localhost/image-maintenance-buildkitd:test "${buildkit_context_dir}"
+[[ "${buildkit_first_hash}" != "${buildkit_second_hash}" ]]
+grep -Fq -- "--label $(build_context_hash_label_key)=${buildkit_second_hash}" "${docker_log}"
+
+printf '%s\n' 'image-maintenance-test: verifying buildkitd cleans up partial create failures' >&2
+: > "${kubectl_log}"
+: > "${kubectl_create_count}"
+export TEST_IMAGE_MAINTENANCE_KUBECTL_FAIL_CREATE_NUMBER=2
+failed_buildkit_image='localhost/image-maintenance-buildkitd-fail:test'
+if build_image_for_toolchain buildkitd "${failed_buildkit_image}" "${buildkit_context_dir}"; then
+  printf '%s\n' 'Expected buildkitd build to fail when service creation fails' >&2
+  exit 1
+fi
+unset TEST_IMAGE_MAINTENANCE_KUBECTL_FAIL_CREATE_NUMBER
+assert_file_matches "${kubectl_log}" '^delete service control-plane-buildkitd-[a-f0-9]+ -n '
+assert_file_matches "${kubectl_log}" '^delete pod control-plane-buildkitd-[a-f0-9]+ -n '
+
+printf '%s\n' 'image-maintenance-test: verifying build-test build-only falls back to buildkitd' >&2
+: > "${docker_log}"
+: > "${kubectl_log}"
+export CONTROL_PLANE_BUILDKIT_STATE_ROOT="${workdir}/buildkitd-build-test-state"
+export TEST_IMAGE_MAINTENANCE_DOCKER_INFO_EXIT_CODE=1
+export CONTROL_PLANE_CONTAINER_BIN=docker
+unset CONTROL_PLANE_TOOLCHAIN
+build_test_output="$("${repo_root}/scripts/build-test.sh" --build-only 2>&1)"
+grep -Fq "Using buildkitd toolchain for build/test" <<<"${build_test_output}"
+grep -Fq "buildx create --name" "${docker_log}"
+grep -Fq "buildx build --builder" "${docker_log}"
+grep -Fq "create -f -" "${kubectl_log}"
+export TEST_IMAGE_MAINTENANCE_DOCKER_INFO_EXIT_CODE=0
+unset CONTROL_PLANE_CONTAINER_BIN
+unset CONTROL_PLANE_BUILDKIT_STATE_ROOT
 
 printf '%s\n' 'image-maintenance-test: verifying rust container cache wiring' >&2
 export CONTROL_PLANE_RUST_CONTAINER_CACHE_ROOT="${workdir}/rust-cache"

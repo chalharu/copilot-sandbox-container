@@ -41,8 +41,10 @@ Types:
 - Hosted lint is provided by the external `linter-service`; the repository-managed
   local validation baseline starts at `scripts/build-test.sh`.
 - `scripts/build-test.sh` is the supported local build/test entry point.
-- `scripts/build-test.sh` expects a working Docker Buildx toolchain.
-- Use `CONTROL_PLANE_TOOLCHAIN=docker` to force Docker / BuildKit explicitly.
+- `scripts/build-test.sh` uses Docker Buildx by default. `--build-only` can fall
+  back to an ephemeral Kubernetes Buildkitd when the Docker daemon is unavailable.
+- Use `CONTROL_PLANE_TOOLCHAIN=docker` or `CONTROL_PLANE_TOOLCHAIN=buildkitd` to
+  force the build surface explicitly.
 - Use trusted upstream images when they already satisfy the contract; if only a
   third-party image exists, build a thin repository-managed image and publish it
   to GHCR for reuse.
@@ -52,8 +54,10 @@ Types:
 - `scripts/test-standalone.sh` and `scripts/test-kind.sh` remain the lower-level
   smoke / integration scripts used by `scripts/build-test.sh`.
 - When this repository is developed from inside a containerized tooling
-  environment, keep these scripts unchanged and provide the required toolchain:
-  `docker`, together with `kind`, `kubectl`, `ssh`, and `ssh-keygen`.
+  environment, keep these scripts unchanged and provide `docker buildx` together
+  with `kubectl`, `ssh`, and `ssh-keygen`. Full runtime / Kind coverage still
+  needs a Docker-compatible container runtime; the Buildkitd fallback only covers
+  `scripts/build-test.sh --build-only`.
 - When behavior or operator guidance changes, keep `README.md`,
   `docs/README.md`, `docs/how-to-guides/cookbook.md`,
   `docs/explanation/knowledge.md`, `docs/reference/control-plane-runtime.md`,
