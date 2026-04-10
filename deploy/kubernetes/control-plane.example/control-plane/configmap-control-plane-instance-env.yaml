@@ -8,9 +8,9 @@ data:
   # named overlay can change image / Service / PVC names in one place and let
   # kustomize replacements carry the derived env settings.
   CONTROL_PLANE_WORKSPACE_PVC: control-plane-workspace-pvc
-  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest
+  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest
   CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: IfNotPresent
-  CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest
+  CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest
   CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane.copilot-sandbox.svc.cluster.local
   CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"
   CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: IfNotPresent

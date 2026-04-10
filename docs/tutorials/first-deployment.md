@@ -1,7 +1,7 @@
 # はじめての control plane 導入
 
 この tutorial では、sample manifest を自分のクラスタ向けに調整し、
-`ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:<tag>` を deploy して
+`ghcr.io/chalharu/copilot-sandbox-container/control-plane:<tag>` を deploy して
 SSH で入れるところまでを通します。最後に `./scripts/test-k8s-job.sh` を使い、
 Kubernetes Job 経路まで確認します。
 
@@ -103,9 +103,9 @@ resource 名を変えるたびに ConfigMap を手で合わせ直す必要はあ
 
 `base/deployment-control-plane.yaml` または named overlay の `images:` で
 control-plane image を決めます。sample の既定は
-`ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest` です。
-再現性を上げたい場合だけ GitHub Packages の `copilot-sandbox-container-v2/control-plane`
-（<https://github.com/chalharu/copilot-sandbox-container-v2/pkgs/container/copilot-sandbox-container-v2%2Fcontrol-plane>）
+`ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest` です。
+再現性を上げたい場合だけ GitHub Packages の `copilot-sandbox-container/control-plane`
+（<https://github.com/chalharu/copilot-sandbox-container/pkgs/container/copilot-sandbox-container%2Fcontrol-plane>）
 から full commit SHA tag を選んでここを pin します。sample 付属の
 `control-plane-instance-env` ConfigMap には同じ tag が自動反映されるので、
 `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` と

@@ -243,7 +243,7 @@ patches:
     patch: |-
       - op: replace
         path: /spec/template/spec/containers/0/image
-        value: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:v1.0.0
+        value: ghcr.io/chalharu/copilot-sandbox-container/control-plane:v1.0.0
       - op: replace
         path: /spec/template/spec/containers/0/imagePullPolicy
         value: Always
@@ -338,9 +338,9 @@ assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRAN
 assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRANSFER_PORT:'
 assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_IMAGE_PULL_POLICY:'
 assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_WORKSPACE_PVC:'
-assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest'
 assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: IfNotPresent'
-assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest'
 assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane.copilot-sandbox.svc.cluster.local'
 assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"'
 assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: IfNotPresent'
@@ -370,8 +370,8 @@ assert_overlay_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_K8S_
 assert_overlay_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_NAMESPACE: custom-sandbox-jobs'
 assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_WORKSPACE_PVC: my-custom-workspace-pvc'
 assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_HOST: my-custom-service.custom-sandbox.svc.cluster.local'
-assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:v1.0.0'
-assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:v1.0.0'
+assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:v1.0.0'
+assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:v1.0.0'
 assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: Always'
 assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: Always'
 
@@ -382,7 +382,7 @@ assert_resource_absent Deployment garage-s3
 assert_resource_absent Job garage-bootstrap
 assert_deployment_contains 'claimName: control-plane-copilot-session-pvc'
 assert_deployment_contains 'claimName: control-plane-workspace-pvc'
-assert_deployment_contains 'image: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest'
+assert_deployment_contains 'image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest'
 assert_deployment_contains 'envFrom:'
 assert_deployment_contains 'name: control-plane-env'
 assert_deployment_contains 'name: control-plane-instance-env'

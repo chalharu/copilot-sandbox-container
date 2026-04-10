@@ -1,7 +1,7 @@
 # Kubernetes サンプルマニフェスト
 
 `deploy/kubernetes/control-plane.example/` は、
-`ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:<tag>` を Kubernetes へ
+`ghcr.io/chalharu/copilot-sandbox-container/control-plane:<tag>` を Kubernetes へ
 配置するための sample manifest です。はじめて導入する場合は
 `docs/tutorials/first-deployment.md` を先に読み、このページは
 「どのファイルをどう編集するか」を確認する reference として使ってください。
@@ -60,13 +60,13 @@ kubectl apply -k deploy/kubernetes/control-plane.example
 5. `control-plane.example/base/deployment-control-plane.yaml` または
     `control-plane.example/overlays/default/kustomization.yaml`
    - sample 既定は
-     `ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest`
+     `ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest`
    - image を差し替えると `control-plane/control-plane-instance-env` 側の
      `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` /
      `CONTROL_PLANE_JOB_TRANSFER_IMAGE` も自動で追従する
    - 再現性が必要なら GitHub Packages の
-     `copilot-sandbox-container-v2/control-plane`
-     （<https://github.com/chalharu/copilot-sandbox-container-v2/pkgs/container/copilot-sandbox-container-v2%2Fcontrol-plane>）
+     `copilot-sandbox-container/control-plane`
+     （<https://github.com/chalharu/copilot-sandbox-container/pkgs/container/copilot-sandbox-container%2Fcontrol-plane>）
      から full commit SHA tag を選び、ここを pin する
 6. `control-plane.example/overlays/default/kustomization.yaml`
    - namespace / Deployment / Service / workspace PVC 名を変える named overlay の
