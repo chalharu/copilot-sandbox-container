@@ -820,21 +820,8 @@ fn install_required_packages(chroot_root: &Path) -> Result<(), DynError> {
     }
 
     if let Some(apk_path) = resolve_chroot_command(chroot_root, &["/sbin/apk", "/bin/apk"]) {
-        run_in_chroot(
-            chroot_root,
-            &apk_path,
-            &[
-                OsString::from("add"),
-                OsString::from("--no-cache"),
-                OsString::from("bash"),
-                OsString::from("git"),
-                OsString::from("github-cli"),
-                OsString::from("kubectl"),
-                OsString::from("ca-certificates"),
-                OsString::from("openssh-client"),
-            ],
-            &[],
-        )?;
+        let packages = apk_required_packages();
+        run_in_chroot(chroot_root, &apk_path, &packages, &[])?;
         return Ok(());
     }
 
@@ -845,36 +832,45 @@ fn install_required_packages(chroot_root: &Path) -> Result<(), DynError> {
             OsString::from("DEBIAN_FRONTEND"),
             OsString::from("noninteractive"),
         )];
-        run_in_chroot(
-            chroot_root,
-            &apt_get_path,
-            &[
-                OsString::from("update"),
-                OsString::from("-o"),
-                OsString::from("Acquire::Retries=3"),
-            ],
-            &noninteractive,
-        )?;
-        run_in_chroot(
-            chroot_root,
-            &apt_get_path,
-            &[
-                OsString::from("install"),
-                OsString::from("-y"),
-                OsString::from("--no-install-recommends"),
-                OsString::from("bash"),
-                OsString::from("ca-certificates"),
-                OsString::from("git"),
-                OsString::from("gh"),
-                OsString::from("kubernetes-client"),
-                OsString::from("openssh-client"),
-            ],
-            &noninteractive,
-        )?;
+        let update_args = [
+            OsString::from("update"),
+            OsString::from("-o"),
+            OsString::from("Acquire::Retries=3"),
+        ];
+        let install_args = apt_required_packages();
+        run_in_chroot(chroot_root, &apt_get_path, &update_args, &noninteractive)?;
+        run_in_chroot(chroot_root, &apt_get_path, &install_args, &noninteractive)?;
         return Ok(());
     }
 
     Err(io::Error::other("unsupported execution image package manager: need apk or apt-get").into())
+}
+
+fn apk_required_packages() -> Vec<OsString> {
+    vec![
+        OsString::from("add"),
+        OsString::from("--no-cache"),
+        OsString::from("bash"),
+        OsString::from("git"),
+        OsString::from("github-cli"),
+        OsString::from("kubectl"),
+        OsString::from("ca-certificates"),
+        OsString::from("openssh-client"),
+    ]
+}
+
+fn apt_required_packages() -> Vec<OsString> {
+    vec![
+        OsString::from("install"),
+        OsString::from("-y"),
+        OsString::from("--no-install-recommends"),
+        OsString::from("bash"),
+        OsString::from("ca-certificates"),
+        OsString::from("git"),
+        OsString::from("gh"),
+        OsString::from("kubectl"),
+        OsString::from("openssh-client"),
+    ]
 }
 
 fn run_startup_script(chroot_root: &Path, startup_script: &str) -> Result<(), DynError> {
@@ -1603,9 +1599,10 @@ fn exit_code_from_status(status: std::process::ExitStatus) -> i32 {
 mod tests {
     use super::{
         CHROOT_COPILOT_HOOKS_DIR, CHROOT_EXEC_POLICY_LIBRARY_PATH, CHROOT_EXEC_POLICY_RULES_PATH,
-        DEFAULT_EXEC_PATH, build_rootfs_extract_command, build_server_config, ensure_runtime_dirs,
-        managed_shell_environment, normalize_path, render_remote_git_config,
-        required_commands_present, resolve_cwd, stdout_with_command_line, sync_git_config,
+        DEFAULT_EXEC_PATH, apt_required_packages, build_rootfs_extract_command,
+        build_server_config, ensure_runtime_dirs, managed_shell_environment, normalize_path,
+        render_remote_git_config, required_commands_present, resolve_cwd, stdout_with_command_line,
+        sync_git_config,
     };
     use crate::RawServerConfig;
     use std::ffi::OsString;
@@ -1774,6 +1771,14 @@ mod tests {
         assert!(!required_commands_present(chroot_root.path()));
         write_stub_command(chroot_root.path(), "/usr/bin/kubectl");
         assert!(required_commands_present(chroot_root.path()));
+    }
+
+    #[test]
+    fn apt_required_packages_install_kubectl_package() {
+        let packages = apt_required_packages();
+
+        assert!(packages.contains(&OsString::from("kubectl")));
+        assert!(!packages.contains(&OsString::from("kubernetes-client")));
     }
 
     #[test]
