@@ -16,7 +16,7 @@ shellcheck_image="${CONTROL_PLANE_SHELLCHECK_IMAGE:-docker.io/koalaman/shellchec
 # renovate: datasource=docker depName=ghcr.io/biomejs/biome versioning=docker
 biome_image="${CONTROL_PLANE_BIOME_IMAGE:-ghcr.io/biomejs/biome:2.4.10@sha256:0cae9ce4269bbf99116d5b8593d71eca111b650d8a269b0e8ce3d58f6a257256}"
 # renovate: datasource=docker depName=docker.io/library/node versioning=docker
-markdownlint_node_image="${CONTROL_PLANE_MARKDOWNLINT_NODE_IMAGE:-docker.io/library/node:24.14.1-bookworm-slim@sha256:06e5c9f86bfa0aaa7163cf37a5eaa8805f16b9acb48e3f85645b09d459fc2a9f}"
+markdownlint_node_image="${CONTROL_PLANE_MARKDOWNLINT_NODE_IMAGE:-docker.io/library/node:24.14.1-bookworm-slim@sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c}"
 # renovate: datasource=npm depName=markdownlint-cli2
 markdownlint_version="${CONTROL_PLANE_MARKDOWNLINT_VERSION:-0.22.0}"
 markdownlint_cache_volume="${CONTROL_PLANE_MARKDOWNLINT_CACHE_VOLUME:-control-plane-markdownlint-cache}"
