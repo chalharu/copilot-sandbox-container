@@ -1,0 +1,6 @@
+apiVersion: v2
+name: copilot-control-plane
+description: Deploy multiple repository-scoped control-plane instances with Helm.
+type: application
+version: 0.1.0
+appVersion: "latest"

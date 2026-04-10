@@ -1,0 +1,111 @@
+global:
+  namespacePrefix: copilot
+  clusterDomain: cluster.local
+  createNamespaces: true
+
+  image:
+    repository: ghcr.io/chalharu/copilot-sandbox-container/control-plane
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  service:
+    name: control-plane
+    type: LoadBalancer
+    port: 2222
+    annotations: {}
+
+  auth:
+    name: control-plane-auth
+    sshPublicKey: |
+      ssh-ed25519 AAAA... replace-me
+    ghGithubToken: ""
+    ghHostsYml: ""
+    copilotGithubToken: ""
+
+  workspace:
+    claimName: control-plane-workspace-pvc
+    accessModes:
+      - ReadWriteOnce
+    size: 5Gi
+    storageClassName: standard
+    subPath: workspace
+    retainOnDelete: true
+    annotations: {}
+
+  session:
+    claimName: control-plane-copilot-session-pvc
+    accessModes:
+      - ReadWriteMany
+    size: 2Gi
+    storageClassName: replace-me-with-rwx-storage-class
+    ghSubPath: state/gh
+    sshSubPath: state/ssh
+    retainOnDelete: true
+    annotations: {}
+
+  controlPlaneConfigJson: |
+    {
+      "telemetry": false
+    }
+
+  controlPlaneEnv:
+    SSH_PUBLIC_KEY_FILE: /var/run/control-plane-auth/ssh-public-key
+    COPILOT_CONFIG_JSON_FILE: /var/run/control-plane-config/copilot-config.json
+    COPILOT_GITHUB_TOKEN_FILE: /var/run/control-plane-auth/copilot-github-token
+    CONTROL_PLANE_FAST_EXECUTION_ENABLED: "1"
+    CONTROL_PLANE_FAST_EXECUTION_IMAGE: docker.io/library/ubuntu:24.04
+    CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: IfNotPresent
+    CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 300s
+    CONTROL_PLANE_FAST_EXECUTION_PORT: "8080"
+    CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID: "1000"
+    CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID: "1000"
+    CONTROL_PLANE_FAST_EXECUTION_HOME: /root
+    CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX: node-workspace
+    CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS: standard
+    CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE: 10Gi
+    CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH: /environment
+    CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST: 250m
+    CONTROL_PLANE_FAST_EXECUTION_CPU_LIMIT: "2"
+    CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST: 256Mi
+    CONTROL_PLANE_FAST_EXECUTION_MEMORY_LIMIT: 2Gi
+    CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC: "3600"
+    CONTROL_PLANE_JOB_INPUT_MOUNT_PATH: /var/run/control-plane/job-inputs
+    CONTROL_PLANE_RUST_HOOK_IMAGE: docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895
+    CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS: "10000"
+    CONTROL_PLANE_JOB_CPU_REQUEST: 250m
+    CONTROL_PLANE_JOB_CPU_LIMIT: "2"
+    CONTROL_PLANE_JOB_MEMORY_REQUEST: 256Mi
+    CONTROL_PLANE_JOB_MEMORY_LIMIT: 2Gi
+
+  instanceEnv: {}
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+  imagePullSecrets: []
+  deploymentAnnotations: {}
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+instances:
+  - name: sandbox
+    image: {}
+    service: {}
+    auth: {}
+    workspace: {}
+    session: {}
+    controlPlaneEnv: {}
+    instanceEnv: {}
+    resources: {}
+    deploymentAnnotations: {}
+    podAnnotations: {}
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}

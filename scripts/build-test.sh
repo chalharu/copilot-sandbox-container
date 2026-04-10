@@ -34,6 +34,9 @@ run_regressions_group() {
     "${script_dir}/test-k8s-sample-storage-layout.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
+    "${script_dir}/test-helm-chart.sh"
+
+  CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-k8s-job-script-paths.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \

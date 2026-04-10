@@ -1,0 +1,44 @@
+global:
+  image:
+    tag: test-global
+
+instances:
+  - name: repo-one
+    auth:
+      sshPublicKey: |
+        ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestRepoOne repo-one
+    workspace:
+      size: 20Gi
+      storageClassName: fast-rwo
+    session:
+      size: 4Gi
+      storageClassName: fast-rwx
+    controlPlaneEnv:
+      TZ: Asia/Tokyo
+
+  - name: repo-two
+    namespace: repo-two-main
+    jobNamespace: repo-two-jobs
+    image:
+      tag: sha-abcdef0
+      pullPolicy: Always
+    service:
+      name: repo-two-control-plane
+      type: ClusterIP
+      port: 2022
+    auth:
+      existingSecretName: repo-two-auth
+    workspace:
+      existingClaim: repo-two-workspace-pvc
+      subPath: repositories/repo-two
+    session:
+      existingClaim: repo-two-session-pvc
+      ghSubPath: session/gh
+      sshSubPath: session/ssh
+    controlPlaneConfigJson: |
+      {
+        "telemetry": false,
+        "chat.warnOnLargeFiles": true
+      }
+    controlPlaneEnv:
+      CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: Always
