@@ -649,6 +649,9 @@ safe_chown_tree "${control_plane_user}:${control_plane_user}" \
   "${cargo_target_dir}" \
   "${runtime_dir}"
 ensure_path_ownership "${control_plane_user}:${control_plane_user}" \
+  "${copilot_config_path}" \
+  "${copilot_command_history_state_path}" \
+  "${copilot_mcp_config_path}" \
   "${copilot_session_state_dir}" \
   "${copilot_skills_dir}" \
   "${copilot_logs_dir}" \
