@@ -1045,7 +1045,7 @@ test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/envir
 test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/environment/root/root/.ssh") | (.readOnly // false)' /workspace/k8s-fast-exec-pod.json)" = "true"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/root"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/hooks/git"
-test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR").value' /workspace/k8s-fast-exec-pod.json)" = "http://\${CONTROL_PLANE_POD_IP}:8081"
+test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR").value' /workspace/k8s-fast-exec-pod.json)" = "http://${CONTROL_PLANE_POD_IP}:8081"
 test -n "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN").value' /workspace/k8s-fast-exec-pod.json)"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC").value' /workspace/k8s-fast-exec-pod.json)" = "3600"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT").value' /workspace/k8s-fast-exec-pod.json)" = 'printf "fast-exec-startup\n" > /workspace/fast-exec-startup-marker.txt'
