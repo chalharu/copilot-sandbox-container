@@ -9,4 +9,26 @@ if [[ -f "${runtime_config_file}" ]]; then
   set +a
 fi
 
+reverse_exec_api_port="${CONTROL_PLANE_REVERSE_EXEC_API_PORT:-8081}"
+reverse_exec_api_token="${CONTROL_PLANE_REVERSE_EXEC_API_TOKEN:-}"
+
+[[ -n "${reverse_exec_api_token}" ]] || {
+  printf '%s\n' 'control-plane-exec-api-launcher: CONTROL_PLANE_REVERSE_EXEC_API_TOKEN is required' >&2
+  exit 64
+}
+
+export CONTROL_PLANE_EXEC_API_MODE=post-tool-use
+export CONTROL_PLANE_EXEC_API_TOKEN="${reverse_exec_api_token}"
+export CONTROL_PLANE_FAST_EXECUTION_PORT="${reverse_exec_api_port}"
+export CONTROL_PLANE_FAST_EXECUTION_HOME="${HOME:-/home/${USER:-copilot}}"
+export CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID="${CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID:-$(id -u)}"
+export CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID="${CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID:-$(id -g)}"
+unset CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT
+unset CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH
+unset CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE
+unset CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR
+unset CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN
+unset CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC
+unset CONTROL_PLANE_POST_TOOL_USE_FORWARD_ACTIVE
+
 exec /usr/local/bin/control-plane-exec-api serve

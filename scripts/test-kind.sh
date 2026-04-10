@@ -723,6 +723,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: CONTROL_PLANE_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
             - name: CONTROL_PLANE_POD_UID
               valueFrom:
                 fieldRef:
@@ -883,16 +887,23 @@ grep -Fqx 'CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target' ~/.config/contr
 grep -Fqx 'LANG=C.UTF-8' ~/.config/control-plane/runtime.env
 grep -Fqx 'LC_CTYPE=C.UTF-8' ~/.config/control-plane/runtime.env
 grep -Fqx "CONTROL_PLANE_RUST_HOOK_IMAGE=${rust_hook_image}" ~/.config/control-plane/runtime.env
+grep -Fqx "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR=http://\${CONTROL_PLANE_POD_IP}:8081" ~/.config/control-plane/runtime.env
+grep -Eq '^CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN=.+$' ~/.config/control-plane/runtime.env
+grep -Fqx 'CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC=3600' ~/.config/control-plane/runtime.env
 test -d /var/tmp/control-plane
 test -d /var/tmp/control-plane/cargo-target
 printf '%s\n' 'kind-test remote: runtime tmp ok' >&2
 test "\${LANG}" = "C.UTF-8"
 test "\${LC_CTYPE}" = "C.UTF-8"
 test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
+test -n "\${CONTROL_PLANE_POD_IP}"
 test "\${CONTROL_PLANE_FAST_EXECUTION_ENABLED}" = "1"
 test "\${CONTROL_PLANE_FAST_EXECUTION_IMAGE}" = "${fast_execution_image}"
 test "\${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE}" = "${control_plane_image}"
 test "\${CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT}" = 'printf "fast-exec-startup\n" > /workspace/fast-exec-startup-marker.txt'
+test "\${CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR}" = "http://\${CONTROL_PLANE_POD_IP}:8081"
+test -n "\${CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN}"
+test "\${CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC}" = "3600"
 test "\${CONTROL_PLANE_COPILOT_SESSION_PVC}" = "control-plane-copilot-session-pvc"
 test "\${CONTROL_PLANE_RUST_HOOK_IMAGE}" = "${rust_hook_image}"
 cat /proc/self/uid_map > /workspace/k8s-pod-uid-map.txt
@@ -1034,8 +1045,15 @@ test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/envir
 test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/environment/root/root/.ssh") | (.readOnly // false)' /workspace/k8s-fast-exec-pod.json)" = "true"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/root"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/hooks/git"
+test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR").value' /workspace/k8s-fast-exec-pod.json)" = "http://${CONTROL_PLANE_POD_IP}:8081"
+test -n "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN").value' /workspace/k8s-fast-exec-pod.json)"
+test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC").value' /workspace/k8s-fast-exec-pod.json)" = "3600"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT").value' /workspace/k8s-fast-exec-pod.json)" = 'printf "fast-exec-startup\n" > /workspace/fast-exec-startup-marker.txt'
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOME").value' /workspace/k8s-fast-exec-pod.json)" = "/root"
+git_hook_command=$'rm -rf /workspace/fast-exec-git-hook-test-repo\nmkdir -p /workspace/fast-exec-git-hook-test-repo\ncd /workspace/fast-exec-git-hook-test-repo\ngit init >/dev/null\ngit checkout -b fast-exec-test >/dev/null 2>&1\ngit config user.name "Fast Exec Test"\ngit config user.email "fast-exec-test@example.com"\ngit config core.hooksPath /environment/hooks/git\ntest -x /root/.copilot/hooks/postToolUse/main\ngit commit --allow-empty -m "fast exec hook test" >/dev/null\ngit rev-parse --verify HEAD > /workspace/fast-exec-git-hook-commit.txt'
+git_hook_command_base64="$(printf '%s' "${git_hook_command}" | base64 | tr -d '\n')"
+control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${git_hook_command_base64}" >/dev/null
+grep -Eq '^[0-9a-f]{40}$' /workspace/fast-exec-git-hook-commit.txt
 command_text=$'printf "fast-exec-stdout\\n"; printf "fast-exec-stderr\\n" >&2; printf "delegated\\n" > /workspace/fast-exec-marker.txt; exit 7'
 command_base64="$(printf '%s' "${command_text}" | base64 | tr -d '\n')"
 set +e

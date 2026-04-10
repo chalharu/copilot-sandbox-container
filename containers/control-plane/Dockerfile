@@ -114,6 +114,14 @@ ARG JQ_VERSION=jq-1.8.1
 ARG KUBECTL_VERSION=v1.35.3
 # renovate: datasource=github-releases depName=rclone/rclone
 ARG RCLONE_VERSION=v1.73.3
+# renovate: datasource=github-releases depName=astral-sh/ruff
+ARG RUFF_VERSION=0.15.10
+ARG RUFF_SHA256_AARCH64=b775a5a09484549ac3fd377b5ce34955cf633165169671d1c4a215c113ce15df
+ARG RUFF_SHA256_AMD64=e3e9e5c791542f00d95edc74a506e1ac24efc0af9574de01ab338187bf1ff9f6
+# renovate: datasource=github-releases depName=hadolint/hadolint
+ARG HADOLINT_VERSION=v2.14.0
+ARG HADOLINT_SHA256_AARCH64=331f1d3511b84a4f1e3d18d52fec284723e4019552f4f47b19322a53ce9a40ed
+ARG HADOLINT_SHA256_AMD64=6bf226944684f56c84dd014e8b979d27425c0148f61b3bd99bcc6f39e9dc5a47
 # renovate: datasource=pypi depName=yamllint
 ARG YAMLLINT_VERSION=1.38.0
 ARG YAMLLINT_SHA256=fc394a5b3be980a4062607b8fdddc0843f4fa394152b6da21722f5d59013c220
@@ -170,6 +178,10 @@ RUN apt-get update -o Acquire::Retries=3 \
             kubectl_sha256=fd31c7d7129260e608f6faf92d5984c3267ad0b5ead3bced2fe125686e286ad6; \
             rclone_arch=amd64; \
             rclone_sha256=70278c22b98c7d02aed01828b70053904dbce4c8a1a15d7781d836c6fdb036ea; \
+            ruff_arch=x86_64; \
+            ruff_sha256=${RUFF_SHA256_AMD64}; \
+            hadolint_asset=hadolint-linux-x86_64; \
+            hadolint_sha256=${HADOLINT_SHA256_AMD64}; \
             ;; \
         arm64) \
             kind_arch=arm64; \
@@ -180,6 +192,10 @@ RUN apt-get update -o Acquire::Retries=3 \
             kubectl_sha256=6f0cd088a82dde5d5807122056069e2fac4ed447cc518efc055547ae46525f14; \
             rclone_arch=arm64; \
             rclone_sha256=ed2a638b4cb15abe4f01d6d9c015f3a1cb41aa7a17c96db2725542c61f353b8e; \
+            ruff_arch=aarch64; \
+            ruff_sha256=${RUFF_SHA256_AARCH64}; \
+            hadolint_asset=hadolint-linux-arm64; \
+            hadolint_sha256=${HADOLINT_SHA256_AARCH64}; \
             ;; \
         *) printf 'Unsupported architecture for control-plane tools: %s\n' "${arch}" >&2; exit 1 ;; \
     esac \
@@ -197,6 +213,14 @@ RUN apt-get update -o Acquire::Retries=3 \
     && printf '%s  %s\n' "${rclone_sha256}" "/tmp/${rclone_asset}" | sha256sum -c - \
     && unzip -q "/tmp/${rclone_asset}" -d /tmp \
     && install -m 0755 "/tmp/rclone-${RCLONE_VERSION}-linux-${rclone_arch}/rclone" /usr/local/bin/rclone \
+    && ruff_asset="ruff-${ruff_arch}-unknown-linux-gnu.tar.gz" \
+    && curl -fsSLo "/tmp/${ruff_asset}" "https://github.com/astral-sh/ruff/releases/download/${RUFF_VERSION}/${ruff_asset}" \
+    && printf '%s  %s\n' "${ruff_sha256}" "/tmp/${ruff_asset}" | sha256sum -c - \
+    && tar -xzf "/tmp/${ruff_asset}" -C /tmp \
+    && install -m 0755 "/tmp/ruff-${ruff_arch}-unknown-linux-gnu/ruff" /usr/local/bin/ruff \
+    && curl -fsSLo "/tmp/${hadolint_asset}" "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/${hadolint_asset}" \
+    && printf '%s  %s\n' "${hadolint_sha256}" "/tmp/${hadolint_asset}" | sha256sum -c - \
+    && install -m 0755 "/tmp/${hadolint_asset}" /usr/local/bin/hadolint \
     && printf '%s\n' \
         "pathspec==${PATHSPEC_VERSION} --hash=sha256:${PATHSPEC_SHA256}" \
         "PyYAML==${PYYAML_VERSION} --hash=sha256:${PYYAML_SHA256_AARCH64} --hash=sha256:${PYYAML_SHA256_AMD64}" \

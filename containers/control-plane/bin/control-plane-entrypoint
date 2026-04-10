@@ -72,6 +72,10 @@ job_transfer_image="${CONTROL_PLANE_JOB_TRANSFER_IMAGE:-}"
 job_transfer_host="${CONTROL_PLANE_JOB_TRANSFER_HOST:-control-plane.${CONTROL_PLANE_K8S_NAMESPACE:-default}.svc.cluster.local}"
 job_transfer_port="${CONTROL_PLANE_JOB_TRANSFER_PORT:-2222}"
 job_transfer_user="${CONTROL_PLANE_JOB_TRANSFER_USER:-${control_plane_user}}"
+reverse_exec_api_port="${CONTROL_PLANE_REVERSE_EXEC_API_PORT:-8081}"
+reverse_exec_api_token="${CONTROL_PLANE_REVERSE_EXEC_API_TOKEN:-}"
+reverse_exec_api_addr=""
+reverse_exec_api_log_path="${CONTROL_PLANE_REVERSE_EXEC_API_LOG_PATH:-${tmp_root}/control-plane-exec-api.log}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   printf '%s\n' \
@@ -95,6 +99,24 @@ esac
 if [[ ! "${audit_log_max_records}" =~ ^[0-9]+$ ]] || (( audit_log_max_records <= 0 )); then
   printf 'CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS must be a positive integer: %s\n' "${audit_log_max_records}" >&2
   exit 1
+fi
+
+if [[ ! "${reverse_exec_api_port}" =~ ^[0-9]+$ ]] || (( reverse_exec_api_port <= 0 || reverse_exec_api_port > 65535 )); then
+  printf 'CONTROL_PLANE_REVERSE_EXEC_API_PORT must be a valid TCP port: %s\n' "${reverse_exec_api_port}" >&2
+  exit 1
+fi
+
+if [[ "${CONTROL_PLANE_FAST_EXECUTION_ENABLED:-0}" == "1" ]]; then
+  if [[ -z "${CONTROL_PLANE_POD_IP:-}" ]]; then
+    printf '%s\n' \
+      'CONTROL_PLANE_POD_IP is required when CONTROL_PLANE_FAST_EXECUTION_ENABLED=1 so fast-exec git hooks can reach the reverse postToolUse API.' \
+      >&2
+    exit 1
+  fi
+  if [[ -z "${reverse_exec_api_token}" ]]; then
+    reverse_exec_api_token="$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
+  fi
+  reverse_exec_api_addr="http://${CONTROL_PLANE_POD_IP}:${reverse_exec_api_port}"
 fi
 
 write_runtime_var() {
@@ -541,6 +563,36 @@ configure_git() {
   chown -h root:root "${compat_git_config_path}"
 }
 
+start_reverse_exec_api() {
+  local local_addr
+  local launcher_pid
+
+  [[ "${CONTROL_PLANE_FAST_EXECUTION_ENABLED:-0}" == "1" ]] || return 0
+
+  local_addr="http://127.0.0.1:${reverse_exec_api_port}"
+  rm -f "${reverse_exec_api_log_path}"
+
+  su -s /bin/bash "${control_plane_user}" -c 'exec /usr/local/bin/control-plane-exec-api-launcher' \
+    > "${reverse_exec_api_log_path}" 2>&1 &
+  launcher_pid=$!
+
+  for _ in $(seq 1 30); do
+    if control-plane-exec-api health --addr "${local_addr}" --timeout-sec 2 >/dev/null 2>&1; then
+      return 0
+    fi
+    if ! kill -0 "${launcher_pid}" 2>/dev/null; then
+      printf 'Reverse postToolUse API launcher exited unexpectedly\n' >&2
+      cat "${reverse_exec_api_log_path}" >&2 || true
+      exit 1
+    fi
+    sleep 1
+  done
+
+  printf 'Timed out waiting for reverse postToolUse API at %s\n' "${local_addr}" >&2
+  cat "${reverse_exec_api_log_path}" >&2 || true
+  exit 1
+}
+
 require_container_capabilities "$@"
 
 mkdir -p \
@@ -790,6 +842,9 @@ runtime_config_tmp="$(mktemp "${runtime_config_path}.XXXXXX")"
   write_runtime_var CONTROL_PLANE_JOB_INPUT_MOUNT_PATH "${job_input_mount_path}"
   write_runtime_var CONTROL_PLANE_POD_NAME "${CONTROL_PLANE_POD_NAME:-${HOSTNAME:-}}"
   write_runtime_var CONTROL_PLANE_POD_NAMESPACE "${CONTROL_PLANE_POD_NAMESPACE:-${CONTROL_PLANE_K8S_NAMESPACE:-default}}"
+  if [[ -n "${CONTROL_PLANE_POD_IP:-}" ]]; then
+    write_runtime_var CONTROL_PLANE_POD_IP "${CONTROL_PLANE_POD_IP}"
+  fi
   if [[ -n "${CONTROL_PLANE_POD_UID:-}" ]]; then
     write_runtime_var CONTROL_PLANE_POD_UID "${CONTROL_PLANE_POD_UID}"
   fi
@@ -831,6 +886,13 @@ runtime_config_tmp="$(mktemp "${runtime_config_path}.XXXXXX")"
   write_runtime_var CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST "${CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST:-256Mi}"
   write_runtime_var CONTROL_PLANE_FAST_EXECUTION_MEMORY_LIMIT "${CONTROL_PLANE_FAST_EXECUTION_MEMORY_LIMIT:-2Gi}"
   write_runtime_var CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC "${CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC:-3600}"
+  if [[ "${CONTROL_PLANE_FAST_EXECUTION_ENABLED:-0}" == "1" ]]; then
+    write_runtime_var CONTROL_PLANE_REVERSE_EXEC_API_PORT "${reverse_exec_api_port}"
+    write_runtime_var CONTROL_PLANE_REVERSE_EXEC_API_TOKEN "${reverse_exec_api_token}"
+    write_runtime_var CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR "${reverse_exec_api_addr}"
+    write_runtime_var CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN "${reverse_exec_api_token}"
+    write_runtime_var CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC "${CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC:-3600}"
+  fi
   if [[ -n "${git_user_name}" ]]; then
     write_runtime_var CONTROL_PLANE_GIT_USER_NAME "${git_user_name}"
   fi
@@ -902,6 +964,7 @@ configure_git
 remove_ssh_host_key ssh_host_rsa_key
 remove_ssh_host_key ssh_host_ecdsa_key
 ensure_ssh_host_key ed25519 ssh_host_ed25519_key
+start_reverse_exec_api
 
 if [[ $# -eq 0 ]]; then
   set -- /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config
