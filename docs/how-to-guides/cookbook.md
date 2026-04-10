@@ -68,11 +68,11 @@ ConfigMap / Secret / write-back の具体的な path は
 ### image と tag を決める
 
 1. sample manifest の既定値は
-   `ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest`
+   `ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest`
    なので、そのまま初回導入に使える
 2. 再現性を重視するなら GitHub Packages の
-   `copilot-sandbox-container-v2/control-plane`
-   （<https://github.com/chalharu/copilot-sandbox-container-v2/pkgs/container/copilot-sandbox-container-v2%2Fcontrol-plane>）
+   `copilot-sandbox-container/control-plane`
+   （<https://github.com/chalharu/copilot-sandbox-container/pkgs/container/copilot-sandbox-container%2Fcontrol-plane>）
    から full commit SHA tag を選び、`Deployment/control-plane` または named
    overlay の `images:` へ入れる。shipped replacement が
    `control-plane-instance-env` 側の

@@ -111,7 +111,7 @@ spec:
           # aligned with this value unless an overlay intentionally overrides the
           # derived config. Pin this to a full commit SHA tag when you want
           # revision-stable rollouts.
-          image: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest
+          image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
