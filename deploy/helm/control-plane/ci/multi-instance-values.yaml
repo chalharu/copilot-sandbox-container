@@ -1,6 +1,10 @@
 global:
   image:
     tag: test-global
+  controlPlaneEnv:
+    CONTROL_PLANE_GIT_USER_NAME: Control Plane Bot
+    CONTROL_PLANE_GIT_USER_EMAIL: control-plane@example.com
+    CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: printf global-startup
 instances:
   - name: repo-one
     auth:
@@ -39,4 +43,7 @@ instances:
         "chat.warnOnLargeFiles": true
       }
     controlPlaneEnv:
+      CONTROL_PLANE_GIT_USER_EMAIL: repo-two@example.com
       CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: Always
+      CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: printf repo-two-startup
+      TZ: Europe/Berlin

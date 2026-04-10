@@ -42,6 +42,13 @@ global:
       "telemetry": false
     }
   controlPlaneEnv:
+    # control-plane-env ConfigMap defaults. Put shared Git identity, TZ, and
+    # exec-pod startup behavior here; override per repo with
+    # instances[].controlPlaneEnv.
+    # CONTROL_PLANE_GIT_USER_NAME: Your Name
+    # CONTROL_PLANE_GIT_USER_EMAIL: you@example.com
+    # TZ: Asia/Tokyo
+    # CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: apt-get update && apt-get install -y ripgrep
     SSH_PUBLIC_KEY_FILE: /var/run/control-plane-auth/ssh-public-key
     COPILOT_CONFIG_JSON_FILE: /var/run/control-plane-config/copilot-config.json
     COPILOT_GITHUB_TOKEN_FILE: /var/run/control-plane-auth/copilot-github-token
@@ -90,6 +97,8 @@ instances:
     auth: {}
     workspace: {}
     session: {}
+    # Repo-specific control-plane-env overrides such as TZ, Git identity, or an
+    # exec-pod startup script.
     controlPlaneEnv: {}
     instanceEnv: {}
     resources: {}

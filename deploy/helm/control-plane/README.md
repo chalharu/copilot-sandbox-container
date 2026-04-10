@@ -50,6 +50,50 @@ helm upgrade --install control-plane deploy/helm/control-plane \
 `instance.name` から namespace を自動生成する場合、既定では
 `<namespacePrefix>-<name>` と `<namespace>-jobs` を使います。
 
+## runtime env の設定先
+
+Git の `user.name` / `user.email`、`TZ`、Execution Pod の startup script は、
+どれも各 instance の `control-plane-env` ConfigMap に入る値です。Helm では
+次の 2 箇所から設定します。
+
+| 用途 | values のキー | 反映先 |
+| --- | --- | --- |
+| 全 instance 共通の既定値 | `global.controlPlaneEnv` | すべての `control-plane-env` ConfigMap |
+| repo ごとの上書き | `instances[].controlPlaneEnv` | 対象 instance の `control-plane-env` ConfigMap |
+
+`instances[].instanceEnv` は workspace PVC 名や job-transfer host のような
+chart 側の派生値向けなので、これらの設定先には使いません。
+
+```yaml
+global:
+  controlPlaneEnv:
+    CONTROL_PLANE_GIT_USER_NAME: Copilot Workspace Bot
+    CONTROL_PLANE_GIT_USER_EMAIL: copilot@example.com
+    TZ: Asia/Tokyo
+    CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: apt-get update && apt-get install -y ripgrep
+
+instances:
+  - name: repo-a
+    auth:
+      sshPublicKey: |
+        ssh-ed25519 AAAA... repo-a
+
+  - name: repo-b
+    auth:
+      sshPublicKey: |
+        ssh-ed25519 AAAA... repo-b
+    controlPlaneEnv:
+      TZ: Europe/Berlin
+      CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: /workspace/scripts/bootstrap-exec.sh
+```
+
+- `CONTROL_PLANE_GIT_USER_NAME` / `CONTROL_PLANE_GIT_USER_EMAIL` は startup 時に
+  managed global Git config へ書かれます。
+- `TZ` は login shell と job tooling に渡されます。
+- `CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT` は各 Execution Pod の chroot 内で
+  `/bin/sh -lc` として実行されます。inline shell snippet でも、そこで見える
+  script path でも構いません。
+
 ## 主な override
 
 - `instances[].image`: repo ごとの image tag / pullPolicy
