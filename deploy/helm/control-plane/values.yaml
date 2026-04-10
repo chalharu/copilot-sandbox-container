@@ -1,5 +1,6 @@
 global:
-  namespacePrefix: copilot
+  namespace: copilot-sandbox
+  jobNamespace: copilot-sandbox-jobs
   clusterDomain: cluster.local
   createNamespaces: true
   image:
@@ -28,11 +29,16 @@ global:
     retainOnDelete: true
     annotations: {}
   session:
+    # Shared session PVC settings. By default all instances use the same claim
+    # in global.namespace while keeping instance-local control-plane state under
+    # <statePathPrefix>/<instance.name>/...
     claimName: control-plane-copilot-session-pvc
+    existingClaim: ""
     accessModes:
       - ReadWriteMany
     size: 2Gi
     storageClassName: replace-me-with-rwx-storage-class
+    statePathPrefix: instances
     ghSubPath: state/gh
     sshSubPath: state/ssh
     retainOnDelete: true
@@ -96,7 +102,12 @@ instances:
     service: {}
     auth: {}
     workspace: {}
-    session: {}
+    session:
+      # Optional per-instance overrides for shared session mounts. stateSubPath
+      # moves repo-local control-plane state under a different directory inside
+      # the shared session PVC; ghSubPath / sshSubPath can isolate client auth
+      # state too when needed.
+      # stateSubPath: repo-state/sandbox
     # Repo-specific control-plane-env overrides such as TZ, Git identity, or an
     # exec-pod startup script.
     controlPlaneEnv: {}

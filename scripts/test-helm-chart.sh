@@ -110,65 +110,75 @@ assert_kind_count() {
 printf '%s\n' 'helm-chart-test: rendering chart' >&2
 render_chart
 
-assert_kind_count Namespace 4
+assert_kind_count Namespace 2
 assert_kind_count Deployment 2
 assert_kind_count Service 2
 assert_kind_count PersistentVolumeClaim 2
 assert_kind_count Secret 1
 
-assert_resource_present Namespace copilot-repo-one
-assert_resource_present Namespace copilot-repo-one-jobs
-assert_resource_present Namespace repo-two-main
-assert_resource_present Namespace repo-two-jobs
+assert_resource_present Namespace copilot-shared
+assert_resource_present Namespace copilot-shared-jobs
 
-assert_resource_present Secret control-plane-auth copilot-repo-one
-assert_resource_absent Secret control-plane-auth repo-two-main
+assert_resource_present Secret control-plane-auth-repo-one copilot-shared
+assert_resource_absent Secret repo-two-auth copilot-shared
 
-assert_resource_present PersistentVolumeClaim control-plane-workspace-pvc copilot-repo-one
-assert_resource_present PersistentVolumeClaim control-plane-copilot-session-pvc copilot-repo-one
-assert_resource_absent PersistentVolumeClaim control-plane-workspace-pvc repo-two-main
-assert_resource_absent PersistentVolumeClaim control-plane-copilot-session-pvc repo-two-main
+assert_resource_present PersistentVolumeClaim control-plane-workspace-pvc-repo-one copilot-shared
+assert_resource_present PersistentVolumeClaim shared-session-pvc copilot-shared
+assert_resource_absent PersistentVolumeClaim repo-two-workspace-pvc copilot-shared
 
-assert_resource_contains PersistentVolumeClaim control-plane-workspace-pvc copilot-repo-one 'storage: 20Gi'
-assert_resource_contains PersistentVolumeClaim control-plane-workspace-pvc copilot-repo-one 'storageClassName: "fast-rwo"'
-assert_resource_contains PersistentVolumeClaim control-plane-copilot-session-pvc copilot-repo-one 'storage: 4Gi'
-assert_resource_contains PersistentVolumeClaim control-plane-copilot-session-pvc copilot-repo-one 'storageClassName: "fast-rwx"'
+assert_resource_contains PersistentVolumeClaim control-plane-workspace-pvc-repo-one copilot-shared 'storage: 20Gi'
+assert_resource_contains PersistentVolumeClaim control-plane-workspace-pvc-repo-one copilot-shared 'storageClassName: "fast-rwo"'
+assert_resource_contains PersistentVolumeClaim shared-session-pvc copilot-shared 'storage: 4Gi'
+assert_resource_contains PersistentVolumeClaim shared-session-pvc copilot-shared 'storageClassName: "fast-rwx"'
 
-assert_resource_contains ConfigMap control-plane-env repo-two-main 'CONTROL_PLANE_K8S_NAMESPACE: "repo-two-main"'
-assert_resource_contains ConfigMap control-plane-env repo-two-main 'CONTROL_PLANE_JOB_NAMESPACE: "repo-two-jobs"'
-assert_resource_contains ConfigMap control-plane-env repo-two-main 'CONTROL_PLANE_COPILOT_SESSION_PVC: "repo-two-session-pvc"'
-assert_resource_contains ConfigMap control-plane-env repo-two-main 'CONTROL_PLANE_COPILOT_SESSION_GH_SUBPATH: "session/gh"'
-assert_resource_contains ConfigMap control-plane-env repo-two-main 'CONTROL_PLANE_COPILOT_SESSION_SSH_SUBPATH: "session/ssh"'
-assert_resource_contains ConfigMap control-plane-env repo-two-main 'CONTROL_PLANE_WORKSPACE_SUBPATH: "repositories/repo-two"'
-assert_resource_contains ConfigMap control-plane-env copilot-repo-one 'CONTROL_PLANE_GIT_USER_NAME: "Control Plane Bot"'
-assert_resource_contains ConfigMap control-plane-env copilot-repo-one 'CONTROL_PLANE_GIT_USER_EMAIL: "control-plane@example.com"'
-assert_resource_contains ConfigMap control-plane-env copilot-repo-one 'CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: "printf global-startup"'
-assert_resource_contains ConfigMap control-plane-env copilot-repo-one 'TZ: "Asia/Tokyo"'
-assert_resource_contains ConfigMap control-plane-env repo-two-main 'CONTROL_PLANE_GIT_USER_NAME: "Control Plane Bot"'
-assert_resource_contains ConfigMap control-plane-env repo-two-main 'CONTROL_PLANE_GIT_USER_EMAIL: "repo-two@example.com"'
-assert_resource_contains ConfigMap control-plane-env repo-two-main 'CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: "printf repo-two-startup"'
-assert_resource_contains ConfigMap control-plane-env repo-two-main 'TZ: "Europe/Berlin"'
+assert_resource_contains ConfigMap control-plane-env-repo-two copilot-shared 'CONTROL_PLANE_K8S_NAMESPACE: "copilot-shared"'
+assert_resource_contains ConfigMap control-plane-env-repo-two copilot-shared 'CONTROL_PLANE_JOB_NAMESPACE: "copilot-shared-jobs"'
+assert_resource_contains ConfigMap control-plane-env-repo-two copilot-shared 'CONTROL_PLANE_COPILOT_SESSION_PVC: "shared-session-pvc"'
+assert_resource_contains ConfigMap control-plane-env-repo-two copilot-shared 'CONTROL_PLANE_COPILOT_SESSION_GH_SUBPATH: "session/gh"'
+assert_resource_contains ConfigMap control-plane-env-repo-two copilot-shared 'CONTROL_PLANE_COPILOT_SESSION_SSH_SUBPATH: "session/ssh"'
+assert_resource_contains ConfigMap control-plane-env-repo-two copilot-shared 'CONTROL_PLANE_WORKSPACE_SUBPATH: "repositories/repo-two"'
+assert_resource_contains ConfigMap control-plane-env-repo-one copilot-shared 'CONTROL_PLANE_GIT_USER_NAME: "Control Plane Bot"'
+assert_resource_contains ConfigMap control-plane-env-repo-one copilot-shared 'CONTROL_PLANE_GIT_USER_EMAIL: "control-plane@example.com"'
+assert_resource_contains ConfigMap control-plane-env-repo-one copilot-shared 'CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: "printf global-startup"'
+assert_resource_contains ConfigMap control-plane-env-repo-one copilot-shared 'CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT: "control-plane-exec-repo-one"'
+assert_resource_contains ConfigMap control-plane-env-repo-one copilot-shared 'CONTROL_PLANE_JOB_SERVICE_ACCOUNT: "control-plane-job-repo-one"'
+assert_resource_contains ConfigMap control-plane-env-repo-one copilot-shared 'TZ: "Asia/Tokyo"'
+assert_resource_contains ConfigMap control-plane-env-repo-two copilot-shared 'CONTROL_PLANE_GIT_USER_NAME: "Control Plane Bot"'
+assert_resource_contains ConfigMap control-plane-env-repo-two copilot-shared 'CONTROL_PLANE_GIT_USER_EMAIL: "repo-two@example.com"'
+assert_resource_contains ConfigMap control-plane-env-repo-two copilot-shared 'CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: "printf repo-two-startup"'
+assert_resource_contains ConfigMap control-plane-env-repo-two copilot-shared 'CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT: "control-plane-exec-repo-two"'
+assert_resource_contains ConfigMap control-plane-env-repo-two copilot-shared 'CONTROL_PLANE_JOB_SERVICE_ACCOUNT: "control-plane-job-repo-two"'
+assert_resource_contains ConfigMap control-plane-env-repo-two copilot-shared 'TZ: "Europe/Berlin"'
 
-assert_resource_contains ConfigMap control-plane-instance-env repo-two-main 'CONTROL_PLANE_WORKSPACE_PVC: "repo-two-workspace-pvc"'
-assert_resource_contains ConfigMap control-plane-instance-env repo-two-main 'CONTROL_PLANE_JOB_TRANSFER_HOST: "repo-two-control-plane.repo-two-main.svc.cluster.local"'
-assert_resource_contains ConfigMap control-plane-instance-env repo-two-main 'CONTROL_PLANE_JOB_TRANSFER_PORT: "2022"'
-assert_resource_contains ConfigMap control-plane-instance-env repo-two-main 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: "ghcr.io/chalharu/copilot-sandbox-container/control-plane:sha-abcdef0"'
-assert_resource_contains ConfigMap control-plane-instance-env repo-two-main 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: "ghcr.io/chalharu/copilot-sandbox-container/control-plane:sha-abcdef0"'
-assert_resource_contains ConfigMap control-plane-instance-env repo-two-main 'CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: "Always"'
+assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_WORKSPACE_PVC: "repo-two-workspace-pvc"'
+assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_JOB_TRANSFER_HOST: "repo-two-control-plane.copilot-shared.svc.cluster.local"'
+assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_JOB_TRANSFER_PORT: "2022"'
+assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: "ghcr.io/chalharu/copilot-sandbox-container/control-plane:sha-abcdef0"'
+assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: "ghcr.io/chalharu/copilot-sandbox-container/control-plane:sha-abcdef0"'
+assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: "Always"'
 
-assert_resource_contains Service repo-two-control-plane repo-two-main 'type: ClusterIP'
-assert_resource_contains Service repo-two-control-plane repo-two-main 'port: 2022'
+assert_resource_contains Service control-plane-repo-one copilot-shared 'type: LoadBalancer'
+assert_resource_contains Service repo-two-control-plane copilot-shared 'type: ClusterIP'
+assert_resource_contains Service repo-two-control-plane copilot-shared 'port: 2022'
 
-assert_resource_contains Deployment control-plane repo-two-main 'image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:sha-abcdef0'
-assert_resource_contains Deployment control-plane repo-two-main 'imagePullPolicy: Always'
-assert_resource_contains Deployment control-plane repo-two-main 'claimName: repo-two-session-pvc'
-assert_resource_contains Deployment control-plane repo-two-main 'claimName: repo-two-workspace-pvc'
-assert_resource_contains Deployment control-plane repo-two-main 'secretName: repo-two-auth'
-assert_resource_contains Deployment control-plane repo-two-main 'subPath: "repositories/repo-two"'
-assert_resource_contains Deployment control-plane repo-two-main 'subPath: "session/gh"'
-assert_resource_contains Deployment control-plane repo-two-main 'subPath: "session/ssh"'
+assert_resource_contains Deployment control-plane-repo-one copilot-shared 'image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:test-global'
+assert_resource_contains Deployment control-plane-repo-one copilot-shared 'claimName: shared-session-pvc'
+assert_resource_contains Deployment control-plane-repo-one copilot-shared 'claimName: control-plane-workspace-pvc-repo-one'
+assert_resource_contains Deployment control-plane-repo-one copilot-shared 'subPath: "instances/repo-one/state/copilot-config.json"'
+assert_resource_contains Deployment control-plane-repo-one copilot-shared 'subPath: "instances/repo-one/session-state"'
+assert_resource_contains Deployment control-plane-repo-two copilot-shared 'image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:sha-abcdef0'
+assert_resource_contains Deployment control-plane-repo-two copilot-shared 'imagePullPolicy: Always'
+assert_resource_contains Deployment control-plane-repo-two copilot-shared 'claimName: shared-session-pvc'
+assert_resource_contains Deployment control-plane-repo-two copilot-shared 'claimName: repo-two-workspace-pvc'
+assert_resource_contains Deployment control-plane-repo-two copilot-shared 'secretName: repo-two-auth'
+assert_resource_contains Deployment control-plane-repo-two copilot-shared 'serviceAccountName: control-plane-repo-two'
+assert_resource_contains Deployment control-plane-repo-two copilot-shared 'subPath: "repositories/repo-two"'
+assert_resource_contains Deployment control-plane-repo-two copilot-shared 'subPath: "repo-state/repo-two/state/copilot-config.json"'
+assert_resource_contains Deployment control-plane-repo-two copilot-shared 'subPath: "repo-state/repo-two/session-state"'
+assert_resource_contains Deployment control-plane-repo-two copilot-shared 'subPath: "session/gh"'
+assert_resource_contains Deployment control-plane-repo-two copilot-shared 'subPath: "session/ssh"'
 
-assert_resource_contains RoleBinding control-plane-jobs repo-two-jobs 'namespace: repo-two-main'
-assert_resource_contains RoleBinding control-plane-exec-workloads repo-two-jobs 'namespace: repo-two-main'
+assert_resource_contains RoleBinding control-plane-jobs-repo-two copilot-shared-jobs 'namespace: copilot-shared'
+assert_resource_contains RoleBinding control-plane-exec-workloads-repo-two copilot-shared-jobs 'namespace: copilot-shared'
 
 printf '%s\n' 'helm-chart-test: ok' >&2

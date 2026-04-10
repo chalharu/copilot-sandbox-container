@@ -1,29 +1,36 @@
 # Helm chart for multi-repository control planes
 
 `deploy/helm/control-plane/` は、repo ごとに `copilot + workspace PVC + Service`
-を複数並べたいケース向けの Helm chart です。
+を複数並べたいケース向けの Helm chart です。既定では、すべての instance を
+同じ main namespace / jobs namespace に置き、session PVC claim も共有します。
+
+chart 全体として、既定で次を生成します。
+
+- shared main namespace
+- shared jobs namespace
+- shared session PVC
 
 各 `instances[]` エントリは、既定で次を 1 セット生成します。
 
-- main namespace
-- jobs namespace
-- ServiceAccount / RBAC
-- `control-plane-env` / `control-plane-instance-env` / `control-plane-config`
-- session PVC / workspace PVC
-- `control-plane` Deployment
-- `control-plane` Service
+- instance ごとに一意な ServiceAccount / RBAC
+- instance ごとに一意な `control-plane-env` / `control-plane-instance-env` / `control-plane-config`
+- workspace PVC
+- `control-plane-<instance.name>` Deployment
+- `control-plane-<instance.name>` Service
 
-既定値は、現在の kustomize sample と同じ `copilot-sandbox` /
-`copilot-sandbox-jobs` 相当になるように寄せています。複数 repo を持つ場合は
-`instances[]` を増やしてください。
+workspace PVC / Secret / Service も、instance 側で明示 override しない限り
+`<base>-<instance.name>` で名前分離されます。複数 repo を持つ場合は `instances[]`
+を増やしてください。
 
 ## 使い方
 
-まず最低限、各 instance の SSH 公開鍵と session PVC の RWX storage class を
-上書きします。
+まず最低限、shared namespace と session PVC の RWX storage class、各 instance の
+SSH 公開鍵を上書きします。
 
 ```yaml
 global:
+  namespace: copilot-workspaces
+  jobNamespace: copilot-workspaces-jobs
   session:
     storageClassName: nfs-rwx
 
@@ -34,8 +41,6 @@ instances:
         ssh-ed25519 AAAA... repo-a
 
   - name: repo-b
-    namespace: repo-b-main
-    jobNamespace: repo-b-jobs
     auth:
       existingSecretName: repo-b-auth
     workspace:
@@ -47,8 +52,12 @@ helm upgrade --install control-plane deploy/helm/control-plane \
   -f my-values.yaml
 ```
 
-`instance.name` から namespace を自動生成する場合、既定では
-`<namespacePrefix>-<name>` と `<namespace>-jobs` を使います。
+既定では、すべての instance が `global.namespace` と `global.jobNamespace` を
+共有します。Session PVC は `global.session.claimName` を共有しつつ、
+`copilot-config.json`、`command-history-state.json`、`session-state`、
+SSH auth/host keys は `instances/<name>/...` 配下へ自動で分離されます。
+GitHub CLI / SSH client state は `global.session.{ghSubPath,sshSubPath}` を使うため、
+必要なら `instances[].session` で repo ごとに分けてください。
 
 ## runtime env の設定先
 
@@ -96,10 +105,12 @@ instances:
 
 ## 主な override
 
+- `global.namespace` / `global.jobNamespace`: instance 群を置く共有 namespace
 - `instances[].image`: repo ごとの image tag / pullPolicy
-- `instances[].service`: Service 名、type、port
+- `instances[].service`: Service の明示名、type、port
 - `instances[].workspace`: workspace PVC claim 名、size、storage class、subPath
-- `instances[].session`: session PVC claim 名、size、storage class、GH / SSH subPath
+- `global.session`: 共有 session PVC の claim 名、size、storage class
+- `instances[].session`: repo ごとの stateSubPath や GH / SSH subPath override
 - `instances[].auth.existingSecretName`: Secret を chart 外で管理したい場合
 - `instances[].controlPlaneEnv`: runtime 用 ConfigMap の追加 override
 - `instances[].instanceEnv`: kustomize replacement 相当の派生 env に対する追加 override

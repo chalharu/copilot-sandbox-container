@@ -4,13 +4,14 @@
 {{- $image := mergeOverwrite (dict) $.Values.global.image (default dict $instance.image) -}}
 {{- $workspace := mergeOverwrite (dict) $.Values.global.workspace (default dict $instance.workspace) -}}
 {{- $session := mergeOverwrite (dict) $.Values.global.session (default dict $instance.session) -}}
+{{- $sessionStateSubPath := include "control-plane.sessionStateSubPath" $ctx -}}
 {{- $resources := mergeOverwrite (dict) $.Values.global.resources (default dict $instance.resources) -}}
 {{- $deploymentAnnotations := mergeOverwrite (dict) $.Values.global.deploymentAnnotations (default dict $instance.deploymentAnnotations) -}}
 {{- $podAnnotations := mergeOverwrite (dict) $.Values.global.podAnnotations (default dict $instance.podAnnotations) -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: control-plane
+  name: {{ include "control-plane.deploymentName" $ctx }}
   namespace: {{ $mainNamespace }}
   labels:{{ include "control-plane.commonLabels" $ctx | nindent 4 }}
 {{- if $deploymentAnnotations }}
@@ -54,29 +55,29 @@ spec:
               umask 077
               mkdir -p \
                 /copilot-session/{{ $session.ghSubPath }} \
-                /copilot-session/state/ssh-auth \
                 /copilot-session/{{ $session.sshSubPath }} \
-                /copilot-session/state/ssh-host-keys \
-                /copilot-session/session-state \
+                /copilot-session/{{ $sessionStateSubPath }}/state/ssh-auth \
+                /copilot-session/{{ $sessionStateSubPath }}/state/ssh-host-keys \
+                /copilot-session/{{ $sessionStateSubPath }}/session-state \
                 /workspace-state/{{ $workspace.subPath }} \
                 /cache/runtime-tmp
               touch \
-                /copilot-session/state/copilot-config.json \
-                /copilot-session/state/command-history-state.json
+                /copilot-session/{{ $sessionStateSubPath }}/state/copilot-config.json \
+                /copilot-session/{{ $sessionStateSubPath }}/state/command-history-state.json
               chown -R 1000:1000 \
-                /copilot-session/state \
-                /copilot-session/session-state \
+                /copilot-session/{{ $sessionStateSubPath }}/state \
+                /copilot-session/{{ $sessionStateSubPath }}/session-state \
                 /copilot-session/{{ $session.ghSubPath }} \
                 /copilot-session/{{ $session.sshSubPath }}
               find \
-                /copilot-session/state \
-                /copilot-session/session-state \
+                /copilot-session/{{ $sessionStateSubPath }}/state \
+                /copilot-session/{{ $sessionStateSubPath }}/session-state \
                 /copilot-session/{{ $session.ghSubPath }} \
                 /copilot-session/{{ $session.sshSubPath }} \
                 -type d -exec chmod 700 {} +
               find \
-                /copilot-session/state \
-                /copilot-session/session-state \
+                /copilot-session/{{ $sessionStateSubPath }}/state \
+                /copilot-session/{{ $sessionStateSubPath }}/session-state \
                 /copilot-session/{{ $session.ghSubPath }} \
                 /copilot-session/{{ $session.sshSubPath }} \
                 -type f -exec chmod 600 {} +
@@ -132,7 +133,7 @@ spec:
           volumeMounts:
             - name: copilot-session
               mountPath: /state
-              subPath: state
+              subPath: {{ printf "%s/state" $sessionStateSubPath | quote }}
       containers:
         - name: control-plane
           image: {{ include "control-plane.imageRef" (dict "image" $image) }}
@@ -207,13 +208,13 @@ spec:
           volumeMounts:
             - name: copilot-session
               mountPath: /home/copilot/.copilot/config.json
-              subPath: state/copilot-config.json
+              subPath: {{ printf "%s/state/copilot-config.json" $sessionStateSubPath | quote }}
             - name: copilot-session
               mountPath: /home/copilot/.copilot/command-history-state.json
-              subPath: state/command-history-state.json
+              subPath: {{ printf "%s/state/command-history-state.json" $sessionStateSubPath | quote }}
             - name: copilot-session
               mountPath: /home/copilot/.copilot/session-state
-              subPath: session-state
+              subPath: {{ printf "%s/session-state" $sessionStateSubPath | quote }}
             - name: copilot-session
               mountPath: /home/copilot/.config/gh
               subPath: {{ $session.ghSubPath | quote }}
@@ -222,10 +223,10 @@ spec:
               subPath: {{ $session.sshSubPath | quote }}
             - name: copilot-session
               mountPath: /home/copilot/.config/control-plane/ssh-auth
-              subPath: state/ssh-auth
+              subPath: {{ printf "%s/state/ssh-auth" $sessionStateSubPath | quote }}
             - name: copilot-session
               mountPath: /var/lib/control-plane/ssh-host-keys
-              subPath: state/ssh-host-keys
+              subPath: {{ printf "%s/state/ssh-host-keys" $sessionStateSubPath | quote }}
             - name: workspace
               mountPath: /workspace
               subPath: {{ $workspace.subPath | quote }}

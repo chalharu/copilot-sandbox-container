@@ -1,6 +1,12 @@
 global:
+  namespace: copilot-shared
+  jobNamespace: copilot-shared-jobs
   image:
     tag: test-global
+  session:
+    claimName: shared-session-pvc
+    size: 4Gi
+    storageClassName: fast-rwx
   controlPlaneEnv:
     CONTROL_PLANE_GIT_USER_NAME: Control Plane Bot
     CONTROL_PLANE_GIT_USER_EMAIL: control-plane@example.com
@@ -13,14 +19,9 @@ instances:
     workspace:
       size: 20Gi
       storageClassName: fast-rwo
-    session:
-      size: 4Gi
-      storageClassName: fast-rwx
     controlPlaneEnv:
       TZ: Asia/Tokyo
   - name: repo-two
-    namespace: repo-two-main
-    jobNamespace: repo-two-jobs
     image:
       tag: sha-abcdef0
       pullPolicy: Always
@@ -34,7 +35,7 @@ instances:
       existingClaim: repo-two-workspace-pvc
       subPath: repositories/repo-two
     session:
-      existingClaim: repo-two-session-pvc
+      stateSubPath: repo-state/repo-two
       ghSubPath: session/gh
       sshSubPath: session/ssh
     controlPlaneConfigJson: |
