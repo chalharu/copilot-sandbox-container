@@ -4,11 +4,14 @@ resources:
   - namespace-copilot-sandbox.yaml
   - namespace-copilot-sandbox-jobs.yaml
   - serviceaccount-control-plane.yaml
+  - serviceaccount-control-plane-exec.yaml
   - serviceaccount-control-plane-job.yaml
   - role-control-plane-exec-pods.yaml
   - rolebinding-control-plane-exec-pods.yaml
   - role-control-plane-jobs.yaml
   - rolebinding-control-plane-jobs.yaml
+  - role-control-plane-exec-workloads.yaml
+  - rolebinding-control-plane-exec-workloads.yaml
   - role-control-plane-job-self-read.yaml
   - rolebinding-control-plane-job-self-read.yaml
   - secret-control-plane-auth.yaml

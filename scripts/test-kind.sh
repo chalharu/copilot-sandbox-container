@@ -283,6 +283,12 @@ metadata:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
+  name: control-plane-exec
+  namespace: ${namespace}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
   name: control-plane-job
   namespace: ${job_namespace}
 ---
@@ -348,6 +354,42 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: control-plane-jobs
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: control-plane-exec-workloads
+  namespace: ${job_namespace}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["create", "delete", "get", "list", "patch", "watch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["create", "delete", "get", "list", "patch", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "delete", "get", "list", "patch", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete", "get", "list", "patch", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: control-plane-exec-workloads
+  namespace: ${job_namespace}
+subjects:
+  - kind: ServiceAccount
+    name: control-plane-exec
+    namespace: ${namespace}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: control-plane-exec-workloads
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -546,6 +588,7 @@ data:
   CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 300s
   CONTROL_PLANE_FAST_EXECUTION_PORT: "8080"
   CONTROL_PLANE_FAST_EXECUTION_HOME: /root
+  CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT: control-plane-exec
   CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: 'printf "fast-exec-startup\n" > /workspace/fast-exec-startup-marker.txt'
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX: node-workspace
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS: control-plane-fast-exec-environment-manual
@@ -1002,6 +1045,7 @@ set -euo pipefail
 session_key=kind-fast-exec
 control-plane-session-exec cleanup --session-key "${session_key}" >/dev/null 2>&1 || true
 rm -f /workspace/fast-exec-startup-marker.txt
+rm -f /workspace/fast-exec-kubectl-marker.txt
 control-plane-session-exec prepare --session-key "${session_key}" >/dev/null
 jq -e --arg key "${session_key}" '.sessions[$key].podName != null and .sessions[$key].podIp != null' \
   ~/.copilot/session-state/session-exec.json >/dev/null
@@ -1027,12 +1071,15 @@ test "$(jq -r '.spec.containers[0].command[0]' /workspace/k8s-fast-exec-pod.json
 test "$(jq -r '.spec.containers[0].startupProbe.grpc.port' /workspace/k8s-fast-exec-pod.json)" = "8080"
 test "$(jq -r '.spec.containers[0].startupProbe.periodSeconds' /workspace/k8s-fast-exec-pod.json)" = "5"
 test "$(jq -r '.spec.containers[0].startupProbe.failureThreshold' /workspace/k8s-fast-exec-pod.json)" = "62"
+test "$(jq -r '.spec.serviceAccountName' /workspace/k8s-fast-exec-pod.json)" = "control-plane-exec"
+test "$(jq -r '.spec.automountServiceAccountToken' /workspace/k8s-fast-exec-pod.json)" = "true"
 test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "environment").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/environment"
 test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "runtime-bin").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/control-plane/bin"
 test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "workspace").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/environment/root/workspace"
 test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/environment/root/root/.config/gh") | (.readOnly // false)' /workspace/k8s-fast-exec-pod.json)" = "false"
 test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/environment/root/root/.ssh") | (.readOnly // false)' /workspace/k8s-fast-exec-pod.json)" = "true"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/root"
+test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_JOB_NAMESPACE").value' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_JOB_NAMESPACE}"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/hooks/git"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT").value' /workspace/k8s-fast-exec-pod.json)" = 'printf "fast-exec-startup\n" > /workspace/fast-exec-startup-marker.txt'
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOME").value' /workspace/k8s-fast-exec-pod.json)" = "/root"
@@ -1058,6 +1105,48 @@ test "${blocked_status}" -ne 0
 ! [ -s /workspace/k8s-fast-exec-blocked-stdout.txt ]
 grep -Fq 'Direct reads of ~/.config/gh/hosts.yml are blocked by control-plane policy.' \
   /workspace/k8s-fast-exec-blocked-stderr.txt
+kubectl_command=$(cat <<'INNER'
+set -euo pipefail
+namespace="${CONTROL_PLANE_JOB_NAMESPACE}"
+command -v kubectl >/dev/null
+test "$(kubectl auth can-i create deployments.apps -n "${namespace}")" = "yes"
+test "$(kubectl auth can-i delete deployments.apps -n "${namespace}")" = "yes"
+test "$(kubectl auth can-i patch deployments.apps -n "${namespace}")" = "yes"
+test "$(kubectl auth can-i create services -n "${namespace}")" = "yes"
+test "$(kubectl auth can-i create jobs.batch -n "${namespace}")" = "yes"
+test "$(kubectl auth can-i create pods -n "${namespace}")" = "yes"
+test "$(kubectl auth can-i get pods/log -n "${namespace}")" = "yes"
+kubectl -n "${namespace}" create deployment fast-exec-deployment \
+  --image=docker.io/library/busybox:1.37.0 \
+  --dry-run=server \
+  -o yaml >/dev/null
+kubectl -n "${namespace}" create service clusterip fast-exec-service \
+  --tcp=80:80 \
+  --dry-run=server \
+  -o yaml >/dev/null
+kubectl -n "${namespace}" create job fast-exec-job \
+  --image=docker.io/library/busybox:1.37.0 \
+  --dry-run=server \
+  -o yaml \
+  -- /bin/sh -lc 'printf ok\n' >/dev/null
+cat <<'POD' | kubectl -n "${namespace}" create --dry-run=server -f - >/dev/null
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fast-exec-pod
+spec:
+  restartPolicy: Never
+  containers:
+    - name: main
+      image: docker.io/library/busybox:1.37.0
+      command: ["/bin/sh", "-lc", "sleep 1"]
+POD
+printf 'exec-kubectl-ok\n' > /workspace/fast-exec-kubectl-marker.txt
+INNER
+)
+kubectl_command_base64="$(printf '%s' "${kubectl_command}" | base64 | tr -d '\n')"
+control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${kubectl_command_base64}" >/dev/null
+grep -qx 'exec-kubectl-ok' /workspace/fast-exec-kubectl-marker.txt
 control-plane-session-exec cleanup --session-key "${session_key}"
 ! kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${pod_name}" >/dev/null 2>&1
 jq -e --arg key "${session_key}" '.sessions[$key] == null' ~/.copilot/session-state/session-exec.json >/dev/null

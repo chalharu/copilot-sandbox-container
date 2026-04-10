@@ -98,9 +98,10 @@ RWO PVC (`CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX` で命名) の
 `/environment` へ初回 staging します。本体 container は cached binary を
 pod-local な `/control-plane/bin/control-plane-exec-api` へ staging して起動し、
 `/environment/root` を
-chroot 先として初回だけ runtime image の rootfs を複製し、そこへ
-`bash` / `git` / `gh` / `openssh-client` を入れます。以後の session pod は
-同じノード上でその chroot を再利用するため、毎回の package install を避けられます。
+ chroot 先として初回だけ runtime image の rootfs を複製し、そこへ
+ `bash` / `git` / `gh` / `kubectl` / `openssh-client` を入れます。以後の
+ session pod は
+ 同じノード上でその chroot を再利用するため、毎回の package install を避けられます。
 `CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT` を設定すると、各 Execution Pod は
 serve 前にその値を chroot 内で `/bin/sh -lc` として実行します。inline command
 でも script path でもよく、`apt-get install` のような追加セットアップを
@@ -109,6 +110,13 @@ serve 前にその値を chroot 内で `/bin/sh -lc` として実行します。
 長めの `CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT` を前提にしています。
 Pod 自体の OwnerReference / node pin には Deployment の downward API env
 (`CONTROL_PLANE_POD_*`, `CONTROL_PLANE_NODE_NAME`) を使います。
+`CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT` を設定すると Execution Pod は
+その ServiceAccount で起動し、in-cluster の service account token も mount
+します。sample 既定では `control-plane-exec` を使い、別 namespace の
+workload 操作用権限は `copilot-sandbox-jobs` の
+`control-plane-exec-workloads` Role に限定します。delegated shell の default
+namespace は owner Pod 側のままなので、別 namespace のリソースは
+`kubectl -n ...` で明示してください。
 
 ## 5. Hook と Git policy surface
 
@@ -163,8 +171,12 @@ bundled `postToolUse/control-plane-rust.sh` は、`CONTROL_PLANE_RUST_HOOK_IMAGE
 build toolchain を戻さないため、専用 image を既定にしてください。
 
 sample manifest では、この経路のために control-plane ServiceAccount へ
-same-namespace Pod の `create/delete/get/list/watch` 権限を付けます。shared
-namespace へそのまま広げず、dedicated control-plane namespace を前提にしてください。
+same-namespace Pod の `create/delete/get/list/watch` 権限を付けます。Exec Pod
+から in-cluster kubectl も使いたい場合は、別の `control-plane-exec`
+ServiceAccount を `CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT` に設定し、
+`copilot-sandbox-jobs` 側では Deployment / Service / Job / Pod に限定した
+`control-plane-exec-workloads` Role へ bind します。shared namespace へそのまま
+広げず、dedicated namespace を前提にしてください。
 
 ## 6. Bundled skill surface
 

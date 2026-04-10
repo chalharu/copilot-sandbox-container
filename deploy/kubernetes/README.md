@@ -93,6 +93,12 @@ spec を通常更新で触らないための運用パスです。immutable な
   の後に `ssh -p 2222 copilot@127.0.0.1` でログインできる
 - このリポジトリの checkout 上で `./scripts/test-k8s-job.sh` を実行できる
 
+sample 既定では、delegated Execution Pod 用の `control-plane-exec`
+ServiceAccount と、`copilot-sandbox-jobs` 側の
+`control-plane-exec-workloads` Role / RoleBinding も含みます。SSH shell や
+delegated `bash` から `kubectl -n copilot-sandbox-jobs ...` を使い、
+作業後に削除する前提の Deployment / Service / Job / Pod を扱えます。
+
 ## default overlay のカスタマイズ
 
 `control-plane.example/overlays/default/kustomization.yaml` には、次の差し替え候補を

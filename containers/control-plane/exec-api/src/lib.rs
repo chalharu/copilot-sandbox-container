@@ -786,6 +786,7 @@ fn install_required_packages(chroot_root: &Path) -> Result<(), DynError> {
                 OsString::from("bash"),
                 OsString::from("git"),
                 OsString::from("github-cli"),
+                OsString::from("kubectl"),
                 OsString::from("ca-certificates"),
                 OsString::from("openssh-client"),
             ],
@@ -822,6 +823,7 @@ fn install_required_packages(chroot_root: &Path) -> Result<(), DynError> {
                 OsString::from("ca-certificates"),
                 OsString::from("git"),
                 OsString::from("gh"),
+                OsString::from("kubernetes-client"),
                 OsString::from("openssh-client"),
             ],
             &noninteractive,
@@ -848,9 +850,15 @@ fn run_startup_script(chroot_root: &Path, startup_script: &str) -> Result<(), Dy
 }
 
 fn required_commands_present(chroot_root: &Path) -> bool {
-    ["/bin/bash", "/usr/bin/git", "/usr/bin/gh", "/usr/bin/ssh"]
-        .iter()
-        .all(|candidate| resolve_chroot_command(chroot_root, &[*candidate]).is_some())
+    [
+        "/bin/bash",
+        "/usr/bin/git",
+        "/usr/bin/gh",
+        "/usr/bin/kubectl",
+        "/usr/bin/ssh",
+    ]
+    .iter()
+    .all(|candidate| resolve_chroot_command(chroot_root, &[*candidate]).is_some())
 }
 
 fn resolve_chroot_command(chroot_root: &Path, candidates: &[&str]) -> Option<PathBuf> {
@@ -1271,6 +1279,11 @@ fn managed_shell_environment(remote_home: &Path, chrooted: bool) -> Vec<(&'stati
             remote_home.join(".gitconfig").into_os_string(),
         ),
     ];
+    for key in ["CONTROL_PLANE_K8S_NAMESPACE", "CONTROL_PLANE_JOB_NAMESPACE"] {
+        if let Some(value) = env::var_os(key) {
+            env.push((key, value));
+        }
+    }
     if chrooted {
         env.push((
             "LD_PRELOAD",
@@ -1426,8 +1439,8 @@ mod tests {
     use super::{
         CHROOT_EXEC_POLICY_LIBRARY_PATH, CHROOT_EXEC_POLICY_RULES_PATH, DEFAULT_EXEC_PATH,
         build_rootfs_extract_command, build_server_config, ensure_runtime_dirs,
-        managed_shell_environment, normalize_path, render_remote_git_config, resolve_cwd,
-        stdout_with_command_line, sync_git_config,
+        managed_shell_environment, normalize_path, render_remote_git_config,
+        required_commands_present, resolve_cwd, stdout_with_command_line, sync_git_config,
     };
     use crate::RawServerConfig;
     use std::ffi::OsString;
@@ -1553,35 +1566,47 @@ mod tests {
     #[test]
     fn managed_shell_environment_enables_exec_policy_for_chroot() {
         let env = managed_shell_environment(Path::new("/root"), true);
-        assert_eq!(
-            env,
-            vec![
-                ("PATH", OsString::from(DEFAULT_EXEC_PATH)),
-                ("HOME", OsString::from("/root")),
-                ("GIT_CONFIG_GLOBAL", OsString::from("/root/.gitconfig")),
-                (
-                    "LD_PRELOAD",
-                    OsString::from(CHROOT_EXEC_POLICY_LIBRARY_PATH),
-                ),
-                (
-                    "CONTROL_PLANE_EXEC_POLICY_RULES_FILE",
-                    OsString::from(CHROOT_EXEC_POLICY_RULES_PATH),
-                ),
-            ]
-        );
+        assert!(env.contains(&("PATH", OsString::from(DEFAULT_EXEC_PATH))));
+        assert!(env.contains(&("HOME", OsString::from("/root"))));
+        assert!(env.contains(&("GIT_CONFIG_GLOBAL", OsString::from("/root/.gitconfig"))));
+        assert!(env.contains(&(
+            "LD_PRELOAD",
+            OsString::from(CHROOT_EXEC_POLICY_LIBRARY_PATH),
+        )));
+        assert!(env.contains(&(
+            "CONTROL_PLANE_EXEC_POLICY_RULES_FILE",
+            OsString::from(CHROOT_EXEC_POLICY_RULES_PATH),
+        )));
     }
 
     #[test]
     fn managed_shell_environment_skips_exec_policy_without_chroot() {
         let env = managed_shell_environment(Path::new("/root"), false);
-        assert_eq!(
-            env,
-            vec![
-                ("PATH", OsString::from(DEFAULT_EXEC_PATH)),
-                ("HOME", OsString::from("/root")),
-                ("GIT_CONFIG_GLOBAL", OsString::from("/root/.gitconfig")),
-            ]
+        assert!(env.contains(&("PATH", OsString::from(DEFAULT_EXEC_PATH))));
+        assert!(env.contains(&("HOME", OsString::from("/root"))));
+        assert!(env.contains(&("GIT_CONFIG_GLOBAL", OsString::from("/root/.gitconfig"))));
+        assert!(!env.iter().any(|(key, _)| *key == "LD_PRELOAD"));
+        assert!(
+            !env.iter()
+                .any(|(key, _)| *key == "CONTROL_PLANE_EXEC_POLICY_RULES_FILE")
         );
+    }
+
+    fn write_stub_command(chroot_root: &Path, relative_path: &str) {
+        let full_path = chroot_root.join(relative_path.trim_start_matches('/'));
+        fs::create_dir_all(full_path.parent().unwrap()).unwrap();
+        fs::write(full_path, "").unwrap();
+    }
+
+    #[test]
+    fn required_commands_present_requires_kubectl_in_chroot() {
+        let chroot_root = TempDir::new().unwrap();
+        for command_path in ["/bin/bash", "/usr/bin/git", "/usr/bin/gh", "/usr/bin/ssh"] {
+            write_stub_command(chroot_root.path(), command_path);
+        }
+        assert!(!required_commands_present(chroot_root.path()));
+        write_stub_command(chroot_root.path(), "/usr/bin/kubectl");
+        assert!(required_commands_present(chroot_root.path()));
     }
 
     #[test]

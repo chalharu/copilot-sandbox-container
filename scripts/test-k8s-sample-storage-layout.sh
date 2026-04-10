@@ -224,6 +224,9 @@ printf '%s\n' 'k8s-sample-storage-layout-test: checking ConfigMap-backed environ
 assert_resource_present ConfigMap control-plane-config
 assert_resource_contains ConfigMap control-plane-config 'copilot-config.json: |'
 assert_resource_present ConfigMap control-plane-env
+assert_resource_present ServiceAccount control-plane-exec
+assert_resource_present Role control-plane-exec-workloads
+assert_resource_present RoleBinding control-plane-exec-workloads
 assert_resource_absent ServiceAccount garage-bootstrap
 assert_resource_absent Secret garage-admin-auth
 assert_resource_absent Secret garage-sccache-auth
@@ -234,6 +237,7 @@ assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_AUDIT_LOG_MA
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_IMAGE: docker.io/library/ubuntu:24.04'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_HOME: /root'
+assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT: control-plane-exec'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX: node-workspace'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS: standard'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE: 10Gi'
@@ -247,6 +251,12 @@ assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXE
 assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_GARAGE_SECRET'
 assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_ROOT'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest'
+assert_resource_contains Role control-plane-exec-workloads '  - deployments'
+assert_resource_contains Role control-plane-exec-workloads '  - services'
+assert_resource_contains Role control-plane-exec-workloads '  - jobs'
+assert_resource_contains Role control-plane-exec-workloads '  - pods'
+assert_resource_contains RoleBinding control-plane-exec-workloads 'name: control-plane-exec'
+assert_resource_contains RoleBinding control-plane-exec-workloads 'namespace: copilot-sandbox'
 assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT:'
 assert_resource_not_contains ConfigMap control-plane-env 'SCCACHE_BUCKET:'
 assert_resource_not_contains ConfigMap control-plane-env 'SCCACHE_ENDPOINT:'

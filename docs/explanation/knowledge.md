@@ -32,6 +32,12 @@ runtime を再利用します。session pod 自体は `sessionEnd` と OwnerRefe
 両方で cleanup されますが、`/environment/root` 側はノード cache として残るため、
 毎回の package install を避けられます。
 
+sample manifest の既定では、この session-scoped Execution Pod にも dedicated な
+`control-plane-exec` ServiceAccount を割り当て、`copilot-sandbox-jobs` 側では
+`control-plane-exec-workloads` Role へだけ bind します。これにより delegated
+shell から `kubectl -n copilot-sandbox-jobs ...` を使っても、control-plane 本体の
+権限をそのまま広げずに済みます。
+
 つまりこの repo は「対話中の Copilot bash は session fast path」「operator が
 明示的に叩く command は Kubernetes Job」という二経路を持ちます。どちらも
 Kubernetes 上で動かすことで、権限分離・再現性・異常時の影響範囲をそろえます。

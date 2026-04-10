@@ -32,6 +32,7 @@ struct SessionExecConfig {
     copilot_session_gh_subpath: String,
     copilot_session_ssh_subpath: String,
     namespace: String,
+    job_namespace: String,
     owner_pod_name: String,
     owner_pod_uid: String,
     node_name: String,
@@ -46,6 +47,7 @@ struct SessionExecConfig {
     memory_request: String,
     memory_limit: String,
     remote_home: String,
+    service_account: Option<String>,
     run_as_uid: u32,
     run_as_gid: u32,
     git_user_name: Option<String>,
@@ -259,6 +261,10 @@ fn load_config() -> ToolResult<SessionExecConfig> {
         "CONTROL_PLANE_POD_NAMESPACE",
         env_or_default("CONTROL_PLANE_K8S_NAMESPACE", "default"),
     )?;
+    let job_namespace = non_empty_env(
+        "CONTROL_PLANE_JOB_NAMESPACE",
+        env_or_default("CONTROL_PLANE_JOB_NAMESPACE", &namespace),
+    )?;
     let owner_pod_name = required_env("CONTROL_PLANE_POD_NAME")?;
     let owner_pod_uid = required_env("CONTROL_PLANE_POD_UID")?;
     let node_name = required_env("CONTROL_PLANE_NODE_NAME")?;
@@ -327,6 +333,7 @@ fn load_config() -> ToolResult<SessionExecConfig> {
             "state/ssh",
         ),
         namespace,
+        job_namespace,
         owner_pod_name,
         owner_pod_uid,
         node_name,
@@ -341,6 +348,7 @@ fn load_config() -> ToolResult<SessionExecConfig> {
         memory_request,
         memory_limit,
         remote_home,
+        service_account: optional_env("CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT"),
         run_as_uid,
         run_as_gid,
         git_user_name: optional_env("CONTROL_PLANE_GIT_USER_NAME"),
@@ -1075,7 +1083,7 @@ fn build_exec_pod(
         }));
     }
 
-    serde_json::from_value(json!({
+    let mut pod = json!({
         "apiVersion": "v1",
         "kind": "Pod",
         "metadata": {
@@ -1204,6 +1212,9 @@ fn build_exec_pod(
                     "name": "CONTROL_PLANE_WORKSPACE",
                     "value": config.workspace_mount_path
                 }, {
+                    "name": "CONTROL_PLANE_JOB_NAMESPACE",
+                    "value": config.job_namespace
+                }, {
                     "name": "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT",
                     "value": chroot_root
                 }, {
@@ -1243,8 +1254,13 @@ fn build_exec_pod(
             }],
             "volumes": volumes
         }
-    }))
-    .map_err(|error| format!("failed to build execution pod manifest: {error}"))
+    });
+    if let Some(service_account) = config.service_account.as_ref() {
+        pod["spec"]["automountServiceAccountToken"] = json!(true);
+        pod["spec"]["serviceAccountName"] = json!(service_account);
+    }
+    serde_json::from_value(pod)
+        .map_err(|error| format!("failed to build execution pod manifest: {error}"))
 }
 
 fn required_node_affinity(node_name: &str) -> Value {
@@ -1361,6 +1377,7 @@ mod tests {
             copilot_session_gh_subpath: "state/gh".to_string(),
             copilot_session_ssh_subpath: "state/ssh".to_string(),
             namespace: "copilot-sandbox".to_string(),
+            job_namespace: "copilot-sandbox-jobs".to_string(),
             owner_pod_name: "control-plane-0".to_string(),
             owner_pod_uid: "pod-uid-1".to_string(),
             node_name: "kind-control-plane".to_string(),
@@ -1375,6 +1392,7 @@ mod tests {
             memory_request: "256Mi".to_string(),
             memory_limit: "1Gi".to_string(),
             remote_home: "/root".to_string(),
+            service_account: Some("control-plane-exec".to_string()),
             run_as_uid: 1000,
             run_as_gid: 1000,
             git_user_name: Some("Copilot".to_string()),
@@ -1502,6 +1520,11 @@ mod tests {
         )
         .unwrap();
         let spec = pod.spec.unwrap();
+        assert_eq!(
+            spec.service_account_name.as_deref(),
+            Some("control-plane-exec")
+        );
+        assert_eq!(spec.automount_service_account_token, Some(true));
         let node_affinity = spec
             .affinity
             .as_ref()
@@ -1531,6 +1554,11 @@ mod tests {
             .iter()
             .find(|container| container.name == "execution")
             .unwrap();
+        let env = execution.env.as_ref().unwrap();
+        assert!(env.iter().any(|entry| {
+            entry.name == "CONTROL_PLANE_JOB_NAMESPACE"
+                && entry.value.as_deref() == Some("copilot-sandbox-jobs")
+        }));
         assert_eq!(
             execution.command.as_ref().unwrap(),
             &vec![
@@ -1664,6 +1692,24 @@ mod tests {
         assert!(command.contains(
             "install -m 0644 \"/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml\" \"$policy_rules_path\""
         ));
+    }
+
+    #[test]
+    fn pod_manifest_keeps_service_account_token_disabled_without_exec_service_account() {
+        let mut config = config();
+        config.service_account = None;
+        let pod = build_exec_pod(
+            &config,
+            "session-42",
+            "control-plane-exec-test",
+            "session-token",
+            "ghcr.io/example/bootstrap:test",
+            "node-workspace-kind-control-plane",
+        )
+        .unwrap();
+        let spec = pod.spec.unwrap();
+        assert!(spec.service_account_name.is_none());
+        assert_eq!(spec.automount_service_account_token, Some(false));
     }
 
     #[test]
