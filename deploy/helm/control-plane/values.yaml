@@ -102,12 +102,11 @@ instances:
     service: {}
     auth: {}
     workspace: {}
-    session:
-      # Optional per-instance overrides for shared session mounts. stateSubPath
-      # moves repo-local control-plane state under a different directory inside
-      # the shared session PVC; ghSubPath / sshSubPath can isolate client auth
-      # state too when needed.
-      # stateSubPath: repo-state/sandbox
+    # Optional per-instance overrides for shared session mounts. stateSubPath
+    # moves repo-local control-plane state under a different directory inside
+    # the shared session PVC; ghSubPath / sshSubPath can isolate client auth
+    # state too when needed.
+    session: {}
     # Repo-specific control-plane-env overrides such as TZ, Git identity, or an
     # exec-pod startup script.
     controlPlaneEnv: {}
