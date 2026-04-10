@@ -1116,6 +1116,10 @@ git_hook_command=$'rm -rf /workspace/fast-exec-git-hook-test-repo\nmkdir -p /wor
 git_hook_command_base64="$(printf '%s' "${git_hook_command}" | base64 | tr -d '\n')"
 control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${git_hook_command_base64}" >/dev/null
 grep -Eq '^[0-9a-f]{40}$' /workspace/fast-exec-git-hook-commit.txt
+hook_readonly_command=$'set -euo pipefail\ntest -x /root/.copilot/hooks/postToolUse/main\ntest -f /usr/local/share/control-plane/hooks/postToolUse/linters.json\nif printf tamper >> /root/.copilot/hooks/postToolUse/linters.json 2>/dev/null; then\n  printf "%s\\n" "Expected fast-exec compat hooks to stay read-only" >&2\n  exit 1\nfi\nif printf tamper >> /usr/local/share/control-plane/hooks/postToolUse/linters.json 2>/dev/null; then\n  printf "%s\\n" "Expected fast-exec managed hooks to stay read-only" >&2\n  exit 1\nfi\nif ln -sfn /tmp/evil-hooks /root/.copilot/hooks 2>/dev/null; then\n  printf "%s\\n" "Expected fast-exec ~/.copilot/hooks symlink replacement to fail" >&2\n  exit 1\nfi\ntest "$(readlink /root/.copilot/hooks)" = "/usr/local/share/control-plane/hooks"\nprintf "exec-hooks-readonly-ok\\n" > /workspace/fast-exec-hooks-readonly.txt'
+hook_readonly_command_base64="$(printf '%s' "${hook_readonly_command}" | base64 | tr -d '\n')"
+control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${hook_readonly_command_base64}" >/dev/null
+grep -qx 'exec-hooks-readonly-ok' /workspace/fast-exec-hooks-readonly.txt
 command_text=$'printf "fast-exec-stdout\\n"; printf "fast-exec-stderr\\n" >&2; printf "delegated\\n" > /workspace/fast-exec-marker.txt; exit 7'
 command_base64="$(printf '%s' "${command_text}" | base64 | tr -d '\n')"
 set +e

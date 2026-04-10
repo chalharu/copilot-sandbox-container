@@ -1126,7 +1126,6 @@ fn finalize_remote_home_permissions(
     }
     for (path, mode, description) in [
         (&paths.home_dir, 0o1770, "remote home"),
-        (&paths.config_dir, 0o700, "remote config directory"),
         (&paths.copilot_dir, 0o1770, "remote Copilot directory"),
         (&paths.gitconfig_path, 0o640, "remote git config"),
     ] {
@@ -1963,7 +1962,6 @@ mod tests {
         assert_eq!(gitconfig_metadata.uid(), 0);
         assert_eq!(gitconfig_metadata.gid(), 1000);
         assert_eq!(home_metadata.permissions().mode() & 0o7777, 0o1770);
-        assert_eq!(config_metadata.permissions().mode() & 0o777, 0o700);
         assert_eq!(copilot_metadata.permissions().mode() & 0o7777, 0o1770);
         assert_eq!(gitconfig_metadata.permissions().mode() & 0o777, 0o640);
         assert_eq!(
