@@ -1013,7 +1013,10 @@ fn sync_git_config(config: &ServerConfig) -> Result<(), DynError> {
     let paths = resolve_remote_home_paths(chroot_root, &config.remote_home)?;
     ensure_remote_home_dirs(&paths)?;
     prepare_remote_home_for_update(&paths)?;
-    ensure_symlink_path(&paths.copilot_hooks_path, Path::new(CHROOT_COPILOT_HOOKS_DIR))?;
+    ensure_symlink_path(
+        &paths.copilot_hooks_path,
+        Path::new(CHROOT_COPILOT_HOOKS_DIR),
+    )?;
     with_context(
         fs::write(
             &paths.gitconfig_path,
@@ -1586,10 +1589,10 @@ fn exit_code_from_status(status: std::process::ExitStatus) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        CHROOT_COPILOT_HOOKS_DIR, CHROOT_EXEC_POLICY_LIBRARY_PATH,
-        CHROOT_EXEC_POLICY_RULES_PATH, DEFAULT_EXEC_PATH, build_rootfs_extract_command,
-        build_server_config, ensure_runtime_dirs, managed_shell_environment, normalize_path,
-        render_remote_git_config, resolve_cwd, stdout_with_command_line, sync_git_config,
+        CHROOT_COPILOT_HOOKS_DIR, CHROOT_EXEC_POLICY_LIBRARY_PATH, CHROOT_EXEC_POLICY_RULES_PATH,
+        DEFAULT_EXEC_PATH, build_rootfs_extract_command, build_server_config, ensure_runtime_dirs,
+        managed_shell_environment, normalize_path, render_remote_git_config, resolve_cwd,
+        stdout_with_command_line, sync_git_config,
     };
     use crate::RawServerConfig;
     use std::ffi::OsString;

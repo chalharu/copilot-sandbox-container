@@ -179,7 +179,9 @@ fn parse_positive_u64(raw_value: &str, variable_name: &str) -> Result<u64, Strin
         .parse::<u64>()
         .map_err(|_| format!("{variable_name} must be a positive integer: {raw_value}"))?;
     if value == 0 {
-        Err(format!("{variable_name} must be a positive integer: {raw_value}"))
+        Err(format!(
+            "{variable_name} must be a positive integer: {raw_value}"
+        ))
     } else {
         Ok(value)
     }
@@ -266,7 +268,8 @@ mod tests {
         permissions.set_mode(0o755);
         fs::set_permissions(&hook_path, permissions).unwrap();
 
-        let (addr, shutdown_tx, server_handle) = start_server(workspace.path(), home.path(), "token");
+        let (addr, shutdown_tx, server_handle) =
+            start_server(workspace.path(), home.path(), "token");
         let _forward_addr = EnvRestore::set(FORWARD_ADDR_ENV, &addr);
         let _forward_token = EnvRestore::set(FORWARD_TOKEN_ENV, "token");
         let _forward_timeout = EnvRestore::set(FORWARD_TIMEOUT_ENV, "30");

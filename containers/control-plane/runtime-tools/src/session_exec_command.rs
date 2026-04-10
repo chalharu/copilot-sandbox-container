@@ -1678,12 +1678,14 @@ mod tests {
         assert!(env.iter().any(|value| value.name
             == "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE"
             && value.value.as_deref() == Some("/environment/hooks/git")));
-        assert!(env.iter().any(|value| value.name
-            == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR"
-            && value.value.as_deref() == Some("http://10.0.0.10:8081")));
-        assert!(env.iter().any(|value| value.name
-            == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN"
-            && value.value.as_deref() == Some("reverse-token")));
+        assert!(env.iter().any(
+            |value| value.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR"
+                && value.value.as_deref() == Some("http://10.0.0.10:8081")
+        ));
+        assert!(env.iter().any(
+            |value| value.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN"
+                && value.value.as_deref() == Some("reverse-token")
+        ));
         assert!(env.iter().any(|value| value.name
             == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC"
             && value.value.as_deref() == Some("3600")));
