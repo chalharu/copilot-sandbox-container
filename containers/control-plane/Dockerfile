@@ -7,7 +7,7 @@ COPY hooks/preToolUse/deny-rules.yaml ./hooks/preToolUse/deny-rules.yaml
 RUN cargo test --locked --release \
     && cargo build --locked --release
 
-FROM node:24.14.1-bookworm-slim@sha256:06e5c9f86bfa0aaa7163cf37a5eaa8805f16b9acb48e3f85645b09d459fc2a9f
+FROM node:24.14.1-bookworm-slim@sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c
 
 # renovate: datasource=npm depName=@github/copilot
 ARG COPILOT_CLI_VERSION=1.0.21
