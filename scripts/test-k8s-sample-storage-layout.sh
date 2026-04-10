@@ -6,9 +6,14 @@ manifest_root="${script_dir}/../deploy/kubernetes/control-plane.example"
 install_manifest_root="${script_dir}/../deploy/kubernetes/control-plane.example/install"
 manifest_path="$(mktemp)"
 install_manifest_path="$(mktemp)"
+overlay_manifest_path="$(mktemp)"
+overlay_workdir=''
 
 cleanup() {
-  rm -f "${manifest_path}" "${install_manifest_path}"
+  rm -f "${manifest_path}" "${install_manifest_path}" "${overlay_manifest_path}"
+  if [[ -n "${overlay_workdir}" ]]; then
+    rm -rf "${overlay_workdir}"
+  fi
 }
 
 trap cleanup EXIT
@@ -66,6 +71,10 @@ resource_block() {
 
 install_resource_block() {
   resource_block_from_file "${install_manifest_path}" "$1" "$2"
+}
+
+overlay_resource_block() {
+  resource_block_from_file "${overlay_manifest_path}" "$1" "$2"
 }
 
 assert_resource_present() {
@@ -137,6 +146,29 @@ assert_install_resource_contains() {
   }
 }
 
+assert_overlay_resource_present() {
+  local kind="$1"
+  local name="$2"
+
+  overlay_resource_block "${kind}" "${name}" >/dev/null || {
+    printf 'Expected %s/%s in overlay manifest\n' "${kind}" "${name}" >&2
+    exit 1
+  }
+}
+
+assert_overlay_resource_contains() {
+  local kind="$1"
+  local name="$2"
+  local expected="$3"
+  local block
+
+  block="$(overlay_resource_block "${kind}" "${name}")"
+  grep -Fq -- "${expected}" <<<"${block}" || {
+    printf 'Expected overlay %s/%s to contain: %s\n' "${kind}" "${name}" "${expected}" >&2
+    exit 1
+  }
+}
+
 kind_count_in_file() {
   local source_manifest="$1"
   local kind="$2"
@@ -168,6 +200,55 @@ assert_deployment_absent() {
     printf 'Did not expect Deployment/control-plane to contain: %s\n' "${unexpected}" >&2
     exit 1
   fi
+}
+
+render_named_overlay_propagation_fixture() {
+  overlay_workdir="$(mktemp -d "${manifest_root}/overlays/tmp-propagation.XXXXXX")"
+  cp "${manifest_root}/overlays/default/kustomization.yaml" "${overlay_workdir}/kustomization.yaml"
+  cat >>"${overlay_workdir}/kustomization.yaml" <<'EOF'
+patches:
+  - target:
+      kind: Namespace
+      name: copilot-sandbox
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: custom-sandbox
+  - target:
+      kind: Namespace
+      name: copilot-sandbox-jobs
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: custom-sandbox-jobs
+  - target:
+      kind: PersistentVolumeClaim
+      name: control-plane-workspace-pvc
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: my-custom-workspace-pvc
+  - target:
+      kind: Service
+      name: control-plane
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: my-custom-service
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: control-plane
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:v1.0.0
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
+EOF
+  render_kustomization "${overlay_workdir}" "${overlay_manifest_path}"
 }
 
 printf '%s\n' 'k8s-sample-storage-layout-test: rendering sample kustomization' >&2
@@ -224,6 +305,7 @@ printf '%s\n' 'k8s-sample-storage-layout-test: checking ConfigMap-backed environ
 assert_resource_present ConfigMap control-plane-config
 assert_resource_contains ConfigMap control-plane-config 'copilot-config.json: |'
 assert_resource_present ConfigMap control-plane-env
+assert_resource_present ConfigMap control-plane-instance-env
 assert_resource_present ServiceAccount control-plane-exec
 assert_resource_present Role control-plane-exec-workloads
 assert_resource_present RoleBinding control-plane-exec-workloads
@@ -235,7 +317,6 @@ assert_resource_absent RoleBinding garage-bootstrap-secret-writer
 assert_resource_contains ConfigMap control-plane-env 'SSH_PUBLIC_KEY_FILE: /var/run/control-plane-auth/ssh-public-key'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS: "10000"'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_IMAGE: docker.io/library/ubuntu:24.04'
-assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_HOME: /root'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT: control-plane-exec'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX: node-workspace'
@@ -250,7 +331,20 @@ assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXE
 assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_CONFIG_CONFIGMAP'
 assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_GARAGE_SECRET'
 assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_ROOT'
-assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE:'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY:'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE:'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRANSFER_HOST:'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRANSFER_PORT:'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_IMAGE_PULL_POLICY:'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_WORKSPACE_PVC:'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: IfNotPresent'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane.copilot-sandbox.svc.cluster.local'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: IfNotPresent'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_WORKSPACE_PVC: control-plane-workspace-pvc'
 assert_resource_contains Role control-plane-exec-workloads '  - deployments'
 assert_resource_contains Role control-plane-exec-workloads '  - services'
 assert_resource_contains Role control-plane-exec-workloads '  - jobs'
@@ -267,6 +361,20 @@ assert_resource_not_contains ConfigMap control-plane-env 'SCCACHE_CACHE_SIZE:'
 assert_resource_not_contains ConfigMap control-plane-env 'AWS_ACCESS_KEY_ID_FILE:'
 assert_resource_not_contains ConfigMap control-plane-env 'AWS_SECRET_ACCESS_KEY_FILE:'
 
+printf '%s\n' 'k8s-sample-storage-layout-test: checking named overlay propagation' >&2
+render_named_overlay_propagation_fixture
+assert_overlay_resource_present ConfigMap control-plane-env
+assert_overlay_resource_present ConfigMap control-plane-instance-env
+assert_overlay_resource_present Service my-custom-service
+assert_overlay_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_K8S_NAMESPACE: custom-sandbox'
+assert_overlay_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_NAMESPACE: custom-sandbox-jobs'
+assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_WORKSPACE_PVC: my-custom-workspace-pvc'
+assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_HOST: my-custom-service.custom-sandbox.svc.cluster.local'
+assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:v1.0.0'
+assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:v1.0.0'
+assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: Always'
+assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: Always'
+
 printf '%s\n' 'k8s-sample-storage-layout-test: checking services and deployment mounts' >&2
 assert_resource_present Service control-plane
 assert_resource_absent Service garage-s3
@@ -277,6 +385,7 @@ assert_deployment_contains 'claimName: control-plane-workspace-pvc'
 assert_deployment_contains 'image: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest'
 assert_deployment_contains 'envFrom:'
 assert_deployment_contains 'name: control-plane-env'
+assert_deployment_contains 'name: control-plane-instance-env'
 assert_deployment_contains 'subPath: state/copilot-config.json'
 assert_deployment_contains 'subPath: state/command-history-state.json'
 assert_deployment_contains 'subPath: session-state'

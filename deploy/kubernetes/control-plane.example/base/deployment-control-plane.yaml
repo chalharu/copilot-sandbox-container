@@ -106,13 +106,18 @@ spec:
       containers:
         - name: control-plane
           # The sample starts with the repository's published latest tag so a
-          # first install works without editing image refs. Pin this to a full
-          # commit SHA tag when you want revision-stable rollouts.
+          # first install works without editing image refs. The shipped
+          # replacements keep the bootstrap / job-transfer helper image env vars
+          # aligned with this value unless an overlay intentionally overrides the
+          # derived config. Pin this to a full commit SHA tag when you want
+          # revision-stable rollouts.
           image: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
                 name: control-plane-env
+            - configMapRef:
+                name: control-plane-instance-env
           env:
             - name: CONTROL_PLANE_POD_NAME
               valueFrom:

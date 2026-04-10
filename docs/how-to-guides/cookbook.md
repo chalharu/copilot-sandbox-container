@@ -73,9 +73,11 @@ ConfigMap / Secret / write-back の具体的な path は
 2. 再現性を重視するなら GitHub Packages の
    `copilot-sandbox-container-v2/control-plane`
    （<https://github.com/chalharu/copilot-sandbox-container-v2/pkgs/container/copilot-sandbox-container-v2%2Fcontrol-plane>）
-   から full commit SHA tag を選び、`Deployment/control-plane`、
-   `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE`、
-   `CONTROL_PLANE_JOB_TRANSFER_IMAGE` の 3 箇所を同じ tag にそろえる
+   から full commit SHA tag を選び、`Deployment/control-plane` または named
+   overlay の `images:` へ入れる。shipped replacement が
+   `control-plane-instance-env` 側の
+   `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` /
+   `CONTROL_PLANE_JOB_TRANSFER_IMAGE` も同じ tag へそろえる
 3. `CONTROL_PLANE_FAST_EXECUTION_IMAGE` の sample 既定は
    `docker.io/library/ubuntu:24.04`。別の image に変える場合は `/bin/sh` と
    `apt-get` または `apk` を含め、shared cluster では digest-pinned ref を使う
@@ -94,12 +96,14 @@ ConfigMap / Secret / write-back の具体的な path は
 4. Copilot CLI の追加設定は `control-plane-config` ConfigMap の
    `copilot-config.json` へ書き、PVC 上の既存 `~/.copilot/config.json`
    へ merge させる
-5. namespace / PVC / file path などの非機密 env は
-   `control-plane-env` ConfigMap にまとめ、Deployment の `envFrom` で読む
+5. 非機密 env は Deployment の `envFrom` で読み、shared な runtime 設定は
+   `control-plane-env`、instance 固有の namespace / Service host / workspace PVC /
+   helper image は `control-plane-instance-env` へ分ける
 6. Copilot CLI の `bash` tool を fast execution pod へ委譲する場合は、
-   `CONTROL_PLANE_FAST_EXECUTION_*` と
-   `CONTROL_PLANE_COPILOT_SESSION_{PVC,GH_SUBPATH,SSH_SUBPATH}` も
-   `control-plane-env` に置く
+   shared な `CONTROL_PLANE_FAST_EXECUTION_*` と
+   `CONTROL_PLANE_COPILOT_SESSION_{PVC,GH_SUBPATH,SSH_SUBPATH}` は
+   `control-plane-env` に置き、helper image や job-transfer host は shipped
+   replacement に追従させる
 7. `CONTROL_PLANE_POD_NAME` / `CONTROL_PLANE_POD_NAMESPACE` /
    `CONTROL_PLANE_POD_UID` / `CONTROL_PLANE_NODE_NAME` は Deployment の
    downward API `env:` で注入し、Execution Pod の OwnerReference / node pin
@@ -150,11 +154,12 @@ ConfigMap / Secret / write-back の具体的な path は
    初回導入前に storage class / サイズを実クラスタ向けへ確定させる。
    `control-plane-copilot-session-pvc` は RWX を想定しているので、
    `replace-me-with-rwx-storage-class` を実クラスタ向けに置き換える
-4. `control-plane-workspace-pvc` も PVC spec なので、`base/` や
-   `overlays/default/` で storage class / サイズを変えるなら、
-   初回導入前に反映しておく。sample 既定の `ReadWriteOnce` のままでも、
-   Execution Pod は control-plane Pod と同じ node に pin されるため共有できる。
-   cluster に `standard` が無い場合は、workspace PVC 側だけでなく
+4. `control-plane-workspace-pvc` も PVC spec なので、storage class / サイズを
+   変えるなら初回導入前に反映しておく。named overlay で PVC 名まで変える場合も、
+   shipped sample が mount 先と helper env を追従させるため、PVC 側を 1 回 patch
+   すればよい。sample 既定の `ReadWriteOnce` のままでも、Execution Pod は
+   control-plane Pod と同じ node に pin されるため共有できる。cluster に
+   `standard` が無い場合は、workspace PVC 側だけでなく
    `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS` も同時に見直す
 5. Rust Job の `cargo` / `rustup` / `target` などの再生成可能な state は
    `/var/tmp/containerized-rust/...` に寄せ、shared `/workspace` PVC に cache を

@@ -28,7 +28,6 @@ data:
   CONTROL_PLANE_COPILOT_SESSION_PVC: control-plane-copilot-session-pvc
   CONTROL_PLANE_COPILOT_SESSION_GH_SUBPATH: state/gh
   CONTROL_PLANE_COPILOT_SESSION_SSH_SUBPATH: state/ssh
-  CONTROL_PLANE_WORKSPACE_PVC: control-plane-workspace-pvc
   CONTROL_PLANE_WORKSPACE_SUBPATH: workspace
   # Enable session-scoped execution pods for Copilot CLI bash commands.
   CONTROL_PLANE_FAST_EXECUTION_ENABLED: "1"
@@ -40,11 +39,6 @@ data:
   # requests.
   CONTROL_PLANE_FAST_EXECUTION_IMAGE: docker.io/library/ubuntu:24.04
   CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: IfNotPresent
-  # The bootstrap image provides the Rust exec-plane binary and bundled git
-  # hooks. The sample starts with the repository's published latest tag; pin to
-  # a full commit SHA tag when you want reproducible rollouts.
-  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest
-  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: IfNotPresent
   # Fresh-node bootstrap can take a few minutes while the cached chroot installs
   # the initial runtime packages.
   CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 300s
@@ -85,16 +79,12 @@ data:
   # Compile-heavy Rust hooks should run through a dedicated toolchain image
   # instead of the slim control-plane image.
   CONTROL_PLANE_RUST_HOOK_IMAGE: docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895
-  CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest
-  CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane.copilot-sandbox.svc.cluster.local
-  CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"
   CONTROL_PLANE_JOB_SERVICE_ACCOUNT: control-plane-job
   # Audit logs are written to ~/.copilot/session-state/audit/audit-log.db
   # on the shared copilot session PVC. Tune the retained row cap to
   # adjust history depth; when a tool hook sees more than this many
   # rows, it deletes the oldest rows until roughly 3/4 of the cap remains.
   CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS: "10000"
-  CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: IfNotPresent
   CONTROL_PLANE_JOB_CPU_REQUEST: 250m
   CONTROL_PLANE_JOB_CPU_LIMIT: "2"
   CONTROL_PLANE_JOB_MEMORY_REQUEST: 256Mi
