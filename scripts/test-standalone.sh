@@ -183,7 +183,7 @@ set -euo pipefail
 command -v node
 command -v npm
 npm ls -g @github/copilot --depth=0 | grep -q "@github/copilot@"
-! command -v git >/dev/null 2>&1
+command -v git
 ! command -v gh >/dev/null 2>&1
 ! command -v curl >/dev/null 2>&1
 ! command -v sqlite3 >/dev/null 2>&1

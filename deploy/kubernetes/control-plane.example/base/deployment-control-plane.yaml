@@ -159,13 +159,19 @@ spec:
             - containerPort: 2222
               name: ssh
           readinessProbe:
-            tcpSocket:
-              port: ssh
+            exec:
+              command:
+                - bash
+                - -lc
+                - pgrep -x sshd >/dev/null
             periodSeconds: 5
             failureThreshold: 12
           livenessProbe:
-            tcpSocket:
-              port: ssh
+            exec:
+              command:
+                - bash
+                - -lc
+                - pgrep -x sshd >/dev/null
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 6
