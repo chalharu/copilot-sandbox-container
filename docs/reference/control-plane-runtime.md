@@ -123,6 +123,8 @@ namespace は owner Pod 側のままなので、別 namespace のリソースは
 
 entrypoint は bundled Copilot hook を root-owned な `COPILOT_HOME` 配下へ
 配置し、互換用に `~/.copilot/hooks` からも参照できるようにします。
+`~/.copilot/` は sticky directory として管理するため、Copilot user は他の
+state を更新できても `hooks` symlink 自体は差し替えられません。
 
 Git 側では次を固定します。
 

@@ -68,6 +68,8 @@ test -x /usr/local/bin/ruff
 test -x /usr/local/bin/hadolint
 test "${COPILOT_HOME}" = /var/lib/control-plane/managed-runtime/copilot-home
 test "${GIT_CONFIG_GLOBAL}" = /var/lib/control-plane/managed-runtime/gitconfig
+test "$(stat -c '%a %U %G' /home/copilot)" = "1770 root copilot"
+test "$(stat -c '%a %U %G' /home/copilot/.copilot)" = "1770 root copilot"
 test -L /home/copilot/.copilot/hooks
 test "$(readlink /home/copilot/.copilot/hooks)" = /usr/local/share/control-plane/hooks
 test -L /home/copilot/.gitconfig
@@ -108,4 +110,10 @@ if su -s /bin/bash copilot -lc "printf tamper >> \"${COPILOT_HOME}/hooks/hooks.j
   printf "%s\n" "Expected managed Copilot hooks to be read-only for the copilot user" >&2
   exit 1
 fi
+if su -s /bin/bash copilot -lc 'ln -sfn /tmp/evil-hooks ~/.copilot/hooks' 2>/dev/null; then
+  printf "%s\n" "Expected ~/.copilot/hooks to resist symlink replacement for the copilot user" >&2
+  exit 1
+fi
+test "$(readlink /home/copilot/.copilot/hooks)" = /usr/local/share/control-plane/hooks
+su -s /bin/bash copilot -lc 'touch ~/.copilot/user-owned-state && rm ~/.copilot/user-owned-state'
 EOF

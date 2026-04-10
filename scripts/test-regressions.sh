@@ -20,6 +20,14 @@ startup_caps=(
 
 cleanup() {
   "${container_bin}" rm -f "${container_name}" >/dev/null 2>&1 || true
+  if [[ -d "${workdir}" ]]; then
+    "${container_bin}" run --rm \
+      --user 0:0 \
+      -v "${workdir}:/cleanup" \
+      --entrypoint sh \
+      "${control_plane_image}" \
+      -c 'find /cleanup -mindepth 1 -depth -delete' >/dev/null 2>&1 || true
+  fi
   rm -rf "${workdir}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT

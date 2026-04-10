@@ -1062,8 +1062,8 @@ fn sync_git_config(config: &ServerConfig) -> Result<(), DynError> {
             )
         },
     )?;
-    set_path_mode(&paths.gitconfig_path, 0o600, "remote git config")?;
-    assign_remote_home_owner(&paths, config.run_as_uid, config.run_as_gid)?;
+    set_path_mode(&paths.gitconfig_path, 0o640, "remote git config")?;
+    finalize_remote_home_permissions(&paths, config.run_as_uid, config.run_as_gid)?;
     Ok(())
 }
 
@@ -1108,28 +1108,33 @@ fn prepare_remote_home_for_update(paths: &RemoteHomePaths) -> Result<(), DynErro
     if paths.gitconfig_path.exists() {
         set_path_owner(&paths.gitconfig_path, 0, 0, "remote git config")?;
     }
-    for (path, description) in [
-        (&paths.home_dir, "remote home"),
-        (&paths.config_dir, "remote config directory"),
-        (&paths.copilot_dir, "remote Copilot directory"),
-    ] {
-        set_path_mode(path, 0o700, description)?;
-    }
     Ok(())
 }
 
-fn assign_remote_home_owner(paths: &RemoteHomePaths, uid: u32, gid: u32) -> Result<(), DynError> {
-    for (path, description) in [
-        (&paths.home_dir, "remote home"),
-        (&paths.config_dir, "remote config directory"),
-        (&paths.copilot_dir, "remote Copilot directory"),
-        (&paths.gitconfig_path, "remote git config"),
+fn finalize_remote_home_permissions(
+    paths: &RemoteHomePaths,
+    uid: u32,
+    gid: u32,
+) -> Result<(), DynError> {
+    for (path, owner_uid, description) in [
+        (&paths.home_dir, 0, "remote home"),
+        (&paths.config_dir, uid, "remote config directory"),
+        (&paths.copilot_dir, 0, "remote Copilot directory"),
+        (&paths.gitconfig_path, 0, "remote git config"),
     ] {
-        set_path_owner(path, uid, gid, description)?;
+        set_path_owner(path, owner_uid, gid, description)?;
+    }
+    for (path, mode, description) in [
+        (&paths.home_dir, 0o1770, "remote home"),
+        (&paths.config_dir, 0o700, "remote config directory"),
+        (&paths.copilot_dir, 0o1770, "remote Copilot directory"),
+        (&paths.gitconfig_path, 0o640, "remote git config"),
+    ] {
+        set_path_mode(path, mode, description)?;
     }
     set_symlink_owner(
         &paths.copilot_hooks_path,
-        uid,
+        0,
         gid,
         "remote Copilot hooks symlink",
     )?;
@@ -1880,6 +1885,8 @@ mod tests {
     fn sync_git_config_handles_reused_runtime_owned_home() {
         use nix::unistd::{Gid, Uid, chown};
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        use std::os::unix::process::CommandExt;
+        use std::process::Command;
 
         if !Uid::effective().is_root() {
             return;
@@ -1945,20 +1952,50 @@ mod tests {
         let copilot_metadata = fs::metadata(&copilot_dir).unwrap();
         let copilot_hooks_metadata = fs::symlink_metadata(&copilot_hooks_path).unwrap();
         let gitconfig_metadata = fs::metadata(&gitconfig_path).unwrap();
-        assert_eq!(home_metadata.uid(), 1000);
+        assert_eq!(home_metadata.uid(), 0);
+        assert_eq!(home_metadata.gid(), 1000);
         assert_eq!(config_metadata.uid(), 1000);
-        assert_eq!(copilot_metadata.uid(), 1000);
-        assert_eq!(copilot_hooks_metadata.uid(), 1000);
+        assert_eq!(config_metadata.gid(), 1000);
+        assert_eq!(copilot_metadata.uid(), 0);
+        assert_eq!(copilot_metadata.gid(), 1000);
+        assert_eq!(copilot_hooks_metadata.uid(), 0);
         assert_eq!(copilot_hooks_metadata.gid(), 1000);
-        assert_eq!(gitconfig_metadata.uid(), 1000);
-        assert_eq!(home_metadata.permissions().mode() & 0o777, 0o700);
+        assert_eq!(gitconfig_metadata.uid(), 0);
+        assert_eq!(gitconfig_metadata.gid(), 1000);
+        assert_eq!(home_metadata.permissions().mode() & 0o7777, 0o1770);
         assert_eq!(config_metadata.permissions().mode() & 0o777, 0o700);
-        assert_eq!(copilot_metadata.permissions().mode() & 0o777, 0o700);
-        assert_eq!(gitconfig_metadata.permissions().mode() & 0o777, 0o600);
+        assert_eq!(copilot_metadata.permissions().mode() & 0o7777, 0o1770);
+        assert_eq!(gitconfig_metadata.permissions().mode() & 0o777, 0o640);
         assert_eq!(
             fs::read_link(&copilot_hooks_path).unwrap(),
             PathBuf::from(CHROOT_COPILOT_HOOKS_DIR)
         );
+
+        let replacement_status = Command::new("ln")
+            .arg("-sfn")
+            .arg("/tmp/evil-hooks")
+            .arg(&copilot_hooks_path)
+            .uid(1000)
+            .gid(1000)
+            .status()
+            .unwrap();
+        assert!(!replacement_status.success());
+        assert_eq!(
+            fs::read_link(&copilot_hooks_path).unwrap(),
+            PathBuf::from(CHROOT_COPILOT_HOOKS_DIR)
+        );
+
+        let writable_state_path = copilot_dir.join("user-owned.json");
+        let writable_state_status = Command::new("touch")
+            .arg(&writable_state_path)
+            .uid(1000)
+            .gid(1000)
+            .status()
+            .unwrap();
+        assert!(writable_state_status.success());
+        let writable_state_metadata = fs::metadata(&writable_state_path).unwrap();
+        assert_eq!(writable_state_metadata.uid(), 1000);
+        assert_eq!(writable_state_metadata.gid(), 1000);
     }
 
     #[cfg(unix)]

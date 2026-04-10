@@ -642,7 +642,6 @@ safe_chown_tree "${control_plane_user}:${control_plane_user}" \
   "${cargo_target_dir}" \
   "${runtime_dir}"
 ensure_path_ownership "${control_plane_user}:${control_plane_user}" \
-  "${copilot_state_dir}" \
   "${copilot_session_state_dir}" \
   "${copilot_skills_dir}" \
   "${copilot_logs_dir}" \
@@ -660,13 +659,17 @@ ensure_path_ownership "${control_plane_user}:${control_plane_user}" \
   "${runtime_dir}"
 chown "${control_plane_user}:${control_plane_user}" \
   "/run/user/${control_plane_uid}" \
-  "${control_plane_home}" \
   "${control_plane_home}/.local" \
   "${control_plane_home}/.local/share"
+chown root:"${control_plane_user}" \
+  "${control_plane_home}" \
+  "${copilot_state_dir}"
 chown root:root "${host_key_dir}"
 chown root:root "${runtime_host_key_dir}"
 chown root:root /run/sshd
-chmod 755 "${control_plane_home}"
+chmod 1770 \
+  "${control_plane_home}" \
+  "${copilot_state_dir}"
 chmod 700 \
   "${control_plane_home}/.ssh" \
   "${runtime_dir}" \
