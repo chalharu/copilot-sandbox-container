@@ -1,8 +1,13 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+# Shared PVCs are applied once from the `install/` kustomization so routine
+# `kubectl apply -k` does not try to mutate bound claim specs.
+# The root sample composes shipped shared-resource and per-instance entry points
+# and keeps namespace / PVC / service / image-derived settings aligned via
+# built-in replacements.
 resources:
-  - ../../shared-resources
-  - ../../control-plane
+  - ../shared-resources
+  - ../control-plane
 replacements:
   - source:
       kind: Namespace
@@ -186,17 +191,3 @@ replacements:
         fieldPaths:
           - data.CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY
           - data.CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
-
-# This overlay is the scratchpad for named variants.
-# Copy this directory when you want a sibling overlay. Keep the replacements
-# block: it re-runs the shipped alignment logic after your local patches so
-# namespace / PVC / Service / image changes still propagate into ConfigMap
-# values such as job-transfer host and helper image refs.
-#
-# Common remaining customizations:
-# - patch Namespace names
-# - patch `../../common/secret-control-plane-auth.yaml`
-# - patch `../../common/configmap-control-plane-env.yaml`
-# - patch workspace PVC size / storage class
-# - patch Deployment resources / nodeSelector / imagePullPolicy
-# - set `images:` for the control-plane container tag
