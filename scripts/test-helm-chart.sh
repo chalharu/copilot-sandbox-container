@@ -46,16 +46,16 @@ render_chart() {
 resource_block() {
   local kind="$1"
   local name="$2"
-  local namespace="${3:-}"
+  local resource_namespace="${3:-}"
 
-  awk -v kind="${kind}" -v name="${name}" -v namespace="${namespace}" '
+  awk -v kind="${kind}" -v name="${name}" -v resource_namespace="${resource_namespace}" '
     BEGIN {
       RS = "---\n"
     }
 
     $0 ~ ("kind:[[:space:]]*" kind "([[:space:]]|$)") \
       && $0 ~ ("name:[[:space:]]*" name "([[:space:]]|$)") \
-      && (namespace == "" || $0 ~ ("namespace:[[:space:]]*" namespace "([[:space:]]|$)")) {
+      && (resource_namespace == "" || $0 ~ ("namespace:[[:space:]]*" resource_namespace "([[:space:]]|$)")) {
         print
         found = 1
         exit
