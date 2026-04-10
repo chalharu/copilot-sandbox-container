@@ -64,6 +64,8 @@ test -x /usr/local/bin/control-plane-exec-api
 test -x /usr/local/bin/control-plane-exec-api-launcher
 test -x /usr/local/bin/control-plane-runtime-tool
 test -x /usr/local/bin/control-plane-session-exec
+test -x /usr/local/bin/ruff
+test -x /usr/local/bin/hadolint
 test "${COPILOT_HOME}" = /var/lib/control-plane/managed-runtime/copilot-home
 test "${GIT_CONFIG_GLOBAL}" = /var/lib/control-plane/managed-runtime/gitconfig
 test -L /home/copilot/.copilot/hooks

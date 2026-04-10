@@ -53,6 +53,9 @@ struct SessionExecConfig {
     git_user_name: Option<String>,
     git_user_email: Option<String>,
     request_timeout: Duration,
+    post_tool_use_forward_addr: String,
+    post_tool_use_forward_token: String,
+    post_tool_use_forward_timeout: Duration,
     startup_script: Option<String>,
     environment_pvc_prefix: String,
     environment_storage_class: Option<String>,
@@ -112,6 +115,8 @@ const STARTUP_PROBE_GRACE_SECONDS: u64 = 10;
 const CHROOT_EXEC_POLICY_LIBRARY_PATH: &str = "/usr/local/lib/libcontrol_plane_exec_policy.so";
 const CHROOT_EXEC_POLICY_RULES_PATH: &str =
     "/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml";
+const CHROOT_RUNTIME_TOOL_PATH: &str = "/usr/local/bin/control-plane-runtime-tool";
+const CHROOT_POST_TOOL_USE_HOOKS_PATH: &str = "/usr/local/share/control-plane/hooks/postToolUse";
 
 pub fn run(args: &[String]) -> ToolResult<i32> {
     if args.len() == 1 && matches!(args[0].as_str(), "--help" | "-h") {
@@ -303,6 +308,12 @@ fn load_config() -> ToolResult<SessionExecConfig> {
         &env_or_default("CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC", "3600"),
         "CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC",
     )?);
+    let post_tool_use_forward_addr = required_env("CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR")?;
+    let post_tool_use_forward_token = required_env("CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN")?;
+    let post_tool_use_forward_timeout = Duration::from_secs(parse_positive_u64(
+        &env_or_default("CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC", "3600"),
+        "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC",
+    )?);
     let startup_script = optional_env("CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT");
     let environment_pvc_prefix = env_or_default(
         "CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX",
@@ -354,6 +365,9 @@ fn load_config() -> ToolResult<SessionExecConfig> {
         git_user_name: optional_env("CONTROL_PLANE_GIT_USER_NAME"),
         git_user_email: optional_env("CONTROL_PLANE_GIT_USER_EMAIL"),
         request_timeout,
+        post_tool_use_forward_addr,
+        post_tool_use_forward_token,
+        post_tool_use_forward_timeout,
         startup_script,
         environment_pvc_prefix,
         environment_storage_class,
@@ -971,6 +985,8 @@ fn build_bootstrap_assets_init_command(environment_root: &str, runtime_bin_dir: 
     let policy_rules_source = CHROOT_EXEC_POLICY_RULES_PATH;
     let policy_library_path = format!("{chroot_root}{CHROOT_EXEC_POLICY_LIBRARY_PATH}");
     let policy_rules_path = format!("{chroot_root}{CHROOT_EXEC_POLICY_RULES_PATH}");
+    let chroot_runtime_tool_path = format!("{chroot_root}{CHROOT_RUNTIME_TOOL_PATH}");
+    let post_tool_use_dir = format!("{chroot_root}{CHROOT_POST_TOOL_USE_HOOKS_PATH}");
     format!(
         concat!(
             "set -eu\n",
@@ -978,16 +994,27 @@ fn build_bootstrap_assets_init_command(environment_root: &str, runtime_bin_dir: 
             "runtime_bin_dir={runtime_bin_dir:?}\n",
             "policy_library_path={policy_library_path:?}\n",
             "policy_rules_path={policy_rules_path:?}\n",
+            "chroot_runtime_tool_path={chroot_runtime_tool_path:?}\n",
+            "post_tool_use_dir={post_tool_use_dir:?}\n",
             "policy_library_dir=\"$(dirname \"$policy_library_path\")\"\n",
             "policy_rules_dir=\"$(dirname \"$policy_rules_path\")\"\n",
-            "install -d -m 0755 \"$environment_root/root\" \"$environment_root/hooks/git\" \"$runtime_bin_dir\" \"$policy_library_dir\" \"$policy_rules_dir\"\n",
+            "chroot_runtime_tool_dir=\"$(dirname \"$chroot_runtime_tool_path\")\"\n",
+            "install -d -m 0755 \"$environment_root/root\" \"$environment_root/hooks/git\" \"$runtime_bin_dir\" \"$policy_library_dir\" \"$policy_rules_dir\" \"$chroot_runtime_tool_dir\" \"$post_tool_use_dir\"\n",
             "install -m 0755 /usr/local/bin/control-plane-exec-api \"$runtime_bin_dir/control-plane-exec-api\"\n",
+            "install -m 0755 /usr/local/bin/control-plane-runtime-tool \"$chroot_runtime_tool_path\"\n",
             "rm -rf \"$environment_root/hooks/git\"\n",
             "install -d -m 0755 \"$environment_root/hooks/git\"\n",
             "cp -R /usr/local/share/control-plane/hooks/git/. \"$environment_root/hooks/git/\"\n",
             "find \"$environment_root/hooks/git\" -type d -exec chmod 755 {{}} +\n",
             "find \"$environment_root/hooks/git\" -type f -exec chmod 644 {{}} +\n",
             "chmod 755 \"$environment_root/hooks/git/pre-commit\" \"$environment_root/hooks/git/pre-push\"\n",
+            "rm -rf \"$post_tool_use_dir\"\n",
+            "install -d -m 0755 \"$post_tool_use_dir\"\n",
+            "cp -R /usr/local/share/control-plane/hooks/postToolUse/. \"$post_tool_use_dir/\"\n",
+            "find \"$post_tool_use_dir\" -type d -exec chmod 755 {{}} +\n",
+            "find \"$post_tool_use_dir\" -type f -exec chmod 644 {{}} +\n",
+            "chmod 755 \"$post_tool_use_dir/control-plane-rust.sh\"\n",
+            "ln -sf {runtime_tool_path:?} \"$post_tool_use_dir/main\"\n",
             "install -m 0644 {policy_library_source:?} \"$policy_library_path\"\n",
             "install -m 0644 {policy_rules_source:?} \"$policy_rules_path\"\n",
         ),
@@ -997,6 +1024,9 @@ fn build_bootstrap_assets_init_command(environment_root: &str, runtime_bin_dir: 
         policy_rules_source = policy_rules_source,
         policy_library_path = policy_library_path,
         policy_rules_path = policy_rules_path,
+        chroot_runtime_tool_path = chroot_runtime_tool_path,
+        post_tool_use_dir = post_tool_use_dir,
+        runtime_tool_path = CHROOT_RUNTIME_TOOL_PATH,
     )
 }
 
@@ -1233,6 +1263,15 @@ fn build_exec_pod(
                     "name": "CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID",
                     "value": config.run_as_gid.to_string()
                 }, {
+                    "name": "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR",
+                    "value": config.post_tool_use_forward_addr
+                }, {
+                    "name": "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN",
+                    "value": config.post_tool_use_forward_token
+                }, {
+                    "name": "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC",
+                    "value": config.post_tool_use_forward_timeout.as_secs().to_string()
+                }, {
                     "name": "CONTROL_PLANE_FAST_EXECUTION_HOME",
                     "value": config.remote_home
                 }, {
@@ -1398,6 +1437,9 @@ mod tests {
             git_user_name: Some("Copilot".to_string()),
             git_user_email: Some("copilot@example.com".to_string()),
             request_timeout: std::time::Duration::from_secs(3600),
+            post_tool_use_forward_addr: "http://10.0.0.10:8081".to_string(),
+            post_tool_use_forward_token: "reverse-token".to_string(),
+            post_tool_use_forward_timeout: std::time::Duration::from_secs(3600),
             startup_script: Some(
                 "printf \"fast-exec-startup\\n\" > /workspace/fast-exec-startup-marker.txt"
                     .to_string(),
@@ -1664,6 +1706,17 @@ mod tests {
         assert!(env.iter().any(|value| value.name
             == "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE"
             && value.value.as_deref() == Some("/environment/hooks/git")));
+        assert!(env.iter().any(
+            |value| value.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR"
+                && value.value.as_deref() == Some("http://10.0.0.10:8081")
+        ));
+        assert!(env.iter().any(
+            |value| value.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN"
+                && value.value.as_deref() == Some("reverse-token")
+        ));
+        assert!(env.iter().any(|value| value.name
+            == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC"
+            && value.value.as_deref() == Some("3600")));
         assert!(env.iter().any(|value| value.name
             == "CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT"
             && value.value.as_deref()
@@ -1684,8 +1737,18 @@ mod tests {
                 "install -m 0755 /usr/local/bin/control-plane-exec-api \"$runtime_bin_dir/control-plane-exec-api\""
             )
         );
+        assert!(command.contains(
+            "install -m 0755 /usr/local/bin/control-plane-runtime-tool \"$chroot_runtime_tool_path\""
+        ));
         assert!(!command.contains("/environment/control-plane-exec-api"));
         assert!(command.contains("rm -rf \"$environment_root/hooks/git\""));
+        assert!(command.contains("rm -rf \"$post_tool_use_dir\""));
+        assert!(command.contains(
+            "cp -R /usr/local/share/control-plane/hooks/postToolUse/. \"$post_tool_use_dir/\""
+        ));
+        assert!(command.contains(
+            "ln -sf \"/usr/local/bin/control-plane-runtime-tool\" \"$post_tool_use_dir/main\""
+        ));
         assert!(command.contains(
             "install -m 0644 \"/usr/local/lib/libcontrol_plane_exec_policy.so\" \"$policy_library_path\""
         ));
