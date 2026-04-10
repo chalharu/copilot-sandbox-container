@@ -310,6 +310,7 @@ printf '%s\n' 'image-maintenance-test: verifying build-test build-only falls bac
 : > "${kubectl_log}"
 export CONTROL_PLANE_BUILDKIT_STATE_ROOT="${workdir}/buildkitd-build-test-state"
 export TEST_IMAGE_MAINTENANCE_DOCKER_INFO_EXIT_CODE=1
+export CONTROL_PLANE_CONTAINER_BIN=docker
 unset CONTROL_PLANE_TOOLCHAIN
 build_test_output="$("${repo_root}/scripts/build-test.sh" --build-only 2>&1)"
 grep -Fq "Using buildkitd toolchain for build/test" <<<"${build_test_output}"
@@ -317,6 +318,7 @@ grep -Fq "buildx create --name" "${docker_log}"
 grep -Fq "buildx build --builder" "${docker_log}"
 grep -Fq "create -f -" "${kubectl_log}"
 export TEST_IMAGE_MAINTENANCE_DOCKER_INFO_EXIT_CODE=0
+unset CONTROL_PLANE_CONTAINER_BIN
 unset CONTROL_PLANE_BUILDKIT_STATE_ROOT
 
 printf '%s\n' 'image-maintenance-test: verifying rust container cache wiring' >&2

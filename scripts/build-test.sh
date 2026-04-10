@@ -129,13 +129,16 @@ control_plane_image="${CONTROL_PLANE_IMAGE_TAG:-localhost/control-plane:test}"
 cluster_name="${CONTROL_PLANE_KIND_CLUSTER_NAME:-control-plane-ci}"
 kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-${container_bin:-docker}}"
 
-if [[ -n "${CONTROL_PLANE_CONTAINER_BIN:-}" ]] && [[ "${CONTROL_PLANE_CONTAINER_BIN}" != "${container_bin}" ]]; then
+if [[ -n "${CONTROL_PLANE_CONTAINER_BIN:-}" ]]; then
   if [[ -z "${container_bin}" ]]; then
-    printf 'CONTROL_PLANE_CONTAINER_BIN cannot be used with %s toolchain.\n' "${toolchain}" >&2
+    if [[ "${build_only}" -eq 0 ]]; then
+      printf 'CONTROL_PLANE_CONTAINER_BIN cannot be used with %s toolchain.\n' "${toolchain}" >&2
+      exit 1
+    fi
+  elif [[ "${CONTROL_PLANE_CONTAINER_BIN}" != "${container_bin}" ]]; then
+    printf 'CONTROL_PLANE_CONTAINER_BIN=%s conflicts with %s toolchain\n' "${CONTROL_PLANE_CONTAINER_BIN}" "${toolchain}" >&2
     exit 1
   fi
-  printf 'CONTROL_PLANE_CONTAINER_BIN=%s conflicts with %s toolchain\n' "${CONTROL_PLANE_CONTAINER_BIN}" "${toolchain}" >&2
-  exit 1
 fi
 
 case "${test_group}" in
