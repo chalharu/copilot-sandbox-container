@@ -985,6 +985,7 @@ fn build_bootstrap_assets_init_command(environment_root: &str, runtime_bin_dir: 
     let policy_rules_source = CHROOT_EXEC_POLICY_RULES_PATH;
     let policy_library_path = format!("{chroot_root}{CHROOT_EXEC_POLICY_LIBRARY_PATH}");
     let policy_rules_path = format!("{chroot_root}{CHROOT_EXEC_POLICY_RULES_PATH}");
+    let chroot_kubectl_path = format!("{chroot_root}/usr/local/bin/kubectl");
     let chroot_runtime_tool_path = format!("{chroot_root}{CHROOT_RUNTIME_TOOL_PATH}");
     let post_tool_use_dir = format!("{chroot_root}{CHROOT_POST_TOOL_USE_HOOKS_PATH}");
     format!(
@@ -994,13 +995,16 @@ fn build_bootstrap_assets_init_command(environment_root: &str, runtime_bin_dir: 
             "runtime_bin_dir={runtime_bin_dir:?}\n",
             "policy_library_path={policy_library_path:?}\n",
             "policy_rules_path={policy_rules_path:?}\n",
+            "chroot_kubectl_path={chroot_kubectl_path:?}\n",
             "chroot_runtime_tool_path={chroot_runtime_tool_path:?}\n",
             "post_tool_use_dir={post_tool_use_dir:?}\n",
             "policy_library_dir=\"$(dirname \"$policy_library_path\")\"\n",
             "policy_rules_dir=\"$(dirname \"$policy_rules_path\")\"\n",
+            "chroot_kubectl_dir=\"$(dirname \"$chroot_kubectl_path\")\"\n",
             "chroot_runtime_tool_dir=\"$(dirname \"$chroot_runtime_tool_path\")\"\n",
-            "install -d -m 0755 \"$environment_root/root\" \"$environment_root/hooks/git\" \"$runtime_bin_dir\" \"$policy_library_dir\" \"$policy_rules_dir\" \"$chroot_runtime_tool_dir\" \"$post_tool_use_dir\"\n",
+            "install -d -m 0755 \"$environment_root/root\" \"$environment_root/hooks/git\" \"$runtime_bin_dir\" \"$policy_library_dir\" \"$policy_rules_dir\" \"$chroot_kubectl_dir\" \"$chroot_runtime_tool_dir\" \"$post_tool_use_dir\"\n",
             "install -m 0755 /usr/local/bin/control-plane-exec-api \"$runtime_bin_dir/control-plane-exec-api\"\n",
+            "install -m 0755 /usr/local/bin/kubectl \"$chroot_kubectl_path\"\n",
             "install -m 0755 /usr/local/bin/control-plane-runtime-tool \"$chroot_runtime_tool_path\"\n",
             "rm -rf \"$environment_root/hooks/git\"\n",
             "install -d -m 0755 \"$environment_root/hooks/git\"\n",
@@ -1024,6 +1028,7 @@ fn build_bootstrap_assets_init_command(environment_root: &str, runtime_bin_dir: 
         policy_rules_source = policy_rules_source,
         policy_library_path = policy_library_path,
         policy_rules_path = policy_rules_path,
+        chroot_kubectl_path = chroot_kubectl_path,
         chroot_runtime_tool_path = chroot_runtime_tool_path,
         post_tool_use_dir = post_tool_use_dir,
         runtime_tool_path = CHROOT_RUNTIME_TOOL_PATH,
@@ -1736,6 +1741,9 @@ mod tests {
             command.contains(
                 "install -m 0755 /usr/local/bin/control-plane-exec-api \"$runtime_bin_dir/control-plane-exec-api\""
             )
+        );
+        assert!(
+            command.contains("install -m 0755 /usr/local/bin/kubectl \"$chroot_kubectl_path\"")
         );
         assert!(command.contains(
             "install -m 0755 /usr/local/bin/control-plane-runtime-tool \"$chroot_runtime_tool_path\""

@@ -868,7 +868,6 @@ fn apt_required_packages() -> Vec<OsString> {
         OsString::from("ca-certificates"),
         OsString::from("git"),
         OsString::from("gh"),
-        OsString::from("kubectl"),
         OsString::from("openssh-client"),
     ]
 }
@@ -889,15 +888,11 @@ fn run_startup_script(chroot_root: &Path, startup_script: &str) -> Result<(), Dy
 }
 
 fn required_commands_present(chroot_root: &Path) -> bool {
-    [
-        "/bin/bash",
-        "/usr/bin/git",
-        "/usr/bin/gh",
-        "/usr/bin/kubectl",
-        "/usr/bin/ssh",
-    ]
-    .iter()
-    .all(|candidate| resolve_chroot_command(chroot_root, &[*candidate]).is_some())
+    ["/bin/bash", "/usr/bin/git", "/usr/bin/gh", "/usr/bin/ssh"]
+        .iter()
+        .all(|candidate| resolve_chroot_command(chroot_root, &[*candidate]).is_some())
+        && resolve_chroot_command(chroot_root, &["/usr/bin/kubectl", "/usr/local/bin/kubectl"])
+            .is_some()
 }
 
 fn resolve_chroot_command(chroot_root: &Path, candidates: &[&str]) -> Option<PathBuf> {
@@ -1769,15 +1764,15 @@ mod tests {
             write_stub_command(chroot_root.path(), command_path);
         }
         assert!(!required_commands_present(chroot_root.path()));
-        write_stub_command(chroot_root.path(), "/usr/bin/kubectl");
+        write_stub_command(chroot_root.path(), "/usr/local/bin/kubectl");
         assert!(required_commands_present(chroot_root.path()));
     }
 
     #[test]
-    fn apt_required_packages_install_kubectl_package() {
+    fn apt_required_packages_skip_kubectl_package() {
         let packages = apt_required_packages();
 
-        assert!(packages.contains(&OsString::from("kubectl")));
+        assert!(!packages.contains(&OsString::from("kubectl")));
         assert!(!packages.contains(&OsString::from("kubernetes-client")));
     }
 
