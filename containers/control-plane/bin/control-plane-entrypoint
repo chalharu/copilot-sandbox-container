@@ -293,6 +293,8 @@ merge_json_object_file() {
   local target_path="$1"
   local overlay_path="$2"
   local owner="$3"
+  local owner_user
+  local target_path_shell
   local base_tmp
   local merged_tmp
 
@@ -335,7 +337,12 @@ merge_json_object_file() {
     exit 1
   fi
 
-  cat "${merged_tmp}" > "${target_path}"
+  owner_user="${owner%%:*}"
+  printf -v target_path_shell '%q' "${target_path}"
+  if ! su -s /bin/bash "${owner_user}" -c "cat > ${target_path_shell}" < "${merged_tmp}"; then
+    rm -f "${base_tmp}" "${merged_tmp}"
+    exit 1
+  fi
   chown "${owner}" "${target_path}"
   chmod 600 "${target_path}"
   rm -f "${base_tmp}" "${merged_tmp}"
