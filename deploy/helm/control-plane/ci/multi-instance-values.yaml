@@ -1,7 +1,6 @@
 global:
   image:
     tag: test-global
-
 instances:
   - name: repo-one
     auth:
@@ -15,7 +14,6 @@ instances:
       storageClassName: fast-rwx
     controlPlaneEnv:
       TZ: Asia/Tokyo
-
   - name: repo-two
     namespace: repo-two-main
     jobNamespace: repo-two-jobs

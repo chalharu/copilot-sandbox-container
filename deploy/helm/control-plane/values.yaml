@@ -2,18 +2,15 @@ global:
   namespacePrefix: copilot
   clusterDomain: cluster.local
   createNamespaces: true
-
   image:
     repository: ghcr.io/chalharu/copilot-sandbox-container/control-plane
     tag: latest
     pullPolicy: IfNotPresent
-
   service:
     name: control-plane
     type: LoadBalancer
     port: 2222
     annotations: {}
-
   auth:
     name: control-plane-auth
     sshPublicKey: |
@@ -21,7 +18,6 @@ global:
     ghGithubToken: ""
     ghHostsYml: ""
     copilotGithubToken: ""
-
   workspace:
     claimName: control-plane-workspace-pvc
     accessModes:
@@ -31,7 +27,6 @@ global:
     subPath: workspace
     retainOnDelete: true
     annotations: {}
-
   session:
     claimName: control-plane-copilot-session-pvc
     accessModes:
@@ -42,12 +37,10 @@ global:
     sshSubPath: state/ssh
     retainOnDelete: true
     annotations: {}
-
   controlPlaneConfigJson: |
     {
       "telemetry": false
     }
-
   controlPlaneEnv:
     SSH_PUBLIC_KEY_FILE: /var/run/control-plane-auth/ssh-public-key
     COPILOT_CONFIG_JSON_FILE: /var/run/control-plane-config/copilot-config.json
@@ -76,9 +69,7 @@ global:
     CONTROL_PLANE_JOB_CPU_LIMIT: "2"
     CONTROL_PLANE_JOB_MEMORY_REQUEST: 256Mi
     CONTROL_PLANE_JOB_MEMORY_LIMIT: 2Gi
-
   instanceEnv: {}
-
   resources:
     requests:
       cpu: 250m
@@ -86,14 +77,12 @@ global:
     limits:
       cpu: "2"
       memory: 2Gi
-
   imagePullSecrets: []
   deploymentAnnotations: {}
   podAnnotations: {}
   nodeSelector: {}
   tolerations: []
   affinity: {}
-
 instances:
   - name: sandbox
     image: {}
