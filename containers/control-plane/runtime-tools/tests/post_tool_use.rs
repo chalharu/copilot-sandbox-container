@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::symlink;
@@ -17,6 +18,14 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
+fn workspace_root() -> PathBuf {
+    repo_root()
+        .parent()
+        .and_then(|path| path.parent())
+        .unwrap()
+        .to_path_buf()
+}
+
 fn bundled_linters_config_path() -> PathBuf {
     repo_root().join("hooks/postToolUse/linters.json")
 }
@@ -28,9 +37,18 @@ fn runtime_tool_bin() -> PathBuf {
 }
 
 fn run_checked(command: &str, args: &[&str], cwd: &Path) {
+    let mut path = OsString::new();
+    let repo_bin = cwd.join("bin");
+    if repo_bin.is_dir() {
+        path.push(repo_bin.as_os_str());
+        path.push(":");
+    }
+    path.push(std::env::var_os("PATH").unwrap_or_default());
     let output = Command::new(command)
         .args(args)
         .current_dir(cwd)
+        .env("COPILOT_HOME", cwd.join(".copilot"))
+        .env("PATH", path)
         .output()
         .unwrap();
     assert!(
@@ -43,8 +61,12 @@ fn run_checked(command: &str, args: &[&str], cwd: &Path) {
 }
 
 fn setup_repo(prefix: &str) -> TempDir {
-    let repo = tempfile::Builder::new().prefix(prefix).tempdir().unwrap();
+    let repo = tempfile::Builder::new()
+        .prefix(prefix)
+        .tempdir_in(workspace_root())
+        .unwrap();
     run_checked("git", &["init", "--quiet"], repo.path());
+    run_checked("git", &["checkout", "-b", "fixture"], repo.path());
     run_checked("git", &["config", "user.name", "test"], repo.path());
     run_checked(
         "git",
@@ -55,8 +77,10 @@ fn setup_repo(prefix: &str) -> TempDir {
     let hook_dir = repo.path().join(".copilot/hooks/postToolUse");
     fs::create_dir_all(repo.path().join(".github")).unwrap();
     fs::create_dir_all(&hook_dir).unwrap();
-    fs::copy(bundled_linters_config_path(), hook_dir.join("linters.json")).unwrap();
-    symlink(runtime_tool_bin(), hook_dir.join("main")).unwrap();
+    write_executable(
+        &hook_dir.join("main"),
+        "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+    );
     fs::OpenOptions::new()
         .append(true)
         .open(repo.path().join(".git/info/exclude"))
@@ -65,6 +89,19 @@ fn setup_repo(prefix: &str) -> TempDir {
         .unwrap();
 
     repo
+}
+
+#[test]
+fn setup_repo_uses_non_protected_branch() {
+    let repo = setup_repo("post-tool-use-branch-");
+    let output = Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "fixture");
 }
 
 #[derive(Clone)]
@@ -111,9 +148,23 @@ fn write_executable(file_path: &Path, content: &str) {
     fs::set_permissions(file_path, permissions).unwrap();
 }
 
+fn install_runtime_hook(repo: &Path) {
+    let hook_dir = repo.join(".copilot/hooks/postToolUse");
+    let hook_path = hook_dir.join("main");
+
+    fs::copy(bundled_linters_config_path(), hook_dir.join("linters.json")).unwrap();
+    if hook_path.exists() {
+        fs::remove_file(&hook_path).unwrap();
+    }
+    symlink(runtime_tool_bin(), &hook_path).unwrap();
+}
+
 fn create_tool_stubs(repo: &Path, options: StubOptions) -> HookEnv {
     let bin_dir = repo.join("bin");
     let log_file = repo.join("hook.log");
+
+    install_runtime_hook(repo);
+    fs::write(&log_file, "").unwrap();
 
     if options.markdownlint {
         write_executable(
@@ -172,6 +223,10 @@ fn create_tool_stubs(repo: &Path, options: StubOptions) -> HookEnv {
         (
             "CONTROL_PLANE_HOOK_TMP_ROOT".to_string(),
             repo.join(".hook-cache").display().to_string(),
+        ),
+        (
+            "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ACTIVE".to_string(),
+            "1".to_string(),
         ),
         (
             "PATH".to_string(),
@@ -527,7 +582,9 @@ fn hook_skips_work_when_tool_use_is_denied() {
     let result = run_hook(repo.path(), &hook_env, "denied");
 
     assert_eq!(result.status.code(), Some(0));
-    assert!(!hook_env.log_file.exists());
+    if hook_env.log_file.exists() {
+        assert!(fs::read_to_string(&hook_env.log_file).unwrap().is_empty());
+    }
     assert!(result.stdout.is_empty());
     assert!(result.stderr.is_empty());
 }
