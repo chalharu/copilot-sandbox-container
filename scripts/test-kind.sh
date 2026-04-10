@@ -244,6 +244,14 @@ wait_for_control_plane_pod() {
   return 1
 }
 
+assert_control_plane_probe_spec() {
+  local deployment_json="${workdir}/control-plane-deployment.json"
+
+  kubectl get deployment/control-plane --namespace "${namespace}" -o json > "${deployment_json}"
+  test "$(jq -r '.spec.template.spec.containers[] | select(.name == "control-plane").readinessProbe.exec.command | join(" ")' "${deployment_json}")" = "bash -lc pgrep -x sshd >/dev/null"
+  test "$(jq -r '.spec.template.spec.containers[] | select(.name == "control-plane").livenessProbe.exec.command | join(" ")' "${deployment_json}")" = "bash -lc pgrep -x sshd >/dev/null"
+}
+
 load_kind_images() {
   local helper_args=(--cluster-name "${cluster_name}")
 
@@ -803,13 +811,19 @@ spec:
             - containerPort: 2222
               name: ssh
           readinessProbe:
-            tcpSocket:
-              port: ssh
+            exec:
+              command:
+                - bash
+                - -lc
+                - pgrep -x sshd >/dev/null
             periodSeconds: 5
             failureThreshold: 12
           livenessProbe:
-            tcpSocket:
-              port: ssh
+            exec:
+              command:
+                - bash
+                - -lc
+                - pgrep -x sshd >/dev/null
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 6
@@ -878,7 +892,7 @@ set -euo pipefail
 command -v node
 command -v npm
 npm ls -g @github/copilot --depth=0 | grep -q '@github/copilot@'
-! command -v git >/dev/null 2>&1
+command -v git
 ! command -v gh >/dev/null 2>&1
 command -v kubectl
 command -v k8s-job-start
@@ -1537,6 +1551,7 @@ load_kind_images
 ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"
 apply_resources
 test "$(kubectl get service/control-plane --namespace "${namespace}" -o jsonpath='{.spec.type}')" = "LoadBalancer"
+assert_control_plane_probe_spec
 wait_for_control_plane_pod
 start_port_forward
 wait_for_ssh

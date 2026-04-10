@@ -131,7 +131,7 @@ assert_install_resource_contains() {
   local block
 
   block="$(install_resource_block "${kind}" "${name}")"
-  grep -Fq "${expected}" <<<"${block}" || {
+  grep -Fq -- "${expected}" <<<"${block}" || {
     printf 'Expected install %s/%s to contain: %s\n' "${kind}" "${name}" "${expected}" >&2
     exit 1
   }
@@ -153,7 +153,7 @@ assert_deployment_contains() {
   local block
 
   block="$(deployment_block)"
-  grep -Fq "${expected}" <<<"${block}" || {
+  grep -Fq -- "${expected}" <<<"${block}" || {
     printf 'Expected Deployment/control-plane to contain: %s\n' "${expected}" >&2
     exit 1
   }
@@ -164,7 +164,7 @@ assert_deployment_absent() {
   local block
 
   block="$(deployment_block)"
-  if grep -Fq "${unexpected}" <<<"${block}"; then
+  if grep -Fq -- "${unexpected}" <<<"${block}"; then
     printf 'Did not expect Deployment/control-plane to contain: %s\n' "${unexpected}" >&2
     exit 1
   fi
@@ -284,6 +284,12 @@ assert_deployment_contains 'subPath: state/gh'
 assert_deployment_contains 'subPath: state/ssh-auth'
 assert_deployment_contains 'subPath: state/ssh'
 assert_deployment_contains 'subPath: state/ssh-host-keys'
+assert_deployment_contains 'readinessProbe:'
+assert_deployment_contains 'livenessProbe:'
+assert_deployment_contains 'exec:'
+assert_deployment_contains '- bash'
+assert_deployment_contains '- -lc'
+assert_deployment_contains '- pgrep -x sshd >/dev/null'
 assert_deployment_contains '/copilot-session/state/ssh-auth'
 assert_deployment_contains 'chown 1000:1000 /workspace-state/workspace'
 assert_deployment_contains 'chmod 700 /workspace-state/workspace'
@@ -299,6 +305,7 @@ assert_deployment_absent 'mountPath: /var/run/garage-sccache-auth'
 assert_deployment_absent 'secretName: garage-sccache-auth'
 assert_deployment_absent 'mountPath: /var/run/sccache-dist-auth-client'
 assert_deployment_absent 'mountPath: /var/run/sccache-dist-auth-server'
+assert_deployment_absent 'tcpSocket:'
 assert_deployment_absent '/usr/local/bin/sccache-dist-entrypoint'
 assert_resource_absent Secret sccache-dist-auth
 assert_resource_absent Service sccache-dist
