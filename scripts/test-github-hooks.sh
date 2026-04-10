@@ -5,7 +5,7 @@ control_plane_image="${1:-}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-docker}"
 control_plane_run_user=(--user 0:0)
 # renovate: datasource=docker depName=docker.io/library/rust versioning=docker
-rust_test_image="${CONTROL_PLANE_RUST_TEST_IMAGE:-docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895}"
+rust_test_image="${CONTROL_PLANE_RUST_TEST_IMAGE:-docker.io/library/rust:1.94.1-bookworm@sha256:6ae102bdbf528294bc79ad6e1fae682f6f7c2a6e6621506ba959f9685b308a55}"
 
 command -v node >/dev/null 2>&1 || {
   printf 'test-github-hooks.sh: node is required\n' >&2
