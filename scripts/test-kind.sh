@@ -930,6 +930,7 @@ grep -Fqx 'CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target' ~/.config/contr
 grep -Fqx 'LANG=C.UTF-8' ~/.config/control-plane/runtime.env
 grep -Fqx 'LC_CTYPE=C.UTF-8' ~/.config/control-plane/runtime.env
 grep -Fqx "CONTROL_PLANE_RUST_HOOK_IMAGE=${rust_hook_image}" ~/.config/control-plane/runtime.env
+grep -Fqx 'CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT=control-plane-exec' ~/.config/control-plane/runtime.env
 grep -Fqx "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR=http://\${CONTROL_PLANE_POD_IP}:8081" ~/.config/control-plane/runtime.env
 grep -Eq '^CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN=.+$' ~/.config/control-plane/runtime.env
 grep -Fqx 'CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC=3600' ~/.config/control-plane/runtime.env
