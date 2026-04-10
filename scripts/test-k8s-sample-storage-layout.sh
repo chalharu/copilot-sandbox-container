@@ -6,9 +6,14 @@ manifest_root="${script_dir}/../deploy/kubernetes/control-plane.example"
 install_manifest_root="${script_dir}/../deploy/kubernetes/control-plane.example/install"
 manifest_path="$(mktemp)"
 install_manifest_path="$(mktemp)"
+overlay_manifest_path="$(mktemp)"
+overlay_workdir=''
 
 cleanup() {
-  rm -f "${manifest_path}" "${install_manifest_path}"
+  rm -f "${manifest_path}" "${install_manifest_path}" "${overlay_manifest_path}"
+  if [[ -n "${overlay_workdir}" ]]; then
+    rm -rf "${overlay_workdir}"
+  fi
 }
 
 trap cleanup EXIT
@@ -66,6 +71,10 @@ resource_block() {
 
 install_resource_block() {
   resource_block_from_file "${install_manifest_path}" "$1" "$2"
+}
+
+overlay_resource_block() {
+  resource_block_from_file "${overlay_manifest_path}" "$1" "$2"
 }
 
 assert_resource_present() {
@@ -131,8 +140,31 @@ assert_install_resource_contains() {
   local block
 
   block="$(install_resource_block "${kind}" "${name}")"
-  grep -Fq "${expected}" <<<"${block}" || {
+  grep -Fq -- "${expected}" <<<"${block}" || {
     printf 'Expected install %s/%s to contain: %s\n' "${kind}" "${name}" "${expected}" >&2
+    exit 1
+  }
+}
+
+assert_overlay_resource_present() {
+  local kind="$1"
+  local name="$2"
+
+  overlay_resource_block "${kind}" "${name}" >/dev/null || {
+    printf 'Expected %s/%s in overlay manifest\n' "${kind}" "${name}" >&2
+    exit 1
+  }
+}
+
+assert_overlay_resource_contains() {
+  local kind="$1"
+  local name="$2"
+  local expected="$3"
+  local block
+
+  block="$(overlay_resource_block "${kind}" "${name}")"
+  grep -Fq -- "${expected}" <<<"${block}" || {
+    printf 'Expected overlay %s/%s to contain: %s\n' "${kind}" "${name}" "${expected}" >&2
     exit 1
   }
 }
@@ -153,7 +185,7 @@ assert_deployment_contains() {
   local block
 
   block="$(deployment_block)"
-  grep -Fq "${expected}" <<<"${block}" || {
+  grep -Fq -- "${expected}" <<<"${block}" || {
     printf 'Expected Deployment/control-plane to contain: %s\n' "${expected}" >&2
     exit 1
   }
@@ -164,10 +196,59 @@ assert_deployment_absent() {
   local block
 
   block="$(deployment_block)"
-  if grep -Fq "${unexpected}" <<<"${block}"; then
+  if grep -Fq -- "${unexpected}" <<<"${block}"; then
     printf 'Did not expect Deployment/control-plane to contain: %s\n' "${unexpected}" >&2
     exit 1
   fi
+}
+
+render_named_overlay_propagation_fixture() {
+  overlay_workdir="$(mktemp -d "${manifest_root}/overlays/tmp-propagation.XXXXXX")"
+  cp "${manifest_root}/overlays/default/kustomization.yaml" "${overlay_workdir}/kustomization.yaml"
+  cat >>"${overlay_workdir}/kustomization.yaml" <<'EOF'
+patches:
+  - target:
+      kind: Namespace
+      name: copilot-sandbox
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: custom-sandbox
+  - target:
+      kind: Namespace
+      name: copilot-sandbox-jobs
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: custom-sandbox-jobs
+  - target:
+      kind: PersistentVolumeClaim
+      name: control-plane-workspace-pvc
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: my-custom-workspace-pvc
+  - target:
+      kind: Service
+      name: control-plane
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: my-custom-service
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: control-plane
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:v1.0.0
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
+EOF
+  render_kustomization "${overlay_workdir}" "${overlay_manifest_path}"
 }
 
 printf '%s\n' 'k8s-sample-storage-layout-test: rendering sample kustomization' >&2
@@ -197,8 +278,8 @@ root_pvc_count="$(kind_count_in_file "${manifest_path}" PersistentVolumeClaim)"
   exit 1
 }
 install_pvc_count="$(kind_count_in_file "${install_manifest_path}" PersistentVolumeClaim)"
-[[ "${install_pvc_count}" == "2" ]] || {
-  printf 'Expected exactly 2 PersistentVolumeClaims in the install manifest, found %s\n' "${install_pvc_count}" >&2
+[[ "${install_pvc_count}" == "1" ]] || {
+  printf 'Expected exactly 1 PersistentVolumeClaim in the install manifest, found %s\n' "${install_pvc_count}" >&2
   exit 1
 }
 
@@ -214,11 +295,6 @@ assert_install_resource_present PersistentVolumeClaim control-plane-copilot-sess
 assert_install_resource_contains PersistentVolumeClaim control-plane-copilot-session-pvc 'ReadWriteMany'
 assert_install_resource_contains PersistentVolumeClaim control-plane-copilot-session-pvc 'storage: 2Gi'
 assert_install_resource_contains PersistentVolumeClaim control-plane-copilot-session-pvc 'storageClassName: replace-me-with-rwx-storage-class'
-
-assert_install_resource_present PersistentVolumeClaim control-plane-sccache-pvc
-assert_install_resource_contains PersistentVolumeClaim control-plane-sccache-pvc 'ReadWriteOnce'
-assert_install_resource_contains PersistentVolumeClaim control-plane-sccache-pvc 'storage: 5Gi'
-assert_install_resource_contains PersistentVolumeClaim control-plane-sccache-pvc 'storageClassName: standard'
 assert_resource_absent StorageClass control-plane-local-storage
 
 assert_resource_absent PersistentVolumeClaim control-plane-state-pvc
@@ -229,119 +305,122 @@ printf '%s\n' 'k8s-sample-storage-layout-test: checking ConfigMap-backed environ
 assert_resource_present ConfigMap control-plane-config
 assert_resource_contains ConfigMap control-plane-config 'copilot-config.json: |'
 assert_resource_present ConfigMap control-plane-env
-assert_resource_present ServiceAccount garage-bootstrap
-assert_resource_present Secret garage-admin-auth
+assert_resource_present ConfigMap control-plane-instance-env
+assert_resource_present ServiceAccount control-plane-exec
+assert_resource_present Role control-plane-exec-workloads
+assert_resource_present RoleBinding control-plane-exec-workloads
+assert_resource_absent ServiceAccount garage-bootstrap
+assert_resource_absent Secret garage-admin-auth
 assert_resource_absent Secret garage-sccache-auth
-assert_resource_present Role garage-bootstrap-secret-writer
-assert_resource_present RoleBinding garage-bootstrap-secret-writer
-assert_resource_contains Role garage-bootstrap-secret-writer '- create'
-assert_resource_contains Role garage-bootstrap-secret-writer 'resourceNames:'
-assert_resource_contains Role garage-bootstrap-secret-writer '- garage-sccache-auth'
-assert_resource_contains Role garage-bootstrap-secret-writer '- get'
-assert_resource_contains Role garage-bootstrap-secret-writer '- patch'
-assert_resource_contains Role garage-bootstrap-secret-writer '- update'
+assert_resource_absent Role garage-bootstrap-secret-writer
+assert_resource_absent RoleBinding garage-bootstrap-secret-writer
 assert_resource_contains ConfigMap control-plane-env 'SSH_PUBLIC_KEY_FILE: /var/run/control-plane-auth/ssh-public-key'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS: "10000"'
-assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha'
-assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER: overlay'
-assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR: /var/tmp/control-plane/rootful-overlay'
-assert_resource_contains ConfigMap control-plane-env 'SCCACHE_BUCKET: control-plane-sccache'
-assert_resource_contains ConfigMap control-plane-env 'SCCACHE_ENDPOINT: http://garage-s3.copilot-sandbox.svc.cluster.local:3900'
-assert_resource_contains ConfigMap control-plane-env 'SCCACHE_REGION: garage'
-assert_resource_contains ConfigMap control-plane-env 'SCCACHE_S3_USE_SSL: "false"'
-assert_resource_contains ConfigMap control-plane-env 'SCCACHE_S3_KEY_PREFIX: sccache/'
-assert_resource_contains ConfigMap control-plane-env 'AWS_ACCESS_KEY_ID_FILE: /var/run/garage-sccache-auth/access-key-id'
-assert_resource_contains ConfigMap control-plane-env 'AWS_SECRET_ACCESS_KEY_FILE: /var/run/garage-sccache-auth/secret-access-key'
-assert_resource_contains ConfigMap control-plane-env 'SCCACHE_CACHE_SIZE: 4G'
+assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_IMAGE: docker.io/library/ubuntu:24.04'
+assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_HOME: /root'
+assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT: control-plane-exec'
+assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX: node-workspace'
+assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS: standard'
+assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE: 10Gi'
+assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH: /environment'
+assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_RUST_HOOK_IMAGE: docker.io/library/rust:1.94.1-bookworm'
+assert_resource_not_contains ConfigMap control-plane-env 'replace-with-digest'
+assert_resource_not_contains ConfigMap control-plane-env 'replace-me-with-commit-sha'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_ENV_CONFIGMAP'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_AUTH_SECRET'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_CONFIG_CONFIGMAP'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_GARAGE_SECRET'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_ROOT'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE:'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY:'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE:'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRANSFER_HOST:'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRANSFER_PORT:'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_IMAGE_PULL_POLICY:'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_WORKSPACE_PVC:'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: IfNotPresent'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane.copilot-sandbox.svc.cluster.local'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: IfNotPresent'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_WORKSPACE_PVC: control-plane-workspace-pvc'
+assert_resource_contains Role control-plane-exec-workloads '  - deployments'
+assert_resource_contains Role control-plane-exec-workloads '  - services'
+assert_resource_contains Role control-plane-exec-workloads '  - jobs'
+assert_resource_contains Role control-plane-exec-workloads '  - pods'
+assert_resource_contains RoleBinding control-plane-exec-workloads 'name: control-plane-exec'
+assert_resource_contains RoleBinding control-plane-exec-workloads 'namespace: copilot-sandbox'
+assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT:'
+assert_resource_not_contains ConfigMap control-plane-env 'SCCACHE_BUCKET:'
+assert_resource_not_contains ConfigMap control-plane-env 'SCCACHE_ENDPOINT:'
+assert_resource_not_contains ConfigMap control-plane-env 'SCCACHE_REGION:'
+assert_resource_not_contains ConfigMap control-plane-env 'SCCACHE_S3_USE_SSL:'
+assert_resource_not_contains ConfigMap control-plane-env 'SCCACHE_S3_KEY_PREFIX:'
+assert_resource_not_contains ConfigMap control-plane-env 'SCCACHE_CACHE_SIZE:'
+assert_resource_not_contains ConfigMap control-plane-env 'AWS_ACCESS_KEY_ID_FILE:'
+assert_resource_not_contains ConfigMap control-plane-env 'AWS_SECRET_ACCESS_KEY_FILE:'
 
-printf '%s\n' 'k8s-sample-storage-layout-test: checking services, deployments, and cache mounts' >&2
+printf '%s\n' 'k8s-sample-storage-layout-test: checking named overlay propagation' >&2
+render_named_overlay_propagation_fixture
+assert_overlay_resource_present ConfigMap control-plane-env
+assert_overlay_resource_present ConfigMap control-plane-instance-env
+assert_overlay_resource_present Service my-custom-service
+assert_overlay_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_K8S_NAMESPACE: custom-sandbox'
+assert_overlay_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_NAMESPACE: custom-sandbox-jobs'
+assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_WORKSPACE_PVC: my-custom-workspace-pvc'
+assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_HOST: my-custom-service.custom-sandbox.svc.cluster.local'
+assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:v1.0.0'
+assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:v1.0.0'
+assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: Always'
+assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: Always'
+
+printf '%s\n' 'k8s-sample-storage-layout-test: checking services and deployment mounts' >&2
 assert_resource_present Service control-plane
-assert_resource_present Service garage-s3
-assert_resource_present Deployment garage-s3
-assert_resource_present Job garage-bootstrap
-assert_resource_contains Service garage-s3 'port: 3900'
-assert_resource_contains Service garage-s3 'targetPort: s3'
-assert_resource_contains Service garage-s3 'app.kubernetes.io/name: garage-s3'
-assert_resource_contains Service garage-s3 'port: 3903'
-assert_resource_contains Service garage-s3 'targetPort: admin'
+assert_resource_absent Service garage-s3
+assert_resource_absent Deployment garage-s3
+assert_resource_absent Job garage-bootstrap
 assert_deployment_contains 'claimName: control-plane-copilot-session-pvc'
 assert_deployment_contains 'claimName: control-plane-workspace-pvc'
+assert_deployment_contains 'image: ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest'
 assert_deployment_contains 'envFrom:'
 assert_deployment_contains 'name: control-plane-env'
+assert_deployment_contains 'name: control-plane-instance-env'
 assert_deployment_contains 'subPath: state/copilot-config.json'
 assert_deployment_contains 'subPath: state/command-history-state.json'
 assert_deployment_contains 'subPath: session-state'
 assert_deployment_contains 'subPath: state/gh'
+assert_deployment_contains 'subPath: state/ssh-auth'
 assert_deployment_contains 'subPath: state/ssh'
 assert_deployment_contains 'subPath: state/ssh-host-keys'
-assert_deployment_contains 'mountPath: /var/run/garage-sccache-auth'
-assert_deployment_contains 'secretName: garage-sccache-auth'
+assert_deployment_contains 'readinessProbe:'
+assert_deployment_contains 'livenessProbe:'
+assert_deployment_contains 'exec:'
+assert_deployment_contains '- bash'
+assert_deployment_contains '- -lc'
+assert_deployment_contains '- pgrep -x sshd >/dev/null'
+assert_deployment_contains '/copilot-session/state/ssh-auth'
 assert_deployment_contains 'chown 1000:1000 /workspace-state/workspace'
 assert_deployment_contains 'chmod 700 /workspace-state/workspace'
-assert_deployment_contains 'mountPath: /var/lib/control-plane/rootful-podman'
-assert_deployment_contains 'subPath: rootful-podman'
 assert_deployment_contains 'mountPath: /var/tmp/control-plane'
 assert_deployment_contains 'subPath: runtime-tmp'
 assert_deployment_contains 'name: cache'
 assert_deployment_contains 'emptyDir: {}'
-assert_deployment_contains 'rm -rf /cache/rootful-podman/*'
-assert_deployment_contains 'mkdir -p /cache/rootful-podman/rootful-overlay /cache/runtime-tmp/rootful-overlay'
+assert_deployment_contains '/cache/runtime-tmp'
 assert_deployment_absent 'mountPath: /workspace/cache/sccache'
 assert_deployment_absent '/workspace-state/workspace/cache'
 assert_deployment_absent 'claimName: control-plane-sccache-pvc'
+assert_deployment_absent 'mountPath: /var/run/garage-sccache-auth'
+assert_deployment_absent 'secretName: garage-sccache-auth'
 assert_deployment_absent 'mountPath: /var/run/sccache-dist-auth-client'
 assert_deployment_absent 'mountPath: /var/run/sccache-dist-auth-server'
+assert_deployment_absent 'tcpSocket:'
 assert_deployment_absent '/usr/local/bin/sccache-dist-entrypoint'
 assert_resource_absent Secret sccache-dist-auth
 assert_resource_absent Service sccache-dist
 assert_resource_absent Deployment sccache-dist
-assert_resource_absent ConfigMap garage-bootstrap
-assert_resource_contains Deployment garage-s3 'claimName: control-plane-sccache-pvc'
-assert_resource_contains Deployment garage-s3 'name: init-garage-config'
-assert_resource_contains Deployment garage-s3 'mountPath: /garage-config'
-assert_resource_contains Deployment garage-s3 'image: dxflrs/garage:v2.2.0'
-assert_resource_contains Deployment garage-s3 'mountPath: /etc/garage'
-assert_resource_contains Deployment garage-s3 'containerPort: 3903'
-assert_resource_contains Deployment garage-s3 'name: admin'
-assert_resource_contains Deployment garage-s3 'mountPath: /var/lib/garage'
-assert_resource_contains Deployment garage-s3 'mountPath: /var/run/garage-admin-auth'
-assert_resource_contains Deployment garage-s3 'defaultMode: 384'
-assert_resource_contains Deployment garage-s3 'fieldPath: status.podIP'
-assert_resource_not_contains Deployment garage-s3 'GARAGE_ALLOW_WORLD_READABLE_SECRETS'
-assert_resource_not_contains Deployment garage-s3 'ghcr.io/chalharu/copilot-sandbox-container/garage'
-assert_resource_not_contains Deployment garage-s3 'name: garage-bootstrap'
-assert_resource_not_contains Deployment garage-s3 'mountPath: /var/run/garage-sccache-auth'
-assert_resource_not_contains Deployment garage-s3 'mountPath: /var/run/garage-bootstrap'
-assert_resource_not_contains Deployment garage-s3 'kubernetes.io/arch: amd64'
-assert_resource_not_contains Service garage-s3 'name: garage-admin'
-assert_resource_absent Service garage-admin
-assert_resource_contains Job garage-bootstrap 'image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha'
-assert_resource_contains Job garage-bootstrap '/usr/local/bin/garage-bootstrap.mjs'
-assert_resource_contains Job garage-bootstrap 'restartPolicy: OnFailure'
-assert_resource_contains Job garage-bootstrap 'backoffLimit: 6'
-assert_resource_contains Job garage-bootstrap 'serviceAccountName: garage-bootstrap'
-assert_resource_contains Job garage-bootstrap 'automountServiceAccountToken: true'
-assert_resource_contains Job garage-bootstrap 'http://garage-s3.copilot-sandbox.svc.cluster.local:3903'
-assert_resource_contains Job garage-bootstrap 'http://garage-s3.copilot-sandbox.svc.cluster.local:3900'
-assert_resource_contains Job garage-bootstrap 'mountPath: /var/run/garage-admin-auth'
-assert_resource_contains Job garage-bootstrap 'GARAGE_CACHE_QUOTA_BYTES'
-assert_resource_contains Job garage-bootstrap 'GARAGE_CACHE_EXPIRATION_DAYS'
-assert_resource_contains Job garage-bootstrap 'GARAGE_S3_AUTH_SECRET_NAME'
-assert_resource_contains Job garage-bootstrap 'fieldPath: metadata.namespace'
-assert_resource_not_contains Job garage-bootstrap 'AWS_ACCESS_KEY_ID_FILE'
-assert_resource_not_contains Job garage-bootstrap 'AWS_SECRET_ACCESS_KEY_FILE'
-assert_resource_not_contains Job garage-bootstrap 'mountPath: /var/run/garage-sccache-auth'
-assert_resource_not_contains Job garage-bootstrap 'defaultMode: 384'
 
-printf '%s\n' 'k8s-sample-storage-layout-test: checking Podman defaults and legacy PVC removal' >&2
-if grep -Fq '/run/control-plane/podman' "${manifest_path}"; then
-  printf 'Expected sample manifest to avoid /run/control-plane/podman for Podman state\n' >&2
-  exit 1
-fi
-if grep -Fq 'rootful-vfs' "${manifest_path}"; then
-  printf 'Expected sample manifest to stop defaulting rootful Podman to vfs\n' >&2
-  exit 1
-fi
+printf '%s\n' 'k8s-sample-storage-layout-test: checking legacy runtime removal' >&2
 if grep -Fq 'CONTROL_PLANE_SCCACHE_PVC' "${manifest_path}"; then
   printf 'Expected sample manifest to stop wiring direct sccache PVC mounts into jobs\n' >&2
   exit 1
@@ -352,6 +431,18 @@ if grep -Fq 'SCCACHE_DIST_' "${manifest_path}"; then
 fi
 if grep -Fq 'control-plane-local-storage' "${manifest_path}"; then
   printf 'Expected sample manifest to stop depending on the bespoke local-storage class\n' >&2
+  exit 1
+fi
+if grep -Fq 'CONTROL_PLANE_LOCAL_PODMAN_MODE' "${manifest_path}"; then
+  printf 'Expected sample manifest to stop carrying local Podman mode settings\n' >&2
+  exit 1
+fi
+if grep -Fq 'rootful-podman' "${manifest_path}"; then
+  printf 'Expected sample manifest to stop mounting rootful Podman cache paths\n' >&2
+  exit 1
+fi
+if grep -Fq 'garage-' "${manifest_path}"; then
+  printf 'Expected sample manifest to stop shipping Garage cache resources\n' >&2
   exit 1
 fi
 

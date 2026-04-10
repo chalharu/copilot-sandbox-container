@@ -1,51 +1,132 @@
 # Kubernetes サンプルマニフェスト
 
-`deploy/kubernetes/control-plane.example/` は、control-plane の Kubernetes サンプルをまとめたエントリーポイントです。
+`deploy/kubernetes/control-plane.example/` は、
+`ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:<tag>` を Kubernetes へ
+配置するための sample manifest です。はじめて導入する場合は
+`docs/tutorials/first-deployment.md` を先に読み、このページは
+「どのファイルをどう編集するか」を確認する reference として使ってください。
 
-初回導入や共有 PVC の作り直し時は、まず shared PVC 定義を適用し、そのあとで通常の kustomization を適用します。
+## どの kustomization を使うか
+
+| 状況 | 実行するパス |
+| --- | --- |
+| 初回導入、または shared session PVC を作り直す | `deploy/kubernetes/control-plane.example/install` を apply してから、`deploy/kubernetes/control-plane.example` を apply |
+| 通常更新 | `deploy/kubernetes/control-plane.example` のみ |
+
+初回導入:
 
 ```bash
 kubectl apply -k deploy/kubernetes/control-plane.example/install
 kubectl apply -k deploy/kubernetes/control-plane.example
 ```
 
-通常更新では、共有 PVC を含まないルート kustomization を使います。
+通常更新:
 
 ```bash
 kubectl apply -k deploy/kubernetes/control-plane.example
 ```
 
-## 構成
+## 導入前に決めること
 
-- `control-plane.example/common/`: Namespace、RBAC、Secret、ConfigMap、Garage S3 関連リソース、`garage-bootstrap` Job などの共通リソースを 1 resource = 1 file で置いています。
-- `control-plane.example/base/`: 1 つの control-plane インスタンスとして再利用する `PersistentVolumeClaim`、`Service`、`Deployment` を個別ファイルで置いています。
-- `control-plane.example/overlays/default/`: 同梱サンプルのカスタマイズ叩き台。`base/` の各 resource に対する書き換え候補をコメントで置いています。
-- `control-plane.example/install/`: 初回導入時だけ apply する shared PVC 定義。shared PVC に加えて、先に必要になる `copilot-sandbox` Namespace も置いています。
-
-ルートの `control-plane.example/kustomization.yaml` は、更新時に immutable な共有 PVC spec を触らないための通常運用パスです。`common/` と `base/` の個別 resource file をそのまま読むことで、standalone `kustomize` と `kubectl kustomize` の両方で warning なく扱いやすい構成にしています。`control-plane-copilot-session-pvc` や `control-plane-sccache-pvc` のような bound 済み PVC は、storage class や access mode を再 apply で安全に変えられないため、初回導入用の `install/` へ分離しています。
+1. session 用 shared PVC に使う RWX storage class
+2. workspace PVC の storage class とサイズ
+3. Execution Pod が node ごとに使う environment PVC の storage class
+   （`CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS`）
+4. `control-plane-auth` Secret に入れる SSH 公開鍵
+5. namespace や PVC 名を既定値のまま使うかどうか
+6. `latest` のまま試すか、published image を full commit SHA tag へ pin するか
 
 ## 最初に書き換える場所
 
-1. `control-plane.example/install/pvc-control-plane-copilot-session.yaml` と `control-plane.example/install/pvc-control-plane-sccache.yaml` の shared PVC 設定をクラスタに合わせる。特に `control-plane-copilot-session-pvc` の RWX storage class は初回導入前に書き換える。
-2. `control-plane.example/base/pvc-control-plane-workspace.yaml` の workspace PVC 設定をクラスタに合わせる。PVC spec は bound 後に自由に変更できないので、storage class やサイズは初回導入前に確定させる。
-3. `control-plane.example/common/secret-control-plane-auth.yaml`、`control-plane.example/common/secret-garage-admin-auth.yaml`、`control-plane.example/common/configmap-control-plane-env.yaml` などの placeholder な credential とクラスタ依存値を置き換える。`garage-sccache-auth` は sample manifest では事前定義せず、`garage-bootstrap` Job が生成するので、通常は `control-plane-auth` と `garage-admin-auth` を主に調整する。
-4. `control-plane` image tag を、次の 3 箇所でそろえて書き換える。
-   - `control-plane.example/base/deployment-control-plane.yaml` の `Deployment/control-plane`
-   - `control-plane.example/common/configmap-control-plane-env.yaml` の `ConfigMap/control-plane-env` にある `CONTROL_PLANE_JOB_TRANSFER_IMAGE`
-   - `control-plane.example/common/job-garage-bootstrap.yaml` の `Job/garage-bootstrap`
-5. デフォルトのインスタンス名や workspace PVC 名を変えたい場合は、`control-plane.example/overlays/default/kustomization.yaml` の候補をベースに sibling overlay を作る。
+1. `control-plane.example/install/pvc-control-plane-copilot-session.yaml`
+   - `replace-me-with-rwx-storage-class` を、`ReadWriteMany` を満たす
+      storage class へ必ず置き換える
+2. `control-plane.example/common/secret-control-plane-auth.yaml`
+   - `ssh-public-key` を自分の公開鍵へ必ず差し替える
+   - 必要なら `gh-github-token` / `gh-hosts.yml` /
+     `copilot-github-token` を追加する
+3. `control-plane.example/base/pvc-control-plane-workspace.yaml`
+   - workspace PVC の storage class / サイズをクラスタに合わせる
+   - sample 既定の `ReadWriteOnce` のままでも、Execution Pod が
+      control-plane Pod と同じ node に pin されるため共有できる
+4. `control-plane.example/common/configmap-control-plane-env.yaml`
+   - cluster 固有の runtime 設定だけを調整する
+   - `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS` を、cluster に
+      `standard` が無い場合は導入前に置き換える
+   - `CONTROL_PLANE_FAST_EXECUTION_IMAGE` を変える場合は `/bin/sh` と
+      `apt-get` または `apk` を持つ image を使う
+   - namespace / session PVC / helper image の追従は shipped sample の
+     replacements が持つので、名前変更のたびにここを書き換える必要はない
+5. `control-plane.example/base/deployment-control-plane.yaml` または
+    `control-plane.example/overlays/default/kustomization.yaml`
+   - sample 既定は
+     `ghcr.io/chalharu/copilot-sandbox-container-v2/control-plane:latest`
+   - image を差し替えると `control-plane/control-plane-instance-env` 側の
+     `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` /
+     `CONTROL_PLANE_JOB_TRANSFER_IMAGE` も自動で追従する
+   - 再現性が必要なら GitHub Packages の
+     `copilot-sandbox-container-v2/control-plane`
+     （<https://github.com/chalharu/copilot-sandbox-container-v2/pkgs/container/copilot-sandbox-container-v2%2Fcontrol-plane>）
+     から full commit SHA tag を選び、ここを pin する
+6. `control-plane.example/overlays/default/kustomization.yaml`
+   - namespace / Deployment / Service / workspace PVC 名を変える named overlay の
+     叩き台として使う
+   - この overlay には root sample と同じ alignment replacement が入っているので、
+     コピーした先でも patch 後の namespace / Service / image 追従を維持できる
+
+`control-plane.example/control-plane/configmap-control-plane-instance-env.yaml` は、
+workspace PVC 名 / Service host / helper image のような instance 固有値を持つ
+ConfigMap ですが、通常は直接編集せず shipped replacement に追従させます。
+
+## 構成
+
+- `control-plane.example/shared-resources/`
+  - Namespace、RBAC、Secret、shared ConfigMap をまとめた entry point
+- `control-plane.example/control-plane/`
+  - workspace PVC、Service、Deployment、instance 固有 env をまとめた
+    control-plane entry point
+- `control-plane.example/common/` / `control-plane.example/base/`
+  - 上記 entry point から再利用する実体 manifest
+- `control-plane.example/overlays/default/`
+  - shipped root sample を包む最小 overlay。named variant の叩き台
+- `control-plane.example/install/`
+  - 初回導入時だけ apply する shared PVC と先行 namespace
+
+ルートの `control-plane.example/kustomization.yaml` は
+`shared-resources/` と `control-plane/` を compose し、namespace / Service host /
+workspace PVC 名 / helper image の追従を built-in replacement で内包します。
+そのうえで、bound 済み shared PVC の spec を通常更新で触らないよう、immutable な
+`control-plane-copilot-session-pvc` だけは `install/` に分離しています。
+
+## 導入後に確認すること
+
+- `kubectl get pvc -n copilot-sandbox` で session / workspace PVC が `Bound`
+- `kubectl get pods -n copilot-sandbox` で control-plane Pod が `Running`
+- `kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox`
+  の後に `ssh -p 2222 copilot@127.0.0.1` でログインできる
+- このリポジトリの checkout 上で `./scripts/test-k8s-job.sh` を実行できる
+
+sample 既定では、delegated Execution Pod 用の `control-plane-exec`
+ServiceAccount と、`copilot-sandbox-jobs` 側の
+`control-plane-exec-workloads` Role / RoleBinding も含みます。SSH shell や
+delegated `bash` から `kubectl -n copilot-sandbox-jobs ...` を使い、
+作業後に削除する前提の Deployment / Service / Job / Pod を扱えます。
 
 ## default overlay のカスタマイズ
 
-`control-plane.example/overlays/default/kustomization.yaml` には、インスタンスごとに差し替えやすい項目の候補をコメントで入れています。これはそのまま root sample に読み込ませるのではなく、named variant を作るときの叩き台として使う想定です。
+`control-plane.example/overlays/default/kustomization.yaml` は、root sample をそのまま
+wrap するための named-variant 叩き台です。複数の名前付きインスタンスを同時に
+持ちたい場合はこの directory を sibling overlay として複製し、そこへ必要な
+patch だけを追加します。コピー後も replacement block は残してください。
 
-- workspace PVC 名
-- デフォルトの `5Gi` では足りないときの workspace PVC サイズ
-- workspace PVC の storage class
-- 別の公開 revision に pin したいときの `control-plane` container image tag
-- `Service` 名と selector label
-- `Deployment` 名、selector label、pod template label、mount する workspace PVC 名
+通常は次だけで十分です。
 
-コメントは固有のサンプル名に寄せず、generic な形にしています。候補ブロックを uncomment して、`replace-me-*` を自分の値に置き換えて使ってください。
+- Namespace 名の差し替え
+- `control-plane-auth` Secret や `control-plane-env` ConfigMap の内容差し替え
+- workspace PVC の storage class / サイズ
+- Deployment の resource / nodeSelector / imagePullPolicy
+- `images:` による control-plane image tag の差し替え
 
-複数の名前付きインスタンスを同時に持ちたい場合は、`overlays/default/` を sibling overlay として複製し、同梱のルートとは別に compose 用の `kustomization.yaml` を追加してください。
+workspace PVC mount 名、job-transfer host、bootstrap / transfer helper image は
+shipped sample 側が自動で追従させるので、Deployment と ConfigMap を二重に
+編集する必要はありません。

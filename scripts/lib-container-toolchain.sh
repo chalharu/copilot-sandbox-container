@@ -23,82 +23,9 @@ load_control_plane_runtime_env() {
   set +a
 }
 
-write_registry_auth_file() {
-  local target_path="$1"
-  local registry="$2"
-  local username="$3"
-  local token="$4"
-  local encoded_auth=""
-
-  require_command base64
-  encoded_auth="$(printf '%s' "${username}:${token}" | base64 | tr -d '\n')"
-  mkdir -p "$(dirname "${target_path}")"
-  (
-    umask 077
-    printf '{"auths":{"%s":{"auth":"%s"}}}\n' "${registry}" "${encoded_auth}" > "${target_path}"
-  )
-  chmod 600 "${target_path}"
-}
-
 docker_runtime_available() {
   command -v docker >/dev/null 2>&1 \
     && docker info >/dev/null 2>&1
-}
-
-running_inside_control_plane_image() {
-  [[ -x /usr/local/bin/control-plane-entrypoint ]] \
-    && [[ -x /usr/local/bin/control-plane-run ]]
-}
-
-report_missing_build_test_toolchain() {
-  printf 'Missing supported build/test toolchain. Provide a working docker buildx environment, or podman with image build support and a usable rootless runtime.\n' >&2
-
-  if running_inside_control_plane_image; then
-    printf '%s\n' \
-      'This control-plane image includes the Podman/Kind toolchain used by scripts/lint.sh and scripts/build-test.sh, but nested containers still depend on the outer host or Kubernetes securityContext.' \
-      'When running on Kubernetes, prefer the sample least-privilege SSH/Copilot deployment and route execution through Kubernetes Jobs or GitHub Actions by default.' \
-      'The image already provisions /etc/subuid and /etc/subgid for the copilot user, but those files alone cannot override host/runtime restrictions on nested user namespaces, /dev/fuse, or other local Podman requirements.' \
-      >&2
-  fi
-}
-
-podman_reports_userns_failure() {
-  local output="$1"
-
-  {
-    grep -Fq 'newuidmap' <<<"${output}" && grep -Fq 'Operation not permitted' <<<"${output}";
-  } || {
-    grep -Fq 'newgidmap' <<<"${output}" && grep -Fq 'Operation not permitted' <<<"${output}";
-  } || grep -Fqi 'cannot set user namespace' <<<"${output}" \
-    || grep -Fq 'cannot clone: Operation not permitted' <<<"${output}" \
-    || grep -Fq 'cannot re-exec process' <<<"${output}"
-}
-
-report_podman_runtime_failure() {
-  local output="$1"
-
-  if podman_reports_userns_failure "${output}"; then
-    printf '%s\n' \
-      'Podman is installed but unusable in this environment: rootless user-namespace setup is blocked.' \
-      'On Linux 5.12+, SETFCAP is also required to map UID 0 in a new user namespace, but re-adding capabilities inside the nested container is not sufficient by itself.' \
-      'Entries in /etc/subuid and /etc/subgid inside the nested container are not enough; the outer host/runtime still has to allow user namespaces, newuidmap/newgidmap, and the required seccomp/sysctl settings.' \
-      'Even privileged Pods can still fail here when the outer host/runtime blocks nested user namespaces.' \
-      'Use the sample SSH/Copilot plus Kubernetes Job path, or fall back to GitHub Actions / a host runner. If you must run local Podman in-cluster, the outer runtime still needs to permit nested user namespaces and related helpers.' \
-      >&2
-  fi
-}
-
-podman_runtime_available() {
-  local output
-
-  command -v podman >/dev/null 2>&1 || return 1
-
-  if output="$(podman info 2>&1)"; then
-    return 0
-  fi
-
-  report_podman_runtime_failure "${output}"
-  return 1
 }
 
 docker_build_toolchain_available() {
@@ -106,9 +33,25 @@ docker_build_toolchain_available() {
     && docker buildx version >/dev/null 2>&1
 }
 
-podman_build_toolchain_available() {
-  podman_runtime_available \
-    && podman build --help >/dev/null 2>&1
+buildkitd_build_toolchain_available() {
+  command -v docker >/dev/null 2>&1 \
+    && docker buildx version >/dev/null 2>&1 \
+    && command -v kubectl >/dev/null 2>&1
+}
+
+toolchain_supports_container_runtime() {
+  case "$1" in
+    docker)
+      return 0
+      ;;
+    buildkitd)
+      return 1
+      ;;
+    *)
+      printf 'Unsupported toolchain: %s\n' "$1" >&2
+      exit 1
+      ;;
+  esac
 }
 
 container_runtime_for_toolchain() {
@@ -116,8 +59,9 @@ container_runtime_for_toolchain() {
     docker)
       printf 'docker\n'
       ;;
-    podman)
-      printf 'podman\n'
+    buildkitd)
+      printf '%s\n' 'Buildkitd toolchain does not provide a local container runtime.' >&2
+      exit 1
       ;;
     *)
       printf 'Unsupported toolchain: %s\n' "$1" >&2
@@ -128,64 +72,14 @@ container_runtime_for_toolchain() {
 
 build_command_for_toolchain() {
   case "$1" in
-    docker)
+    docker|buildkitd)
       printf 'docker\n'
-      ;;
-    podman)
-      if command -v buildah >/dev/null 2>&1 && ! prefer_podman_remote_build; then
-        printf 'buildah\n'
-      else
-        printf 'podman\n'
-      fi
       ;;
     *)
       printf 'Unsupported toolchain: %s\n' "$1" >&2
       exit 1
       ;;
   esac
-}
-
-build_context_hash() {
-  local context_dir="$1"
-
-  [[ -d "${context_dir}" ]] || {
-    printf 'Build context directory not found: %s\n' "${context_dir}" >&2
-    exit 1
-  }
-  require_command tar
-  require_command sha256sum
-
-  tar \
-    --sort=name \
-    --mtime='UTC 1970-01-01' \
-    --owner=0 \
-    --group=0 \
-    --numeric-owner \
-    -cf - \
-    -C "${context_dir}" \
-    . \
-    | sha256sum \
-    | awk '{print $1}'
-}
-
-build_context_hash_label_key() {
-  printf '%s\n' 'io.github.chalharu.control-plane.build-context-sha256'
-}
-
-image_context_hash_for_toolchain() {
-  local toolchain="$1"
-  local image_tag="$2"
-  local label_key="$3"
-  local container_bin
-
-  container_bin="$(container_runtime_for_toolchain "${toolchain}")"
-  "${container_bin}" image inspect --format "{{ index .Config.Labels \"${label_key}\" }}" "${image_tag}" 2>/dev/null
-}
-
-prefer_podman_remote_build() {
-  [[ -n "${CONTAINER_HOST:-}" ]] \
-    || [[ -n "${DOCKER_HOST:-}" ]] \
-    || [[ "${CONTROL_PLANE_LOCAL_PODMAN_MODE:-}" == "rootful-service" ]]
 }
 
 detect_container_runtime() {
@@ -195,45 +89,20 @@ detect_container_runtime() {
   local requested_toolchain="${CONTROL_PLANE_TOOLCHAIN:-}"
 
   if [[ -n "${requested_runtime}" ]]; then
-    case "${requested_runtime}" in
-      docker)
-        docker_runtime_available || {
-          printf 'Requested docker runtime is not usable in this environment.\n' >&2
-          exit 1
-        }
-        ;;
-      podman)
-        podman_runtime_available || {
-          printf 'Requested podman runtime is not usable in this environment.\n' >&2
-          exit 1
-        }
-        ;;
-      *)
-        require_command "${requested_runtime}"
-        ;;
-    esac
-    printf '%s\n' "${requested_runtime}"
+    [[ "${requested_runtime}" == "docker" ]] || {
+      printf 'Unsupported CONTROL_PLANE_CONTAINER_BIN: %s\n' "${requested_runtime}" >&2
+      exit 1
+    }
+    docker_runtime_available || {
+      printf 'Requested docker runtime is not usable in this environment.\n' >&2
+      exit 1
+    }
+    printf 'docker\n'
     return
   fi
 
   case "${requested_toolchain}" in
-    docker)
-      docker_runtime_available || {
-        printf 'Requested docker toolchain is not usable in this environment.\n' >&2
-        exit 1
-      }
-      printf 'docker\n'
-      return
-      ;;
-    podman)
-      podman_runtime_available || {
-        printf 'Requested podman toolchain is not usable in this environment.\n' >&2
-        exit 1
-      }
-      printf 'podman\n'
-      return
-      ;;
-    '')
+    docker|'')
       ;;
     *)
       printf 'Unsupported CONTROL_PLANE_TOOLCHAIN: %s\n' "${requested_toolchain}" >&2
@@ -241,81 +110,429 @@ detect_container_runtime() {
       ;;
   esac
 
-  if docker_runtime_available; then
-    printf 'docker\n'
-    return
-  fi
-
-  if podman_runtime_available; then
-    printf 'podman\n'
-    return
-  fi
-
-  printf 'Missing supported container runtime. Provide a working docker daemon, or podman with a usable rootless user namespace environment.\n' >&2
-  exit 1
+  docker_runtime_available || {
+    printf 'Missing supported container runtime. Provide a working docker daemon.\n' >&2
+    exit 1
+  }
+  printf 'docker\n'
 }
 
 detect_build_test_toolchain() {
   load_control_plane_runtime_env
 
-  local requested_toolchain="${CONTROL_PLANE_TOOLCHAIN:-}"
-
-  case "${requested_toolchain}" in
-    docker)
-      docker_build_toolchain_available || {
-        printf 'Docker toolchain requires a working docker CLI with buildx support.\n' >&2
-        report_missing_build_test_toolchain
+  case "${CONTROL_PLANE_TOOLCHAIN:-}" in
+    docker|'')
+      ;;
+    buildkitd)
+      buildkitd_build_toolchain_available || {
+        printf 'Buildkitd toolchain requires docker buildx and kubectl.\n' >&2
         exit 1
       }
-      printf 'docker\n'
+      printf 'buildkitd\n'
       return
-      ;;
-    podman)
-      podman_build_toolchain_available || {
-        printf 'Podman toolchain requires podman with image build support and a usable rootless runtime.\n' >&2
-        report_missing_build_test_toolchain
-        exit 1
-      }
-      printf 'podman\n'
-      return
-      ;;
-    '')
       ;;
     *)
-      printf 'Unsupported CONTROL_PLANE_TOOLCHAIN: %s\n' "${requested_toolchain}" >&2
+      printf 'Unsupported CONTROL_PLANE_TOOLCHAIN: %s\n' "${CONTROL_PLANE_TOOLCHAIN}" >&2
       exit 1
       ;;
   esac
 
-  if docker_build_toolchain_available; then
-    printf 'docker\n'
+  docker_build_toolchain_available || {
+    printf 'Docker toolchain requires a working docker CLI with buildx support.\n' >&2
+    exit 1
+  }
+
+  printf 'docker\n'
+}
+
+build_context_hash() {
+  local context_dir="$1"
+
+  [[ -d "${context_dir}" ]] || {
+    printf 'Build context directory not found: %s\n' "${context_dir}" >&2
+    exit 1
+  }
+  require_command find
+  require_command sort
+  require_command tar
+  require_command sha256sum
+
+  (
+    cd "${context_dir}" || exit
+    find . \
+      \( -path './.git' -o -path '*/target' \) -prune -o \
+      \( -type f -o -type l \) -print0 \
+      | LC_ALL=C sort -z \
+      | tar \
+          --null \
+          --no-recursion \
+          --sort=name \
+          --mtime='UTC 1970-01-01' \
+          --owner=0 \
+          --group=0 \
+          --numeric-owner \
+          -cf - \
+          --files-from -
+  ) | sha256sum | awk '{print $1}'
+}
+
+build_context_hash_label_key() {
+  printf '%s\n' 'io.github.chalharu.control-plane.build-context-sha256'
+}
+
+build_context_hash_label_key_for_target() {
+  local target_name="$1"
+
+  printf '%s.%s\n' "$(build_context_hash_label_key)" "${target_name}"
+}
+
+image_context_hash_for_toolchain() {
+  local toolchain="$1"
+  local image_tag="$2"
+  local label_key="$3"
+  local container_bin
+
+  case "${toolchain}" in
+    docker)
+      container_bin="$(container_runtime_for_toolchain "${toolchain}")"
+      "${container_bin}" image inspect --format "{{ index .Config.Labels \"${label_key}\" }}" "${image_tag}" 2>/dev/null
+      ;;
+    buildkitd)
+      local stamp_path
+
+      stamp_path="$(buildkitd_context_stamp_path "${image_tag}" "${label_key}")"
+      [[ -f "${stamp_path}" ]] && cat "${stamp_path}"
+      ;;
+    *)
+      printf 'Unsupported toolchain: %s\n' "${toolchain}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+buildkitd_namespace() {
+  load_control_plane_runtime_env
+
+  if [[ -n "${CONTROL_PLANE_BUILDKIT_NAMESPACE:-}" ]]; then
+    printf '%s\n' "${CONTROL_PLANE_BUILDKIT_NAMESPACE}"
+    return
+  fi
+  if [[ -n "${CONTROL_PLANE_JOB_NAMESPACE:-}" ]]; then
+    printf '%s\n' "${CONTROL_PLANE_JOB_NAMESPACE}"
+    return
+  fi
+  if [[ -r /var/run/secrets/kubernetes.io/serviceaccount/namespace ]]; then
+    cat /var/run/secrets/kubernetes.io/serviceaccount/namespace
     return
   fi
 
-  if podman_build_toolchain_available; then
-    printf 'podman\n'
+  printf 'default\n'
+}
+
+buildkitd_image() {
+  printf '%s\n' "${CONTROL_PLANE_BUILDKIT_IMAGE:-docker.io/moby/buildkit:rootless}"
+}
+
+buildkitd_service_port() {
+  printf '%s\n' "${CONTROL_PLANE_BUILDKIT_SERVICE_PORT:-1234}"
+}
+
+buildkitd_start_timeout() {
+  printf '%s\n' "${CONTROL_PLANE_BUILDKIT_START_TIMEOUT:-180s}"
+}
+
+buildkitd_service_account() {
+  if [[ -n "${CONTROL_PLANE_BUILDKIT_SERVICE_ACCOUNT:-}" ]]; then
+    printf '%s\n' "${CONTROL_PLANE_BUILDKIT_SERVICE_ACCOUNT}"
     return
   fi
+  printf '%s\n' "${CONTROL_PLANE_JOB_SERVICE_ACCOUNT:-}"
+}
 
-  report_missing_build_test_toolchain
-  exit 1
+buildkitd_state_root() {
+  printf '%s\n' "${CONTROL_PLANE_BUILDKIT_STATE_ROOT:-${TMPDIR:-/tmp}/control-plane-buildkitd}"
+}
+
+buildkitd_context_stamp_path() {
+  local image_tag="$1"
+  local label_key="$2"
+  local state_root
+  local stamp_id
+
+  require_command sha256sum
+  state_root="$(buildkitd_state_root)"
+  mkdir -p "${state_root}"
+  stamp_id="$(printf '%s\0%s' "${image_tag}" "${label_key}" | sha256sum | awk '{print $1}')"
+  printf '%s/%s.context-sha256\n' "${state_root}" "${stamp_id}"
+}
+
+record_image_context_hash_for_toolchain() {
+  local toolchain="$1"
+  local image_tag="$2"
+  local label_key="$3"
+  local context_hash="$4"
+
+  case "${toolchain}" in
+    docker)
+      return 0
+      ;;
+    buildkitd)
+      local stamp_path
+
+      stamp_path="$(buildkitd_context_stamp_path "${image_tag}" "${label_key}")"
+      printf '%s\n' "${context_hash}" > "${stamp_path}"
+      ;;
+    *)
+      printf 'Unsupported toolchain: %s\n' "${toolchain}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+buildx_local_cache_dir_for_context() {
+  local context_dir="$1"
+  local cache_root="${CONTROL_PLANE_BUILDX_CACHE_ROOT:-}"
+  local context_path
+
+  [[ -n "${cache_root}" ]] || {
+    printf '%s\n' ''
+    return 0
+  }
+
+  require_command sha256sum
+  context_path="$(cd "${context_dir}" && pwd -P)"
+  printf '%s/%s\n' "${cache_root}" "$(printf '%s' "${context_path}" | sha256sum | awk '{print $1}')"
+}
+
+prepare_buildx_local_cache() {
+  local context_dir="$1"
+  local args_name="$2"
+  local cache_dir_name="$3"
+  local new_cache_dir_name="$4"
+  local cache_root="${CONTROL_PLANE_BUILDX_CACHE_ROOT:-}"
+  local cache_dir_value
+  local new_cache_dir_value
+  local -n args_ref="${args_name}"
+
+  if [[ -z "${cache_root}" ]]; then
+    printf -v "${cache_dir_name}" '%s' ''
+    printf -v "${new_cache_dir_name}" '%s' ''
+    return 0
+  fi
+
+  cache_dir_value="$(buildx_local_cache_dir_for_context "${context_dir}")"
+  new_cache_dir_value="${cache_dir_value}-new"
+  mkdir -p "${cache_root}" "${cache_dir_value}"
+  rm -rf "${new_cache_dir_value}"
+  args_ref+=(--cache-from "type=local,src=${cache_dir_value}" --cache-to "type=local,dest=${new_cache_dir_value},mode=max")
+  printf -v "${cache_dir_name}" '%s' "${cache_dir_value}"
+  printf -v "${new_cache_dir_name}" '%s' "${new_cache_dir_value}"
+}
+
+finalize_buildx_local_cache() {
+  local cache_dir="$1"
+  local new_cache_dir="$2"
+
+  [[ -n "${cache_dir}" ]] || return 0
+  [[ -d "${new_cache_dir}" ]] || return 0
+
+  rm -rf "${cache_dir}"
+  mv "${new_cache_dir}" "${cache_dir}"
+}
+
+rust_container_cache_dir_for_scope() {
+  local cache_scope="$1"
+  local cache_root="${CONTROL_PLANE_RUST_CONTAINER_CACHE_ROOT:-}"
+
+  [[ -n "${cache_root}" ]] || {
+    printf '%s\n' ''
+    return 0
+  }
+
+  require_command sha256sum
+  printf '%s/%s\n' "${cache_root}" "$(printf '%s' "${cache_scope}" | sha256sum | awk '{print $1}')"
+}
+
+prepare_rust_container_cache() {
+  local cache_scope="$1"
+  local home_dir_name="$2"
+  local target_dir_name="$3"
+  local temp_root_name="$4"
+  local cache_dir
+  local home_dir
+  local target_dir
+  local temp_root=''
+
+  cache_dir="$(rust_container_cache_dir_for_scope "${cache_scope}")"
+  if [[ -n "${cache_dir}" ]]; then
+    home_dir="${cache_dir}/home"
+    target_dir="${cache_dir}/target"
+  else
+    temp_root="$(mktemp -d)"
+    home_dir="${temp_root}/home"
+    target_dir="${temp_root}/target"
+  fi
+
+  mkdir -p "${home_dir}/.cargo" "${target_dir}"
+  printf -v "${home_dir_name}" '%s' "${home_dir}"
+  printf -v "${target_dir_name}" '%s' "${target_dir}"
+  printf -v "${temp_root_name}" '%s' "${temp_root}"
+}
+
+buildkitd_resource_name() {
+  local seed="$1"
+  local suffix
+
+  require_command sha256sum
+  suffix="$(printf '%s\n%s\n%s\n' "${seed}" "$$" "${RANDOM}" | sha256sum | awk '{print substr($1, 1, 12)}')"
+  printf 'control-plane-buildkitd-%s\n' "${suffix}"
+}
+
+buildkitd_remote_addr() {
+  local service_name="$1"
+  local namespace="$2"
+  local port
+
+  port="$(buildkitd_service_port)"
+  printf 'tcp://%s.%s.svc.cluster.local:%s\n' "${service_name}" "${namespace}" "${port}"
+}
+
+buildkitd_cleanup_resources() {
+  local builder_name="$1"
+  local service_name="$2"
+  local pod_name="$3"
+  local namespace="$4"
+
+  docker buildx rm -f "${builder_name}" >/dev/null 2>&1 || true
+  kubectl delete service "${service_name}" -n "${namespace}" --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete pod "${pod_name}" -n "${namespace}" --ignore-not-found >/dev/null 2>&1 || true
+}
+
+buildkitd_create_resources() {
+  local builder_name="$1"
+  local service_name="$2"
+  local pod_name="$3"
+  local namespace="$4"
+  local port="$5"
+  local image="$6"
+  local service_account="$7"
+  local service_account_yaml=''
+
+  if [[ -n "${service_account}" ]]; then
+    service_account_yaml="  serviceAccountName: ${service_account}"
+  fi
+
+  if ! cat <<EOF | kubectl create -f - >/dev/null
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${pod_name}
+  namespace: ${namespace}
+  labels:
+    app.kubernetes.io/name: ${pod_name}
+spec:
+  restartPolicy: Never
+${service_account_yaml}
+  containers:
+    - name: buildkitd
+      image: ${image}
+      args:
+        - --addr
+        - tcp://0.0.0.0:${port}
+        - --oci-worker-no-process-sandbox
+      ports:
+        - containerPort: ${port}
+          name: grpc
+      readinessProbe:
+        tcpSocket:
+          port: ${port}
+        periodSeconds: 2
+      securityContext:
+        seccompProfile:
+          type: Unconfined
+        appArmorProfile:
+          type: Unconfined
+EOF
+  then
+    buildkitd_cleanup_resources "${builder_name}" "${service_name}" "${pod_name}" "${namespace}"
+    return 1
+  fi
+
+  if ! cat <<EOF | kubectl create -f - >/dev/null
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${service_name}
+  namespace: ${namespace}
+spec:
+  selector:
+    app.kubernetes.io/name: ${pod_name}
+  ports:
+    - name: grpc
+      port: ${port}
+      targetPort: ${port}
+EOF
+  then
+    buildkitd_cleanup_resources "${builder_name}" "${service_name}" "${pod_name}" "${namespace}"
+    return 1
+  fi
+
+  if ! kubectl wait -n "${namespace}" --for=condition=Ready "pod/${pod_name}" --timeout="$(buildkitd_start_timeout)" >/dev/null; then
+    kubectl describe pod "${pod_name}" -n "${namespace}" >&2 || true
+    kubectl logs "${pod_name}" -n "${namespace}" --tail=100 >&2 || true
+    buildkitd_cleanup_resources "${builder_name}" "${service_name}" "${pod_name}" "${namespace}"
+    return 1
+  fi
+}
+
+buildkitd_prepare_remote_builder() {
+  local seed="$1"
+  local namespace
+  local port
+  local image
+  local service_account
+  local resource_name
+  local pod_name
+  local service_name
+  local builder_name
+
+  namespace="$(buildkitd_namespace)"
+  port="$(buildkitd_service_port)"
+  image="$(buildkitd_image)"
+  service_account="$(buildkitd_service_account)"
+  resource_name="$(buildkitd_resource_name "${seed}")"
+  pod_name="${resource_name}"
+  service_name="${resource_name}"
+  builder_name="${resource_name}"
+
+  if ! buildkitd_create_resources "${builder_name}" "${service_name}" "${pod_name}" "${namespace}" "${port}" "${image}" "${service_account}"; then
+    return 1
+  fi
+  if ! docker buildx create \
+    --name "${builder_name}" \
+    --use \
+    --driver remote \
+    "$(buildkitd_remote_addr "${service_name}" "${namespace}")" \
+    >/dev/null; then
+    buildkitd_cleanup_resources "${builder_name}" "${service_name}" "${pod_name}" "${namespace}"
+    return 1
+  fi
+
+  printf '%s\t%s\t%s\t%s\n' "${builder_name}" "${service_name}" "${pod_name}" "${namespace}"
 }
 
 build_image_for_toolchain() {
   local toolchain="$1"
   local image_tag="$2"
   local context_dir="$3"
-  local build_isolation=""
-  local build_bin=""
-  local context_hash=""
-  local context_hash_label_key=""
-  local existing_context_hash=""
+  local build_bin
+  local context_hash
+  local context_hash_label_key
+  local existing_context_hash
+  local cache_dir=""
+  local new_cache_dir=""
+  local buildx_args=()
 
-  load_control_plane_runtime_env
-  build_isolation="${CONTROL_PLANE_PODMAN_BUILD_ISOLATION:-}"
-  if [[ -z "${build_isolation}" ]] && [[ "${CONTROL_PLANE_LOCAL_PODMAN_MODE:-}" == "rootful-service" ]]; then
-    build_isolation="chroot"
-  fi
   build_bin="$(build_command_for_toolchain "${toolchain}")"
   context_hash="$(build_context_hash "${context_dir}")"
   context_hash_label_key="$(build_context_hash_label_key)"
@@ -328,42 +545,115 @@ build_image_for_toolchain() {
 
   case "${toolchain}" in
     docker)
-      docker buildx build --load \
+      prepare_buildx_local_cache "${context_dir}" buildx_args cache_dir new_cache_dir
+      "${build_bin}" buildx build --load \
+        "${buildx_args[@]}" \
         --label "${context_hash_label_key}=${context_hash}" \
         -t "${image_tag}" \
         "${context_dir}"
+      finalize_buildx_local_cache "${cache_dir}" "${new_cache_dir}"
       ;;
-    podman)
-      if [[ "${build_bin}" == "buildah" ]]; then
-        if [[ -n "${build_isolation}" ]] && [[ -z "${BUILDAH_ISOLATION:-}" ]]; then
-          BUILDAH_ISOLATION="${build_isolation}" buildah bud \
-            --label "${context_hash_label_key}=${context_hash}" \
-            --tag "${image_tag}" \
-            "${context_dir}"
-        else
-          buildah bud \
-            --label "${context_hash_label_key}=${context_hash}" \
-            --tag "${image_tag}" \
-            "${context_dir}"
-        fi
-      else
-        if [[ -n "${build_isolation}" ]]; then
-          podman build \
-            --isolation="${build_isolation}" \
-            --label "${context_hash_label_key}=${context_hash}" \
-            --tag "${image_tag}" \
-            "${context_dir}"
-        else
-          podman build \
-            --label "${context_hash_label_key}=${context_hash}" \
-            --tag "${image_tag}" \
-            "${context_dir}"
-        fi
+    buildkitd)
+      local builder_name
+      local service_name
+      local pod_name
+      local namespace
+      local cleanup_line
+      local build_rc=0
+
+      if ! cleanup_line="$(buildkitd_prepare_remote_builder "${image_tag}")"; then
+        return 1
+      fi
+      IFS=$'\t' read -r builder_name service_name pod_name namespace <<<"${cleanup_line}"
+      set +e
+      "${build_bin}" buildx build \
+        --builder "${builder_name}" \
+        --output "type=image,name=${image_tag},push=false" \
+        --label "${context_hash_label_key}=${context_hash}" \
+        "${context_dir}"
+      build_rc=$?
+      set -e
+      if [[ "${build_rc}" -eq 0 ]]; then
+        record_image_context_hash_for_toolchain "${toolchain}" "${image_tag}" "${context_hash_label_key}" "${context_hash}"
+      fi
+      buildkitd_cleanup_resources "${builder_name}" "${service_name}" "${pod_name}" "${namespace}"
+      if [[ "${build_rc}" -ne 0 ]]; then
+        return "${build_rc}"
       fi
       ;;
     *)
       printf 'Unsupported toolchain: %s\n' "${toolchain}" >&2
-      exit 1
+      return 1
+      ;;
+  esac
+}
+
+build_image_target_for_toolchain() {
+  local toolchain="$1"
+  local image_tag="$2"
+  local context_dir="$3"
+  local target_name="$4"
+  local build_bin
+  local context_hash
+  local context_hash_label_key
+  local existing_context_hash
+  local cache_dir=""
+  local new_cache_dir=""
+  local buildx_args=()
+
+  build_bin="$(build_command_for_toolchain "${toolchain}")"
+  context_hash="$(build_context_hash "${context_dir}")"
+  context_hash_label_key="$(build_context_hash_label_key_for_target "${target_name}")"
+  existing_context_hash="$(image_context_hash_for_toolchain "${toolchain}" "${image_tag}" "${context_hash_label_key}" || true)"
+
+  if [[ -n "${existing_context_hash}" ]] && [[ "${existing_context_hash}" == "${context_hash}" ]]; then
+    printf 'Reusing %s; build context unchanged for target %s\n' "${image_tag}" "${target_name}" >&2
+    return 0
+  fi
+
+  case "${toolchain}" in
+    docker)
+      prepare_buildx_local_cache "${context_dir}" buildx_args cache_dir new_cache_dir
+      "${build_bin}" buildx build --load \
+        "${buildx_args[@]}" \
+        --target "${target_name}" \
+        --label "${context_hash_label_key}=${context_hash}" \
+        -t "${image_tag}" \
+        "${context_dir}"
+      finalize_buildx_local_cache "${cache_dir}" "${new_cache_dir}"
+      ;;
+    buildkitd)
+      local builder_name
+      local service_name
+      local pod_name
+      local namespace
+      local cleanup_line
+      local build_rc=0
+
+      if ! cleanup_line="$(buildkitd_prepare_remote_builder "${image_tag}-${target_name}")"; then
+        return 1
+      fi
+      IFS=$'\t' read -r builder_name service_name pod_name namespace <<<"${cleanup_line}"
+      set +e
+      "${build_bin}" buildx build \
+        --builder "${builder_name}" \
+        --output "type=image,name=${image_tag},push=false" \
+        --target "${target_name}" \
+        --label "${context_hash_label_key}=${context_hash}" \
+        "${context_dir}"
+      build_rc=$?
+      set -e
+      if [[ "${build_rc}" -eq 0 ]]; then
+        record_image_context_hash_for_toolchain "${toolchain}" "${image_tag}" "${context_hash_label_key}" "${context_hash}"
+      fi
+      buildkitd_cleanup_resources "${builder_name}" "${service_name}" "${pod_name}" "${namespace}"
+      if [[ "${build_rc}" -ne 0 ]]; then
+        return "${build_rc}"
+      fi
+      ;;
+    *)
+      printf 'Unsupported toolchain: %s\n' "${toolchain}" >&2
+      return 1
       ;;
   esac
 }

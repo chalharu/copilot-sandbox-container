@@ -4,8 +4,7 @@
     "sessionStart": [
       {
         "type": "command",
-        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/audit/main.mjs\" && node \"$hook_script\" sessionStart",
-        "powershell": "$hookRoot = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME '.copilot' }; $hookScript = Join-Path $hookRoot 'hooks/audit/main.mjs'; node $hookScript sessionStart",
+        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/audit/main\" && \"$hook_script\" sessionStart",
         "cwd": ".",
         "timeoutSec": 30
       }
@@ -13,8 +12,7 @@
     "userPromptSubmitted": [
       {
         "type": "command",
-        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/audit/main.mjs\" && node \"$hook_script\" userPromptSubmitted",
-        "powershell": "$hookRoot = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME '.copilot' }; $hookScript = Join-Path $hookRoot 'hooks/audit/main.mjs'; node $hookScript userPromptSubmitted",
+        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/audit/main\" && \"$hook_script\" userPromptSubmitted",
         "cwd": ".",
         "timeoutSec": 30
       }
@@ -22,49 +20,33 @@
     "preToolUse": [
       {
         "type": "command",
-        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/audit/main.mjs\" && node \"$hook_script\" preToolUse",
-        "powershell": "$hookRoot = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME '.copilot' }; $hookScript = Join-Path $hookRoot 'hooks/audit/main.mjs'; node $hookScript preToolUse",
+        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/audit/main\" && \"$hook_script\" preToolUse",
         "cwd": ".",
         "timeoutSec": 30
       },
       {
         "type": "command",
         "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/preToolUse/main\" && \"$hook_script\"",
-        "powershell": "$hookRoot = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME '.copilot' }; $hookScript = Join-Path $hookRoot 'hooks/preToolUse/main'; & $hookScript",
-        "cwd": ".",
-        "timeoutSec": 30
-      }
-    ],
-    "postToolUse": [
-      {
-        "type": "command",
-        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/audit/main.mjs\" && node \"$hook_script\" postToolUse",
-        "powershell": "$hookRoot = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME '.copilot' }; $hookScript = Join-Path $hookRoot 'hooks/audit/main.mjs'; node $hookScript postToolUse",
         "cwd": ".",
         "timeoutSec": 30
       },
       {
         "type": "command",
-        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/postToolUse/main.mjs\" && node \"$hook_script\"",
-        "powershell": "$hookRoot = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME '.copilot' }; $hookScript = Join-Path $hookRoot 'hooks/postToolUse/main.mjs'; node $hookScript",
+        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/preToolUse/exec-forward\" && CONTROL_PLANE_HOOK_SESSION_KEY=\"$PPID\" \"$hook_script\"",
         "cwd": ".",
-        "timeoutSec": 30
+        "timeoutSec": 150
       }
     ],
-    "agentStop": [
+    "postToolUse": [
       {
         "type": "command",
-        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/auditAnalysis/main.mjs\" && node \"$hook_script\" agentStop",
-        "powershell": "$hookRoot = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME '.copilot' }; $hookScript = Join-Path $hookRoot 'hooks/auditAnalysis/main.mjs'; node $hookScript agentStop",
+        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/audit/main\" && \"$hook_script\" postToolUse",
         "cwd": ".",
         "timeoutSec": 30
-      }
-    ],
-    "subagentStop": [
+      },
       {
         "type": "command",
-        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/auditAnalysis/main.mjs\" && node \"$hook_script\" subagentStop",
-        "powershell": "$hookRoot = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME '.copilot' }; $hookScript = Join-Path $hookRoot 'hooks/auditAnalysis/main.mjs'; node $hookScript subagentStop",
+        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/postToolUse/main\" && \"$hook_script\"",
         "cwd": ".",
         "timeoutSec": 30
       }
@@ -72,17 +54,7 @@
     "sessionEnd": [
       {
         "type": "command",
-        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/auditAnalysis/main.mjs\" && node \"$hook_script\" sessionEnd",
-        "powershell": "$hookRoot = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME '.copilot' }; $hookScript = Join-Path $hookRoot 'hooks/auditAnalysis/main.mjs'; node $hookScript sessionEnd",
-        "cwd": ".",
-        "timeoutSec": 30
-      }
-    ],
-    "errorOccurred": [
-      {
-        "type": "command",
-        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/auditAnalysis/main.mjs\" && node \"$hook_script\" errorOccurred",
-        "powershell": "$hookRoot = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME '.copilot' }; $hookScript = Join-Path $hookRoot 'hooks/auditAnalysis/main.mjs'; node $hookScript errorOccurred",
+        "bash": "hook_script=\"${COPILOT_HOME:-${HOME}/.copilot}/hooks/sessionEnd/cleanup\" && CONTROL_PLANE_HOOK_SESSION_KEY=\"$PPID\" \"$hook_script\"",
         "cwd": ".",
         "timeoutSec": 30
       }

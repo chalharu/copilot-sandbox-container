@@ -1,0 +1,193 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Shared PVCs are applied once from the `install/` kustomization so routine
+# `kubectl apply -k` does not try to mutate bound claim specs.
+# The root sample composes shipped shared-resource and per-instance entry points
+# and keeps namespace / PVC / service / image-derived settings aligned via
+# built-in replacements.
+resources:
+  - ../shared-resources
+  - ../control-plane
+replacements:
+  - source:
+      kind: Namespace
+      name: copilot-sandbox
+      fieldPath: metadata.name
+    targets:
+      - select:
+          kind: Role
+          name: control-plane-exec-pods
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: RoleBinding
+          name: control-plane-exec-pods
+        fieldPaths:
+          - metadata.namespace
+          - subjects.[name=control-plane].namespace
+      - select:
+          kind: RoleBinding
+          name: control-plane-jobs
+        fieldPaths:
+          - subjects.[name=control-plane].namespace
+      - select:
+          kind: RoleBinding
+          name: control-plane-exec-workloads
+        fieldPaths:
+          - subjects.[name=control-plane-exec].namespace
+      - select:
+          kind: Service
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: ServiceAccount
+          name: control-plane
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: ServiceAccount
+          name: control-plane-exec
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: Secret
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: PersistentVolumeClaim
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: Deployment
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: ConfigMap
+          name: control-plane-config
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: ConfigMap
+          name: control-plane-env
+        fieldPaths:
+          - metadata.namespace
+          - data.CONTROL_PLANE_K8S_NAMESPACE
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
+          - data.CONTROL_PLANE_JOB_TRANSFER_HOST
+        options:
+          delimiter: .
+          index: 1
+  - source:
+      kind: Namespace
+      name: copilot-sandbox-jobs
+      fieldPath: metadata.name
+    targets:
+      - select:
+          kind: Role
+          name: control-plane-jobs
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: Role
+          name: control-plane-job-self-read
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: Role
+          name: control-plane-exec-workloads
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: RoleBinding
+          name: control-plane-job-self-read
+        fieldPaths:
+          - metadata.namespace
+          - subjects.[name=control-plane-job].namespace
+      - select:
+          kind: RoleBinding
+          name: control-plane-jobs
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: RoleBinding
+          name: control-plane-exec-workloads
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: ServiceAccount
+          name: control-plane-job
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: ConfigMap
+          name: control-plane-env
+        fieldPaths:
+          - data.CONTROL_PLANE_JOB_NAMESPACE
+  - source:
+      kind: ConfigMap
+      name: control-plane-env
+      fieldPath: data.CONTROL_PLANE_COPILOT_SESSION_PVC
+    targets:
+      - select:
+          kind: Deployment
+          name: control-plane
+        fieldPaths:
+          - spec.template.spec.volumes.[name=copilot-session].persistentVolumeClaim.claimName
+  - source:
+      kind: PersistentVolumeClaim
+      name: control-plane-workspace-pvc
+      fieldPath: metadata.name
+    targets:
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
+          - data.CONTROL_PLANE_WORKSPACE_PVC
+      - select:
+          kind: Deployment
+          name: control-plane
+        fieldPaths:
+          - spec.template.spec.volumes.[name=workspace].persistentVolumeClaim.claimName
+  - source:
+      kind: Service
+      name: control-plane
+      fieldPath: metadata.name
+    targets:
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
+          - data.CONTROL_PLANE_JOB_TRANSFER_HOST
+        options:
+          delimiter: .
+          index: 0
+  - source:
+      kind: Deployment
+      name: control-plane
+      fieldPath: spec.template.spec.containers.[name=control-plane].image
+    targets:
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
+          - data.CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE
+          - data.CONTROL_PLANE_JOB_TRANSFER_IMAGE
+  - source:
+      kind: Deployment
+      name: control-plane
+      fieldPath: spec.template.spec.containers.[name=control-plane].imagePullPolicy
+    targets:
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
+          - data.CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY
+          - data.CONTROL_PLANE_JOB_IMAGE_PULL_POLICY

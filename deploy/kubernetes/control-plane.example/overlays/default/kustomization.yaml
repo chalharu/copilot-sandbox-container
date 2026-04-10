@@ -1,90 +1,202 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-resources: []
+resources:
+  - ../../shared-resources
+  - ../../control-plane
+replacements:
+  - source:
+      kind: Namespace
+      name: copilot-sandbox
+      fieldPath: metadata.name
+    targets:
+      - select:
+          kind: Role
+          name: control-plane-exec-pods
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: RoleBinding
+          name: control-plane-exec-pods
+        fieldPaths:
+          - metadata.namespace
+          - subjects.[name=control-plane].namespace
+      - select:
+          kind: RoleBinding
+          name: control-plane-jobs
+        fieldPaths:
+          - subjects.[name=control-plane].namespace
+      - select:
+          kind: RoleBinding
+          name: control-plane-exec-workloads
+        fieldPaths:
+          - subjects.[name=control-plane-exec].namespace
+      - select:
+          kind: Service
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: ServiceAccount
+          name: control-plane
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: ServiceAccount
+          name: control-plane-exec
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: Secret
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: PersistentVolumeClaim
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: Deployment
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: ConfigMap
+          name: control-plane-config
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: ConfigMap
+          name: control-plane-env
+        fieldPaths:
+          - metadata.namespace
+          - data.CONTROL_PLANE_K8S_NAMESPACE
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
+          - data.CONTROL_PLANE_JOB_TRANSFER_HOST
+        options:
+          delimiter: .
+          index: 1
+  - source:
+      kind: Namespace
+      name: copilot-sandbox-jobs
+      fieldPath: metadata.name
+    targets:
+      - select:
+          kind: Role
+          name: control-plane-jobs
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: Role
+          name: control-plane-job-self-read
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: Role
+          name: control-plane-exec-workloads
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: RoleBinding
+          name: control-plane-job-self-read
+        fieldPaths:
+          - metadata.namespace
+          - subjects.[name=control-plane-job].namespace
+      - select:
+          kind: RoleBinding
+          name: control-plane-jobs
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: RoleBinding
+          name: control-plane-exec-workloads
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: ServiceAccount
+          name: control-plane-job
+        fieldPaths:
+          - metadata.namespace
+      - select:
+          kind: ConfigMap
+          name: control-plane-env
+        fieldPaths:
+          - data.CONTROL_PLANE_JOB_NAMESPACE
+  - source:
+      kind: ConfigMap
+      name: control-plane-env
+      fieldPath: data.CONTROL_PLANE_COPILOT_SESSION_PVC
+    targets:
+      - select:
+          kind: Deployment
+          name: control-plane
+        fieldPaths:
+          - spec.template.spec.volumes.[name=copilot-session].persistentVolumeClaim.claimName
+  - source:
+      kind: PersistentVolumeClaim
+      name: control-plane-workspace-pvc
+      fieldPath: metadata.name
+    targets:
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
+          - data.CONTROL_PLANE_WORKSPACE_PVC
+      - select:
+          kind: Deployment
+          name: control-plane
+        fieldPaths:
+          - spec.template.spec.volumes.[name=workspace].persistentVolumeClaim.claimName
+  - source:
+      kind: Service
+      name: control-plane
+      fieldPath: metadata.name
+    targets:
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
+          - data.CONTROL_PLANE_JOB_TRANSFER_HOST
+        options:
+          delimiter: .
+          index: 0
+  - source:
+      kind: Deployment
+      name: control-plane
+      fieldPath: spec.template.spec.containers.[name=control-plane].image
+    targets:
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
+          - data.CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE
+          - data.CONTROL_PLANE_JOB_TRANSFER_IMAGE
+  - source:
+      kind: Deployment
+      name: control-plane
+      fieldPath: spec.template.spec.containers.[name=control-plane].imagePullPolicy
+    targets:
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
+          - data.CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY
+          - data.CONTROL_PLANE_JOB_IMAGE_PULL_POLICY
 
-# This overlay is the customization point for the shipped sample.
-# The shipped root sample reads the individual files under `../base/` directly.
-# Use this file as a commented scratchpad when you prepare a named variant and
-# then compose that variant with the individual files under `../../common/`.
+# This overlay is the scratchpad for named variants.
+# Copy this directory when you want a sibling overlay. Keep the replacements
+# block: it re-runs the shipped alignment logic after your local patches so
+# namespace / PVC / Service / image changes still propagate into ConfigMap
+# values such as job-transfer host and helper image refs.
 #
-# When you need a named variant instead, uncomment the block below and replace
-# the `replace-me-*` values with your own instance-specific names.
-#
-# patchesJson6902:
-#   - target:
-#       version: v1
-#       kind: PersistentVolumeClaim
-#       name: control-plane-workspace-pvc
-#     path: workspace-pvc-patch.yaml
-#   - target:
-#       version: v1
-#       kind: Service
-#       name: control-plane
-#     path: service-patch.yaml
-#   - target:
-#       group: apps
-#       version: v1
-#       kind: Deployment
-#       name: control-plane
-#     path: deployment-patch.yaml
-#   - target:
-#       group: apps
-#       version: v1
-#       kind: Deployment
-#       name: control-plane
-#     path: deployment-image-patch.yaml
-#
-# Candidate `workspace-pvc-patch.yaml`:
-# - op: replace
-#   path: /metadata/name
-#   value: replace-me-with-workspace-pvc-name
-# - op: replace
-#   path: /spec/storageClassName
-#   value: replace-me-with-workspace-storage-class
-# - op: replace
-#   path: /spec/resources/requests/storage
-#   value: 8Gi
-#   # Remove the storage op when the default size is already fine.
-# Shared PVC candidates such as `control-plane-copilot-session-pvc` and
-# `control-plane-sccache-pvc` live in `../../install/`
-# because the root kustomization intentionally avoids mutating those immutable
-# shared claims during routine updates.
-#
-# Candidate `service-patch.yaml`:
-# - op: replace
-#   path: /metadata/name
-#   value: replace-me-with-service-name
-# - op: replace
-#   path: /metadata/labels/app.kubernetes.io~1name
-#   value: replace-me-with-instance-label
-# - op: replace
-#   path: /spec/selector/app.kubernetes.io~1name
-#   value: replace-me-with-instance-label
-#
-# Candidate `deployment-patch.yaml`:
-# - op: replace
-#   path: /metadata/name
-#   value: replace-me-with-deployment-name
-# - op: replace
-#   path: /metadata/labels/app.kubernetes.io~1name
-#   value: replace-me-with-instance-label
-# - op: replace
-#   path: /spec/selector/matchLabels/app.kubernetes.io~1name
-#   value: replace-me-with-instance-label
-# - op: replace
-#   path: /spec/template/metadata/labels/app.kubernetes.io~1name
-#   value: replace-me-with-instance-label
-# - op: test
-#   path: /spec/template/spec/volumes/1/name
-#   value: workspace
-# - op: replace
-#   path: /spec/template/spec/volumes/1/persistentVolumeClaim/claimName
-#   value: replace-me-with-workspace-pvc-name
-#
-# Candidate `deployment-image-patch.yaml`:
-# - op: replace
-#   path: /spec/template/spec/containers/0/image
-#   value: ghcr.io/chalharu/copilot-sandbox-container/control-plane:replace-me-with-commit-sha
-# Keep the same tag aligned in `../../common/configmap-control-plane-env.yaml`
-# for `CONTROL_PLANE_JOB_TRANSFER_IMAGE` and in
-# `../../common/job-garage-bootstrap.yaml` for the `garage-bootstrap` Job image.
+# Common remaining customizations:
+# - patch Namespace names
+# - patch `../../common/secret-control-plane-auth.yaml`
+# - patch `../../common/configmap-control-plane-env.yaml`
+# - patch workspace PVC size / storage class
+# - patch Deployment resources / nodeSelector / imagePullPolicy
+# - set `images:` for the control-plane container tag

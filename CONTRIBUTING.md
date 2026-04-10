@@ -38,30 +38,26 @@ Types:
 
 ## 4. Local and Containerized Validation
 
-- `scripts/lint.sh` is the supported lint entry point.
-- `scripts/lint.sh` runs `hadolint` and `shellcheck` through their upstream
-  container images, validates `renovate.json5` with `ghcr.io/biomejs/biome`,
-  runs a local Renovate dry-run for scope validation, and builds the
-  repository's `containers/yamllint/` image to run `yamllint` v1.38.0.
+- Hosted lint is provided by the external `linter-service`; the repository-managed
+  local validation baseline starts at `scripts/build-test.sh`.
 - `scripts/build-test.sh` is the supported local build/test entry point.
-- `scripts/build-test.sh` auto-detects a working Docker Buildx toolchain first,
-  then falls back to a Podman-based toolchain, using Buildah only when it is
-  already available on the host or CI runner and no remote Podman service is active.
-- Use `CONTROL_PLANE_TOOLCHAIN=docker` to force Docker / BuildKit, or
-  `CONTROL_PLANE_TOOLCHAIN=podman` to force the Podman-based toolchain.
+- `scripts/build-test.sh` uses Docker Buildx by default. `--build-only` can fall
+  back to an ephemeral Kubernetes Buildkitd when the Docker daemon is unavailable.
+- Use `CONTROL_PLANE_TOOLCHAIN=docker` or `CONTROL_PLANE_TOOLCHAIN=buildkitd` to
+  force the build surface explicitly.
 - Use trusted upstream images when they already satisfy the contract; if only a
   third-party image exists, build a thin repository-managed image and publish it
   to GHCR for reuse.
-- GitHub Actions needs `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` for the DHI
-  image pulls used by `containers/yamllint/` and the Renovate dry-run validation
-  inside `scripts/lint.sh`.
+- GitHub Actions validation should pass without extra registry secrets; keep the
+  Renovate dry-run scoped to public dependencies and the pinned external skills
+  repository.
 - `scripts/test-standalone.sh` and `scripts/test-kind.sh` remain the lower-level
   smoke / integration scripts used by `scripts/build-test.sh`.
 - When this repository is developed from inside a containerized tooling
-  environment, keep these scripts unchanged and provide the required toolchain:
-  `docker`, or `podman` (with `buildah` used only when already available and the
-  build stays local), together with
-  `kind`, `kubectl`, `ssh`, and `ssh-keygen`.
+  environment, keep these scripts unchanged and provide `docker buildx` together
+  with `kubectl`, `ssh`, and `ssh-keygen`. Full runtime / Kind coverage still
+  needs a Docker-compatible container runtime; the Buildkitd fallback only covers
+  `scripts/build-test.sh --build-only`.
 - When behavior or operator guidance changes, keep `README.md`,
   `docs/README.md`, `docs/how-to-guides/cookbook.md`,
   `docs/explanation/knowledge.md`, `docs/reference/control-plane-runtime.md`,

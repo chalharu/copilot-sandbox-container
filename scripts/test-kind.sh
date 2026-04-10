@@ -2,20 +2,22 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-control_plane_image="${1:?usage: scripts/test-kind.sh <control-plane-image> <execution-plane-image> [cluster-name]}"
-execution_plane_image="${2:?usage: scripts/test-kind.sh <control-plane-image> <execution-plane-image> [cluster-name]}"
-cluster_name="${3:-control-plane-ci}"
+control_plane_image="${1:?usage: scripts/test-kind.sh <control-plane-image> [cluster-name]}"
+cluster_name="${2:-control-plane-ci}"
 namespace="${CONTROL_PLANE_TEST_NAMESPACE:-control-plane-ci}"
 job_namespace="${CONTROL_PLANE_TEST_JOB_NAMESPACE:-${namespace}-jobs}"
 ssh_port="${CONTROL_PLANE_TEST_SSH_PORT:-32222}"
-kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-podman}"
+kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-docker}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-${kind_provider}}"
 control_plane_selector="app.kubernetes.io/name=control-plane"
 kind_image_archive="${CONTROL_PLANE_KIND_IMAGE_ARCHIVE:-}"
+kind_required_host_path="${CONTROL_PLANE_KIND_REQUIRED_HOST_PATH:-/lib/modules}"
 workdir="$(mktemp -d)"
 ssh_key="${workdir}/id_ed25519"
 kubeconfig_path="${workdir}/kubeconfig"
-kind_auto_login_session="k8s-auto-login-${RANDOM}"
+rust_hook_image="${CONTROL_PLANE_TEST_RUST_HOOK_IMAGE:-docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895}"
+fast_execution_image="${CONTROL_PLANE_TEST_FAST_EXECUTION_IMAGE:-docker.io/library/ubuntu:24.04}"
+fast_execution_image_pull_policy="${CONTROL_PLANE_TEST_FAST_EXECUTION_IMAGE_PULL_POLICY:-IfNotPresent}"
 port_forward_pid=""
 created_cluster=0
 kind_uses_sudo=0
@@ -60,6 +62,11 @@ enable_kind_sudo() {
 create_cluster() {
   local create_log="${workdir}/kind-create.log"
 
+  if [[ ! -d "${kind_required_host_path}" ]]; then
+    printf 'Skipping Kind cluster tests: required host path is unavailable: %s\n' "${kind_required_host_path}" >&2
+    return 2
+  fi
+
   if kind_cmd create cluster --name "${cluster_name}" >"${create_log}" 2>&1; then
     cat "${create_log}"
     return 0
@@ -67,13 +74,7 @@ create_cluster() {
 
   cat "${create_log}" >&2
 
-  if [[ "${kind_provider}" == "podman" ]] \
-    && grep -Eq 'cannot set multiple networks without bridge network mode, selected mode host: invalid argument|failed to enable forwarding: open /proc/sys/net/ipv4/ip_forward: read-only file system' "${create_log}"; then
-    printf '%s\n' 'kind-test: skipping because the current outer runtime does not allow Podman bridge networking for Kind' >&2
-    return 2
-  fi
-
-  if [[ "${kind_provider}" != "podman" ]] || [[ "${kind_uses_sudo}" -eq 1 ]] || [[ "${kind_sudo_mode}" == "never" ]]; then
+  if [[ "${kind_uses_sudo}" -eq 1 ]] || [[ "${kind_sudo_mode}" == "never" ]]; then
     return 1
   fi
 
@@ -101,7 +102,6 @@ ssh_opts=(
   -o StrictHostKeyChecking=no
   -o UserKnownHostsFile=/dev/null
   -o IdentitiesOnly=yes
-  -o SetEnv=LC_ALL=en_US.UTF8
   -i "${ssh_key}"
   -p "${ssh_port}"
 )
@@ -132,23 +132,15 @@ wait_for_ssh() {
   exit 1
 }
 
-wait_for_screen_term() {
+wait_for_screen_session() {
   local target_session="$1"
-  local term_file="$2"
-  local expected_term_pattern="${3:-screen-256color(-bce)?}"
-  local attempts="${4:-15}"
-  local remote_command
+  local attempts="${2:-15}"
   local _
 
-  printf -v remote_command 'TARGET_SESSION=%q TERM_FILE=%q EXPECTED_TERM_PATTERN=%q bash -l -se' \
-    "${target_session}" "${term_file}" "${expected_term_pattern}"
-
   for _ in $(seq 1 "${attempts}"); do
-    # shellcheck disable=SC2029
-    if ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_command}" <<'EOF' >/dev/null 2>&1
+    if ssh_bash <<EOF >/dev/null 2>&1
 set -euo pipefail
-screen -list | grep -q -- "${TARGET_SESSION}"
-grep -Eq -- "^(${EXPECTED_TERM_PATTERN})$" "${TERM_FILE}"
+screen -list | grep -q -- '${target_session}'
 EOF
     then
       return 0
@@ -216,6 +208,7 @@ control_plane_pod_name() {
 
 dump_control_plane_diagnostics() {
   local pod_name=""
+  local exec_pod=""
 
   kubectl get deployment,replicaset,pods,svc --namespace "${namespace}" -l "${control_plane_selector}" -o wide >&2 || true
   kubectl describe deployment/control-plane --namespace "${namespace}" >&2 || true
@@ -226,6 +219,18 @@ dump_control_plane_diagnostics() {
     kubectl logs --namespace "${namespace}" pod/"${pod_name}" -c init-state >&2 || true
     kubectl logs --namespace "${namespace}" pod/"${pod_name}" -c control-plane >&2 || true
   fi
+  while read -r exec_pod; do
+    [[ -n "${exec_pod}" ]] || continue
+    kubectl describe "${exec_pod}" --namespace "${namespace}" >&2 || true
+    kubectl logs --namespace "${namespace}" "${exec_pod}" -c bootstrap-assets >&2 || true
+    kubectl logs --namespace "${namespace}" "${exec_pod}" -c execution >&2 || true
+    kubectl logs --namespace "${namespace}" "${exec_pod}" -c execution --previous >&2 || true
+  done < <(
+    kubectl get pods \
+      --namespace "${namespace}" \
+      -l app.kubernetes.io/name=control-plane-fast-exec \
+      -o name 2>/dev/null || true
+  )
   kubectl get events --namespace "${namespace}" --sort-by=.lastTimestamp >&2 || true
 }
 
@@ -239,13 +244,21 @@ wait_for_control_plane_pod() {
   return 1
 }
 
+assert_control_plane_probe_spec() {
+  local deployment_json="${workdir}/control-plane-deployment.json"
+
+  kubectl get deployment/control-plane --namespace "${namespace}" -o json > "${deployment_json}"
+  test "$(jq -r '.spec.template.spec.containers[] | select(.name == "control-plane").readinessProbe.exec.command | join(" ")' "${deployment_json}")" = "bash -lc pgrep -x sshd >/dev/null"
+  test "$(jq -r '.spec.template.spec.containers[] | select(.name == "control-plane").livenessProbe.exec.command | join(" ")' "${deployment_json}")" = "bash -lc pgrep -x sshd >/dev/null"
+}
+
 load_kind_images() {
   local helper_args=(--cluster-name "${cluster_name}")
 
   if [[ -n "${kind_image_archive}" ]]; then
     helper_args+=(--image-archive "${kind_image_archive}")
   else
-    helper_args+=(--container-bin "${container_bin}" --image "${control_plane_image}" --image "${execution_plane_image}")
+    helper_args+=(--container-bin "${container_bin}" --image "${control_plane_image}")
   fi
 
   CONTROL_PLANE_KIND_USE_SUDO="${kind_uses_sudo}" \
@@ -255,7 +268,9 @@ load_kind_images() {
 
 apply_resources() {
   local public_key
+  local environment_pvc_name
   public_key="$(cat "${ssh_key}.pub")"
+  environment_pvc_name="node-workspace-${cluster_name}-control-plane"
   cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: Namespace
@@ -276,8 +291,44 @@ metadata:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
+  name: control-plane-exec
+  namespace: ${namespace}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
   name: control-plane-job
   namespace: ${job_namespace}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: control-plane-exec-pods
+  namespace: ${namespace}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["create", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: control-plane-exec-pods
+  namespace: ${namespace}
+subjects:
+  - kind: ServiceAccount
+    name: control-plane
+    namespace: ${namespace}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: control-plane-exec-pods
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -295,7 +346,7 @@ rules:
     resources: ["pods/log"]
     verbs: ["get"]
   - apiGroups: [""]
-    resources: ["secrets"]
+    resources: ["secrets", "configmaps"]
     verbs: ["create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -311,6 +362,42 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: control-plane-jobs
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: control-plane-exec-workloads
+  namespace: ${job_namespace}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["create", "delete", "get", "list", "patch", "watch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["create", "delete", "get", "list", "patch", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "delete", "get", "list", "patch", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete", "get", "list", "patch", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: control-plane-exec-workloads
+  namespace: ${job_namespace}
+subjects:
+  - kind: ServiceAccount
+    name: control-plane-exec
+    namespace: ${namespace}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: control-plane-exec-workloads
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -348,7 +435,7 @@ spec:
   persistentVolumeReclaimPolicy: Delete
   storageClassName: control-plane-copilot-session-manual
   hostPath:
-    path: /tmp/control-plane-copilot-session
+    path: /var/lib/control-plane-copilot-session
     type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -363,7 +450,9 @@ spec:
   persistentVolumeReclaimPolicy: Delete
   storageClassName: control-plane-control-workspace-manual
   hostPath:
-    path: /tmp/control-plane-workspace
+    # Kind nodes can mount /tmp with noexec, which breaks running cached shells,
+    # package managers, and workspace scripts from hostPath-backed volumes.
+    path: /var/lib/control-plane-workspace
     type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -408,7 +497,25 @@ spec:
   # Intentionally use the same hostPath as the control-plane workspace PV so
   # the Kind test can simulate a shared RW filesystem across namespaces.
   hostPath:
-    path: /tmp/control-plane-workspace
+    path: /var/lib/control-plane-workspace
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: control-plane-fast-exec-environment-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: control-plane-fast-exec-environment-manual
+  claimRef:
+    name: ${environment_pvc_name}
+    namespace: ${namespace}
+  hostPath:
+    path: /var/lib/control-plane-fast-exec-environment
     type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -476,19 +583,37 @@ data:
   GH_GITHUB_TOKEN_FILE: /var/run/control-plane-auth/gh-github-token
   CONTROL_PLANE_K8S_NAMESPACE: ${namespace}
   CONTROL_PLANE_JOB_NAMESPACE: ${job_namespace}
+  CONTROL_PLANE_COPILOT_SESSION_PVC: control-plane-copilot-session-pvc
+  CONTROL_PLANE_COPILOT_SESSION_GH_SUBPATH: state/gh
+  CONTROL_PLANE_COPILOT_SESSION_SSH_SUBPATH: state/ssh
   CONTROL_PLANE_WORKSPACE_PVC: control-plane-workspace-pvc
   CONTROL_PLANE_WORKSPACE_SUBPATH: workspace
+  CONTROL_PLANE_FAST_EXECUTION_ENABLED: "1"
+  CONTROL_PLANE_FAST_EXECUTION_IMAGE: ${fast_execution_image}
+  CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: ${fast_execution_image_pull_policy}
+  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ${control_plane_image}
+  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: Never
+  CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 300s
+  CONTROL_PLANE_FAST_EXECUTION_PORT: "8080"
+  CONTROL_PLANE_FAST_EXECUTION_HOME: /root
+  CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT: control-plane-exec
+  CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: 'printf "fast-exec-startup\n" > /workspace/fast-exec-startup-marker.txt'
+  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX: node-workspace
+  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS: control-plane-fast-exec-environment-manual
+  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE: 10Gi
+  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH: /environment
+  CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST: 250m
+  CONTROL_PLANE_FAST_EXECUTION_CPU_LIMIT: "1"
+  CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST: 256Mi
+  CONTROL_PLANE_FAST_EXECUTION_MEMORY_LIMIT: 1Gi
+  CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC: "3600"
   CONTROL_PLANE_JOB_WORKSPACE_PVC: control-plane-workspace-pvc
   CONTROL_PLANE_JOB_WORKSPACE_SUBPATH: workspace
   CONTROL_PLANE_JOB_SERVICE_ACCOUNT: control-plane-job
-  CONTROL_PLANE_RUN_MODE: k8s-job
-  CONTROL_PLANE_LOCAL_PODMAN_MODE: rootful-service
-  CONTROL_PLANE_ROOTFUL_PODMAN_STORAGE_DRIVER: overlay
-  CONTROL_PLANE_ROOTFUL_PODMAN_RUNTIME_DIR: /var/tmp/control-plane/rootful-overlay
   CONTROL_PLANE_JOB_TRANSFER_IMAGE: ${control_plane_image}
   CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane.${namespace}.svc.cluster.local
   CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"
-  CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT: "100"
+  CONTROL_PLANE_RUST_HOOK_IMAGE: ${rust_hook_image}
   CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: Never
 ---
 apiVersion: v1
@@ -541,13 +666,15 @@ spec:
               umask 077
               mkdir -p \
                 /copilot-session/state/gh \
+                /copilot-session/state/ssh-auth \
                 /copilot-session/state/ssh \
                 /copilot-session/state/ssh-host-keys \
                 /copilot-session/session-state \
                 /workspace-state/workspace \
-                /cache/rootful-podman \
                 /cache/runtime-tmp
-              touch /copilot-session/state/copilot-config.json /copilot-session/state/command-history-state.json
+              touch \
+                /copilot-session/state/copilot-config.json \
+                /copilot-session/state/command-history-state.json
               chown -R 1000:1000 /copilot-session/state /copilot-session/session-state
               find /copilot-session/state /copilot-session/session-state -type d -exec chmod 700 {} +
               find /copilot-session/state /copilot-session/session-state -type f -exec chmod 600 {} +
@@ -555,18 +682,9 @@ spec:
               # back to UID/GID 1000 so the control-plane session can use it.
               chown 1000:1000 /workspace-state/workspace
               chmod 700 /workspace-state/workspace
-              # Keep graphroot root-only, but leave the runtime tmp path traversable
-              # so the copilot user can reach the rootful Podman socket later.
-              chown 0:0 /cache/rootful-podman
-              chmod 700 /cache/rootful-podman
+              # Keep the shared tmp/cache root traversable for the copilot user.
               chown 0:1000 /cache/runtime-tmp
               chmod 755 /cache/runtime-tmp
-              rm -rf /cache/rootful-podman/*
-              mkdir -p /cache/rootful-podman/rootful-overlay /cache/runtime-tmp/rootful-overlay
-              chown 0:0 /cache/rootful-podman/rootful-overlay
-              chmod 700 /cache/rootful-podman/rootful-overlay
-              chown 0:1000 /cache/runtime-tmp/rootful-overlay
-              chmod 755 /cache/runtime-tmp/rootful-overlay
           securityContext:
             privileged: false
             # Fresh PVC roots start out owned by root, so create the shared
@@ -647,10 +765,29 @@ spec:
           envFrom:
             - configMapRef:
                 name: control-plane-env
-          # Keep the Kind test on the same current-cluster-compatible profile as
-          # the sample manifest: drop: ALL, explicit capability re-adds, and a
-          # rootful local Podman remote-service fallback instead of nested
-          # rootless Podman.
+          env:
+            - name: CONTROL_PLANE_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: CONTROL_PLANE_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CONTROL_PLANE_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: CONTROL_PLANE_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: CONTROL_PLANE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          # Keep the Kind test on the same SSH-focused capability profile as the
+          # sample manifest.
           securityContext:
             privileged: false
             runAsUser: 0
@@ -665,29 +802,28 @@ spec:
                 - DAC_OVERRIDE
                 - FOWNER
                 - KILL
-                - MKNOD
-                - NET_ADMIN
-                - SETFCAP
                 - SETGID
-                - SETPCAP
                 - SETUID
-                - SYS_ADMIN
                 - SYS_CHROOT
             seccompProfile:
-              type: Unconfined
-            appArmorProfile:
-              type: Unconfined
+              type: RuntimeDefault
           ports:
             - containerPort: 2222
               name: ssh
           readinessProbe:
-            tcpSocket:
-              port: ssh
+            exec:
+              command:
+                - bash
+                - -lc
+                - pgrep -x sshd >/dev/null
             periodSeconds: 5
             failureThreshold: 12
           livenessProbe:
-            tcpSocket:
-              port: ssh
+            exec:
+              command:
+                - bash
+                - -lc
+                - pgrep -x sshd >/dev/null
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 6
@@ -715,14 +851,14 @@ spec:
               mountPath: /home/copilot/.ssh
               subPath: state/ssh
             - name: copilot-session
+              mountPath: /home/copilot/.config/control-plane/ssh-auth
+              subPath: state/ssh-auth
+            - name: copilot-session
               mountPath: /var/lib/control-plane/ssh-host-keys
               subPath: state/ssh-host-keys
             - name: workspace
               mountPath: /workspace
               subPath: workspace
-            - name: cache
-              mountPath: /var/lib/control-plane/rootful-podman
-              subPath: rootful-podman
             - name: cache
               mountPath: /var/tmp/control-plane
               subPath: runtime-tmp
@@ -757,37 +893,29 @@ command -v node
 command -v npm
 npm ls -g @github/copilot --depth=0 | grep -q '@github/copilot@'
 command -v git
-command -v gh
+! command -v gh >/dev/null 2>&1
 command -v kubectl
 command -v k8s-job-start
 command -v k8s-job-wait
 command -v k8s-job-pod
 command -v k8s-job-logs
 command -v control-plane-copilot
+command -v control-plane-run
 command -v control-plane-job-transfer
-command -v podman
-command -v docker
+command -v control-plane-exec-api
+command -v control-plane-session-exec
 command -v kind
-docker --version >/dev/null
+command -v cargo
+command -v yamllint
 command -v sshd
 command -v screen
+! command -v cpulimit >/dev/null 2>&1
+! command -v gcc >/dev/null 2>&1
+! command -v pkg-config >/dev/null 2>&1
 command -v vim
 printf '%s\n' 'kind-test remote: command availability ok' >&2
-test "\$(TERM=xterm-256color tput colors)" -ge 256
-test "\$(TERM=screen-256color tput colors)" -ge 256
-test "\$(TERM=tmux-256color tput colors)" -ge 256
-printf '%s\n' 'kind-test remote: terminfo ok' >&2
 printf '%s\n' "\${LANG}" | grep -qi 'utf-8'
-test "\${LC_ALL}" = "en_US.UTF8"
-locale charmap | grep -qx 'UTF-8'
-locale -a | grep -Eqi '^en_US\.utf-?8$'
-locale -a | grep -Eqi '^ja_JP\.utf-?8$'
-test "\${EDITOR}" = "vim"
-test "\${VISUAL}" = "vim"
-test "\${GH_PAGER}" = "cat"
-printf '%s\n' 'kind-test remote: locale and editor env ok' >&2
-test -f ~/.copilot/skills/control-plane-operations/SKILL.md
-test -f ~/.copilot/skills/containerized-yamllint-ops/SKILL.md
+printf '%s\n' 'kind-test remote: login env ok' >&2
 test -f ~/.copilot/skills/repo-change-delivery/SKILL.md
 test -f ~/.copilot/config.json
 test -f ~/.copilot/command-history-state.json
@@ -806,36 +934,36 @@ jq -e '.nested.replace.fromBase == true and .nested.replace.fromOverlay == true'
 jq -e '.nested.array == ["overlay"]' ~/.copilot/config.json >/dev/null
 jq -e '.topLevelOverlay == "kind"' ~/.copilot/config.json >/dev/null
 printf '%s\n' 'kind-test remote: config merge ok' >&2
-gh config get git_protocol --host github.com | grep -qx 'ssh'
-printf '%s\n' 'kind-test remote: gh hosts ok' >&2
-grep -qx 'cgroup_manager = "cgroupfs"' ~/.config/containers/containers.conf
-grep -qx 'events_logger = "file"' ~/.config/containers/containers.conf
-printf '%s\n' 'kind-test remote: containers.conf ok' >&2
-expected_driver=""
-expected_state_dir=""
-expected_state_root="/var/tmp/control-plane/rootless-podman"
-if [[ -e /dev/fuse ]]; then
-  expected_driver=overlay
-else
-  expected_driver=vfs
+if cat ~/.config/gh/hosts.yml >/dev/null 2>&1; then
+  printf '%s\n' 'expected direct ~/.config/gh/hosts.yml reads to be blocked by the exec policy' >&2
+  exit 1
 fi
-expected_state_dir="\${expected_state_root}/\${expected_driver}"
-test "\$(readlink /home/copilot/.copilot/containers)" = "\${expected_state_root}"
-test "\$(readlink /home/copilot/.local/share/containers)" = "\${expected_state_dir}"
-grep -qx "graphroot = \"\${expected_state_dir}/storage\"" ~/.config/containers/storage.conf
-grep -qx "runroot = \"/run/user/1000/\${expected_driver}/containers/storage\"" ~/.config/containers/storage.conf
-if [[ "\${expected_driver}" == "overlay" ]]; then
-  grep -qx 'driver = "overlay"' ~/.config/containers/storage.conf
-  grep -qx 'mount_program = "/usr/bin/fuse-overlayfs"' ~/.config/containers/storage.conf
-else
-  grep -qx 'driver = "vfs"' ~/.config/containers/storage.conf
-  ! grep -q 'mount_program' ~/.config/containers/storage.conf
-fi
-test -d "\${expected_state_dir}/storage/\${expected_driver}"
-test -d "\${expected_state_dir}/storage/volumes"
-test -d /var/tmp/control-plane/rootful-overlay/runroot
-printf '%s\n' 'kind-test remote: storage paths ok' >&2
+printf '%s\n' 'kind-test remote: gh hosts confinement ok' >&2
+grep -Fqx 'CARGO_HOME=/home/copilot/.cargo' ~/.config/control-plane/runtime.env
+grep -Fqx 'CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target' ~/.config/control-plane/runtime.env
+grep -Fqx 'LANG=C.UTF-8' ~/.config/control-plane/runtime.env
+grep -Fqx 'LC_CTYPE=C.UTF-8' ~/.config/control-plane/runtime.env
+grep -Fqx "CONTROL_PLANE_RUST_HOOK_IMAGE=${rust_hook_image}" ~/.config/control-plane/runtime.env
+grep -Fqx 'CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT=control-plane-exec' ~/.config/control-plane/runtime.env
+grep -Fqx "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR=http://\${CONTROL_PLANE_POD_IP}:8081" ~/.config/control-plane/runtime.env
+grep -Eq '^CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN=.+$' ~/.config/control-plane/runtime.env
+grep -Fqx 'CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC=3600' ~/.config/control-plane/runtime.env
+test -d /var/tmp/control-plane
+test -d /var/tmp/control-plane/cargo-target
+printf '%s\n' 'kind-test remote: runtime tmp ok' >&2
+test "\${LANG}" = "C.UTF-8"
+test "\${LC_CTYPE}" = "C.UTF-8"
 test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
+test -n "\${CONTROL_PLANE_POD_IP}"
+test "\${CONTROL_PLANE_FAST_EXECUTION_ENABLED}" = "1"
+test "\${CONTROL_PLANE_FAST_EXECUTION_IMAGE}" = "${fast_execution_image}"
+test "\${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE}" = "${control_plane_image}"
+test "\${CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT}" = 'printf "fast-exec-startup\n" > /workspace/fast-exec-startup-marker.txt'
+test "\${CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR}" = "http://\${CONTROL_PLANE_POD_IP}:8081"
+test -n "\${CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN}"
+test "\${CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC}" = "3600"
+test "\${CONTROL_PLANE_COPILOT_SESSION_PVC}" = "control-plane-copilot-session-pvc"
+test "\${CONTROL_PLANE_RUST_HOOK_IMAGE}" = "${rust_hook_image}"
 cat /proc/self/uid_map > /workspace/k8s-pod-uid-map.txt
 printf '%s\n' 'kind-test remote: runtime env and workspace write ok' >&2
 EOF
@@ -844,66 +972,28 @@ EOF
 set +e
 printf '%s\n' '--- kind-test initial remote debug ---'
 printf 'LANG=%s\n' "${LANG:-}" || true
-printf 'LC_ALL=%s\n' "${LC_ALL:-}" || true
-printf 'EDITOR=%s\n' "${EDITOR:-}" || true
-printf 'VISUAL=%s\n' "${VISUAL:-}" || true
-printf 'GH_PAGER=%s\n' "${GH_PAGER:-}" || true
-printf '%s\n' '--- terminfo ---'
-TERM=xterm-256color tput colors || true
-TERM=screen-256color tput colors || true
-TERM=tmux-256color tput colors || true
-printf '%s\n' '--- locale ---'
-locale charmap || true
-locale -a || true
 printf '%s\n' '--- persisted files ---'
 ls -ld ~/.copilot ~/.copilot/session-state ~/.config ~/.config/gh ~/.ssh /workspace || true
 ls -l ~/.copilot/config.json ~/.copilot/command-history-state.json ~/.config/gh/hosts.yml || true
 stat -c '%n %a %U %G' ~/.copilot/config.json ~/.copilot/command-history-state.json ~/.config/gh/hosts.yml || true
-printf '%s\n' '--- config and gh hosts ---'
+printf '%s\n' '--- config and gh auth ---'
 cat ~/.copilot/config.json || true
-gh auth status --hostname github.com || true
-gh config get git_protocol --host github.com || true
-printf '%s\n' '--- containers config ---'
-cat ~/.config/containers/containers.conf || true
-cat ~/.config/containers/storage.conf || true
-printf '%s\n' '--- storage paths ---'
-readlink /home/copilot/.local/share/containers || true
-ls -la /home/copilot/.copilot /home/copilot/.copilot/containers || true
-ls -la /var/lib/control-plane/rootful-podman || true
+printf '%s\n' 'direct reads of ~/.config/gh/hosts.yml are expected to fail under the exec policy'
+printf '%s\n' '--- runtime tmp ---'
+ls -la /var/tmp/control-plane || true
 printf '%s\n' '--- runtime env ---'
 printf 'CONTROL_PLANE_JOB_NAMESPACE=%s\n' "${CONTROL_PLANE_JOB_NAMESPACE:-}" || true
+printf 'CONTROL_PLANE_FAST_EXECUTION_ENABLED=%s\n' "${CONTROL_PLANE_FAST_EXECUTION_ENABLED:-}" || true
+printf 'CONTROL_PLANE_FAST_EXECUTION_IMAGE=%s\n' "${CONTROL_PLANE_FAST_EXECUTION_IMAGE:-}" || true
+printf 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE=%s\n' "${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE:-}" || true
+printf 'CONTROL_PLANE_COPILOT_SESSION_PVC=%s\n' "${CONTROL_PLANE_COPILOT_SESSION_PVC:-}" || true
+printf 'CONTROL_PLANE_RUST_HOOK_IMAGE=%s\n' "${CONTROL_PLANE_RUST_HOOK_IMAGE:-}" || true
 cat /proc/self/uid_map || true
 EOF
     dump_control_plane_diagnostics
     exit 1
   fi
   printf '%s\n' 'kind-test: initial remote assertions ok' >&2
-
-  if [[ "${kind_test_group}" == "session" ]] || [[ "${kind_test_group}" == "jobs-core" ]]; then
-    printf 'kind-test: skipping duplicate rootful local podman smoke for group %s\n' "${kind_test_group}" >&2
-  elif ! ssh_bash <<'EOF'
-set -euo pipefail
-podman info --format '{{.Store.GraphRoot}} {{.Store.GraphDriverName}} {{.Host.Security.Rootless}}' > /workspace/k8s-podman-info-summary.txt 2> /workspace/k8s-podman-info.log
-grep -qx '/var/lib/control-plane/rootful-podman/rootful-overlay/storage overlay false' /workspace/k8s-podman-info-summary.txt
-timeout 30s podman pull docker.io/library/hello-world:latest > /workspace/k8s-actual-podman-pull.log 2>&1
-timeout 20s podman run --rm docker.io/library/hello-world:latest > /workspace/k8s-actual-podman-run.log 2>&1
-grep -q 'Hello from Docker!' /workspace/k8s-actual-podman-run.log
-EOF
-  then
-    ssh_bash <<'EOF' >&2 || true
-set -euo pipefail
-cat /workspace/k8s-podman-info.log || true
-cat /workspace/k8s-podman-info-summary.txt || true
-cat /workspace/k8s-actual-podman-pull.log || true
-cat /workspace/k8s-actual-podman-run.log || true
-podman info || true
-podman ps -a || true
-EOF
-    dump_control_plane_diagnostics
-    exit 1
-  else
-    printf '%s\n' 'kind-test: rootful local podman smoke ok' >&2
-  fi
 
   ssh_bash <<EOF
 set -euo pipefail
@@ -929,6 +1019,39 @@ if [[ "\${secrets_status}" -ne 0 ]] || [[ "\${secrets_access}" != "yes" ]]; then
   kubectl config current-context >&2 || true
   exit 1
 fi
+set +e
+configmaps_access="\$(kubectl auth can-i create configmaps --namespace ${job_namespace} 2>&1)"
+configmaps_status=\$?
+set -e
+if [[ "\${configmaps_status}" -ne 0 ]] || [[ "\${configmaps_access}" != "yes" ]]; then
+  printf 'Expected control-plane service account to create configmaps in namespace %s\n' "${job_namespace}" >&2
+  printf 'kubectl auth can-i exit status: %s\n' "\${configmaps_status}" >&2
+  printf '%s\n' "\${configmaps_access}" >&2
+  kubectl config current-context >&2 || true
+  exit 1
+fi
+set +e
+pods_access="\$(kubectl auth can-i create pods --namespace ${namespace} 2>&1)"
+pods_status=\$?
+set -e
+if [[ "\${pods_status}" -ne 0 ]] || [[ "\${pods_access}" != "yes" ]]; then
+  printf 'Expected control-plane service account to create pods in namespace %s\n' "${namespace}" >&2
+  printf 'kubectl auth can-i exit status: %s\n' "\${pods_status}" >&2
+  printf '%s\n' "\${pods_access}" >&2
+  kubectl config current-context >&2 || true
+  exit 1
+fi
+set +e
+pvcs_access="\$(kubectl auth can-i create persistentvolumeclaims --namespace ${namespace} 2>&1)"
+pvcs_status=\$?
+set -e
+if [[ "\${pvcs_status}" -ne 0 ]] || [[ "\${pvcs_access}" != "yes" ]]; then
+  printf 'Expected control-plane service account to create persistentvolumeclaims in namespace %s\n' "${namespace}" >&2
+  printf 'kubectl auth can-i exit status: %s\n' "\${pvcs_status}" >&2
+  printf '%s\n' "\${pvcs_access}" >&2
+  kubectl config current-context >&2 || true
+  exit 1
+fi
 EOF
   printf '%s\n' 'kind-test: rbac assertions ok' >&2
 
@@ -941,6 +1064,181 @@ EOF
   printf '%s\n' 'kind-test: utf8 roundtrip ok' >&2
 }
 
+run_fast_exec_assertions() {
+  printf '%s\n' 'kind-test: verifying fast execution pod flow' >&2
+  if ! ssh_bash <<'EOF'
+set -euo pipefail
+session_key=kind-fast-exec
+control-plane-session-exec cleanup --session-key "${session_key}" >/dev/null 2>&1 || true
+rm -f /workspace/fast-exec-startup-marker.txt
+rm -f /workspace/fast-exec-kubectl-marker.txt
+control-plane-session-exec prepare --session-key "${session_key}" >/dev/null
+jq -e --arg key "${session_key}" '.sessions[$key].podName != null and .sessions[$key].podIp != null' \
+  ~/.copilot/session-state/session-exec.json >/dev/null
+pod_name="$(jq -r --arg key "${session_key}" '.sessions[$key].podName' ~/.copilot/session-state/session-exec.json)"
+pod_ip="$(jq -r --arg key "${session_key}" '.sessions[$key].podIp' ~/.copilot/session-state/session-exec.json)"
+environment_pvc="$(jq -r --arg key "${session_key}" '.sessions[$key].environmentPvcName' ~/.copilot/session-state/session-exec.json)"
+test -n "${pod_name}"
+test -n "${pod_ip}"
+test -n "${environment_pvc}"
+test "$(cat /workspace/fast-exec-startup-marker.txt)" = "fast-exec-startup"
+kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${pod_name}" -o json > /workspace/k8s-fast-exec-pod.json
+test "$(jq -r '.metadata.ownerReferences[0].kind' /workspace/k8s-fast-exec-pod.json)" = "Pod"
+test "$(jq -r '.metadata.ownerReferences[0].name' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_POD_NAME}"
+test "$(jq -r '.metadata.ownerReferences[0].uid' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_POD_UID}"
+test "$(jq -r '.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchFields[] | select(.key == "metadata.name").values[0]' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_NODE_NAME}"
+test "$(jq -r '.spec.containers[0].image' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_FAST_EXECUTION_IMAGE}"
+test "$(jq -r '.spec.initContainers[0].image' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE}"
+test "$(jq -r '.spec.volumes[] | select(.name == "workspace").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "control-plane-workspace-pvc"
+test "$(jq -r '.spec.volumes[] | select(.name == "copilot-session").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "control-plane-copilot-session-pvc"
+test "$(jq -r '.spec.volumes[] | select(.name == "environment").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "${environment_pvc}"
+test "$(jq -r '.spec.volumes[] | select(.name == "runtime-bin").emptyDir | type' /workspace/k8s-fast-exec-pod.json)" = "object"
+test "$(jq -r '.spec.containers[0].command[0]' /workspace/k8s-fast-exec-pod.json)" = "/control-plane/bin/control-plane-exec-api"
+test "$(jq -r '.spec.containers[0].startupProbe.grpc.port' /workspace/k8s-fast-exec-pod.json)" = "8080"
+test "$(jq -r '.spec.containers[0].startupProbe.periodSeconds' /workspace/k8s-fast-exec-pod.json)" = "5"
+test "$(jq -r '.spec.containers[0].startupProbe.failureThreshold' /workspace/k8s-fast-exec-pod.json)" = "62"
+test "$(jq -r '.spec.serviceAccountName' /workspace/k8s-fast-exec-pod.json)" = "control-plane-exec"
+test "$(jq -r '.spec.automountServiceAccountToken' /workspace/k8s-fast-exec-pod.json)" = "true"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "environment").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/environment"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "runtime-bin").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/control-plane/bin"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "workspace").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/environment/root/workspace"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/environment/root/root/.config/gh") | (.readOnly // false)' /workspace/k8s-fast-exec-pod.json)" = "false"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/environment/root/root/.ssh") | (.readOnly // false)' /workspace/k8s-fast-exec-pod.json)" = "true"
+test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/root"
+test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_JOB_NAMESPACE").value' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_JOB_NAMESPACE}"
+test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/hooks/git"
+test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR").value' /workspace/k8s-fast-exec-pod.json)" = "http://${CONTROL_PLANE_POD_IP}:8081"
+test -n "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN").value' /workspace/k8s-fast-exec-pod.json)"
+test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC").value' /workspace/k8s-fast-exec-pod.json)" = "3600"
+test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT").value' /workspace/k8s-fast-exec-pod.json)" = 'printf "fast-exec-startup\n" > /workspace/fast-exec-startup-marker.txt'
+test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOME").value' /workspace/k8s-fast-exec-pod.json)" = "/root"
+git_hook_command=$'rm -rf /workspace/fast-exec-git-hook-test-repo\nmkdir -p /workspace/fast-exec-git-hook-test-repo\ncd /workspace/fast-exec-git-hook-test-repo\ngit init >/dev/null\ngit checkout -b fast-exec-test >/dev/null 2>&1\ngit config user.name "Fast Exec Test"\ngit config user.email "fast-exec-test@example.com"\ngit config core.hooksPath /environment/hooks/git\ntest -x /root/.copilot/hooks/postToolUse/main\ngit commit --allow-empty -m "fast exec hook test" >/dev/null\ngit rev-parse --verify HEAD > /workspace/fast-exec-git-hook-commit.txt'
+git_hook_command_base64="$(printf '%s' "${git_hook_command}" | base64 | tr -d '\n')"
+control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${git_hook_command_base64}" >/dev/null
+grep -Eq '^[0-9a-f]{40}$' /workspace/fast-exec-git-hook-commit.txt
+hook_readonly_command=$'set -euo pipefail\ntest -x /root/.copilot/hooks/postToolUse/main\ntest -f /usr/local/share/control-plane/hooks/postToolUse/linters.json\nif printf tamper >> /root/.copilot/hooks/postToolUse/linters.json 2>/dev/null; then\n  printf "%s\\n" "Expected fast-exec compat hooks to stay read-only" >&2\n  exit 1\nfi\nif printf tamper >> /usr/local/share/control-plane/hooks/postToolUse/linters.json 2>/dev/null; then\n  printf "%s\\n" "Expected fast-exec managed hooks to stay read-only" >&2\n  exit 1\nfi\nif ln -sfn /tmp/evil-hooks /root/.copilot/hooks 2>/dev/null; then\n  printf "%s\\n" "Expected fast-exec ~/.copilot/hooks symlink replacement to fail" >&2\n  exit 1\nfi\ntest "$(readlink /root/.copilot/hooks)" = "/usr/local/share/control-plane/hooks"\nprintf "exec-hooks-readonly-ok\\n" > /workspace/fast-exec-hooks-readonly.txt'
+hook_readonly_command_base64="$(printf '%s' "${hook_readonly_command}" | base64 | tr -d '\n')"
+control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${hook_readonly_command_base64}" >/dev/null
+grep -qx 'exec-hooks-readonly-ok' /workspace/fast-exec-hooks-readonly.txt
+command_text=$'printf "fast-exec-stdout\\n"; printf "fast-exec-stderr\\n" >&2; printf "delegated\\n" > /workspace/fast-exec-marker.txt; exit 7'
+command_base64="$(printf '%s' "${command_text}" | base64 | tr -d '\n')"
+set +e
+control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${command_base64}" \
+  > /workspace/k8s-fast-exec-stdout.txt 2> /workspace/k8s-fast-exec-stderr.txt
+proxy_status=$?
+set -e
+test "${proxy_status}" -eq 7
+test "$(sed -n '1p' /workspace/k8s-fast-exec-stdout.txt)" = "\$ ${command_text}"
+test "$(sed -n '2p' /workspace/k8s-fast-exec-stdout.txt)" = 'fast-exec-stdout'
+grep -qx 'fast-exec-stderr' /workspace/k8s-fast-exec-stderr.txt
+grep -qx 'delegated' /workspace/fast-exec-marker.txt
+blocked_command_base64="$(printf '%s' 'cat /root/.config/gh/hosts.yml' | base64 | tr -d '\n')"
+set +e
+control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${blocked_command_base64}" \
+  > /workspace/k8s-fast-exec-blocked-stdout.txt 2> /workspace/k8s-fast-exec-blocked-stderr.txt
+blocked_status=$?
+set -e
+test "${blocked_status}" -ne 0
+! [ -s /workspace/k8s-fast-exec-blocked-stdout.txt ]
+grep -Fq 'Direct reads of ~/.config/gh/hosts.yml are blocked by control-plane policy.' \
+  /workspace/k8s-fast-exec-blocked-stderr.txt
+service_account_command=$'set -euo pipefail\ntest -n "${KUBERNETES_SERVICE_HOST:-}"\ntest -n "${KUBERNETES_SERVICE_PORT:-}"\ntest -f /var/run/secrets/kubernetes.io/serviceaccount/token\ntest -f /var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
+service_account_command_base64="$(printf '%s' "${service_account_command}" | base64 | tr -d '\n')"
+control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${service_account_command_base64}" >/dev/null
+kubectl_command=$(cat <<'INNER'
+set -euo pipefail
+namespace="${CONTROL_PLANE_JOB_NAMESPACE}"
+command -v kubectl >/dev/null
+test "$(kubectl auth can-i create deployments.apps -n "${namespace}")" = "yes"
+test "$(kubectl auth can-i delete deployments.apps -n "${namespace}")" = "yes"
+test "$(kubectl auth can-i patch deployments.apps -n "${namespace}")" = "yes"
+test "$(kubectl auth can-i create services -n "${namespace}")" = "yes"
+test "$(kubectl auth can-i create jobs.batch -n "${namespace}")" = "yes"
+test "$(kubectl auth can-i create pods -n "${namespace}")" = "yes"
+test "$(kubectl auth can-i get pods/log -n "${namespace}")" = "yes"
+kubectl -n "${namespace}" create deployment fast-exec-deployment \
+  --image=docker.io/library/busybox:1.37.0 \
+  --dry-run=server \
+  -o yaml >/dev/null
+kubectl -n "${namespace}" create service clusterip fast-exec-service \
+  --tcp=80:80 \
+  --dry-run=server \
+  -o yaml >/dev/null
+kubectl -n "${namespace}" create job fast-exec-job \
+  --image=docker.io/library/busybox:1.37.0 \
+  --dry-run=server \
+  -o yaml \
+  -- /bin/sh -lc 'printf ok\n' >/dev/null
+cat <<'POD' | kubectl -n "${namespace}" create --dry-run=server -f - >/dev/null
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fast-exec-pod
+spec:
+  restartPolicy: Never
+  containers:
+    - name: main
+      image: docker.io/library/busybox:1.37.0
+      command: ["/bin/sh", "-lc", "sleep 1"]
+POD
+printf 'exec-kubectl-ok\n' > /workspace/fast-exec-kubectl-marker.txt
+INNER
+)
+kubectl_command_base64="$(printf '%s' "${kubectl_command}" | base64 | tr -d '\n')"
+control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${kubectl_command_base64}" >/dev/null
+grep -qx 'exec-kubectl-ok' /workspace/fast-exec-kubectl-marker.txt
+control-plane-session-exec cleanup --session-key "${session_key}"
+! kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${pod_name}" >/dev/null 2>&1
+jq -e --arg key "${session_key}" '.sessions[$key] == null' ~/.copilot/session-state/session-exec.json >/dev/null
+terminating_session_key=kind-fast-exec-terminating
+control-plane-session-exec cleanup --session-key "${terminating_session_key}" >/dev/null 2>&1 || true
+rm -f /workspace/fast-exec-terminating-marker.txt
+control-plane-session-exec prepare --session-key "${terminating_session_key}" >/dev/null
+terminating_pod_name="$(jq -r --arg key "${terminating_session_key}" '.sessions[$key].podName' ~/.copilot/session-state/session-exec.json)"
+terminating_pod_uid="$(kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${terminating_pod_name}" -o jsonpath='{.metadata.uid}')"
+kubectl delete pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${terminating_pod_name}" --wait=false >/dev/null
+deletion_timestamp=''
+for _ in $(seq 1 60); do
+  deletion_timestamp="$(kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${terminating_pod_name}" -o jsonpath='{.metadata.deletionTimestamp}' 2>/dev/null || true)"
+  if [ -n "${deletion_timestamp}" ]; then
+    break
+  fi
+  sleep 1
+done
+test -n "${deletion_timestamp}"
+state_temp="$(mktemp)"
+jq --arg key "${terminating_session_key}" 'del(.sessions[$key])' ~/.copilot/session-state/session-exec.json > "${state_temp}"
+mv "${state_temp}" ~/.copilot/session-state/session-exec.json
+control-plane-session-exec prepare --session-key "${terminating_session_key}" >/dev/null
+replacement_pod_uid="$(kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${terminating_pod_name}" -o jsonpath='{.metadata.uid}')"
+test -n "${replacement_pod_uid}"
+test "${replacement_pod_uid}" != "${terminating_pod_uid}"
+terminating_command_base64="$(printf '%s' 'printf "terminating-fast-exec-ok\n" > /workspace/fast-exec-terminating-marker.txt' | base64 | tr -d '\n')"
+control-plane-session-exec proxy --session-key "${terminating_session_key}" --cwd /workspace --command-base64 "${terminating_command_base64}" >/dev/null
+grep -qx 'terminating-fast-exec-ok' /workspace/fast-exec-terminating-marker.txt
+control-plane-session-exec cleanup --session-key "${terminating_session_key}"
+! kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${terminating_pod_name}" >/dev/null 2>&1
+jq -e --arg key "${terminating_session_key}" '.sessions[$key] == null' ~/.copilot/session-state/session-exec.json >/dev/null
+EOF
+  then
+    ssh_bash <<'EOF' >&2 || true
+set +e
+printf '%s\n' '--- fast exec debug ---'
+cat ~/.copilot/session-state/session-exec.json || true
+cat /workspace/k8s-fast-exec-pod.json || true
+cat /workspace/k8s-fast-exec-stdout.txt || true
+cat /workspace/k8s-fast-exec-stderr.txt || true
+cat /workspace/k8s-fast-exec-blocked-stdout.txt || true
+cat /workspace/k8s-fast-exec-blocked-stderr.txt || true
+cat /workspace/fast-exec-terminating-marker.txt || true
+kubectl get pods --namespace "${CONTROL_PLANE_POD_NAMESPACE:-default}" -o wide || true
+EOF
+    dump_control_plane_diagnostics
+    exit 1
+  fi
+  printf '%s\n' 'kind-test: fast execution pod flow ok' >&2
+}
+
 start_persistence_session_fixtures() {
   ssh_bash <<'EOF'
 set -euo pipefail
@@ -948,7 +1246,7 @@ mkdir -p ~/.copilot ~/.config/gh ~/.ssh /workspace
 echo k8s > ~/.copilot/state.txt
 echo gh > ~/.config/gh/state.txt
 echo ssh > ~/.ssh/state.txt
-screen -T screen-256color -dmS kind-session sh -lc 'printf "%s\n" "$TERM" > /workspace/k8s-screen-term.txt; printf "日本語★\n" > /workspace/k8s-screen-utf8.txt; echo k8s-screen > /workspace/k8s-screen.txt; sleep 30'
+screen -dmS kind-session sh -lc 'printf "日本語★\n" > /workspace/k8s-screen-utf8.txt; echo k8s-screen > /workspace/k8s-screen.txt; sleep 30'
 EOF
   printf '%s\n' 'kind-test: screen session started' >&2
 }
@@ -957,7 +1255,6 @@ wait_for_screen_output_fixture() {
   if ! wait_for_remote_grep '^k8s-screen$' /workspace/k8s-screen.txt; then
     ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
-cat /workspace/k8s-screen-term.txt || true
 cat /workspace/k8s-screen-utf8.txt || true
 cat /workspace/k8s-screen.txt || true
 EOF
@@ -967,70 +1264,21 @@ EOF
 }
 
 run_terminal_session_assertions() {
-  printf '%s\n' 'kind-test: verifying login TERM fallback' >&2
-  if ! TERM=bogusterm ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
-    "CONTROL_PLANE_DISABLE_SESSION_PICKER=1 bash -lic 'printf \"%s\n\" \"\$TERM\" > /workspace/k8s-login-term.txt; tput colors > /workspace/k8s-login-colors.txt'" \
-    </dev/null >"${workdir}/ssh-login-term.log" 2>&1; then
-    cat "${workdir}/ssh-login-term.log" >&2 || true
-    printf 'Expected kind login shell TERM fallback to succeed over SSH\n' >&2
-    exit 1
-  fi
-  if ! ssh_bash <<'EOF'
-set -euo pipefail
-grep -Eq '^(xterm-256color|xterm)$' /workspace/k8s-login-term.txt
-awk 'NR == 1 { exit !($1 >= 8) }' /workspace/k8s-login-colors.txt
-EOF
-  then
-    ssh_bash <<'EOF' >&2 || true
-set -euo pipefail
-cat /workspace/k8s-login-term.txt || true
-cat /workspace/k8s-login-colors.txt || true
-EOF
-    printf 'Expected kind login TERM fallback files to report a usable terminal\n' >&2
-    exit 1
-  fi
-  printf '%s\n' 'kind-test: login TERM fallback ok' >&2
-
-  printf '%s\n' 'kind-test: verifying login TERM upgrade to 256 colors' >&2
-  if ! TERM=xterm-color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
-    "CONTROL_PLANE_DISABLE_SESSION_PICKER=1 bash -lic 'printf \"%s\n\" \"\$TERM\" > /workspace/k8s-login-term-upgrade.txt; tput colors > /workspace/k8s-login-term-upgrade-colors.txt'" \
-    </dev/null >"${workdir}/ssh-login-term-upgrade.log" 2>&1; then
-    cat "${workdir}/ssh-login-term-upgrade.log" >&2 || true
-    printf 'Expected kind login TERM upgrade to succeed over SSH\n' >&2
-    exit 1
-  fi
-  if ! ssh_bash <<'EOF'
-set -euo pipefail
-grep -qx 'xterm-256color' /workspace/k8s-login-term-upgrade.txt
-awk 'NR == 1 { exit !($1 >= 256) }' /workspace/k8s-login-term-upgrade-colors.txt
-EOF
-  then
-    ssh_bash <<'EOF' >&2 || true
-set -euo pipefail
-cat /workspace/k8s-login-term-upgrade.txt || true
-cat /workspace/k8s-login-term-upgrade-colors.txt || true
-EOF
-    printf 'Expected kind login TERM upgrade files to report xterm-256color with 256 colors\n' >&2
-    exit 1
-  fi
-  printf '%s\n' 'kind-test: login TERM upgrade ok' >&2
-
-  if ! wait_for_screen_term kind-session /workspace/k8s-screen-term.txt; then
+  if ! wait_for_screen_session kind-session; then
     ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
 screen -list || true
-cat /workspace/k8s-screen-term.txt || true
 cat /workspace/k8s-screen-utf8.txt || true
+cat /workspace/k8s-screen.txt || true
 EOF
-    printf 'Expected kind-session to report a screen-256color TERM variant\n' >&2
+    printf 'Expected kind-session to stay available after SSH setup\n' >&2
     exit 1
   fi
-  printf '%s\n' 'kind-test: screen term ready' >&2
+  printf '%s\n' 'kind-test: screen session ready' >&2
 
   if ! wait_for_remote_grep '^日本語★$' /workspace/k8s-screen-utf8.txt; then
     ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
-cat /workspace/k8s-screen-term.txt || true
 cat /workspace/k8s-screen-utf8.txt || true
 cat /workspace/k8s-screen.txt || true
 EOF
@@ -1042,7 +1290,6 @@ EOF
   if ! wait_for_remote_grep '^k8s-screen$' /workspace/k8s-screen.txt; then
     ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
-cat /workspace/k8s-screen-term.txt || true
 cat /workspace/k8s-screen-utf8.txt || true
 cat /workspace/k8s-screen.txt || true
 EOF
@@ -1051,34 +1298,33 @@ EOF
   fi
   printf '%s\n' 'kind-test: screen output ready' >&2
 
-  printf '%s\n' 'kind-test: verifying session picker fallback' >&2
-  if ! TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
-    "CONTROL_PLANE_SESSION_SELECTION=9999 bash -lic 'printf \"%s\n\" fallback-shell-ok'" \
-    </dev/null >"${workdir}/ssh-picker-fallback.log" 2>&1; then
-    cat "${workdir}/ssh-picker-fallback.log" >&2 || true
-    printf 'Expected SSH login to fall back to a shell when the session picker fails\n' >&2
-    exit 1
-  fi
-  if ! grep -q 'fallback-shell-ok' "${workdir}/ssh-picker-fallback.log"; then
-    printf 'Expected fallback-shell-ok marker in kind SSH fallback log\n' >&2
-    cat "${workdir}/ssh-picker-fallback.log" >&2 || true
-    exit 1
-  fi
-  if ! grep -q 'session picker failed; continuing with the login shell' "${workdir}/ssh-picker-fallback.log"; then
-    printf 'Expected session picker fallback warning in kind SSH fallback log\n' >&2
-    cat "${workdir}/ssh-picker-fallback.log" >&2 || true
-    exit 1
-  fi
-  printf '%s\n' 'kind-test: session picker fallback ok' >&2
-
-  printf '%s\n' 'kind-test: verifying interactive SSH auto-login' >&2
+  printf '%s\n' 'kind-test: verifying interactive SSH Copilot session reuse' >&2
   if ! ssh_bash <<EOF
 set -euo pipefail
 cp ~/.config/control-plane/runtime.env /workspace/k8s-runtime.env.bak
-printf '\nCONTROL_PLANE_SESSION_SELECTION=new:%s\n' "${kind_auto_login_session}" >> ~/.config/control-plane/runtime.env
+printf '\nCONTROL_PLANE_COPILOT_BIN=%s\n' /workspace/test-copilot-shell >> ~/.config/control-plane/runtime.env
+cat > /workspace/test-copilot-shell <<'INNER'
+#!/usr/bin/env bash
+set -euo pipefail
+exec bash -il
+INNER
+chmod +x /workspace/test-copilot-shell
 EOF
   then
-    printf 'Expected kind runtime.env backup/setup to succeed before SSH auto-login probe\n' >&2
+    printf 'Expected kind runtime.env backup/setup to succeed before SSH Copilot probe\n' >&2
+    exit 1
+  fi
+
+  if ! ssh_bash <<'EOF'
+set -euo pipefail
+session_key=kind-ssh-reconnect-fast-exec
+control-plane-session-exec cleanup --session-key "${session_key}" >/dev/null 2>&1 || true
+control-plane-session-exec prepare --session-key "${session_key}" >/dev/null
+command_base64="$(printf '%s' 'printf kind-fast-exec-reconnect > /workspace/k8s-fast-exec-reconnect.txt' | base64 | tr -d '\n')"
+control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${command_base64}" >/dev/null
+EOF
+  then
+    printf 'Expected kind fast-exec bootstrap to succeed before SSH reconnect probe\n' >&2
     exit 1
   fi
 
@@ -1086,9 +1332,9 @@ EOF
   "${script_dir}/test-ssh-session-persistence.sh" \
     --identity "${ssh_key}" \
     --port "${ssh_port}" \
-    --session-name "${kind_auto_login_session}" \
-    --marker-path /workspace/k8s-auto-login-marker.txt
-  kind_auto_login_status=$?
+    --session-name copilot \
+    --marker-path /workspace/k8s-copilot-marker.txt
+  kind_copilot_status=$?
   set -e
 
   if ! ssh_bash <<'EOF'
@@ -1096,50 +1342,27 @@ set -euo pipefail
 cp /workspace/k8s-runtime.env.bak ~/.config/control-plane/runtime.env
 chmod 600 ~/.config/control-plane/runtime.env
 rm -f /workspace/k8s-runtime.env.bak
+rm -f /workspace/test-copilot-shell
+control-plane-session-exec cleanup --session-key kind-ssh-reconnect-fast-exec >/dev/null 2>&1 || true
+rm -f /workspace/k8s-fast-exec-reconnect.txt
 EOF
   then
-    printf 'Expected kind runtime.env restore to succeed after SSH auto-login probe\n' >&2
+    printf 'Expected kind runtime.env restore to succeed after SSH Copilot probe\n' >&2
     exit 1
   fi
 
-  if [[ "${kind_auto_login_status}" -ne 0 ]]; then
-    printf 'Expected kind interactive SSH auto-login to stay attached and accept input\n' >&2
+  if [[ "${kind_copilot_status}" -ne 0 ]]; then
+    printf 'Expected kind interactive SSH Copilot session to stay attached and accept input\n' >&2
     exit 1
   fi
-  printf '%s\n' 'kind-test: interactive SSH auto-login ok' >&2
-
-  printf '%s\n' 'kind-test: verifying picker menu options' >&2
-  if ! ssh_bash <<'EOF'
-set -euo pipefail
-screen -T screen-256color -dmS shell bash -lc 'sleep 30'
-EOF
-  then
-    printf 'Expected shell session fixture for kind picker menu test\n' >&2
-    exit 1
-  fi
-  set +e
-  printf '9999\n' | TERM=tmux-256color ssh -tt "${ssh_opts[@]}" copilot@127.0.0.1 \
-    "control-plane-session --select" >"${workdir}/ssh-picker-menu.log" 2>&1
-  picker_menu_status=$?
-  set -e
-  if [[ "${picker_menu_status}" -eq 0 ]]; then
-    printf 'Expected kind picker menu probe to fail on invalid selection\n' >&2
-    cat "${workdir}/ssh-picker-menu.log" >&2 || true
-    exit 1
-  fi
-  if ! grep -Fq 'Copilot (/workspace, --yolo)' "${workdir}/ssh-picker-menu.log"; then
-    printf 'Expected kind picker menu to show the Copilot option when only shell sessions exist\n' >&2
-    cat "${workdir}/ssh-picker-menu.log" >&2 || true
-    exit 1
-  fi
-  printf '%s\n' 'kind-test: picker menu shows Copilot option' >&2
+  printf '%s\n' 'kind-test: interactive SSH Copilot session ok' >&2
 }
 
 run_job_core_assertions() {
   printf '%s\n' 'kind-test: starting manual job' >&2
   if ! job_name="$(ssh_bash <<EOF
 set -euo pipefail
-k8s-job-start --namespace ${job_namespace} --job-name ci-manual-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/manual-job.txt manual
+k8s-job-start --namespace ${job_namespace} --job-name ci-manual-job --image ${control_plane_image} -- bash -lc 'printf "%s\n" manual | tee /workspace/manual-job.txt'
 EOF
 )";
   then
@@ -1152,7 +1375,7 @@ kubectl get serviceaccount control-plane-job --namespace ${job_namespace}
 kubectl get pvc control-plane-workspace-pvc --namespace ${job_namespace}
 kubectl auth can-i create jobs --namespace ${job_namespace}
 kubectl delete job --namespace ${job_namespace} ci-manual-job --ignore-not-found >/dev/null 2>&1 || true
-bash -x "\$(command -v k8s-job-start)" --namespace ${job_namespace} --job-name ci-manual-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/manual-job.txt manual
+bash -x "\$(command -v k8s-job-start)" --namespace ${job_namespace} --job-name ci-manual-job --image ${control_plane_image} -- bash -lc 'printf "%s\n" manual | tee /workspace/manual-job.txt'
 EOF
     dump_control_plane_diagnostics
     exit 1
@@ -1185,21 +1408,9 @@ set -euo pipefail
 test -f /workspace/manual-job.txt
 EOF
 
-  auto_output="$(ssh_bash <<EOF
-set -euo pipefail
-control-plane-run --mode auto --execution-hint long --namespace ${job_namespace} --job-name ci-auto-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/auto-job.txt auto
-EOF
-)"
-  grep -q 'auto' <<<"${auto_output}"
-
-  ssh_bash <<'EOF'
-set -euo pipefail
-test -f /workspace/auto-job.txt
-EOF
-
   default_mode_output="$(ssh_bash <<EOF
 set -euo pipefail
-control-plane-run --job-name ci-default-job --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/default-job.txt default
+control-plane-run --job-name ci-default-job --image ${control_plane_image} -- bash -lc 'printf "%s\n" default | tee /workspace/default-job.txt'
 EOF
 )"
   grep -q 'default' <<<"${default_mode_output}"
@@ -1209,89 +1420,10 @@ set -euo pipefail
 test -f /workspace/default-job.txt
 EOF
 
-  ssh_bash <<EOF
-set -euo pipefail
-printf 'job input from transfer\n' > /workspace/job-input.txt
-printf 'colon input\n' > '/workspace/job:input.txt'
-cat > /tmp/fake-podman-success <<'INNER'
-#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' 'fake success stderr' >&2
-printf '%s\n' "\$@" > /tmp/fake-podman-success.log
-INNER
-chmod +x /tmp/fake-podman-success
-timeout 10s bash -lc 'CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman-success control-plane-podman info' \
-  >/tmp/fake-podman-success.stdout 2>/tmp/fake-podman-success.stderr
-grep -qx 'info' /tmp/fake-podman-success.log
-grep -q 'fake success stderr' /tmp/fake-podman-success.stderr
-cat > /tmp/fake-podman <<'INNER'
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ "\${1:-}" == "pull" ]]; then
-  printf '%s\n' 'WARN[0000] "/" is not a shared mount, this could cause issues or missing mounts with rootless containers' >&2
-  printf '%s\n' 'cannot clone: Operation not permitted' >&2
-  printf '%s\n' 'ERRO[0000] invalid internal status, try resetting the pause process with "/usr/bin/podman system migrate": cannot re-exec process' >&2
-  exit 125
-fi
-printf '%s\n' "\$@" > /tmp/fake-podman.log
-INNER
-chmod +x /tmp/fake-podman
-CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-run --mode auto --execution-hint short --workspace /workspace --mount-file /workspace/job-input.txt:inputs/job-input.txt --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/short-auto.txt short
-grep -q '^run$' /tmp/fake-podman.log
-grep -q '${execution_plane_image}' /tmp/fake-podman.log
-grep -Eq ':/var/run/control-plane/job-inputs:ro$' /tmp/fake-podman.log
-CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-run --mode auto --execution-hint short --workspace /workspace --mount-file '/workspace/job:input.txt' --image ${execution_plane_image} -- /usr/local/bin/execution-plane-smoke write-marker /workspace/short-auto-colon.txt short
-grep -Eq ':/var/run/control-plane/job-inputs:ro$' /tmp/fake-podman.log
-set +e
-fake_podman_output="\$(CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman control-plane-podman pull quay.io/example/test:latest 2>&1)"
-fake_podman_status=\$?
-set -e
-printf '%s\n' "\${fake_podman_output}" > /tmp/fake-podman-pull.log
-if [[ "\${fake_podman_status}" -eq 0 ]]; then
-  printf 'Expected fake control-plane-podman pull to fail in kind\n' >&2
-  exit 1
-fi
-grep -q 'cannot clone: Operation not permitted' /tmp/fake-podman-pull.log
-grep -q 'rootless Podman is blocked by the outer runtime' /tmp/fake-podman-pull.log
-grep -q 'SETFCAP' /tmp/fake-podman-pull.log
-grep -q 'CONTROL_PLANE_RUN_MODE=k8s-job' /tmp/fake-podman-pull.log
-cat > /tmp/fake-podman-migrate <<'INNER'
-#!/usr/bin/env bash
-set -euo pipefail
-state_file=/tmp/fake-podman-migrate-state
-if [[ "\${1:-}" == "system" ]] && [[ "\${2:-}" == "migrate" ]]; then
-  : > "\${state_file}"
-  exit 0
-fi
-if [[ "\${1:-}" == "pull" ]]; then
-  if [[ ! -f "\${state_file}" ]]; then
-    printf '%s\n' 'ERRO[0000] invalid internal status, try resetting the pause process with "/usr/bin/podman system migrate": cannot re-exec process' >&2
-    exit 125
-  fi
-  printf '%s\n' "\$@" > /tmp/fake-podman-migrate.log
-  exit 0
-fi
-printf '%s\n' "\$@" > /tmp/fake-podman-migrate.log
-INNER
-chmod +x /tmp/fake-podman-migrate
-set +e
-fake_migrate_output="\$(CONTROL_PLANE_PODMAN_BIN=/tmp/fake-podman-migrate control-plane-podman pull quay.io/example/test:latest 2>&1)"
-fake_migrate_status=\$?
-set -e
-printf '%s\n' "\${fake_migrate_output}" > /tmp/fake-podman-migrate-output.log
-if [[ "\${fake_migrate_status}" -ne 0 ]]; then
-  printf 'Expected control-plane-podman to recover after podman system migrate\n' >&2
-  exit 1
-fi
-  grep -q '^pull$' /tmp/fake-podman-migrate.log
-  grep -q '^quay.io/example/test:latest$' /tmp/fake-podman-migrate.log
-  grep -q 'detected stale rootless Podman state' /tmp/fake-podman-migrate-output.log
-  grep -q 'repaired the local Podman state' /tmp/fake-podman-migrate-output.log
-EOF
 }
 
 run_job_transfer_assertions() {
-  printf -v remote_job_transfer_command 'bash -l -se -- %q %q' "${execution_plane_image}" "${job_namespace}"
+  printf -v remote_job_transfer_command 'bash -l -se -- %q %q' "${control_plane_image}" "${job_namespace}"
   # shellcheck disable=SC2029
   if ! ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_job_transfer_command}" < "${script_dir}/test-job-transfer.sh"; then
     printf 'Expected kind job transfer regression script to succeed\n' >&2
@@ -1310,7 +1442,7 @@ printf '%s\n' 'tmp-ok' > "${TMPDIR}/k8s-tmp.txt"
 EOF
 
   kubectl exec --namespace "${namespace}" "$(control_plane_pod_name)" -c control-plane -- bash -lc \
-    "set -euo pipefail; printf '%s\n' 'rootful-reset' > /var/lib/control-plane/rootful-podman/rootful-overlay/should-disappear.txt"
+    "set -euo pipefail; printf '%s\n' 'runtime-reset' > /var/tmp/control-plane/should-disappear.txt"
 
   first_host_fingerprint="$(ssh_host_fingerprint)"
 
@@ -1319,6 +1451,16 @@ EOF
   wait_for_control_plane_pod
   start_port_forward
   wait_for_ssh
+
+  kubectl exec --namespace "${namespace}" "$(control_plane_pod_name)" -c control-plane -- bash -lc \
+    "set -euo pipefail; \
+     test -L /etc/ssh/ssh_host_ed25519_key; \
+     test -L /etc/ssh/ssh_host_ed25519_key.pub; \
+     test \"\$(readlink /etc/ssh/ssh_host_ed25519_key)\" = '/run/control-plane/ssh-host-keys/ssh_host_ed25519_key'; \
+     test \"\$(readlink /etc/ssh/ssh_host_ed25519_key.pub)\" = '/run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub'; \
+     test \"\$(stat -c '%a %U %G' /run/control-plane/ssh-host-keys)\" = '700 root root'; \
+     test \"\$(stat -c '%a %U %G' /run/control-plane/ssh-host-keys/ssh_host_ed25519_key)\" = '600 root root'; \
+     test \"\$(stat -c '%a %U %G' /run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub)\" = '644 root root'"
 
   second_host_fingerprint="$(ssh_host_fingerprint)"
   [[ "${first_host_fingerprint}" == "${second_host_fingerprint}" ]]
@@ -1331,11 +1473,10 @@ test -f ~/.copilot/session-state/k8s-session-state.txt
 test -f ~/.config/gh/state.txt
 test -f ~/.ssh/state.txt
 test -f /workspace/manual-job.txt
-test -f /workspace/auto-job.txt
 test -f /workspace/default-job.txt
 test -f /workspace/k8s-screen.txt
 test ! -e "${TMPDIR}/k8s-tmp.txt"
-test ! -e /var/lib/control-plane/rootful-podman/rootful-overlay/should-disappear.txt
+test ! -e /var/tmp/control-plane/should-disappear.txt
 test ! -e ~/.copilot/tmp
 EOF
 }
@@ -1358,6 +1499,7 @@ cleanup() {
   kubectl delete pv control-plane-copilot-session-pv --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete pv control-plane-workspace-control-pv --ignore-not-found >/dev/null 2>&1 || true
   kubectl delete pv control-plane-workspace-job-pv --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete pv control-plane-fast-exec-environment-pv --ignore-not-found >/dev/null 2>&1 || true
   if [[ "${created_cluster}" -eq 1 ]]; then
     kind_cmd delete cluster --name "${cluster_name}" >/dev/null 2>&1 || true
   fi
@@ -1393,8 +1535,11 @@ case "${kind_test_group}" in
 esac
 
 if ! kind_cmd get clusters | grep -qx "${cluster_name}"; then
-  if ! create_cluster; then
-    status=$?
+  set +e
+  create_cluster
+  status=$?
+  set -e
+  if [[ "${status}" -ne 0 ]]; then
     if [[ "${status}" -eq 2 ]]; then
       exit 0
     fi
@@ -1410,11 +1555,15 @@ load_kind_images
 ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"
 apply_resources
 test "$(kubectl get service/control-plane --namespace "${namespace}" -o jsonpath='{.spec.type}')" = "LoadBalancer"
+assert_control_plane_probe_spec
 wait_for_control_plane_pod
 start_port_forward
 wait_for_ssh
 
 run_shared_remote_assertions
+if [[ "${kind_test_group}" == "all" ]] || [[ "${kind_test_group}" == "session" ]]; then
+  run_fast_exec_assertions
+fi
 
 case "${kind_test_group}" in
   all)

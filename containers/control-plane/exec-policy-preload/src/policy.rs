@@ -131,12 +131,9 @@ mod tests {
             protected_environments: vec![Regex::new("^(?:GIT_CONFIG_GLOBAL)$").unwrap()],
             file_access_rules: vec![
                 CompiledFileAccessRule {
-                    path: "/run/secrets/dockerhub-token".to_string(),
-                    reason: "dockerhub token blocked".to_string(),
-                    allowed_executables: vec![
-                        "/usr/local/bin/podman".to_string(),
-                        "/usr/local/bin/control-plane-podman".to_string(),
-                    ],
+                    path: "/home/copilot/.config/control-plane/copilot-github-token".to_string(),
+                    reason: "copilot token blocked".to_string(),
+                    allowed_executables: vec!["/usr/local/bin/control-plane-copilot".to_string()],
                 },
                 CompiledFileAccessRule {
                     path: "/home/copilot/.config/gh/hosts.yml".to_string(),
@@ -236,21 +233,21 @@ mod tests {
             Some("hooks path blocked")
         );
         assert_eq!(
-            match_file_access_rule(&config, &["/usr/bin/bash"], "/run/secrets/dockerhub-token")
-                .as_deref(),
-            Some("dockerhub token blocked")
+            match_file_access_rule(
+                &config,
+                &["/usr/local/bin/control-plane-copilot"],
+                "/home/copilot/.config/control-plane/copilot-github-token"
+            )
+            .as_deref(),
+            None
         );
         assert_eq!(
             match_file_access_rule(
                 &config,
-                &["/usr/bin/bash", "/usr/local/bin/control-plane-podman"],
-                "/run/secrets/dockerhub-token",
+                &["/usr/bin/bash", "/usr/bin/docker"],
+                "/home/copilot/.config/control-plane/copilot-github-token",
             ),
-            None
-        );
-        assert_eq!(
-            match_file_access_rule(&config, &["podman"], "/run/secrets/dockerhub-token").as_deref(),
-            Some("dockerhub token blocked")
+            Some(String::from("copilot token blocked"))
         );
         assert_eq!(
             match_file_access_rule(
@@ -273,7 +270,7 @@ mod tests {
             match_file_access_rule(
                 &config,
                 &["/usr/bin/bash"],
-                "/run/control-plane-auth/dockerhub-token"
+                "/run/control-plane-auth/copilot-github-token"
             )
             .as_deref(),
             Some("control-plane auth mount blocked")
@@ -282,7 +279,7 @@ mod tests {
             match_file_access_rule(
                 &config,
                 &["/usr/bin/bash"],
-                "/run/control-plane-auth/..data/dockerhub-token"
+                "/run/control-plane-auth/..data/copilot-github-token"
             )
             .as_deref(),
             Some("control-plane auth mount blocked")
@@ -291,7 +288,7 @@ mod tests {
             match_file_access_rule(
                 &config,
                 &["/usr/bin/bash"],
-                "/run/control-plane-auth-copy/dockerhub-token"
+                "/run/control-plane-auth-copy/copilot-github-token"
             ),
             None
         );

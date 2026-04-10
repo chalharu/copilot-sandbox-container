@@ -144,37 +144,38 @@
       ]
     },
     {
-      "id": "containerized-rust-fmt",
+      "id": "control-plane-rust-fmt",
       "command": "bash",
       "args": [
-        "containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh",
+        "/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh",
         "fmt"
       ],
-      "appendFiles": false
+      "appendFiles": true
     },
     {
-      "id": "containerized-rust-clippy-fix",
+      "id": "control-plane-rust-clippy-fix",
       "command": "bash",
       "args": [
-        "containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh",
+        "/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh",
         "clippy-fix"
       ],
-      "appendFiles": false
+      "appendFiles": true
     },
     {
-      "id": "containerized-rust-clippy-check",
+      "id": "control-plane-rust-clippy-check",
       "command": "bash",
       "args": [
-        "containers/control-plane/skills/containerized-rust-ops/scripts/podman-rust.sh",
+        "/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh",
         "clippy"
       ],
-      "appendFiles": false
+      "appendFiles": true
     },
     {
-      "id": "containerized-yamllint-check",
-      "command": "bash",
+      "id": "yamllint-check",
+      "command": "yamllint",
       "args": [
-        "containers/control-plane/skills/containerized-yamllint-ops/scripts/podman-yamllint.sh"
+        "-c",
+        ".yamllint"
       ]
     },
     {
@@ -260,7 +261,7 @@
       "steps": [
         {
           "tools": [
-            "containerized-yamllint-check"
+            "yamllint-check"
           ],
           "reportFailure": true,
           "failureLabel": "Yamllint reported unresolved issues:"
@@ -305,27 +306,27 @@
       "steps": [
         {
           "tools": [
-            "containerized-rust-fmt"
+            "control-plane-rust-fmt"
           ],
           "reportFailure": true,
-          "failureLabel": "Containerized Rust formatter reported unresolved issues:"
+          "failureLabel": "Rust formatter reported unresolved issues:"
         },
         {
           "tools": [
-            "containerized-rust-clippy-fix"
+            "control-plane-rust-clippy-fix"
           ]
         },
         {
           "tools": [
-            "containerized-rust-fmt"
+            "control-plane-rust-fmt"
           ]
         },
         {
           "tools": [
-            "containerized-rust-clippy-check"
+            "control-plane-rust-clippy-check"
           ],
           "reportFailure": true,
-          "failureLabel": "Containerized Rust linter reported unresolved issues:"
+          "failureLabel": "Rust linter reported unresolved issues:"
         }
       ]
     },

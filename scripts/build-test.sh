@@ -5,13 +5,6 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-container-toolchain.sh
 source "${script_dir}/lib-container-toolchain.sh"
 
-toolchain="$(detect_build_test_toolchain)"
-container_bin="$(container_runtime_for_toolchain "${toolchain}")"
-build_bin="$(build_command_for_toolchain "${toolchain}")"
-control_plane_image="${CONTROL_PLANE_IMAGE_TAG:-localhost/control-plane:test}"
-execution_plane_image="${EXECUTION_PLANE_IMAGE_TAG:-localhost/execution-plane-smoke:test}"
-cluster_name="${CONTROL_PLANE_KIND_CLUSTER_NAME:-control-plane-ci}"
-kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-${container_bin}}"
 build_only=0
 skip_image_build=0
 test_group="all"
@@ -24,7 +17,7 @@ EOF
 
 run_smoke_group() {
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
-    "${script_dir}/test-standalone.sh" "${control_plane_image}" "${execution_plane_image}"
+    "${script_dir}/test-standalone.sh" "${control_plane_image}"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-config-injection.sh" "${control_plane_image}"
@@ -38,22 +31,16 @@ run_regressions_group() {
     "${script_dir}/test-regressions.sh" "${control_plane_image}"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
-    "${script_dir}/test-renovate-config-permissions.sh"
-
-  CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
-    "${script_dir}/test-podman-startup.sh" "${control_plane_image}"
-
-  CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-k8s-sample-storage-layout.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
-    "${script_dir}/test-k8s-rust-s3-backend.sh"
+    "${script_dir}/test-k8s-job-script-paths.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
-    "${script_dir}/test-k8s-job-wait.sh"
+    "${script_dir}/test-session-exec.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
-    "${script_dir}/test-garage-bootstrap.sh"
+    "${script_dir}/test-kind-prereqs.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-kind-image-loading.sh"
@@ -71,16 +58,10 @@ run_regressions_group() {
     "${script_dir}/test-audit-logging.sh" "${control_plane_image}"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
-    "${script_dir}/test-audit-analysis.sh" "${control_plane_image}"
-
-  CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-image-maintenance.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-dockerfile-hardening.sh"
-
-  CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
-    "${script_dir}/test-rustfmt-style-edition.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-repo-change-delivery-skills.sh"
@@ -92,7 +73,7 @@ run_kind_group() {
   KIND_EXPERIMENTAL_PROVIDER="${kind_provider}" \
     CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     CONTROL_PLANE_KIND_TEST_GROUP="${kind_test_group}" \
-    "${script_dir}/test-kind.sh" "${control_plane_image}" "${execution_plane_image}" "${cluster_name}"
+    "${script_dir}/test-kind.sh" "${control_plane_image}" "${cluster_name}"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -124,9 +105,40 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -n "${CONTROL_PLANE_CONTAINER_BIN:-}" ]] && [[ "${CONTROL_PLANE_CONTAINER_BIN}" != "${container_bin}" ]]; then
-  printf 'CONTROL_PLANE_CONTAINER_BIN=%s conflicts with %s toolchain\n' "${CONTROL_PLANE_CONTAINER_BIN}" "${toolchain}" >&2
-  exit 1
+detect_requested_or_build_only_toolchain() {
+  if [[ -n "${CONTROL_PLANE_TOOLCHAIN:-}" ]]; then
+    detect_build_test_toolchain
+    return
+  fi
+
+  if [[ "${build_only}" -eq 1 ]] && ! docker_build_toolchain_available && buildkitd_build_toolchain_available; then
+    printf 'buildkitd\n'
+    return
+  fi
+
+  detect_build_test_toolchain
+}
+
+toolchain="$(detect_requested_or_build_only_toolchain)"
+build_bin="$(build_command_for_toolchain "${toolchain}")"
+container_bin=''
+if toolchain_supports_container_runtime "${toolchain}"; then
+  container_bin="$(container_runtime_for_toolchain "${toolchain}")"
+fi
+control_plane_image="${CONTROL_PLANE_IMAGE_TAG:-localhost/control-plane:test}"
+cluster_name="${CONTROL_PLANE_KIND_CLUSTER_NAME:-control-plane-ci}"
+kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-${container_bin:-docker}}"
+
+if [[ -n "${CONTROL_PLANE_CONTAINER_BIN:-}" ]]; then
+  if [[ -z "${container_bin}" ]]; then
+    if [[ "${build_only}" -eq 0 ]]; then
+      printf 'CONTROL_PLANE_CONTAINER_BIN cannot be used with %s toolchain.\n' "${toolchain}" >&2
+      exit 1
+    fi
+  elif [[ "${CONTROL_PLANE_CONTAINER_BIN}" != "${container_bin}" ]]; then
+    printf 'CONTROL_PLANE_CONTAINER_BIN=%s conflicts with %s toolchain\n' "${CONTROL_PLANE_CONTAINER_BIN}" "${toolchain}" >&2
+    exit 1
+  fi
 fi
 
 case "${test_group}" in
@@ -145,16 +157,22 @@ if [[ "${build_only}" -eq 1 ]] && [[ "${skip_image_build}" -eq 1 ]]; then
 fi
 
 require_command "${build_bin}"
-require_command "${container_bin}"
+if [[ -n "${container_bin}" ]]; then
+  require_command "${container_bin}"
+fi
 
 printf 'Using %s toolchain for build/test\n' "${toolchain}"
 if [[ "${skip_image_build}" -eq 0 ]]; then
   build_image_for_toolchain "${toolchain}" "${control_plane_image}" containers/control-plane
-  build_image_for_toolchain "${toolchain}" "${execution_plane_image}" containers/execution-plane-smoke
 fi
 
 if [[ "${build_only}" -eq 1 ]]; then
   exit 0
+fi
+
+if ! toolchain_supports_container_runtime "${toolchain}"; then
+  printf 'The %s toolchain currently supports --build-only only; runtime groups still require a local Docker-compatible container runtime.\n' "${toolchain}" >&2
+  exit 1
 fi
 
 require_command ssh

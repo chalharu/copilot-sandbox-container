@@ -3,4 +3,3 @@ kind: Kustomization
 resources:
   - namespace-copilot-sandbox.yaml
   - pvc-control-plane-copilot-session.yaml
-  - pvc-control-plane-sccache.yaml

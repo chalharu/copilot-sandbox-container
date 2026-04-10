@@ -9,10 +9,17 @@
 
 ## Local validation baseline
 
-Run the repository baseline with Podman:
+Run the repository-managed baseline with Docker:
 
-- `CONTROL_PLANE_TOOLCHAIN=podman ./scripts/lint.sh`
-- `CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh`
+- `./scripts/build-test.sh`
+
+When the Docker daemon is unavailable but the current cluster allows pod/service
+creation in the job namespace, `./scripts/build-test.sh --build-only` can fall
+back to an ephemeral Kubernetes Buildkitd. Use
+`CONTROL_PLANE_TOOLCHAIN=buildkitd` when you need to force that path.
+
+Hosted lint is provided by the external `linter-service`, including the Renovate
+dry-run coverage that used to live in `lint.sh`.
 
 Add a focused `scripts/test-*.sh` regression check for the behavior you changed and run it directly during iteration. Wire it into `scripts/build-test.sh` when it is deterministic and worth covering in the standard regression path.
 
@@ -42,14 +49,14 @@ That script:
 
 - validates the repo-local `pr-fix-workflow` skill
 - validates the bundled `repo-change-delivery`, `git-commit`, and `pull-request-workflow` skills
-- packages each skill through the repository `containers/yamllint` image without depending on host Python
+- packages each skill through the bundled control-plane image without depending on host Python
 - checks that the control-plane image and runtime tests still expose bundled skills correctly
 
-`CONTROL_PLANE_TOOLCHAIN=podman ./scripts/build-test.sh` also includes the same regression script in the standard baseline.
+`./scripts/build-test.sh` also includes the same regression script in the standard baseline.
 
 ## CI surfaces
 
 The authoritative hosted validation definition lives in `.github/workflows/control-plane-ci.yml`.
 
-- `pull_request` starts `lint` and `Integration Images` in parallel, then fans out `Integration Smoke`, `Integration Regressions`, `Integration Kind Session`, `Integration Kind Jobs Core`, and `Integration Kind Jobs Transfer`
-- `push` to `main` additionally gates `Publish Architecture Images`, `publish-manifests`, and `cleanup-packages` on the lint and integration fan-out results
+- `pull_request` relies on the external `linter-service`, builds integration images for both x64 and aarch64, then fans out dual-arch `Integration Smoke` plus x64-only `Integration Regressions`, `Integration Kind Session`, `Integration Kind Jobs Core`, and `Integration Kind Jobs Transfer`
+- `push` to `main` additionally gates `Publish Architecture Images`, `publish-manifests`, and `cleanup-packages` on the integration fan-out results

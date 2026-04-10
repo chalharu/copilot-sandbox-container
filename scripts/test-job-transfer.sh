@@ -7,7 +7,7 @@ if [[ -f "${runtime_config_file}" ]]; then
   source "${runtime_config_file}"
 fi
 
-execution_plane_image="${1:?usage: scripts/test-job-transfer.sh <execution-plane-image> [job-namespace]}"
+job_image="${1:?usage: scripts/test-job-transfer.sh <job-image> [job-namespace]}"
 job_namespace="${2:-${CONTROL_PLANE_JOB_NAMESPACE:-${CONTROL_PLANE_K8S_NAMESPACE:-default}}}"
 workdir="$(mktemp -d "${TMPDIR:-/tmp}/control-plane-job-transfer-test.XXXXXX")"
 success_job_name=""
@@ -77,9 +77,9 @@ EOF
 k8s-job-start \
   --namespace "${job_namespace}" \
   --job-name "${success_job_name}" \
-  --image "${execution_plane_image}" \
+  --image "${job_image}" \
   --mount-file "${success_source}:inputs/large-transfer.txt" \
-  -- /usr/local/bin/execution-plane-smoke exec bash -lc "${success_job_script}" >/dev/null
+  -- bash -lc "${success_job_script}" >/dev/null
 
 success_transfer_id="$(kubectl get job --namespace "${job_namespace}" "${success_job_name}" -o jsonpath='{.metadata.annotations.control-plane\.github\.io/job-transfer-id}')"
 success_transfer_secret="$(kubectl get job --namespace "${job_namespace}" "${success_job_name}" -o jsonpath='{.metadata.annotations.control-plane\.github\.io/job-transfer-secret}')"
@@ -123,9 +123,9 @@ EOF
 k8s-job-start \
   --namespace "${job_namespace}" \
   --job-name "${conflict_job_name}" \
-  --image "${execution_plane_image}" \
+  --image "${job_image}" \
   --mount-file "${conflict_source}:inputs/conflict-transfer.txt" \
-  -- /usr/local/bin/execution-plane-smoke exec bash -lc "${conflict_job_script}" >/dev/null
+  -- bash -lc "${conflict_job_script}" >/dev/null
 
 conflict_transfer_id="$(kubectl get job --namespace "${job_namespace}" "${conflict_job_name}" -o jsonpath='{.metadata.annotations.control-plane\.github\.io/job-transfer-id}')"
 conflict_transfer_secret="$(kubectl get job --namespace "${job_namespace}" "${conflict_job_name}" -o jsonpath='{.metadata.annotations.control-plane\.github\.io/job-transfer-secret}')"

@@ -13,8 +13,7 @@ KbdInteractiveAuthentication no
 ChallengeResponseAuthentication no
 UsePAM no
 PubkeyAuthentication yes
-AuthorizedKeysFile .ssh/authorized_keys
-AcceptEnv LANG LC_*
+AuthorizedKeysFile .config/control-plane/ssh-auth/authorized_keys
 PermitUserEnvironment no
 AllowTcpForwarding yes
 X11Forwarding no
