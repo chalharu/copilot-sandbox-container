@@ -18,12 +18,16 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn workspace_root() -> PathBuf {
-    repo_root()
-        .parent()
-        .and_then(|path| path.parent())
-        .unwrap()
+fn workspace_root_for(repo_root: &Path) -> PathBuf {
+    repo_root
+        .ancestors()
+        .nth(2)
+        .unwrap_or(repo_root)
         .to_path_buf()
+}
+
+fn workspace_root() -> PathBuf {
+    workspace_root_for(&repo_root())
 }
 
 fn bundled_linters_config_path() -> PathBuf {
@@ -102,6 +106,18 @@ fn setup_repo_uses_non_protected_branch() {
 
     assert!(output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "fixture");
+}
+
+#[test]
+fn workspace_root_falls_back_to_repo_root_for_shallow_layouts() {
+    assert_eq!(
+        workspace_root_for(Path::new("/build")),
+        PathBuf::from("/build")
+    );
+    assert_eq!(
+        workspace_root_for(Path::new("/workspace/containers/control-plane")),
+        PathBuf::from("/workspace")
+    );
 }
 
 #[derive(Clone)]
