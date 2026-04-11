@@ -1,0 +1,3 @@
+exceptions = [
+  { crate = "base16", allow = ["CC0-1.0"] },
+]
