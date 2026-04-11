@@ -1,0 +1,50 @@
+global:
+  namespace: copilot-shared
+  jobNamespace: copilot-shared-jobs
+  image:
+    tag: test-global
+  auth:
+    sshPublicKey: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestSharedKey shared
+  session:
+    claimName: shared-session-pvc
+    size: 4Gi
+    storageClassName: fast-rwx
+  controlPlaneEnv:
+    CONTROL_PLANE_GIT_USER_NAME: Control Plane Bot
+    CONTROL_PLANE_GIT_USER_EMAIL: control-plane@example.com
+    CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: printf global-startup
+instances:
+  - name: repo-one
+    workspace:
+      size: 20Gi
+      storageClassName: fast-rwo
+    controlPlaneEnv:
+      TZ: Asia/Tokyo
+  - name: repo-two
+    image:
+      tag: sha-abcdef0
+      pullPolicy: Always
+    service:
+      name: repo-two-control-plane
+      type: ClusterIP
+      port: 2022
+    auth:
+      existingSecretName: repo-two-auth
+    workspace:
+      existingClaim: repo-two-workspace-pvc
+      subPath: repositories/repo-two
+    session:
+      stateSubPath: repo-state/repo-two
+      ghSubPath: session/gh
+      sshSubPath: session/ssh
+    controlPlaneConfigJson: |
+      {
+        "telemetry": false,
+        "chat.warnOnLargeFiles": true
+      }
+    controlPlaneEnv:
+      CONTROL_PLANE_GIT_USER_EMAIL: repo-two@example.com
+      CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: Always
+      CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: printf repo-two-startup
+      TZ: Europe/Berlin

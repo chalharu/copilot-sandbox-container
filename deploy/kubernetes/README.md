@@ -6,6 +6,9 @@
 `docs/tutorials/first-deployment.md` を先に読み、このページは
 「どのファイルをどう編集するか」を確認する reference として使ってください。
 
+kustomize overlay を repo ごとに複製して追従する運用が重くなってきた場合は、
+values から複数 instance を展開できる `deploy/helm/control-plane/` も使えます。
+
 ## どの kustomization を使うか
 
 | 状況 | 実行するパス |
