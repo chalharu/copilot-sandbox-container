@@ -346,10 +346,10 @@ if grep -Fq 'CONTROL_PLANE_TRANSFER_HOST' "${workdir}/k8s-job-manifest.yaml" \
   exit 1
 fi
 grep -Fq 'curl -fsSL' "${workdir}/k8s-job-manifest.yaml"
-grep -Fq '"${CONTROL_PLANE_TRANSFER_URL}/input.tar"' "${workdir}/k8s-job-manifest.yaml"
-grep -Fq '"${CONTROL_PLANE_TRANSFER_URL}/output.tar"' "${workdir}/k8s-job-manifest.yaml"
-grep -Fq '"${CONTROL_PLANE_TRANSFER_URL}/finalize"' "${workdir}/k8s-job-manifest.yaml"
-grep -Fq '"${CONTROL_PLANE_TRANSFER_URL}/release"' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq "\"\${CONTROL_PLANE_TRANSFER_URL}/input.tar\"" "${workdir}/k8s-job-manifest.yaml"
+grep -Fq "\"\${CONTROL_PLANE_TRANSFER_URL}/output.tar\"" "${workdir}/k8s-job-manifest.yaml"
+grep -Fq "\"\${CONTROL_PLANE_TRANSFER_URL}/finalize\"" "${workdir}/k8s-job-manifest.yaml"
+grep -Fq "\"\${CONTROL_PLANE_TRANSFER_URL}/release\"" "${workdir}/k8s-job-manifest.yaml"
 if ! grep -Fq 'curl -fsS' "${workdir}/k8s-job-manifest.yaml"; then
   printf 'Expected job-transfer-sync to use curl for HTTP transfer callbacks\n' >&2
   grep -n 'curl -fsS\|kubectl get pod\|jsonpath=' "${workdir}/k8s-job-manifest.yaml" >&2 || true
@@ -362,9 +362,18 @@ if grep -Fq '--transfers 1' "${workdir}/k8s-job-manifest.yaml"; then
   grep -n 'transfers 1\|checkers 1\|sftp-disable-concurrent' "${workdir}/k8s-job-manifest.yaml" >&2 || true
   exit 1
 fi
-! grep -Fq -- '--checkers 1' "${workdir}/k8s-job-manifest.yaml"
-! grep -Fq -- '--sftp-disable-concurrent-reads' "${workdir}/k8s-job-manifest.yaml"
-! grep -Fq -- '--sftp-disable-concurrent-writes' "${workdir}/k8s-job-manifest.yaml"
+if grep -Fq -- '--checkers 1' "${workdir}/k8s-job-manifest.yaml"; then
+  printf 'Expected HTTP transfer wiring to drop rclone checker flags\n' >&2
+  exit 1
+fi
+if grep -Fq -- '--sftp-disable-concurrent-reads' "${workdir}/k8s-job-manifest.yaml"; then
+  printf 'Expected HTTP transfer wiring to drop SFTP read flags\n' >&2
+  exit 1
+fi
+if grep -Fq -- '--sftp-disable-concurrent-writes' "${workdir}/k8s-job-manifest.yaml"; then
+  printf 'Expected HTTP transfer wiring to drop SFTP write flags\n' >&2
+  exit 1
+fi
 grep -Fq 'name: CONTROL_PLANE_JOB_RUN_AS_UID' "${workdir}/k8s-job-manifest.yaml"
 grep -Fq 'name: CONTROL_PLANE_JOB_RUN_AS_GID' "${workdir}/k8s-job-manifest.yaml"
 grep -A1 'name: CONTROL_PLANE_JOB_RUN_AS_UID' "${workdir}/k8s-job-manifest.yaml" | grep -Fq "value: '1000'"
