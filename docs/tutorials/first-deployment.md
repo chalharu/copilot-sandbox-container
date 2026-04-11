@@ -5,6 +5,10 @@
 SSH で入れるところまでを通します。最後に `./scripts/test-k8s-job.sh` を使い、
 Kubernetes Job 経路まで確認します。
 
+この手順は単一 instance を sample manifest（Kustomize）で入れる経路です。複数 repo
+や複数 instance を同じ cluster へ並べたい場合は、
+`deploy/helm/control-plane/README.md` の Helm chart を使ってください。
+
 ## ゴール
 
 この手順を終えると、少なくとも次を確認できます。
@@ -168,6 +172,7 @@ ssh -p 2222 copilot@127.0.0.1
 ## 次に読む文書
 
 - day 2 の運用手順: `docs/how-to-guides/cookbook.md`
+- 複数 repo / instance を並べる Helm chart: `deploy/helm/control-plane/README.md`
 - runtime / state / hook の正確な path: `docs/reference/control-plane-runtime.md`
 - 代表的な失敗ログ: `docs/reference/debug-log.md`
 - どの文書から読むか迷ったら: `docs/README.md`
