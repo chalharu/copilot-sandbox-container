@@ -1137,13 +1137,13 @@ printf '%s\n' 'kind-test remote: persisted files ok' >&2
 # config after startup, so the stable integration check here is the mounted
 # config wiring. Deeper merge coverage lives in test-config-injection.sh.
 copilot_config_source='/var/run/control-plane-config/copilot-config.json'
-test -f "${copilot_config_source}"
+test -f "\${copilot_config_source}"
 jq -e 'type == "object"' ~/.copilot/config.json >/dev/null
-jq -e '.features.persisted == false' "${copilot_config_source}" >/dev/null
-jq -e '.features.overlayOnly == true' "${copilot_config_source}" >/dev/null
-jq -e '.nested.replace.fromOverlay == true' "${copilot_config_source}" >/dev/null
-jq -e '.nested.array == ["overlay"]' "${copilot_config_source}" >/dev/null
-jq -e '.topLevelOverlay == "kind"' "${copilot_config_source}" >/dev/null
+jq -e '.features.persisted == false' "\${copilot_config_source}" >/dev/null
+jq -e '.features.overlayOnly == true' "\${copilot_config_source}" >/dev/null
+jq -e '.nested.replace.fromOverlay == true' "\${copilot_config_source}" >/dev/null
+jq -e '.nested.array == ["overlay"]' "\${copilot_config_source}" >/dev/null
+jq -e '.topLevelOverlay == "kind"' "\${copilot_config_source}" >/dev/null
 printf '%s\n' 'kind-test remote: config wiring ok' >&2
 if cat ~/.config/gh/hosts.yml >/dev/null 2>&1; then
   printf '%s\n' 'expected direct ~/.config/gh/hosts.yml reads to be blocked by the exec policy' >&2
