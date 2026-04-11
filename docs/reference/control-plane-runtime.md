@@ -40,11 +40,11 @@ copilot session PVC へまとめるもの:
 - `/var/lib/control-plane/ssh-host-keys`
 
 `session-exec.json` には、hook rewrite が使う session key ごとの Execution Pod
-名 / Pod IP / auth token / environment PVC 名 が入ります。incoming SSH auth は
-`~/.config/control-plane/ssh-auth/authorized_keys` へ切り出して同じ PVC に残し、
-`~/.ssh/authorized_keys` は互換 symlink にとどめることで、delegated exec pod が
-共有する client-side SSH state から切り離します。
-`sshd` 自体は PVC 上の private host key をそのまま読まず、startup ごとに
+名 / Pod IP / auth token / environment PVC 名 が入ります。`~/.config/control-plane/ssh-auth/authorized_keys`
+と `~/.ssh/authorized_keys` の互換 symlink、`/var/lib/control-plane/ssh-host-keys`
+は、明示的な `sshd` 起動や互換用途のため同じ PVC に残しています。通常の導入では
+これらを主経路にせず、対話面は ACP + web 側を使います。
+`sshd` を使う場合も、PVC 上の private host key をそのまま読まず、startup ごとに
 `/run/control-plane/ssh-host-keys` へ root-only copy を staging してから使います。
 これで、storage backend が persistent file に group bit を残す場合でも再起動を壊しません。
 
@@ -85,7 +85,7 @@ copilot session PVC へまとめるもの:
 
 ### Secret
 
-- `control-plane-auth`: `ssh-public-key` と認証系の Secret 値を startup 専用 input として供給
+- `control-plane-auth`: `gh` / Copilot token や、必要なら `ssh-public-key` を startup 専用 input として供給
 - `gh` 認証は `gh-github-token` または `gh-hosts.yml`
 - 必要に応じて `copilot-github-token` も保持
 
@@ -193,11 +193,11 @@ bundled skill は image に同梱し、起動時に `~/.copilot/skills/` へ cop
 
 ## 7. Kubernetes Job file transfer
 
-Kubernetes Job path の `--mount-file` は、ConfigMap ではなく SSH/SFTP +
-`rclone` を使います。
+Kubernetes Job path の `--mount-file` は、ConfigMap ではなく web backend の
+HTTP transfer endpoint を使います。
 
-- init container が入力ファイルを pull する
-- sidecar が Job 完了後に変更ファイルを push する
+- init container が入力 tar を download する
+- sidecar が Job 完了後に出力 tar を upload する
 - write-back は Job 開始時の SHA-256 と完了時の現在値を比較する
 - 外部更新と Job 側更新が衝突した場合は、黙って上書きせず staging area へ
   退避する

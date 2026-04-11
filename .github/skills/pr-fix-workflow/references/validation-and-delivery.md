@@ -27,15 +27,24 @@ Add a focused `scripts/test-*.sh` regression check for the behavior you changed 
 
 When the change affects Kubernetes manifests, control-plane runtime behavior, or cluster interactions, verify it against a real cluster path instead of relying only on static inspection.
 
-Preferred pre-deploy check:
+Preferred pre-deploy checks:
 
-- `./scripts/test-k8s-job.sh`
+- `./scripts/test-k8s-sample-storage-layout.sh`
+- `./scripts/test-helm-chart.sh`
+- `./scripts/test-standalone.sh`
+- `./scripts/test-kind.sh`
 
-When the current cluster already runs the workspace image you are editing, also use:
+When the current cluster already runs the workspace image you are editing, also add
+manual spot checks with:
 
-- `./scripts/test-current-cluster-regressions.sh`
+- `kubectl get`
+- `kubectl describe`
+- `kubectl logs`
+- `kubectl port-forward`
 
-Use `kubectl get`, `kubectl describe`, and `kubectl logs` for extra inspection when needed. `scripts/build-test.sh` already assumes `kind`, `kubectl`, `ssh`, and `ssh-keygen` are available.
+Use those to confirm the live Pod/Service shape, `control-plane-web` health, and any
+cluster-only wiring that the static scripts cannot see. `scripts/build-test.sh`
+already assumes the repository's existing cluster/runtime tooling is available.
 
 ## Skill-specific validation
 

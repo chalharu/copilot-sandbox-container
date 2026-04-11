@@ -1,6 +1,8 @@
 ARG RUST_BASE_IMAGE=docker.io/library/rust:1.94.1-bookworm@sha256:6ae102bdbf528294bc79ad6e1fae682f6f7c2a6e6621506ba959f9685b308a55
 # renovate: datasource=crate depName=cargo-chef
 ARG CARGO_CHEF_VERSION=0.1.77
+# renovate: datasource=crate depName=trunk
+ARG TRUNK_VERSION=0.22.0-beta.1
 
 FROM ${RUST_BASE_IMAGE} AS cargo-chef
 
@@ -84,6 +86,38 @@ COPY runtime-tools/tests ./tests
 COPY hooks/postToolUse/linters.json /build/hooks/postToolUse/linters.json
 RUN cargo test --locked --release \
     && cargo build --locked --release
+
+FROM cargo-chef AS web-backend-planner
+
+WORKDIR /build/control-plane-web-backend
+COPY web-backend/Cargo.toml web-backend/Cargo.lock ./
+COPY web-backend/src ./src
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM cargo-chef AS web-backend-builder
+
+WORKDIR /build/control-plane-web-backend
+COPY --from=web-backend-planner /build/control-plane-web-backend/recipe.json ./recipe.json
+RUN cargo chef cook --locked --release --recipe-path recipe.json
+COPY web-backend/Cargo.toml web-backend/Cargo.lock ./
+COPY web-backend/src ./src
+RUN cargo test --locked --release \
+    && cargo build --locked --release
+
+FROM cargo-chef AS web-frontend-builder
+
+ARG TRUNK_VERSION
+
+RUN rustup target add wasm32-unknown-unknown \
+    && cargo install trunk --locked --version "${TRUNK_VERSION}"
+
+WORKDIR /build/control-plane-web-frontend
+COPY web-frontend/Cargo.toml web-frontend/Cargo.lock ./
+COPY web-frontend/index.html ./index.html
+COPY web-frontend/Trunk.toml ./Trunk.toml
+COPY web-frontend/src ./src
+RUN cargo test --locked --release \
+    && trunk build --release
 
 FROM cargo-chef AS rust-toolchain
 
@@ -298,6 +332,8 @@ COPY --from=rust-toolchain /usr/local/cargo/bin /usr/local/cargo/bin
 COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
 COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/bin/control-plane-runtime-tool
 COPY --from=exec-policy-builder /build/control-plane-exec-policy/target/release/libcontrol_plane_exec_policy.so /usr/local/lib/libcontrol_plane_exec_policy.so
+COPY --from=web-backend-builder /build/control-plane-web-backend/target/release/control-plane-web-backend /usr/local/bin/control-plane-web-backend
+COPY --from=web-frontend-builder /build/control-plane-web-frontend/dist/ /usr/local/share/control-plane/web-frontend/
 COPY --from=exec-policy-builder /build/control-plane-exec-policy/target/release/control-plane-pre-tool-use-hook /usr/local/share/control-plane/hooks/preToolUse/main
 COPY --chmod=755 bin/control-plane-screen /usr/local/bin/control-plane-screen
 COPY --chmod=755 bin/control-plane-entrypoint /usr/local/bin/control-plane-entrypoint
@@ -339,10 +375,10 @@ RUN mkdir -p /usr/local/share/control-plane/hooks/sessionEnd \
 
 WORKDIR /workspace
 # Supported runtimes still have to override this to root because the entrypoint
-# provisions mounted state and SSH host keys.
+# provisions mounted state before dropping non-sshd commands to the copilot user.
 USER ${CONTROL_PLANE_USER}
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["bash", "-lc", "node --version >/dev/null && cargo --version >/dev/null && git --version >/dev/null && yamllint --version >/dev/null && control-plane-exec-api --help >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]
-EXPOSE 2222
+    CMD ["bash", "-lc", "node --version >/dev/null && cargo --version >/dev/null && git --version >/dev/null && yamllint --version >/dev/null && copilot --help >/dev/null && control-plane-exec-api --help >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -x /usr/local/bin/control-plane-copilot && test -x /usr/local/bin/control-plane-web-backend && test -r /usr/local/share/control-plane/web-frontend/index.html"]
+EXPOSE 3000 8080
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/control-plane-entrypoint"]
-CMD ["/usr/sbin/sshd", "-D", "-e", "-f", "/etc/ssh/sshd_config"]
+CMD ["/usr/local/bin/control-plane-copilot"]

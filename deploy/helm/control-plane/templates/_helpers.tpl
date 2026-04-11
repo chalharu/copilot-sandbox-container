@@ -46,6 +46,15 @@ app.kubernetes.io/name: control-plane
 {{- include "control-plane.explicitOrQualifiedName" (dict "base" $service.name "explicit" $instanceService.name "instance" $instance) -}}
 {{- end -}}
 
+{{- define "control-plane.webServiceName" -}}
+{{- $root := .root -}}
+{{- $instance := .instance -}}
+{{- $globalService := default dict $root.Values.global.webService -}}
+{{- $instanceService := default dict $instance.webService -}}
+{{- $service := mergeOverwrite (dict) $globalService $instanceService -}}
+{{- include "control-plane.explicitOrQualifiedName" (dict "base" $service.name "explicit" $instanceService.name "instance" $instance) -}}
+{{- end -}}
+
 {{- define "control-plane.workspaceClaimName" -}}
 {{- $root := .root -}}
 {{- $instance := .instance -}}
@@ -131,6 +140,10 @@ control-plane-config
 
 {{- define "control-plane.deploymentName" -}}
 {{- include "control-plane.instanceQualifiedName" (dict "base" "control-plane" "instance" .instance) -}}
+{{- end -}}
+
+{{- define "control-plane.webDeploymentName" -}}
+{{- include "control-plane.instanceQualifiedName" (dict "base" "control-plane-web" "instance" .instance) -}}
 {{- end -}}
 
 {{- define "control-plane.controlPlaneServiceAccountName" -}}

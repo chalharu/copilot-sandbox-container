@@ -53,7 +53,7 @@ resource_block_from_file() {
       RS = "---\n"
     }
 
-    $0 ~ ("kind:[[:space:]]*" kind) && $0 ~ ("name:[[:space:]]*" name "([[:space:]]|$)") {
+    $0 ~ ("kind:[[:space:]]*" kind "([[:space:]]|$)") && $0 ~ ("name:[[:space:]]*" name "([[:space:]]|$)") {
       print
       found = 1
       exit
@@ -307,6 +307,8 @@ assert_resource_contains ConfigMap control-plane-config 'copilot-config.json: |'
 assert_resource_present ConfigMap control-plane-env
 assert_resource_present ConfigMap control-plane-instance-env
 assert_resource_present ServiceAccount control-plane-exec
+assert_resource_present Role control-plane-exec-pods
+assert_resource_present RoleBinding control-plane-exec-pods
 assert_resource_present Role control-plane-exec-workloads
 assert_resource_present RoleBinding control-plane-exec-workloads
 assert_resource_absent ServiceAccount garage-bootstrap
@@ -338,13 +340,20 @@ assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRAN
 assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_TRANSFER_PORT:'
 assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_IMAGE_PULL_POLICY:'
 assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_WORKSPACE_PVC:'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_ACP_HOST: control-plane.copilot-sandbox.svc.cluster.local'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_ACP_PORT: "3000"'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_WEB_PORT: "8080"'
 assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest'
 assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: IfNotPresent'
 assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest'
-assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane.copilot-sandbox.svc.cluster.local'
-assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_ROOT: /home/copilot/.copilot/session-state/job-transfers'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane-web.copilot-sandbox.svc.cluster.local'
+assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_PORT: "8080"'
 assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: IfNotPresent'
 assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_WORKSPACE_PVC: control-plane-workspace-pvc'
+assert_resource_contains Role control-plane-exec-pods '  - pods/exec'
+assert_resource_contains RoleBinding control-plane-exec-pods 'name: control-plane'
+assert_resource_contains RoleBinding control-plane-exec-pods 'namespace: copilot-sandbox'
 assert_resource_contains Role control-plane-exec-workloads '  - deployments'
 assert_resource_contains Role control-plane-exec-workloads '  - services'
 assert_resource_contains Role control-plane-exec-workloads '  - jobs'
@@ -366,10 +375,12 @@ render_named_overlay_propagation_fixture
 assert_overlay_resource_present ConfigMap control-plane-env
 assert_overlay_resource_present ConfigMap control-plane-instance-env
 assert_overlay_resource_present Service my-custom-service
+assert_overlay_resource_present Service control-plane-web
 assert_overlay_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_K8S_NAMESPACE: custom-sandbox'
 assert_overlay_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_NAMESPACE: custom-sandbox-jobs'
 assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_WORKSPACE_PVC: my-custom-workspace-pvc'
-assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_HOST: my-custom-service.custom-sandbox.svc.cluster.local'
+assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_ACP_HOST: my-custom-service.custom-sandbox.svc.cluster.local'
+assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane-web.custom-sandbox.svc.cluster.local'
 assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:v1.0.0'
 assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:v1.0.0'
 assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: Always'
@@ -377,15 +388,26 @@ assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_P
 
 printf '%s\n' 'k8s-sample-storage-layout-test: checking services and deployment mounts' >&2
 assert_resource_present Service control-plane
+assert_resource_present Service control-plane-web
+assert_resource_present Deployment control-plane-web
 assert_resource_absent Service garage-s3
 assert_resource_absent Deployment garage-s3
 assert_resource_absent Job garage-bootstrap
+assert_resource_contains Service control-plane 'name: acp'
+assert_resource_contains Service control-plane 'port: 3000'
+assert_resource_contains Service control-plane 'targetPort: acp'
+assert_resource_contains Service control-plane-web 'name: http'
+assert_resource_contains Service control-plane-web 'port: 8080'
+assert_resource_contains Service control-plane-web 'targetPort: http'
 assert_deployment_contains 'claimName: control-plane-copilot-session-pvc'
 assert_deployment_contains 'claimName: control-plane-workspace-pvc'
 assert_deployment_contains 'image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest'
 assert_deployment_contains 'envFrom:'
 assert_deployment_contains 'name: control-plane-env'
 assert_deployment_contains 'name: control-plane-instance-env'
+assert_deployment_contains 'app.kubernetes.io/component: acp'
+assert_deployment_contains 'args:'
+assert_deployment_contains '- /usr/local/bin/control-plane-copilot'
 assert_deployment_contains 'subPath: state/copilot-config.json'
 assert_deployment_contains 'subPath: state/command-history-state.json'
 assert_deployment_contains 'subPath: session-state'
@@ -398,7 +420,8 @@ assert_deployment_contains 'livenessProbe:'
 assert_deployment_contains 'exec:'
 assert_deployment_contains '- bash'
 assert_deployment_contains '- -lc'
-assert_deployment_contains '- pgrep -x sshd >/dev/null'
+assert_deployment_contains 'CONTROL_PLANE_ACP_PORT:-3000'
+assert_deployment_contains 'name: acp'
 assert_deployment_contains '/copilot-session/state/ssh-auth'
 assert_deployment_contains 'chown 1000:1000 /workspace-state/workspace'
 assert_deployment_contains 'chmod 700 /workspace-state/workspace'
@@ -416,6 +439,16 @@ assert_deployment_absent 'mountPath: /var/run/sccache-dist-auth-client'
 assert_deployment_absent 'mountPath: /var/run/sccache-dist-auth-server'
 assert_deployment_absent 'tcpSocket:'
 assert_deployment_absent '/usr/local/bin/sccache-dist-entrypoint'
+assert_deployment_absent 'name: ssh'
+assert_resource_contains Deployment control-plane-web 'args:'
+assert_resource_contains Deployment control-plane-web '/usr/local/bin/control-plane-web-backend'
+assert_resource_contains Deployment control-plane-web 'app.kubernetes.io/component: web'
+assert_resource_contains Deployment control-plane-web 'runAsNonRoot: false'
+assert_resource_contains Deployment control-plane-web 'httpGet:'
+assert_resource_contains Deployment control-plane-web 'path: /healthz'
+assert_resource_contains Deployment control-plane-web 'port: http'
+assert_resource_contains Deployment control-plane-web 'mountPath: /home/copilot/.copilot/session-state'
+assert_resource_contains Deployment control-plane-web 'mountPath: /var/tmp/control-plane'
 assert_resource_absent Secret sccache-dist-auth
 assert_resource_absent Service sccache-dist
 assert_resource_absent Deployment sccache-dist

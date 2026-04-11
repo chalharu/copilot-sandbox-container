@@ -3,4 +3,6 @@ kind: Kustomization
 resources:
   - pvc-control-plane-workspace.yaml
   - service-control-plane.yaml
+  - service-control-plane-web.yaml
   - deployment-control-plane.yaml
+  - deployment-control-plane-web.yaml

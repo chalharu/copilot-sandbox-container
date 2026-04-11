@@ -164,4 +164,4 @@ if ! kubectl logs "job/${conflict_job_name}" --namespace "${job_namespace}" --al
   exit 1
 fi
 
-printf '%s\n' 'job-transfer-test: SSH/rclone transfer regressions ok' >&2
+printf '%s\n' 'job-transfer-test: HTTP transfer regressions ok' >&2

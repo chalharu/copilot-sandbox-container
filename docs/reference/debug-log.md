@@ -14,11 +14,11 @@
 | --- | --- |
 | `Permission denied` で bundled skill が読めない | [§1](#1-bundled-skill-が読めない) |
 | capability 不足で起動時に止まる | [§2](#2-capability-が足りず起動時に止まる) |
-| SSH が切れる / `cleanup_exit` が出る | [§3](#3-interactive-ssh-で切れる--sshd-cleanup-警告が出る) |
+| 明示的な `sshd` 起動で SSH が切れる / `cleanup_exit` が出る | [§3](#3-明示的な-sshd-起動で-ssh-が切れる--sshd-cleanup-警告が出る) |
 | rootless Podman の user namespace error | [§4](#4-rootless-podman-が-outer-runtime-に止められている) |
 | `podman system migrate` の自己修復ログ | [§5](#5-stale-state-は-podman-system-migrate-で直る) |
 | `cgroup.subtree_control` で止まる | [§6](#6-rootful-service-build-が-cgroup-で止まる) |
-| interactive SSH が Copilot session へ入らない | [§7](#7-interactive-ssh-が-copilot-session-へ入らない) |
+| 明示的な SSH login が想定どおり動かない | [§7](#7-明示的な-ssh-login-が想定どおり動かない) |
 | private image pull が unauthorized | [§8](#8-private-image-を-pull-できない) |
 | Service の `EXTERNAL-IP` が `pending` | [§9](#9-service-の-external-ip-が未割当て) |
 | injected Copilot config が壊れている | [§10](#10-injected-copilot-config-が壊れている) |
@@ -54,9 +54,13 @@ Missing Linux capabilities for control-plane startup: CHOWN DAC_OVERRIDE FOWNER 
 
 ### 意味
 
-`drop: ALL` は有効でも、SSH と entrypoint の初期化に必要な capability が戻っていません。最低でも `AUDIT_WRITE CHOWN DAC_OVERRIDE FOWNER SETGID SETUID SYS_CHROOT` が必要で、`CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service` のときは追加で `KILL MKNOD NET_ADMIN SETFCAP SETPCAP SYS_ADMIN` も必要です。
+`drop: ALL` は有効でも、entrypoint の初期化に必要な capability が戻っていません。
+既定の ACP 起動では最低でも `CHOWN DAC_OVERRIDE FOWNER SETGID SETUID SYS_CHROOT`
+が必要です。明示的に `sshd` を起動する場合は追加で `AUDIT_WRITE` なども必要で、
+`CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service` のときはさらに
+`KILL MKNOD NET_ADMIN SETFCAP SETPCAP SYS_ADMIN` も必要です。
 
-## 3. interactive SSH で切れる / `sshd` cleanup 警告が出る
+## 3. 明示的な `sshd` 起動で SSH が切れる / `sshd` cleanup 警告が出る
 
 ### 代表ログ
 
@@ -66,7 +70,9 @@ cleanup_exit: kill(...): Operation not permitted
 
 ### 意味
 
-preauth cleanup か privilege separation / PTY login accounting 周辺で capability が不足しています。`drop: ALL` でも `AUDIT_WRITE`, `KILL`, `SETUID`, `SETGID`, `SYS_CHROOT` などを戻す必要があります。
+preauth cleanup か privilege separation / PTY login accounting 周辺で capability が
+不足しています。`drop: ALL` でも `AUDIT_WRITE`, `KILL`, `SETUID`, `SETGID`,
+`SYS_CHROOT` などを戻す必要があります。
 
 ### 回帰テストの目印
 
@@ -124,7 +130,7 @@ job-check: podman-build=ok
 current-cluster-test: podman-build=ok
 ```
 
-## 7. interactive SSH が Copilot session へ入らない
+## 7. 明示的な SSH login が想定どおり動かない
 
 ### 代表ログ
 
@@ -163,7 +169,10 @@ kubectl get svc -n copilot-sandbox
 
 ### 意味
 
-LoadBalancer の割り当て待ちです。SSH 自体の検証は `kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox` で先に進められます。
+LoadBalancer の割り当て待ちです。通常の確認は
+`kubectl port-forward service/control-plane-web 8080:8080 -n copilot-sandbox`
+で先に進められます。internal ACP port まで見たい場合だけ
+`service/control-plane 3000:3000` を追加で port-forward してください。
 
 ## 10. injected Copilot config が壊れている
 

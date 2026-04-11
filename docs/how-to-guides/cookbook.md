@@ -40,25 +40,29 @@ runtime / cache / hook の具体的な path は
 最小 smoke:
 
 ```bash
-./scripts/test-k8s-job.sh
+kubectl get pods,svc -n copilot-sandbox
+kubectl port-forward service/control-plane-web 8080:8080 -n copilot-sandbox
 ```
 
-今いる Control Plane Pod 自体を spot check したい場合:
+別 terminal から:
 
 ```bash
-./scripts/test-current-cluster-regressions.sh
+curl http://127.0.0.1:8080/healthz
 ```
 
-この 2 本で、少なくとも次を確認できます。
+必要なら browser で `http://127.0.0.1:8080/` も開きます。内部 ACP endpoint まで
+spot check したい場合だけ、さらに別 terminal で次を使います。
 
-- bundled skill の `references/` が読める
-- `COPILOT_CONFIG_JSON_FILE` と `GH_HOSTS_YML_FILE` / `GH_GITHUB_TOKEN_FILE` による設定注入が効く
-- `drop: ALL` 系 capability 構成で interactive SSH login が接続維持後も入力を受け付ける
-- bundled toolchain と runtime.env が期待どおり生成される
-- `--mount-file` が SSH/SFTP + `rclone` で大きめのファイルも運べ、競合時は安全に write-back を止める
-- `CONTROL_PLANE_FAST_EXECUTION_ENABLED=1` のとき、Copilot CLI の `bash`
-  tool が session-scoped Execution Pod に委譲され、`sessionEnd` /
-  OwnerReference で cleanup される
+```bash
+kubectl port-forward service/control-plane 3000:3000 -n copilot-sandbox
+```
+
+この確認で、少なくとも次を見られます。
+
+- `control-plane` と `control-plane-web` の Pod / Service が生きている
+- `control-plane-web` backend が `/healthz` を返す
+- browser が Leptos CSR frontend を受け取れる
+- 必要なら internal ACP service にも port-forward できる
 
 ConfigMap / Secret / write-back の具体的な path は
 `docs/reference/control-plane-runtime.md` を参照してください。
@@ -84,45 +88,43 @@ ConfigMap / Secret / write-back の具体的な path は
 
 ### Secret と ConfigMap をそろえる
 
-1. `control-plane-auth` Secret の `ssh-public-key` を自分の公開鍵へ
-   差し替える
-2. `gh` 認証は Secret 側で管理し、簡単な GitHub.com 用なら
+1. `gh` 認証は Secret 側で管理し、簡単な GitHub.com 用なら
    `gh-github-token`、複数 host や `git_protocol: ssh` を含めたいなら
    `gh-hosts.yml` を使う。どちらも startup 時に `gh` 用の managed config へ
    取り込まれ、`/run/control-plane-auth` の raw mount を直接読む運用はしない
-3. 必要なら `copilot-github-token` も入れる。Copilot token は private
+2. 必要なら `copilot-github-token` も入れる。Copilot token は private
    runtime file へ staging されるので、`/run/control-plane-auth` から直接
    読まない
-4. Copilot CLI の追加設定は `control-plane-config` ConfigMap の
+3. Copilot CLI の追加設定は `control-plane-config` ConfigMap の
    `copilot-config.json` へ書き、PVC 上の既存 `~/.copilot/config.json`
    へ merge させる
-5. 非機密 env は Deployment の `envFrom` で読み、shared な runtime 設定は
+4. 非機密 env は Deployment の `envFrom` で読み、shared な runtime 設定は
    `control-plane-env`、instance 固有の namespace / Service host / workspace PVC /
    helper image は `control-plane-instance-env` へ分ける
-6. Copilot CLI の `bash` tool を fast execution pod へ委譲する場合は、
+5. Copilot CLI の `bash` tool を fast execution pod へ委譲する場合は、
    shared な `CONTROL_PLANE_FAST_EXECUTION_*` と
    `CONTROL_PLANE_COPILOT_SESSION_{PVC,GH_SUBPATH,SSH_SUBPATH}` は
    `control-plane-env` に置き、helper image や job-transfer host は shipped
    replacement に追従させる
-7. `CONTROL_PLANE_POD_NAME` / `CONTROL_PLANE_POD_NAMESPACE` /
+6. `CONTROL_PLANE_POD_NAME` / `CONTROL_PLANE_POD_NAMESPACE` /
    `CONTROL_PLANE_POD_UID` / `CONTROL_PLANE_NODE_NAME` は Deployment の
    downward API `env:` で注入し、Execution Pod の OwnerReference / node pin
    に使う
-8. control-plane ServiceAccount には同じ namespace の Pod と ExecPod 用 PVC を
+7. control-plane ServiceAccount には同じ namespace の Pod と ExecPod 用 PVC を
    `create/get/list/watch` でき、Pod は `delete` できる Role / RoleBinding
    (`control-plane-exec-pods`) を付ける。ただし shared namespace ではなく、
    control-plane 専用 namespace に閉じ込める
-9. Exec Pod から in-cluster kubectl も使いたい場合は、
+8. Exec Pod から in-cluster kubectl も使いたい場合は、
    `CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT` を dedicated な
    `control-plane-exec` ServiceAccount へ向け、`copilot-sandbox-jobs` 側では
    Deployment / Service / Job / Pod だけを許す
    `control-plane-exec-workloads` Role / RoleBinding を別で bind する。
    delegated shell の default namespace は control-plane 側のままなので、
    `kubectl -n "${CONTROL_PLANE_JOB_NAMESPACE}" ...` のように明示する
-10. `CONTROL_PLANE_FAST_EXECUTION_IMAGE` には delegated bash を実行したい
-   任意の Linux image（例: `ubuntu:24.04` や `alpine:3.22`）を置けるが、
-   `/bin/sh` と `apt-get` または `apk` を必ず含め、本番では digest-pinned ref
-   を使う。
+9. `CONTROL_PLANE_FAST_EXECUTION_IMAGE` には delegated bash を実行したい
+    任意の Linux image（例: `ubuntu:24.04` や `alpine:3.22`）を置けるが、
+    `/bin/sh` と `apt-get` または `apk` を必ず含め、本番では digest-pinned ref
+    を使う。
    `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` には Rust 製 exec-plane
    binary と bundled Git hook を持つ control-plane image を置く。sample
    既定では bootstrap 時に `bash` / `git` / `gh` / `kubectl` /
@@ -136,8 +138,8 @@ ConfigMap / Secret / write-back の具体的な path は
    delegated command を非 root で走らせたい場合は
    `CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID` /
    `CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID` も合わせて定義する
-11. 監査ログ DB の保持件数は `control-plane-env` ConfigMap の
-   `CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）で調整する
+10. 監査ログ DB の保持件数は `control-plane-env` ConfigMap の
+    `CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）で調整する
 
 ### 永続化と storage class を合わせる
 
@@ -210,29 +212,30 @@ command の Job 経路です。
 control-plane-run ...
 ```
 
-## 6. SSH login を検証する
+## 6. web UI / API を検証する
 
-Service の `EXTERNAL-IP` がまだ無い場合は port-forward を使います。
-
-```bash
-kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox
-```
-
-その後に SSH:
+Service の `EXTERNAL-IP` がまだ無い場合は `control-plane-web` を port-forward します。
 
 ```bash
-ssh -p 2222 copilot@127.0.0.1
+kubectl port-forward service/control-plane-web 8080:8080 -n copilot-sandbox
 ```
 
-interactive SSH login は常に Copilot 用 GNU Screen session を再利用または作成します。
-one-shot の shell command だけなら `ssh -p 2222 copilot@127.0.0.1 'bash -il'` のように
-command mode を使います。
+その後に health check:
+
+```bash
+curl http://127.0.0.1:8080/healthz
+```
+
+browser で `http://127.0.0.1:8080/` を開けば Leptos CSR frontend も確認できます。
+ACP port を直接見たい場合だけ、別 terminal で
+`kubectl port-forward service/control-plane 3000:3000 -n copilot-sandbox`
+を使います。
 
 ## 7. 典型的なデバッグの入口
 
 - `ls: cannot access ... Permission denied`: bundled skill の同期結果と directory execute bit を確認する
 - `cannot clone: Operation not permitted`: rootless 前提の説明を見直し、Execution Pod / Job 経路へ寄せる
 - `cgroup.subtree_control: Read-only file system`: nested container 実行を前提にせず Job 経路を優先する
-- `cleanup_exit: kill(`: SSH capability 構成を見直す
+- `cleanup_exit: kill(`: 明示的に `sshd` を使う場合の capability 構成を見直す
 
 失敗ログの意味は `docs/reference/debug-log.md` を参照してください。

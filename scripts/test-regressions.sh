@@ -41,7 +41,6 @@ require_command() {
 
 require_command "${container_bin}"
 require_command awk
-require_command ssh-keygen
 
 # shellcheck source=scripts/lib-container-toolchain.sh
 source "${script_dir}/lib-container-toolchain.sh"
@@ -292,11 +291,10 @@ if [[ "${runtime_legacy_surface_status}" -ne 0 ]]; then
 fi
 grep -qx 'runtime-legacy-surface-ok' <<<"${runtime_legacy_surface_output}"
 
-printf '%s\n' 'regression-test: verifying k8s-job-start expands transfer env in rclone config' >&2
+printf '%s\n' 'regression-test: verifying k8s-job-start renders HTTP transfer wiring' >&2
 mkdir -p "${workdir}/fake-bin"
-mkdir -p "${workdir}/k8s-home/.ssh" "${workdir}/k8s-host-keys"
+mkdir -p "${workdir}/k8s-home/.ssh"
 printf '%s\n' 'k8s transfer input' > "${workdir}/k8s-transfer-input.txt"
-ssh-keygen -q -t ed25519 -N '' -f "${workdir}/k8s-host-keys/ssh_host_ed25519_key" >/dev/null
 cat > "${workdir}/fake-bin/kubectl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -321,7 +319,6 @@ chmod +x "${workdir}/fake-bin/kubectl"
 PATH="${workdir}/fake-bin:${control_plane_bin_dir}:${PATH}" \
   HOME="${workdir}/k8s-home" \
   CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
-  CONTROL_PLANE_HOST_KEY_DIR="${workdir}/k8s-host-keys" \
   CONTROL_PLANE_JOB_TRANSFER_IMAGE=localhost/control-plane:test \
   TEST_REGRESSION_K8S_MANIFEST_PATH="${workdir}/k8s-job-manifest.yaml" \
   TEST_REGRESSION_K8S_SECRET_ARGS_PATH="${workdir}/k8s-job-secret.args" \
@@ -335,45 +332,37 @@ PATH="${workdir}/fake-bin:${control_plane_bin_dir}:${PATH}" \
 grep -qx 'create' "${workdir}/k8s-job-secret.args"
 grep -qx 'secret' "${workdir}/k8s-job-secret.args"
 grep -qx 'generic' "${workdir}/k8s-job-secret.args"
-if grep -Fq '<<RCLONE' "${workdir}/k8s-job-manifest.yaml"; then
-  printf 'Expected k8s-job-start to render rclone.conf with printf, not heredocs\n' >&2
-  grep -n 'RCLONE' "${workdir}/k8s-job-manifest.yaml" >&2 || true
+if grep -Eq 'rclone|sftp-disable-concurrent|known_hosts|id_ed25519' "${workdir}/k8s-job-manifest.yaml"; then
+  printf 'Expected k8s-job-start to stop rendering SSH/rclone transfer wiring\n' >&2
+  grep -n 'rclone\|sftp-disable-concurrent\|known_hosts\|id_ed25519' "${workdir}/k8s-job-manifest.yaml" >&2 || true
   exit 1
 fi
-if [[ "$(grep -Fc "printf 'host = %s\\n' \"\${CONTROL_PLANE_TRANSFER_HOST}\"" "${workdir}/k8s-job-manifest.yaml")" -ne 2 ]]; then
-  printf 'Expected both transfer containers to format the rclone host with printf\n' >&2
-  grep -n 'rclone.conf\|host = %s\|user = %s\|port = %s' "${workdir}/k8s-job-manifest.yaml" >&2 || true
+if [[ "$(grep -Fc 'name: CONTROL_PLANE_TRANSFER_URL' "${workdir}/k8s-job-manifest.yaml")" -ne 2 ]]; then
+  printf 'Expected both transfer containers to receive CONTROL_PLANE_TRANSFER_URL\n' >&2
+  grep -n 'CONTROL_PLANE_TRANSFER_URL\|api/transfers' "${workdir}/k8s-job-manifest.yaml" >&2 || true
   exit 1
 fi
-if grep -Fq 'curl -fsS' "${workdir}/k8s-job-manifest.yaml"; then
-  printf 'Expected job-transfer-sync to avoid curl and use kubectl in-cluster polling\n' >&2
-  grep -n 'curl -fsS\|kubectl get pod\|jsonpath=' "${workdir}/k8s-job-manifest.yaml" >&2 || true
+grep -Fq '/api/transfers/' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq -- '--from-literal=transfer-token=' "${workdir}/k8s-job-secret.args"
+grep -Fq 'cat /var/run/control-plane-job-transfer/transfer-token' "${workdir}/k8s-job-manifest.yaml"
+if [[ "$(grep -Fc 'curl -fsSL \' "${workdir}/k8s-job-manifest.yaml")" -ne 1 ]]; then
+  printf 'Expected init container to fetch staged inputs over HTTP\n' >&2
+  grep -n 'curl -fsSL\|input.tar' "${workdir}/k8s-job-manifest.yaml" >&2 || true
   exit 1
 fi
+if [[ "$(grep -Fc 'curl -fsS \' "${workdir}/k8s-job-manifest.yaml")" -ne 1 ]]; then
+  printf 'Expected sync container to upload staged outputs over HTTP\n' >&2
+  grep -n 'curl -fsS\|output.tar' "${workdir}/k8s-job-manifest.yaml" >&2 || true
+  exit 1
+fi
+grep -Fq 'kubectl get pod "${pod_name}" --namespace "${namespace}" -o jsonpath=' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq '.status.containerStatuses[?(@.name=="execution")].state.terminated.exitCode' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq '"${CONTROL_PLANE_TRANSFER_URL}/input.tar"' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq '"${CONTROL_PLANE_TRANSFER_URL}/output.tar"' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq '"${CONTROL_PLANE_TRANSFER_URL}/finalize"' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq '"${CONTROL_PLANE_TRANSFER_URL}/release"' "${workdir}/k8s-job-manifest.yaml"
 grep -Fq "kubectl get pod \"\${pod_name}\" --namespace \"\${namespace}\" -o jsonpath=" "${workdir}/k8s-job-manifest.yaml"
 grep -Fq ".status.containerStatuses[?(@.name==\"execution\")].state.terminated.exitCode" "${workdir}/k8s-job-manifest.yaml"
-grep -Fq "printf 'user = %s\\n' \"\${CONTROL_PLANE_TRANSFER_USER}\"" "${workdir}/k8s-job-manifest.yaml"
-grep -Fq "printf 'port = %s\\n' \"\${CONTROL_PLANE_TRANSFER_PORT}\"" "${workdir}/k8s-job-manifest.yaml"
-if [[ "$(grep -Fc -- '--transfers 1' "${workdir}/k8s-job-manifest.yaml")" -ne 2 ]]; then
-  printf 'Expected both transfer containers to serialize rclone transfers\n' >&2
-  grep -n 'rclone_flags\|transfers 1\|checkers 1\|sftp-disable-concurrent' "${workdir}/k8s-job-manifest.yaml" >&2 || true
-  exit 1
-fi
-if [[ "$(grep -Fc -- '--checkers 1' "${workdir}/k8s-job-manifest.yaml")" -ne 2 ]]; then
-  printf 'Expected both transfer containers to serialize rclone checkers\n' >&2
-  grep -n 'rclone_flags\|transfers 1\|checkers 1\|sftp-disable-concurrent' "${workdir}/k8s-job-manifest.yaml" >&2 || true
-  exit 1
-fi
-if [[ "$(grep -Fc -- '--sftp-disable-concurrent-reads' "${workdir}/k8s-job-manifest.yaml")" -ne 2 ]]; then
-  printf 'Expected both transfer containers to disable concurrent SFTP reads\n' >&2
-  grep -n 'rclone_flags\|transfers 1\|checkers 1\|sftp-disable-concurrent' "${workdir}/k8s-job-manifest.yaml" >&2 || true
-  exit 1
-fi
-if [[ "$(grep -Fc -- '--sftp-disable-concurrent-writes' "${workdir}/k8s-job-manifest.yaml")" -ne 2 ]]; then
-  printf 'Expected both transfer containers to disable concurrent SFTP writes\n' >&2
-  grep -n 'rclone_flags\|transfers 1\|checkers 1\|sftp-disable-concurrent' "${workdir}/k8s-job-manifest.yaml" >&2 || true
-  exit 1
-fi
 grep -Fq 'name: CONTROL_PLANE_JOB_RUN_AS_UID' "${workdir}/k8s-job-manifest.yaml"
 grep -Fq 'name: CONTROL_PLANE_JOB_RUN_AS_GID' "${workdir}/k8s-job-manifest.yaml"
 grep -A1 'name: CONTROL_PLANE_JOB_RUN_AS_UID' "${workdir}/k8s-job-manifest.yaml" | grep -Fq "value: '1000'"
@@ -398,7 +387,6 @@ fi
 PATH="${workdir}/fake-bin:${control_plane_bin_dir}:${PATH}" \
   HOME="${workdir}/k8s-home" \
   CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
-  CONTROL_PLANE_HOST_KEY_DIR="${workdir}/k8s-host-keys" \
   TEST_REGRESSION_K8S_MANIFEST_PATH="${workdir}/k8s-job-multiline-manifest.yaml" \
   TEST_REGRESSION_K8S_SECRET_ARGS_PATH="${workdir}/k8s-job-multiline-secret.args" \
   "${control_plane_bin_dir}/k8s-job-start" \
@@ -412,7 +400,6 @@ assert_multiline_command_block "${workdir}/k8s-job-multiline-manifest.yaml" '|-'
 PATH="${workdir}/fake-bin:${control_plane_bin_dir}:${PATH}" \
   HOME="${workdir}/k8s-home" \
   CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
-  CONTROL_PLANE_HOST_KEY_DIR="${workdir}/k8s-host-keys" \
   TEST_REGRESSION_K8S_MANIFEST_PATH="${workdir}/k8s-job-multiline-trailing-manifest.yaml" \
   TEST_REGRESSION_K8S_SECRET_ARGS_PATH="${workdir}/k8s-job-multiline-trailing-secret.args" \
   "${control_plane_bin_dir}/k8s-job-start" \
@@ -428,7 +415,6 @@ newline_transfer_output="$(
   PATH="${workdir}/fake-bin:${control_plane_bin_dir}:${PATH}" \
     HOME="${workdir}/k8s-home" \
     CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
-    CONTROL_PLANE_HOST_KEY_DIR="${workdir}/k8s-host-keys" \
     CONTROL_PLANE_JOB_TRANSFER_IMAGE=localhost/control-plane:test \
     CONTROL_PLANE_JOB_TRANSFER_HOST=$'control-plane.example\nmalicious' \
     TEST_REGRESSION_K8S_MANIFEST_PATH="${workdir}/should-not-exist.yaml" \
@@ -488,6 +474,9 @@ run_copilot_launcher_test
 grep -qx -- '-n' "${workdir}/nice.args"
 grep -qx '7' "${workdir}/nice.args"
 grep -qx -- '--yolo' "${workdir}/copilot.args"
+grep -qx -- '--acp' "${workdir}/copilot.args"
+grep -qx -- '--port' "${workdir}/copilot.args"
+grep -qx '3000' "${workdir}/copilot.args"
 grep -qx -- '--secret-env-vars=COPILOT_GITHUB_TOKEN' "${workdir}/copilot.args"
 grep -qx 'COPILOT_GITHUB_TOKEN=copilot-token-for-test' "${workdir}/copilot.env"
 

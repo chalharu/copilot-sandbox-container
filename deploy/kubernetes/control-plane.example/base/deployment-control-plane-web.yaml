@@ -1,0 +1,205 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control-plane-web
+  namespace: copilot-sandbox
+  labels:
+    app.kubernetes.io/name: control-plane
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: control-plane
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: control-plane
+        app.kubernetes.io/component: web
+    spec:
+      securityContext:
+        fsGroup: 1000
+      serviceAccountName: control-plane
+      initContainers:
+        - name: init-state-dirs
+          # renovate: datasource=docker depName=busybox versioning=docker
+          image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              umask 077
+              mkdir -p \
+                /copilot-session/state/gh \
+                /copilot-session/state/ssh-auth \
+                /copilot-session/state/ssh \
+                /copilot-session/state/ssh-host-keys \
+                /copilot-session/session-state \
+                /workspace-state/workspace \
+                /cache/runtime-tmp
+              touch \
+                /copilot-session/state/copilot-config.json \
+                /copilot-session/state/command-history-state.json
+              chown -R 1000:1000 /copilot-session/state /copilot-session/session-state
+              find /copilot-session/state /copilot-session/session-state -type d -exec chmod 700 {} +
+              find /copilot-session/state /copilot-session/session-state -type f -exec chmod 600 {} +
+              chown 1000:1000 /workspace-state/workspace
+              chmod 700 /workspace-state/workspace
+              chown 0:1000 /cache/runtime-tmp
+              chmod 755 /cache/runtime-tmp
+          securityContext:
+            privileged: false
+            runAsUser: 0
+            runAsGroup: 1000
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: copilot-session
+              mountPath: /copilot-session
+            - name: workspace
+              mountPath: /workspace-state
+            - name: cache
+              mountPath: /cache
+        - name: init-state
+          # renovate: datasource=docker depName=busybox versioning=docker
+          image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              umask 077
+              [ -s /state/copilot-config.json ] || cat > /state/copilot-config.json <<'JSON'
+              {
+                "telemetry": false
+              }
+              JSON
+          securityContext:
+            privileged: false
+            runAsUser: 1000
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: copilot-session
+              mountPath: /state
+              subPath: state
+      containers:
+        - name: control-plane-web
+          image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: control-plane-env
+            - configMapRef:
+                name: control-plane-instance-env
+          env:
+            - name: CONTROL_PLANE_FAST_EXECUTION_ENABLED
+              value: "0"
+          args:
+            - /usr/local/bin/control-plane-web-backend
+          securityContext:
+            privileged: false
+            runAsUser: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: true
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+                - KILL
+                - SETGID
+                - SETUID
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: copilot-session
+              mountPath: /home/copilot/.copilot/config.json
+              subPath: state/copilot-config.json
+            - name: copilot-session
+              mountPath: /home/copilot/.copilot/command-history-state.json
+              subPath: state/command-history-state.json
+            - name: copilot-session
+              mountPath: /home/copilot/.copilot/session-state
+              subPath: session-state
+            - name: copilot-session
+              mountPath: /home/copilot/.config/gh
+              subPath: state/gh
+            - name: copilot-session
+              mountPath: /home/copilot/.ssh
+              subPath: state/ssh
+            - name: copilot-session
+              mountPath: /home/copilot/.config/control-plane/ssh-auth
+              subPath: state/ssh-auth
+            - name: copilot-session
+              mountPath: /var/lib/control-plane/ssh-host-keys
+              subPath: state/ssh-host-keys
+            - name: workspace
+              mountPath: /workspace
+              subPath: workspace
+            - name: cache
+              mountPath: /var/tmp/control-plane
+              subPath: runtime-tmp
+            - name: control-plane-auth
+              mountPath: /var/run/control-plane-auth
+              readOnly: true
+            - name: control-plane-config
+              mountPath: /var/run/control-plane-config
+              readOnly: true
+      volumes:
+        - name: copilot-session
+          persistentVolumeClaim:
+            claimName: control-plane-copilot-session-pvc
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: control-plane-workspace-pvc
+        - name: cache
+          emptyDir: {}
+        - name: control-plane-auth
+          secret:
+            secretName: control-plane-auth
+        - name: control-plane-config
+          configMap:
+            name: control-plane-config

@@ -26,5 +26,5 @@ Use this repo-local skill as the repository-specific companion to the bundled `r
 
 - Use `./scripts/build-test.sh` for the standard repo-managed validation baseline in this repository; hosted lint comes from the external `linter-service`.
 - When the change touches `.github/skills/` or `containers/control-plane/skills/`, validate every changed skill and the control-plane runtime surfaces that expose bundled skills.
-- Use `./scripts/test-k8s-job.sh` or the current-cluster checks when runtime or Kubernetes behavior changes.
+- Use the manifest/runtime checks (`./scripts/test-k8s-sample-storage-layout.sh`, `./scripts/test-helm-chart.sh`, `./scripts/test-standalone.sh`, `./scripts/test-kind.sh`) and add `kubectl get/logs/port-forward` spot checks when runtime or Kubernetes behavior changes.
 - Read `references/validation-and-delivery.md` for the exact commands and CI surfaces in this repository.

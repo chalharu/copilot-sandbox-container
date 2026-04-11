@@ -52,22 +52,23 @@ if [[ "${non_sshd_status}" -ne 0 ]]; then
 fi
 grep -qx 'startup-ok' <<<"${non_sshd_output}"
 
-printf '%s\n' 'entrypoint-capability-test: verifying direct sshd startup still requires AUDIT_WRITE' >&2
+printf '%s\n' 'entrypoint-capability-test: verifying explicit sshd startup still requires AUDIT_WRITE' >&2
 set +e
 sshd_output="$("${container_bin}" run --rm \
   "${control_plane_run_user[@]}" \
   --cap-drop AUDIT_WRITE \
-  "${control_plane_image}" 2>&1)"
+  "${control_plane_image}" \
+  /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config 2>&1)"
 sshd_status=$?
 set -e
 
 if [[ "${sshd_status}" -eq 0 ]]; then
-  printf 'Expected direct sshd startup to fail without AUDIT_WRITE\n' >&2
+  printf 'Expected explicit sshd startup to fail without AUDIT_WRITE\n' >&2
   printf '%s\n' "${sshd_output}" >&2
   exit 1
 fi
 if ! grep -q 'Missing Linux capabilities for control-plane startup: AUDIT_WRITE' <<<"${sshd_output}"; then
-  printf 'Expected direct sshd startup diagnostic to name AUDIT_WRITE\n' >&2
+  printf 'Expected explicit sshd startup diagnostic to name AUDIT_WRITE\n' >&2
   printf '%s\n' "${sshd_output}" >&2
   exit 1
 fi

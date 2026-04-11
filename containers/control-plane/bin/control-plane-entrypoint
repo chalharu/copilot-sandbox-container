@@ -206,14 +206,14 @@ require_container_capabilities() {
   capability_mask="$(awk '/^CapEff:/ { print $2 }' /proc/self/status)"
   [[ -n "${capability_mask}" ]] || return 0
 
-  for capability_name in CHOWN DAC_OVERRIDE FOWNER; do
+  for capability_name in CHOWN DAC_OVERRIDE FOWNER SETGID SETUID; do
     if ! has_effective_capability "${capability_name}" "${capability_mask}"; then
       missing+=("${capability_name}")
     fi
   done
 
   if command_uses_sshd "$@"; then
-    for capability_name in AUDIT_WRITE SETGID SETUID SYS_CHROOT; do
+    for capability_name in AUDIT_WRITE SYS_CHROOT; do
       if ! has_effective_capability "${capability_name}" "${capability_mask}"; then
         missing+=("${capability_name}")
       fi
@@ -229,7 +229,7 @@ require_container_capabilities() {
         >&2
     else
       printf '%s\n' \
-        'Non-SSH startup still needs CHOWN,DAC_OVERRIDE,FOWNER on mounted state. Direct sshd startup adds AUDIT_WRITE,SETGID,SETUID,SYS_CHROOT on top of that.' \
+        'Non-SSH startup still needs CHOWN,DAC_OVERRIDE,FOWNER,SETGID,SETUID on mounted state so the entrypoint can drop to the copilot user. Direct sshd startup adds AUDIT_WRITE,SYS_CHROOT on top of that.' \
         >&2
     fi
     exit 1
@@ -600,6 +600,13 @@ start_reverse_exec_api() {
   exit 1
 }
 
+exec_as_control_plane_user() {
+  local quoted_command=""
+
+  printf -v quoted_command '%q ' "$@"
+  exec su -s /bin/bash "${control_plane_user}" -c "${quoted_command% }"
+}
+
 require_container_capabilities "$@"
 
 mkdir -p \
@@ -966,6 +973,7 @@ runtime_config_tmp="$(mktemp "${runtime_config_path}.XXXXXX")"
   if [[ -n "${copilot_github_token}" ]]; then
     write_runtime_var CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE "${copilot_token_path}"
   fi
+  write_runtime_var CONTROL_PLANE_ACP_PORT "${CONTROL_PLANE_ACP_PORT:-3000}"
 } > "${runtime_config_tmp}"
 mv "${runtime_config_tmp}" "${runtime_config_path}"
 chown "${control_plane_user}:${control_plane_user}" "${runtime_config_path}"
@@ -983,7 +991,11 @@ ensure_ssh_host_key ed25519 ssh_host_ed25519_key
 start_reverse_exec_api
 
 if [[ $# -eq 0 ]]; then
-  set -- /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config
+  set -- /usr/local/bin/control-plane-copilot
 fi
 
-exec "$@"
+if command_uses_sshd "$@"; then
+  exec "$@"
+fi
+
+exec_as_control_plane_user "$@"

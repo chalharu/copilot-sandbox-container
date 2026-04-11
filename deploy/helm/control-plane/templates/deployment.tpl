@@ -4,6 +4,7 @@
 {{- $image := mergeOverwrite (dict) $.Values.global.image (default dict $instance.image) -}}
 {{- $workspace := mergeOverwrite (dict) $.Values.global.workspace (default dict $instance.workspace) -}}
 {{- $session := mergeOverwrite (dict) $.Values.global.session (default dict $instance.session) -}}
+{{- $service := mergeOverwrite (dict) $.Values.global.service (default dict $instance.service) -}}
 {{- $sessionStateSubPath := include "control-plane.sessionStateSubPath" $ctx -}}
 {{- $resources := mergeOverwrite (dict) $.Values.global.resources (default dict $instance.resources) -}}
 {{- $deploymentAnnotations := mergeOverwrite (dict) $.Values.global.deploymentAnnotations (default dict $instance.deploymentAnnotations) -}}
@@ -14,6 +15,7 @@ metadata:
   name: {{ include "control-plane.deploymentName" $ctx }}
   namespace: {{ $mainNamespace }}
   labels:{{ include "control-plane.commonLabels" $ctx | nindent 4 }}
+    app.kubernetes.io/component: acp
 {{- if $deploymentAnnotations }}
   annotations:
 {{- range $key := keys $deploymentAnnotations | sortAlpha }}
@@ -26,9 +28,11 @@ spec:
     type: Recreate
   selector:
     matchLabels:{{ include "control-plane.selectorLabels" $ctx | nindent 6 }}
+      app.kubernetes.io/component: acp
   template:
     metadata:
       labels:{{ include "control-plane.commonLabels" $ctx | nindent 8 }}
+        app.kubernetes.io/component: acp
 {{- if $podAnnotations }}
       annotations:
 {{- range $key := keys $podAnnotations | sortAlpha }}
@@ -164,6 +168,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+          args:
+            - /usr/local/bin/control-plane-copilot
           securityContext:
             privileged: false
             runAsUser: 0
@@ -173,25 +179,23 @@ spec:
               drop:
                 - ALL
               add:
-                - AUDIT_WRITE
                 - CHOWN
                 - DAC_OVERRIDE
                 - FOWNER
                 - KILL
                 - SETGID
                 - SETUID
-                - SYS_CHROOT
             seccompProfile:
               type: RuntimeDefault
           ports:
-            - containerPort: 2222
-              name: ssh
+            - containerPort: {{ $service.port }}
+              name: acp
           readinessProbe:
             exec:
               command:
                 - bash
                 - -lc
-                - pgrep -x sshd >/dev/null
+                - ":</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}"
             periodSeconds: 5
             failureThreshold: 12
           livenessProbe:
@@ -199,7 +203,7 @@ spec:
               command:
                 - bash
                 - -lc
-                - pgrep -x sshd >/dev/null
+                - ":</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}"
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 6

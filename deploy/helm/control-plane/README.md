@@ -1,7 +1,7 @@
 # Helm chart for multi-repository control planes
 
-`deploy/helm/control-plane/` は、repo ごとに `copilot + workspace PVC + Service`
-を複数並べたいケース向けの Helm chart です。既定では、すべての instance を
+`deploy/helm/control-plane/` は、repo ごとに `copilot ACP + web backend/frontend +
+workspace PVC + Service` を複数並べたいケース向けの Helm chart です。既定では、すべての instance を
 同じ main namespace / jobs namespace に置き、session PVC claim も共有します。
 
 chart 全体として、既定で次を生成します。
@@ -20,6 +20,8 @@ chart 全体として、既定で次を生成します。
 - workspace PVC
 - `control-plane-<instance.name>` Deployment
 - `control-plane-<instance.name>` Service
+- `control-plane-web-<instance.name>` Deployment
+- `control-plane-web-<instance.name>` Service
 
 workspace PVC と Service は、instance 側で明示 override しない限り
 `<base>-<instance.name>` で名前分離されます。Secret と `control-plane-config` は
@@ -30,15 +32,14 @@ global 値をそのまま使う限り shared resource を使い、instance overr
 ## 使い方
 
 まず最低限、shared namespace と session PVC の RWX storage class、各 instance の
-SSH 公開鍵を上書きします。
+必要な認証情報を上書きします。
 
 ```yaml
 global:
   namespace: copilot-workspaces
   jobNamespace: copilot-workspaces-jobs
   auth:
-    sshPublicKey: |
-      ssh-ed25519 AAAA... shared-login-key
+    ghGithubToken: github_pat_... shared-token
   session:
     storageClassName: nfs-rwx
 
@@ -60,7 +61,7 @@ helm upgrade --install control-plane deploy/helm/control-plane \
 既定では、すべての instance が `global.namespace` と `global.jobNamespace` を
 共有します。Session PVC は `global.session.claimName` を共有しつつ、
 `copilot-config.json`、`command-history-state.json`、`session-state`、
-SSH auth/host keys は `instances/<name>/...` 配下へ自動で分離されます。
+SSH 互換 state / host keys も `instances/<name>/...` 配下へ自動で分離されます。
 GitHub CLI / SSH client state は `global.session.{ghSubPath,sshSubPath}` を使うため、
 必要なら `instances[].session` で repo ごとに分けてください。
 
@@ -84,7 +85,7 @@ shared な `control-plane-env` と、instance ごとの
 | 全 instance 共通の既定値 | `global.controlPlaneEnv` | shared `control-plane-env` ConfigMap |
 | repo ごとの上書き | `instances[].controlPlaneEnv` | 対象 instance の `control-plane-instance-env-<name>` ConfigMap |
 
-`instances[].instanceEnv` は workspace PVC 名や job-transfer host のような
+`instances[].instanceEnv` は workspace PVC 名や ACP / web host のような
 chart 側の派生値向けなので、これらの設定先には使いません。
 
 ```yaml
@@ -98,13 +99,15 @@ global:
 instances:
   - name: repo-a
     auth:
-      sshPublicKey: |
-        ssh-ed25519 AAAA... repo-a
+      ghGithubToken: github_pat_... repo-a
 
   - name: repo-b
     auth:
-      sshPublicKey: |
-        ssh-ed25519 AAAA... repo-b
+      ghHostsYml: |
+        github.com:
+          oauth_token: github_pat_... repo-b
+          git_protocol: ssh
+          user: octocat
     controlPlaneEnv:
       TZ: Europe/Berlin
       CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: /workspace/scripts/bootstrap-exec.sh
@@ -121,13 +124,14 @@ instances:
 
 - `global.namespace` / `global.jobNamespace`: instance 群を置く共有 namespace
 - `instances[].image`: repo ごとの image tag / pullPolicy
-- `instances[].service`: Service の明示名、type、port
+- `instances[].service`: internal ACP Service の明示名、type、port
+- `instances[].webService`: browser / API 向け Service の明示名、type、port
 - `instances[].workspace`: workspace PVC claim 名、size、storage class、subPath
 - `global.session`: 共有 session PVC の claim 名、size、storage class
 - `instances[].session`: repo ごとの stateSubPath や GH / SSH subPath override
 - `global.auth`: shared `control-plane-auth` Secret
 - `instances[].auth.existingSecretName`: Secret を chart 外で管理したい場合
-- `instances[].auth`: SSH 公開鍵や token を repo ごとに変えたい場合だけ per-instance Secret を作る
+- `instances[].auth`: token や、必要なら SSH 公開鍵を repo ごとに変えたい場合だけ per-instance Secret を作る
 - `global.controlPlaneConfigJson`: shared `control-plane-config` ConfigMap
 - `instances[].controlPlaneConfigJson`: repo ごとの config overlay が必要な場合だけ per-instance ConfigMap を作る
 - `instances[].controlPlaneEnv`: runtime 用 ConfigMap の追加 override

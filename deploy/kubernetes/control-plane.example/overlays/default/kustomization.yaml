@@ -76,6 +76,14 @@ replacements:
           kind: ConfigMap
           name: control-plane-instance-env
         fieldPaths:
+          - data.CONTROL_PLANE_ACP_HOST
+        options:
+          delimiter: .
+          index: 1
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
           - data.CONTROL_PLANE_JOB_TRANSFER_HOST
         options:
           delimiter: .
@@ -160,10 +168,44 @@ replacements:
           kind: ConfigMap
           name: control-plane-instance-env
         fieldPaths:
+          - data.CONTROL_PLANE_ACP_HOST
+        options:
+          delimiter: .
+          index: 0
+  - source:
+      kind: Service
+      name: control-plane
+      fieldPath: spec.ports.[name=acp].port
+    targets:
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
+          - data.CONTROL_PLANE_ACP_PORT
+  - source:
+      kind: Service
+      name: control-plane-web
+      fieldPath: metadata.name
+    targets:
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
           - data.CONTROL_PLANE_JOB_TRANSFER_HOST
         options:
           delimiter: .
           index: 0
+  - source:
+      kind: Service
+      name: control-plane-web
+      fieldPath: spec.ports.[name=http].port
+    targets:
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
+          - data.CONTROL_PLANE_WEB_PORT
+          - data.CONTROL_PLANE_JOB_TRANSFER_PORT
   - source:
       kind: Deployment
       name: control-plane

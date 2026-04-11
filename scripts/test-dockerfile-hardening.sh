@@ -61,7 +61,7 @@ legacy_yamllint_dockerfile="${repo_root}/containers/yamllint/Dockerfile"
 
 assert_file_contains "${control_plane_dockerfile}" "USER \${CONTROL_PLANE_USER}"
 assert_file_not_matches "${control_plane_dockerfile}" '^USER root$'
-assert_healthcheck_cmd "${control_plane_dockerfile}" '    CMD ["bash", "-lc", "node --version >/dev/null && cargo --version >/dev/null && git --version >/dev/null && yamllint --version >/dev/null && control-plane-exec-api --help >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]'
+assert_healthcheck_cmd "${control_plane_dockerfile}" '    CMD ["bash", "-lc", "node --version >/dev/null && cargo --version >/dev/null && git --version >/dev/null && yamllint --version >/dev/null && copilot --help >/dev/null && control-plane-exec-api --help >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -x /usr/local/bin/control-plane-copilot && test -x /usr/local/bin/control-plane-web-backend && test -r /usr/local/share/control-plane/web-frontend/index.html"]'
 assert_file_contains "${control_plane_dockerfile}" 'YAMLLINT_VIRTUAL_ENV=/opt/yamllint'
 assert_file_contains "${control_plane_dockerfile}" 'python3-venv'
 assert_file_contains "${control_plane_dockerfile}" "python3 -m venv \"\${YAMLLINT_VIRTUAL_ENV}\""

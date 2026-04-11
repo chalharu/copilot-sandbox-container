@@ -108,3 +108,24 @@ Helm chart へ切り出しました。
 
 この変更により、「shipped sample を 1 つ整えて使う repo」から、「同じ cluster に
 複数 repo の control plane を並べて管理できる repo」へ性格が広がりました。
+
+## フェーズ 9: SSH-first から ACP TCP + web 分離へ切り替えた段階
+
+その後、対話面の主役を SSH login に置き続けると、browser から扱う UI や自動化との
+整合が悪くなりました。そこで deployment の既定起動対象は `sshd` ではなく
+`copilot --acp --port <port>` に切り替え、Copilot との対話は Agent Client
+Protocol を軸に再設計しました。
+
+- `control-plane-entrypoint` の既定 command は `control-plane-copilot` になり、
+  control-plane Pod は ACP を TCP mode で待ち受ける
+- user-facing な web 面は別 Deployment `control-plane-web` へ分離し、Axum backend
+  が ACP 通信と job transfer を処理し、Leptos CSR frontend は Axum から配信する
+- browser には JSON API と軽量 UI だけを見せ、ACP の詳細や長い応答処理は backend
+  側で吸収する
+- file handoff は SSH / SFTP / rclone ではなく、HTTP の tar upload/download
+  endpoint へ寄せる
+- Kustomize sample と Helm chart も、internal ACP service と browser 向け web
+  service を分けて表現する
+
+この段階で repo の中心は、「SSH で control plane に入る箱」から、「Copilot ACP を
+cluster 内で動かし、その上に web backend / frontend を載せる基盤」へ移りました。

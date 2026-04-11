@@ -7,6 +7,7 @@ metadata:
   name: {{ include "control-plane.serviceName" $ctx }}
   namespace: {{ include "control-plane.instanceMainNamespace" $ctx }}
   labels:{{ include "control-plane.commonLabels" $ctx | nindent 4 }}
+    app.kubernetes.io/component: acp
 {{- if $service.annotations }}
   annotations:
 {{- range $key := keys $service.annotations | sortAlpha }}
@@ -16,9 +17,10 @@ metadata:
 spec:
   type: {{ $service.type }}
   selector:{{ include "control-plane.selectorLabels" $ctx | nindent 4 }}
+    app.kubernetes.io/component: acp
   ports:
-    - name: ssh
+    - name: acp
       port: {{ $service.port }}
-      targetPort: ssh
+      targetPort: acp
 ---
 {{- end }}

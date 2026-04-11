@@ -25,6 +25,7 @@ data:
   # TZ: Asia/Tokyo
   CONTROL_PLANE_K8S_NAMESPACE: copilot-sandbox
   CONTROL_PLANE_JOB_NAMESPACE: copilot-sandbox-jobs
+  CONTROL_PLANE_ACP_PORT: "3000"
   CONTROL_PLANE_COPILOT_SESSION_PVC: control-plane-copilot-session-pvc
   CONTROL_PLANE_COPILOT_SESSION_GH_SUBPATH: state/gh
   CONTROL_PLANE_COPILOT_SESSION_SSH_SUBPATH: state/ssh
@@ -71,8 +72,8 @@ data:
   # Optional: when the job namespace has its own shared workspace PVC
   # that exposes the same repository contents, mount it into Jobs too.
   # Otherwise keep Jobs stateless and use `--mount-file`, which stages
-  # input files over SSH/SFTP via rclone and writes modified files back
-  # when the Job completes.
+  # input/output tar archives through the web backend transfer endpoints
+  # when the Job runs and completes.
   # CONTROL_PLANE_JOB_WORKSPACE_PVC: control-plane-workspace-pvc
   # CONTROL_PLANE_JOB_WORKSPACE_SUBPATH: workspace
   CONTROL_PLANE_JOB_INPUT_MOUNT_PATH: /var/run/control-plane/job-inputs

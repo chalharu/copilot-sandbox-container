@@ -64,7 +64,7 @@ if [[ "${workspace_dirty}" -eq 1 ]] || [[ "${pod_image}" != *":${workspace_head}
   if [[ "${workspace_dirty}" -eq 1 ]]; then
     printf '%s\n' 'current-cluster-test: workspace has uncommitted changes, so the running image cannot represent the current code yet' >&2
   fi
-  printf '%s\n' 'current-cluster-test: use scripts/test-k8s-job.sh for pre-deploy validation and re-run this script after updating the cluster image'
+  printf '%s\n' 'current-cluster-test: use scripts/test-k8s-sample-storage-layout.sh plus scripts/test-standalone.sh or scripts/test-kind.sh for pre-deploy validation, then re-run this script after updating the cluster image'
   exit 0
 fi
 

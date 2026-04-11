@@ -12,13 +12,15 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: control-plane
+      app.kubernetes.io/component: acp
   template:
     metadata:
       labels:
         app.kubernetes.io/name: control-plane
+        app.kubernetes.io/component: acp
     spec:
-      # Keep the default hostUsers path so SSH and shared-volume ownership
-      # handling stay compatible with the current cluster runtime.
+      # Keep the default hostUsers path so shared-volume ownership handling
+      # stays compatible with the current cluster runtime.
       securityContext:
         fsGroup: 1000
       serviceAccountName: control-plane
@@ -139,8 +141,11 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-          # Keep `drop: ALL`, then re-add only the capabilities that sshd and
-          # mounted-state ownership fixes need.
+          args:
+            - /usr/local/bin/control-plane-copilot
+          # Keep `drop: ALL`, then re-add only the capabilities needed to
+          # prepare mounted state before dropping the Copilot ACP process to the
+          # unprivileged user.
           securityContext:
             privileged: false
             runAsUser: 0
@@ -150,25 +155,23 @@ spec:
               drop:
                 - ALL
               add:
-                - AUDIT_WRITE
                 - CHOWN
                 - DAC_OVERRIDE
                 - FOWNER
                 - KILL
                 - SETGID
                 - SETUID
-                - SYS_CHROOT
             seccompProfile:
               type: RuntimeDefault
           ports:
-            - containerPort: 2222
-              name: ssh
+            - containerPort: 3000
+              name: acp
           readinessProbe:
             exec:
               command:
                 - bash
                 - -lc
-                - pgrep -x sshd >/dev/null
+                - ":</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}"
             periodSeconds: 5
             failureThreshold: 12
           livenessProbe:
@@ -176,7 +179,7 @@ spec:
               command:
                 - bash
                 - -lc
-                - pgrep -x sshd >/dev/null
+                - ":</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}"
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 6

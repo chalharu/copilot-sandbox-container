@@ -6,10 +6,10 @@ control_plane_image="${1:?usage: scripts/test-kind.sh <control-plane-image> [clu
 cluster_name="${2:-control-plane-ci}"
 namespace="${CONTROL_PLANE_TEST_NAMESPACE:-control-plane-ci}"
 job_namespace="${CONTROL_PLANE_TEST_JOB_NAMESPACE:-${namespace}-jobs}"
-ssh_port="${CONTROL_PLANE_TEST_SSH_PORT:-32222}"
 kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-docker}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-${kind_provider}}"
-control_plane_selector="app.kubernetes.io/name=control-plane"
+control_plane_selector="app.kubernetes.io/name=control-plane,app.kubernetes.io/component=acp"
+control_plane_web_selector="app.kubernetes.io/name=control-plane,app.kubernetes.io/component=web"
 kind_image_archive="${CONTROL_PLANE_KIND_IMAGE_ARCHIVE:-}"
 kind_required_host_path="${CONTROL_PLANE_KIND_REQUIRED_HOST_PATH:-/lib/modules}"
 workdir="$(mktemp -d)"
@@ -98,36 +98,26 @@ create_cluster() {
   return 1
 }
 
-ssh_opts=(
-  -o StrictHostKeyChecking=no
-  -o UserKnownHostsFile=/dev/null
-  -o IdentitiesOnly=yes
-  -i "${ssh_key}"
-  -p "${ssh_port}"
-)
-
 ssh_cmd() {
-  # shellcheck disable=SC2029
-  ssh "${ssh_opts[@]}" copilot@127.0.0.1 "$@"
+  kubectl exec --namespace "${namespace}" "$(control_plane_pod_name)" -c control-plane -- \
+    su -s /bin/bash copilot -c "$*"
 }
 
 ssh_bash() {
-  ssh "${ssh_opts[@]}" copilot@127.0.0.1 'bash -l -se'
+  kubectl exec -i --namespace "${namespace}" "$(control_plane_pod_name)" -c control-plane -- \
+    su -s /bin/bash copilot -c 'bash -l -se'
 }
 
 wait_for_ssh() {
   local _
   for _ in $(seq 1 60); do
-    if ssh_cmd true >/dev/null 2>&1; then
+    if kubectl exec --namespace "${namespace}" "$(control_plane_pod_name)" -c control-plane -- \
+      su -s /bin/bash copilot -c true >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
   done
-  printf 'Timed out waiting for SSH on port %s\n' "${ssh_port}" >&2
-  if [[ -f "${workdir}/port-forward.log" ]]; then
-    printf '%s\n' '--- kubectl port-forward log ---' >&2
-    cat "${workdir}/port-forward.log" >&2 || true
-  fi
+  printf '%s\n' 'Timed out waiting for control-plane exec access\n' >&2
   dump_control_plane_diagnostics
   exit 1
 }
@@ -162,8 +152,8 @@ wait_for_remote_grep() {
     "${remote_pattern}" "${remote_path}"
 
   for _ in $(seq 1 "${attempts}"); do
-    # shellcheck disable=SC2029
-    if ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_command}" <<'EOF' >/dev/null 2>&1
+    if kubectl exec -i --namespace "${namespace}" "$(control_plane_pod_name)" -c control-plane -- \
+      su -s /bin/bash copilot -c "${remote_command}" <<'EOF' >/dev/null 2>&1
 set -euo pipefail
 grep -Eq -- "${REMOTE_PATTERN}" "${REMOTE_PATH}"
 EOF
@@ -179,9 +169,12 @@ EOF
 ssh_host_fingerprint() {
   local fingerprint
 
-  fingerprint="$(ssh-keyscan -p "${ssh_port}" 127.0.0.1 2>/dev/null | ssh-keygen -lf - | awk '/ED25519/ { print $2; exit }')"
+  fingerprint="$(
+    kubectl exec --namespace "${namespace}" "$(control_plane_pod_name)" -c control-plane -- \
+      bash -lc 'sha256sum /run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub | awk "{ print \$1 }"'
+  )"
   [[ -n "${fingerprint}" ]] || {
-    printf 'Unable to read SSH host key fingerprint on port %s\n' "${ssh_port}" >&2
+    printf '%s\n' 'Unable to read control-plane SSH host key fingerprint' >&2
     exit 1
   }
 
@@ -189,35 +182,43 @@ ssh_host_fingerprint() {
 }
 
 stop_port_forward() {
-  if [[ -n "${port_forward_pid}" ]]; then
-    kill "${port_forward_pid}" >/dev/null 2>&1 || true
-    wait "${port_forward_pid}" 2>/dev/null || true
-    port_forward_pid=""
-  fi
+  :
 }
 
 start_port_forward() {
-  stop_port_forward
-  kubectl port-forward --namespace "${namespace}" service/control-plane "${ssh_port}:2222" >"${workdir}/port-forward.log" 2>&1 &
-  port_forward_pid=$!
+  :
 }
 
 control_plane_pod_name() {
   kubectl get pods --namespace "${namespace}" -l "${control_plane_selector}" -o jsonpath='{.items[0].metadata.name}'
 }
 
+control_plane_web_pod_name() {
+  kubectl get pods --namespace "${namespace}" -l "${control_plane_web_selector}" -o jsonpath='{.items[0].metadata.name}'
+}
+
 dump_control_plane_diagnostics() {
   local pod_name=""
   local exec_pod=""
+  local web_pod=""
 
   kubectl get deployment,replicaset,pods,svc --namespace "${namespace}" -l "${control_plane_selector}" -o wide >&2 || true
+  kubectl get deployment,replicaset,pods,svc --namespace "${namespace}" -l "${control_plane_web_selector}" -o wide >&2 || true
   kubectl describe deployment/control-plane --namespace "${namespace}" >&2 || true
+  kubectl describe deployment/control-plane-web --namespace "${namespace}" >&2 || true
   pod_name="$(control_plane_pod_name 2>/dev/null || true)"
   if [[ -n "${pod_name}" ]]; then
     kubectl describe pod/"${pod_name}" --namespace "${namespace}" >&2 || true
     kubectl logs --namespace "${namespace}" pod/"${pod_name}" -c init-state-dirs >&2 || true
     kubectl logs --namespace "${namespace}" pod/"${pod_name}" -c init-state >&2 || true
     kubectl logs --namespace "${namespace}" pod/"${pod_name}" -c control-plane >&2 || true
+  fi
+  web_pod="$(control_plane_web_pod_name 2>/dev/null || true)"
+  if [[ -n "${web_pod}" ]]; then
+    kubectl describe pod/"${web_pod}" --namespace "${namespace}" >&2 || true
+    kubectl logs --namespace "${namespace}" pod/"${web_pod}" -c init-state-dirs >&2 || true
+    kubectl logs --namespace "${namespace}" pod/"${web_pod}" -c init-state >&2 || true
+    kubectl logs --namespace "${namespace}" pod/"${web_pod}" -c control-plane-web >&2 || true
   fi
   while read -r exec_pod; do
     [[ -n "${exec_pod}" ]] || continue
@@ -236,7 +237,9 @@ dump_control_plane_diagnostics() {
 
 wait_for_control_plane_pod() {
   if kubectl rollout status --namespace "${namespace}" deployment/control-plane --timeout=180s >/dev/null \
-    && kubectl wait --namespace "${namespace}" --for=condition=Ready pod -l "${control_plane_selector}" --timeout=180s >/dev/null; then
+    && kubectl wait --namespace "${namespace}" --for=condition=Ready pod -l "${control_plane_selector}" --timeout=180s >/dev/null \
+    && kubectl rollout status --namespace "${namespace}" deployment/control-plane-web --timeout=180s >/dev/null \
+    && kubectl wait --namespace "${namespace}" --for=condition=Ready pod -l "${control_plane_web_selector}" --timeout=180s >/dev/null; then
     return 0
   fi
 
@@ -246,10 +249,14 @@ wait_for_control_plane_pod() {
 
 assert_control_plane_probe_spec() {
   local deployment_json="${workdir}/control-plane-deployment.json"
+  local web_deployment_json="${workdir}/control-plane-web-deployment.json"
 
   kubectl get deployment/control-plane --namespace "${namespace}" -o json > "${deployment_json}"
-  test "$(jq -r '.spec.template.spec.containers[] | select(.name == "control-plane").readinessProbe.exec.command | join(" ")' "${deployment_json}")" = "bash -lc pgrep -x sshd >/dev/null"
-  test "$(jq -r '.spec.template.spec.containers[] | select(.name == "control-plane").livenessProbe.exec.command | join(" ")' "${deployment_json}")" = "bash -lc pgrep -x sshd >/dev/null"
+  test "$(jq -r '.spec.template.spec.containers[] | select(.name == "control-plane").readinessProbe.exec.command | join(" ")' "${deployment_json}")" = 'bash -lc :</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}'
+  test "$(jq -r '.spec.template.spec.containers[] | select(.name == "control-plane").livenessProbe.exec.command | join(" ")' "${deployment_json}")" = 'bash -lc :</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}'
+  kubectl get deployment/control-plane-web --namespace "${namespace}" -o json > "${web_deployment_json}"
+  test "$(jq -r '.spec.template.spec.containers[] | select(.name == "control-plane-web").readinessProbe.httpGet.path' "${web_deployment_json}")" = "/healthz"
+  test "$(jq -r '.spec.template.spec.containers[] | select(.name == "control-plane-web").livenessProbe.httpGet.path' "${web_deployment_json}")" = "/healthz"
 }
 
 load_kind_images() {
@@ -607,12 +614,16 @@ data:
   CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST: 256Mi
   CONTROL_PLANE_FAST_EXECUTION_MEMORY_LIMIT: 1Gi
   CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC: "3600"
+  CONTROL_PLANE_ACP_HOST: control-plane.${namespace}.svc.cluster.local
+  CONTROL_PLANE_ACP_PORT: "3000"
+  CONTROL_PLANE_WEB_PORT: "8080"
   CONTROL_PLANE_JOB_WORKSPACE_PVC: control-plane-workspace-pvc
   CONTROL_PLANE_JOB_WORKSPACE_SUBPATH: workspace
   CONTROL_PLANE_JOB_SERVICE_ACCOUNT: control-plane-job
   CONTROL_PLANE_JOB_TRANSFER_IMAGE: ${control_plane_image}
-  CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane.${namespace}.svc.cluster.local
-  CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"
+  CONTROL_PLANE_JOB_TRANSFER_ROOT: /home/copilot/.copilot/session-state/job-transfers
+  CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane-web.${namespace}.svc.cluster.local
+  CONTROL_PLANE_JOB_TRANSFER_PORT: "8080"
   CONTROL_PLANE_RUST_HOOK_IMAGE: ${rust_hook_image}
   CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: Never
 ---
@@ -623,14 +634,16 @@ metadata:
   namespace: ${namespace}
   labels:
     app.kubernetes.io/name: control-plane
+    app.kubernetes.io/component: acp
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: control-plane
+    app.kubernetes.io/component: acp
   ports:
-    - name: ssh
-      port: 2222
-      targetPort: ssh
+    - name: acp
+      port: 3000
+      targetPort: acp
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -639,6 +652,7 @@ metadata:
   namespace: ${namespace}
   labels:
     app.kubernetes.io/name: control-plane
+    app.kubernetes.io/component: acp
 spec:
   replicas: 1
   strategy:
@@ -646,10 +660,12 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: control-plane
+      app.kubernetes.io/component: acp
   template:
     metadata:
       labels:
         app.kubernetes.io/name: control-plane
+        app.kubernetes.io/component: acp
     spec:
       securityContext:
         fsGroup: 1000
@@ -786,8 +802,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-          # Keep the Kind test on the same SSH-focused capability profile as the
-          # sample manifest.
+          args:
+            - /usr/local/bin/control-plane-copilot
           securityContext:
             privileged: false
             runAsUser: 0
@@ -797,25 +813,23 @@ spec:
               drop:
                 - ALL
               add:
-                - AUDIT_WRITE
                 - CHOWN
                 - DAC_OVERRIDE
                 - FOWNER
                 - KILL
                 - SETGID
                 - SETUID
-                - SYS_CHROOT
             seccompProfile:
               type: RuntimeDefault
           ports:
-            - containerPort: 2222
-              name: ssh
+            - containerPort: 3000
+              name: acp
           readinessProbe:
             exec:
               command:
                 - bash
                 - -lc
-                - pgrep -x sshd >/dev/null
+                - ":</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}"
             periodSeconds: 5
             failureThreshold: 12
           livenessProbe:
@@ -823,7 +837,7 @@ spec:
               command:
                 - bash
                 - -lc
-                - pgrep -x sshd >/dev/null
+                - ":</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}"
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 6
@@ -834,6 +848,229 @@ spec:
             limits:
               cpu: "1"
               memory: 1Gi
+          volumeMounts:
+            - name: copilot-session
+              mountPath: /home/copilot/.copilot/config.json
+              subPath: state/copilot-config.json
+            - name: copilot-session
+              mountPath: /home/copilot/.copilot/command-history-state.json
+              subPath: state/command-history-state.json
+            - name: copilot-session
+              mountPath: /home/copilot/.copilot/session-state
+              subPath: session-state
+            - name: copilot-session
+              mountPath: /home/copilot/.config/gh
+              subPath: state/gh
+            - name: copilot-session
+              mountPath: /home/copilot/.ssh
+              subPath: state/ssh
+            - name: copilot-session
+              mountPath: /home/copilot/.config/control-plane/ssh-auth
+              subPath: state/ssh-auth
+            - name: copilot-session
+              mountPath: /var/lib/control-plane/ssh-host-keys
+              subPath: state/ssh-host-keys
+            - name: workspace
+              mountPath: /workspace
+              subPath: workspace
+            - name: cache
+              mountPath: /var/tmp/control-plane
+              subPath: runtime-tmp
+            - name: control-plane-auth
+              mountPath: /var/run/control-plane-auth
+              readOnly: true
+            - name: control-plane-config
+              mountPath: /var/run/control-plane-config
+              readOnly: true
+      volumes:
+        - name: copilot-session
+          persistentVolumeClaim:
+            claimName: control-plane-copilot-session-pvc
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: control-plane-workspace-pvc
+        - name: cache
+          emptyDir: {}
+        - name: control-plane-auth
+          secret:
+            secretName: control-plane-auth
+        - name: control-plane-config
+          configMap:
+            name: control-plane-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: control-plane-web
+  namespace: ${namespace}
+  labels:
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/component: web
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/component: web
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control-plane-web
+  namespace: ${namespace}
+  labels:
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/component: web
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: control-plane
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: control-plane
+        app.kubernetes.io/component: web
+    spec:
+      securityContext:
+        fsGroup: 1000
+      serviceAccountName: control-plane
+      initContainers:
+        - name: init-state-dirs
+          # renovate: datasource=docker depName=busybox versioning=docker
+          image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              umask 077
+              mkdir -p \
+                /copilot-session/state/gh \
+                /copilot-session/state/ssh-auth \
+                /copilot-session/state/ssh \
+                /copilot-session/state/ssh-host-keys \
+                /copilot-session/session-state \
+                /workspace-state/workspace \
+                /cache/runtime-tmp
+              touch \
+                /copilot-session/state/copilot-config.json \
+                /copilot-session/state/command-history-state.json
+              chown -R 1000:1000 /copilot-session/state /copilot-session/session-state
+              find /copilot-session/state /copilot-session/session-state -type d -exec chmod 700 {} +
+              find /copilot-session/state /copilot-session/session-state -type f -exec chmod 600 {} +
+              chown 1000:1000 /workspace-state/workspace
+              chmod 700 /workspace-state/workspace
+              chown 0:1000 /cache/runtime-tmp
+              chmod 755 /cache/runtime-tmp
+          securityContext:
+            privileged: false
+            runAsUser: 0
+            runAsGroup: 1000
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: copilot-session
+              mountPath: /copilot-session
+            - name: workspace
+              mountPath: /workspace-state
+            - name: cache
+              mountPath: /cache
+        - name: init-state
+          # renovate: datasource=docker depName=busybox versioning=docker
+          image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              umask 077
+              [ -s /state/copilot-config.json ] || cat > /state/copilot-config.json <<'JSON'
+              {
+                "telemetry": false
+              }
+              JSON
+          securityContext:
+            privileged: false
+            runAsUser: 1000
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: copilot-session
+              mountPath: /state
+              subPath: state
+      containers:
+        - name: control-plane-web
+          image: ${control_plane_image}
+          imagePullPolicy: Never
+          envFrom:
+            - configMapRef:
+                name: control-plane-env
+          env:
+            - name: CONTROL_PLANE_FAST_EXECUTION_ENABLED
+              value: "0"
+          args:
+            - /usr/local/bin/control-plane-web-backend
+          securityContext:
+            privileged: false
+            runAsUser: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: true
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+                - KILL
+                - SETGID
+                - SETUID
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
           volumeMounts:
             - name: copilot-session
               mountPath: /home/copilot/.copilot/config.json
@@ -1298,64 +1535,26 @@ EOF
   fi
   printf '%s\n' 'kind-test: screen output ready' >&2
 
-  printf '%s\n' 'kind-test: verifying interactive SSH Copilot session reuse' >&2
-  if ! ssh_bash <<EOF
-set -euo pipefail
-cp ~/.config/control-plane/runtime.env /workspace/k8s-runtime.env.bak
-printf '\nCONTROL_PLANE_COPILOT_BIN=%s\n' /workspace/test-copilot-shell >> ~/.config/control-plane/runtime.env
-cat > /workspace/test-copilot-shell <<'INNER'
-#!/usr/bin/env bash
-set -euo pipefail
-exec bash -il
-INNER
-chmod +x /workspace/test-copilot-shell
+  printf '%s\n' 'kind-test: verifying web backend health surface' >&2
+  kubectl exec --namespace "${namespace}" "$(control_plane_web_pod_name)" -c control-plane-web -- node - <<'EOF'
+const http = require('http');
+
+http.get({ host: '127.0.0.1', port: 8080, path: '/healthz' }, (res) => {
+  let body = '';
+  res.setEncoding('utf8');
+  res.on('data', (chunk) => { body += chunk; });
+  res.on('end', () => {
+    if (res.statusCode !== 200 || body.trim() !== 'ok') {
+      console.error(`unexpected web health response: ${res.statusCode} ${body}`);
+      process.exit(1);
+    }
+  });
+}).on('error', (error) => {
+  console.error(error.message);
+  process.exit(1);
+});
 EOF
-  then
-    printf 'Expected kind runtime.env backup/setup to succeed before SSH Copilot probe\n' >&2
-    exit 1
-  fi
-
-  if ! ssh_bash <<'EOF'
-set -euo pipefail
-session_key=kind-ssh-reconnect-fast-exec
-control-plane-session-exec cleanup --session-key "${session_key}" >/dev/null 2>&1 || true
-control-plane-session-exec prepare --session-key "${session_key}" >/dev/null
-command_base64="$(printf '%s' 'printf kind-fast-exec-reconnect > /workspace/k8s-fast-exec-reconnect.txt' | base64 | tr -d '\n')"
-control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${command_base64}" >/dev/null
-EOF
-  then
-    printf 'Expected kind fast-exec bootstrap to succeed before SSH reconnect probe\n' >&2
-    exit 1
-  fi
-
-  set +e
-  "${script_dir}/test-ssh-session-persistence.sh" \
-    --identity "${ssh_key}" \
-    --port "${ssh_port}" \
-    --session-name copilot \
-    --marker-path /workspace/k8s-copilot-marker.txt
-  kind_copilot_status=$?
-  set -e
-
-  if ! ssh_bash <<'EOF'
-set -euo pipefail
-cp /workspace/k8s-runtime.env.bak ~/.config/control-plane/runtime.env
-chmod 600 ~/.config/control-plane/runtime.env
-rm -f /workspace/k8s-runtime.env.bak
-rm -f /workspace/test-copilot-shell
-control-plane-session-exec cleanup --session-key kind-ssh-reconnect-fast-exec >/dev/null 2>&1 || true
-rm -f /workspace/k8s-fast-exec-reconnect.txt
-EOF
-  then
-    printf 'Expected kind runtime.env restore to succeed after SSH Copilot probe\n' >&2
-    exit 1
-  fi
-
-  if [[ "${kind_copilot_status}" -ne 0 ]]; then
-    printf 'Expected kind interactive SSH Copilot session to stay attached and accept input\n' >&2
-    exit 1
-  fi
-  printf '%s\n' 'kind-test: interactive SSH Copilot session ok' >&2
+  printf '%s\n' 'kind-test: web backend health ok' >&2
 }
 
 run_job_core_assertions() {
@@ -1424,8 +1623,8 @@ EOF
 
 run_job_transfer_assertions() {
   printf -v remote_job_transfer_command 'bash -l -se -- %q %q' "${control_plane_image}" "${job_namespace}"
-  # shellcheck disable=SC2029
-  if ! ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_job_transfer_command}" < "${script_dir}/test-job-transfer.sh"; then
+  if ! kubectl exec -i --namespace "${namespace}" "$(control_plane_pod_name)" -c control-plane -- \
+    su -s /bin/bash copilot -c "${remote_job_transfer_command}" < "${script_dir}/test-job-transfer.sh"; then
     printf 'Expected kind job transfer regression script to succeed\n' >&2
     dump_control_plane_diagnostics
     exit 1
@@ -1510,9 +1709,7 @@ trap cleanup EXIT
 require_command kind
 require_command kubectl
 require_command "${container_bin}"
-require_command ssh
 require_command ssh-keygen
-require_command ssh-keyscan
 
 export KIND_EXPERIMENTAL_PROVIDER="${kind_provider}"
 
@@ -1554,7 +1751,8 @@ kubectl wait --for=condition=Ready node --all --timeout=180s >/dev/null
 load_kind_images
 ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"
 apply_resources
-test "$(kubectl get service/control-plane --namespace "${namespace}" -o jsonpath='{.spec.type}')" = "LoadBalancer"
+test "$(kubectl get service/control-plane --namespace "${namespace}" -o jsonpath='{.spec.type}')" = "ClusterIP"
+test "$(kubectl get service/control-plane-web --namespace "${namespace}" -o jsonpath='{.spec.type}')" = "LoadBalancer"
 assert_control_plane_probe_spec
 wait_for_control_plane_pod
 start_port_forward

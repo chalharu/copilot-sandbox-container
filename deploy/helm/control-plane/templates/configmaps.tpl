@@ -6,6 +6,7 @@
 {{- $jobNamespace := include "control-plane.instanceJobNamespace" $ctx -}}
 {{- $image := mergeOverwrite (dict) $.Values.global.image (default dict $instance.image) -}}
 {{- $service := mergeOverwrite (dict) $.Values.global.service (default dict $instance.service) -}}
+{{- $webService := mergeOverwrite (dict) $.Values.global.webService (default dict $instance.webService) -}}
 {{- $workspace := mergeOverwrite (dict) $.Values.global.workspace (default dict $instance.workspace) -}}
 {{- $session := mergeOverwrite (dict) $.Values.global.session (default dict $instance.session) -}}
 {{- $globalAuth := default dict $.Values.global.auth -}}
@@ -37,6 +38,9 @@ data:
 {{- end }}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_K8S_NAMESPACE" $mainNamespace -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_NAMESPACE" $jobNamespace -}}
+{{- $_ := set $instanceEnv "CONTROL_PLANE_ACP_HOST" (printf "%s.%s.svc.%s" (include "control-plane.serviceName" $ctx) $mainNamespace $.Values.global.clusterDomain) -}}
+{{- $_ := set $instanceEnv "CONTROL_PLANE_ACP_PORT" ($service.port | toString) -}}
+{{- $_ := set $instanceEnv "CONTROL_PLANE_WEB_PORT" ($webService.port | toString) -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_COPILOT_SESSION_PVC" (include "control-plane.sessionClaimName" $ctx) -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_COPILOT_SESSION_GH_SUBPATH" ($session.ghSubPath | toString) -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_COPILOT_SESSION_SSH_SUBPATH" ($session.sshSubPath | toString) -}}
@@ -47,8 +51,9 @@ data:
 {{- $_ := set $instanceEnv "CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE" (include "control-plane.imageRef" (dict "image" $image)) -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY" ($image.pullPolicy | toString) -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_TRANSFER_IMAGE" (include "control-plane.imageRef" (dict "image" $image)) -}}
-{{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_TRANSFER_HOST" (printf "%s.%s.svc.%s" (include "control-plane.serviceName" $ctx) $mainNamespace $.Values.global.clusterDomain) -}}
-{{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_TRANSFER_PORT" ($service.port | toString) -}}
+{{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_TRANSFER_ROOT" "/home/copilot/.copilot/session-state/job-transfers" -}}
+{{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_TRANSFER_HOST" (printf "%s.%s.svc.%s" (include "control-plane.webServiceName" $ctx) $mainNamespace $.Values.global.clusterDomain) -}}
+{{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_TRANSFER_PORT" ($webService.port | toString) -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_IMAGE_PULL_POLICY" ($image.pullPolicy | toString) -}}
 apiVersion: v1
 kind: ConfigMap
