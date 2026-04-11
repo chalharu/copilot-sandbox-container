@@ -9,7 +9,8 @@ job_namespace="${CONTROL_PLANE_TEST_JOB_NAMESPACE:-${namespace}-jobs}"
 ssh_port="${CONTROL_PLANE_TEST_SSH_PORT:-32222}"
 kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-docker}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-${kind_provider}}"
-control_plane_selector="app.kubernetes.io/name=control-plane"
+control_plane_selector="app.kubernetes.io/name=control-plane,app.kubernetes.io/component=ssh"
+control_plane_web_selector="app.kubernetes.io/name=control-plane,app.kubernetes.io/component=web"
 kind_image_archive="${CONTROL_PLANE_KIND_IMAGE_ARCHIVE:-}"
 kind_required_host_path="${CONTROL_PLANE_KIND_REQUIRED_HOST_PATH:-/lib/modules}"
 workdir="$(mktemp -d)"
@@ -206,18 +207,31 @@ control_plane_pod_name() {
   kubectl get pods --namespace "${namespace}" -l "${control_plane_selector}" -o jsonpath='{.items[0].metadata.name}'
 }
 
+control_plane_web_pod_name() {
+  kubectl get pods --namespace "${namespace}" -l "${control_plane_web_selector}" -o jsonpath='{.items[0].metadata.name}'
+}
+
 dump_control_plane_diagnostics() {
   local pod_name=""
   local exec_pod=""
+  local web_pod=""
 
   kubectl get deployment,replicaset,pods,svc --namespace "${namespace}" -l "${control_plane_selector}" -o wide >&2 || true
+  kubectl get deployment,replicaset,pods,svc --namespace "${namespace}" -l "${control_plane_web_selector}" -o wide >&2 || true
   kubectl describe deployment/control-plane --namespace "${namespace}" >&2 || true
+  kubectl describe deployment/control-plane-web --namespace "${namespace}" >&2 || true
   pod_name="$(control_plane_pod_name 2>/dev/null || true)"
   if [[ -n "${pod_name}" ]]; then
     kubectl describe pod/"${pod_name}" --namespace "${namespace}" >&2 || true
     kubectl logs --namespace "${namespace}" pod/"${pod_name}" -c init-state-dirs >&2 || true
     kubectl logs --namespace "${namespace}" pod/"${pod_name}" -c init-state >&2 || true
     kubectl logs --namespace "${namespace}" pod/"${pod_name}" -c control-plane >&2 || true
+  fi
+  web_pod="$(control_plane_web_pod_name 2>/dev/null || true)"
+  if [[ -n "${web_pod}" ]]; then
+    kubectl describe pod/"${web_pod}" --namespace "${namespace}" >&2 || true
+    kubectl logs --namespace "${namespace}" pod/"${web_pod}" -c init-state-dirs >&2 || true
+    kubectl logs --namespace "${namespace}" pod/"${web_pod}" -c control-plane-web >&2 || true
   fi
   while read -r exec_pod; do
     [[ -n "${exec_pod}" ]] || continue
@@ -236,7 +250,9 @@ dump_control_plane_diagnostics() {
 
 wait_for_control_plane_pod() {
   if kubectl rollout status --namespace "${namespace}" deployment/control-plane --timeout=180s >/dev/null \
-    && kubectl wait --namespace "${namespace}" --for=condition=Ready pod -l "${control_plane_selector}" --timeout=180s >/dev/null; then
+    && kubectl wait --namespace "${namespace}" --for=condition=Ready pod -l "${control_plane_selector}" --timeout=180s >/dev/null \
+    && kubectl rollout status --namespace "${namespace}" deployment/control-plane-web --timeout=180s >/dev/null \
+    && kubectl wait --namespace "${namespace}" --for=condition=Ready pod -l "${control_plane_web_selector}" --timeout=180s >/dev/null; then
     return 0
   fi
 
@@ -611,8 +627,9 @@ data:
   CONTROL_PLANE_JOB_WORKSPACE_SUBPATH: workspace
   CONTROL_PLANE_JOB_SERVICE_ACCOUNT: control-plane-job
   CONTROL_PLANE_JOB_TRANSFER_IMAGE: ${control_plane_image}
-  CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane.${namespace}.svc.cluster.local
-  CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"
+  CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane-web.${namespace}.svc.cluster.local
+  CONTROL_PLANE_JOB_TRANSFER_PORT: "8080"
+  CONTROL_PLANE_WEB_PORT: "8080"
   CONTROL_PLANE_RUST_HOOK_IMAGE: ${rust_hook_image}
   CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: Never
 ---
@@ -623,14 +640,33 @@ metadata:
   namespace: ${namespace}
   labels:
     app.kubernetes.io/name: control-plane
+    app.kubernetes.io/component: ssh
 spec:
   type: LoadBalancer
   selector:
     app.kubernetes.io/name: control-plane
+    app.kubernetes.io/component: ssh
   ports:
     - name: ssh
       port: 2222
       targetPort: ssh
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: control-plane-web
+  namespace: ${namespace}
+  labels:
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/component: web
+spec:
+  selector:
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/component: web
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -639,6 +675,7 @@ metadata:
   namespace: ${namespace}
   labels:
     app.kubernetes.io/name: control-plane
+    app.kubernetes.io/component: ssh
 spec:
   replicas: 1
   strategy:
@@ -646,10 +683,12 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: control-plane
+      app.kubernetes.io/component: ssh
   template:
     metadata:
       labels:
         app.kubernetes.io/name: control-plane
+        app.kubernetes.io/component: ssh
     spec:
       securityContext:
         fsGroup: 1000
@@ -883,6 +922,151 @@ spec:
         - name: control-plane-config
           configMap:
             name: control-plane-config
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control-plane-web
+  namespace: ${namespace}
+  labels:
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/component: web
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: control-plane
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: control-plane
+        app.kubernetes.io/component: web
+    spec:
+      securityContext:
+        fsGroup: 1000
+      serviceAccountName: control-plane
+      initContainers:
+        - name: init-state-dirs
+          image: busybox:1.37.0@sha256:1487d0af5f52b4ba31c7e465126ee2123fe3f2305d638e7827681e7cf6c83d5e
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              umask 077
+              mkdir -p \
+                /copilot-session/state/gh \
+                /copilot-session/state/ssh-auth \
+                /copilot-session/state/ssh \
+                /copilot-session/state/ssh-host-keys \
+                /copilot-session/session-state \
+                /workspace-state/workspace
+              touch \
+                /copilot-session/state/copilot-config.json \
+                /copilot-session/state/command-history-state.json
+              chown -R 1000:1000 /copilot-session/state /copilot-session/session-state
+              find /copilot-session/state /copilot-session/session-state -type d -exec chmod 700 {} +
+              find /copilot-session/state /copilot-session/session-state -type f -exec chmod 600 {} +
+              chown 1000:1000 /workspace-state/workspace
+              chmod 700 /workspace-state/workspace
+          securityContext:
+            privileged: false
+            runAsUser: 0
+            runAsGroup: 1000
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: copilot-session
+              mountPath: /copilot-session
+            - name: workspace
+              mountPath: /workspace-state
+      containers:
+        - name: control-plane-web
+          image: ${control_plane_image}
+          imagePullPolicy: Never
+          command:
+            - /usr/local/bin/control-plane-web
+          envFrom:
+            - configMapRef:
+                name: control-plane-env
+          securityContext:
+            privileged: false
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: copilot-session
+              mountPath: /home/copilot/.copilot/config.json
+              subPath: state/copilot-config.json
+            - name: copilot-session
+              mountPath: /home/copilot/.copilot/command-history-state.json
+              subPath: state/command-history-state.json
+            - name: copilot-session
+              mountPath: /home/copilot/.copilot/session-state
+              subPath: session-state
+            - name: copilot-session
+              mountPath: /home/copilot/.config/gh
+              subPath: state/gh
+            - name: copilot-session
+              mountPath: /home/copilot/.ssh
+              subPath: state/ssh
+            - name: copilot-session
+              mountPath: /home/copilot/.config/control-plane/ssh-auth
+              subPath: state/ssh-auth
+            - name: copilot-session
+              mountPath: /var/lib/control-plane/ssh-host-keys
+              subPath: state/ssh-host-keys
+            - name: workspace
+              mountPath: /workspace
+              subPath: workspace
+      volumes:
+        - name: copilot-session
+          persistentVolumeClaim:
+            claimName: control-plane-copilot-session-pvc
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: control-plane-workspace-pvc
 EOF
 }
 
