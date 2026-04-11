@@ -18,7 +18,6 @@ kubeconfig_path="${workdir}/kubeconfig"
 rust_hook_image="${CONTROL_PLANE_TEST_RUST_HOOK_IMAGE:-docker.io/library/rust:1.94.1-bookworm@sha256:fdb91abf3cb33f1ebc84a76461d2472fd8cf606df69c181050fa7474bade2895}"
 fast_execution_image="${CONTROL_PLANE_TEST_FAST_EXECUTION_IMAGE:-docker.io/library/ubuntu:24.04}"
 fast_execution_image_pull_policy="${CONTROL_PLANE_TEST_FAST_EXECUTION_IMAGE_PULL_POLICY:-IfNotPresent}"
-port_forward_pid=""
 created_cluster=0
 kind_uses_sudo=0
 kind_sudo_mode="${CONTROL_PLANE_KIND_SUDO_MODE:-auto}"
@@ -171,7 +170,7 @@ ssh_host_fingerprint() {
 
   fingerprint="$(
     kubectl exec --namespace "${namespace}" "$(control_plane_pod_name)" -c control-plane -- \
-      bash -lc 'sha256sum /run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub | awk "{ print \$1 }"'
+      bash -lc "sha256sum /run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub | cut -d' ' -f1"
   )"
   [[ -n "${fingerprint}" ]] || {
     printf '%s\n' 'Unable to read control-plane SSH host key fingerprint' >&2
@@ -250,10 +249,11 @@ wait_for_control_plane_pod() {
 assert_control_plane_probe_spec() {
   local deployment_json="${workdir}/control-plane-deployment.json"
   local web_deployment_json="${workdir}/control-plane-web-deployment.json"
+  local expected_acp_probe='bash -lc :</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}'
 
   kubectl get deployment/control-plane --namespace "${namespace}" -o json > "${deployment_json}"
-  test "$(jq -r '.spec.template.spec.containers[] | select(.name == "control-plane").readinessProbe.exec.command | join(" ")' "${deployment_json}")" = 'bash -lc :</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}'
-  test "$(jq -r '.spec.template.spec.containers[] | select(.name == "control-plane").livenessProbe.exec.command | join(" ")' "${deployment_json}")" = 'bash -lc :</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}'
+  test "$(jq -r '.spec.template.spec.containers[] | select(.name == "control-plane").readinessProbe.exec.command | join(" ")' "${deployment_json}")" = "${expected_acp_probe}"
+  test "$(jq -r '.spec.template.spec.containers[] | select(.name == "control-plane").livenessProbe.exec.command | join(" ")' "${deployment_json}")" = "${expected_acp_probe}"
   kubectl get deployment/control-plane-web --namespace "${namespace}" -o json > "${web_deployment_json}"
   test "$(jq -r '.spec.template.spec.containers[] | select(.name == "control-plane-web").readinessProbe.httpGet.path' "${web_deployment_json}")" = "/healthz"
   test "$(jq -r '.spec.template.spec.containers[] | select(.name == "control-plane-web").livenessProbe.httpGet.path' "${web_deployment_json}")" = "/healthz"

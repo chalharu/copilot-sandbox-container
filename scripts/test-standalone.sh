@@ -69,7 +69,7 @@ start_container() {
 wait_for_acp() {
   local _
   for _ in $(seq 1 30); do
-    if "${container_bin}" exec "${container_name}" bash -lc ':</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}' >/dev/null 2>&1; then
+    if "${container_bin}" exec "${container_name}" bash -lc ":</dev/tcp/127.0.0.1/\${CONTROL_PLANE_ACP_PORT:-3000}" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -91,7 +91,7 @@ start_web_backend() {
 wait_for_web_backend() {
   local _
   for _ in $(seq 1 30); do
-    if "${container_bin}" exec "${container_name}" bash -lc ':</dev/tcp/127.0.0.1/${CONTROL_PLANE_WEB_PORT:-8080}' >/dev/null 2>&1; then
+    if "${container_bin}" exec "${container_name}" bash -lc ":</dev/tcp/127.0.0.1/\${CONTROL_PLANE_WEB_PORT:-8080}" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -226,13 +226,13 @@ grep -qx 'screen-ok' /workspace/screen.txt
 INNER
 EOF
 
-first_host_fingerprint="$("${container_bin}" exec "${container_name}" bash -lc 'sha256sum /run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub | awk "{ print \$1 }"')"
+first_host_fingerprint="$("${container_bin}" exec "${container_name}" bash -lc "sha256sum /run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub | cut -d' ' -f1")"
 
 "${container_bin}" rm -f "${container_name}" >/dev/null
 start_container
 wait_for_acp
 
-second_host_fingerprint="$("${container_bin}" exec "${container_name}" bash -lc 'sha256sum /run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub | awk "{ print \$1 }"')"
+second_host_fingerprint="$("${container_bin}" exec "${container_name}" bash -lc "sha256sum /run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub | cut -d' ' -f1")"
 [[ "${first_host_fingerprint}" == "${second_host_fingerprint}" ]]
 
 printf '%s\n' 'standalone-test: checking runtime SSH host key staging after restart' >&2

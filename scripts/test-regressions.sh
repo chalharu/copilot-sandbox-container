@@ -345,22 +345,20 @@ fi
 grep -Fq '/api/transfers/' "${workdir}/k8s-job-manifest.yaml"
 grep -Fq -- '--from-literal=transfer-token=' "${workdir}/k8s-job-secret.args"
 grep -Fq 'cat /var/run/control-plane-job-transfer/transfer-token' "${workdir}/k8s-job-manifest.yaml"
-if [[ "$(grep -Fc 'curl -fsSL \' "${workdir}/k8s-job-manifest.yaml")" -ne 1 ]]; then
+if [[ "$(grep -Fc "curl -fsSL \\" "${workdir}/k8s-job-manifest.yaml")" -ne 1 ]]; then
   printf 'Expected init container to fetch staged inputs over HTTP\n' >&2
   grep -n 'curl -fsSL\|input.tar' "${workdir}/k8s-job-manifest.yaml" >&2 || true
   exit 1
 fi
-if [[ "$(grep -Fc 'curl -fsS \' "${workdir}/k8s-job-manifest.yaml")" -ne 1 ]]; then
+if [[ "$(grep -Fc "curl -fsS \\" "${workdir}/k8s-job-manifest.yaml")" -ne 1 ]]; then
   printf 'Expected sync container to upload staged outputs over HTTP\n' >&2
   grep -n 'curl -fsS\|output.tar' "${workdir}/k8s-job-manifest.yaml" >&2 || true
   exit 1
 fi
-grep -Fq 'kubectl get pod "${pod_name}" --namespace "${namespace}" -o jsonpath=' "${workdir}/k8s-job-manifest.yaml"
-grep -Fq '.status.containerStatuses[?(@.name=="execution")].state.terminated.exitCode' "${workdir}/k8s-job-manifest.yaml"
-grep -Fq '"${CONTROL_PLANE_TRANSFER_URL}/input.tar"' "${workdir}/k8s-job-manifest.yaml"
-grep -Fq '"${CONTROL_PLANE_TRANSFER_URL}/output.tar"' "${workdir}/k8s-job-manifest.yaml"
-grep -Fq '"${CONTROL_PLANE_TRANSFER_URL}/finalize"' "${workdir}/k8s-job-manifest.yaml"
-grep -Fq '"${CONTROL_PLANE_TRANSFER_URL}/release"' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq "\"\${CONTROL_PLANE_TRANSFER_URL}/input.tar\"" "${workdir}/k8s-job-manifest.yaml"
+grep -Fq "\"\${CONTROL_PLANE_TRANSFER_URL}/output.tar\"" "${workdir}/k8s-job-manifest.yaml"
+grep -Fq "\"\${CONTROL_PLANE_TRANSFER_URL}/finalize\"" "${workdir}/k8s-job-manifest.yaml"
+grep -Fq "\"\${CONTROL_PLANE_TRANSFER_URL}/release\"" "${workdir}/k8s-job-manifest.yaml"
 grep -Fq "kubectl get pod \"\${pod_name}\" --namespace \"\${namespace}\" -o jsonpath=" "${workdir}/k8s-job-manifest.yaml"
 grep -Fq ".status.containerStatuses[?(@.name==\"execution\")].state.terminated.exitCode" "${workdir}/k8s-job-manifest.yaml"
 grep -Fq 'name: CONTROL_PLANE_JOB_RUN_AS_UID' "${workdir}/k8s-job-manifest.yaml"

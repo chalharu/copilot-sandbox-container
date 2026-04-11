@@ -69,8 +69,14 @@ pub async fn serve_http(state: HttpState, web_port: u16) -> Result<(), String> {
             "/api/transfers/{transfer_id}/output.tar",
             put(upload_transfer_output),
         )
-        .route("/api/transfers/{transfer_id}/finalize", post(finalize_transfer))
-        .route("/api/transfers/{transfer_id}/release", post(release_transfer))
+        .route(
+            "/api/transfers/{transfer_id}/finalize",
+            post(finalize_transfer),
+        )
+        .route(
+            "/api/transfers/{transfer_id}/release",
+            post(release_transfer),
+        )
         .fallback_service(get_service(
             ServeDir::new(assets_dir).not_found_service(ServeFile::new(index_path)),
         ))
@@ -301,7 +307,10 @@ fn error_response(status: StatusCode, message: String) -> Response {
     (status, message).into_response()
 }
 
-fn read_transfer_manifest(state: &HttpState, transfer_id: &str) -> Result<TransferManifest, String> {
+fn read_transfer_manifest(
+    state: &HttpState,
+    transfer_id: &str,
+) -> Result<TransferManifest, String> {
     let manifest_path = state
         .job_transfer_root
         .join(transfer_id)

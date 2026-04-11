@@ -131,7 +131,11 @@ impl PromptGateway for TcpAcpPromptGateway {
     }
 }
 
-fn run_prompt(acp_addr: String, workspace_root: PathBuf, prompt: String) -> Result<PromptOutput, String> {
+fn run_prompt(
+    acp_addr: String,
+    workspace_root: PathBuf,
+    prompt: String,
+) -> Result<PromptOutput, String> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -142,7 +146,9 @@ fn run_prompt(acp_addr: String, workspace_root: PathBuf, prompt: String) -> Resu
             .run_until(async move {
                 let stream = tokio::net::TcpStream::connect(&acp_addr)
                     .await
-                    .map_err(|error| format!("failed to connect to ACP server {acp_addr}: {error}"))?;
+                    .map_err(|error| {
+                        format!("failed to connect to ACP server {acp_addr}: {error}")
+                    })?;
                 let (reader, writer) = stream.into_split();
                 let collector = PromptCollector::default();
                 let collector_handle = collector.clone();
@@ -182,4 +188,3 @@ fn run_prompt(acp_addr: String, workspace_root: PathBuf, prompt: String) -> Resu
             .await
     })
 }
-

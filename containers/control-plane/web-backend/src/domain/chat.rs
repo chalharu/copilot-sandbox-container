@@ -23,4 +23,3 @@ impl PromptInput {
 pub struct PromptOutput {
     pub text: String,
 }
-
