@@ -21,6 +21,7 @@
 | まず README から全体像をつかみたい | `README.md` |
 | runtime.env、永続 state、hook / Git policy、exec pod の kubectl 権限の path を引きたい | `docs/reference/control-plane-runtime.md` |
 | なぜ session-scoped Execution Pod と Kubernetes Job を併用するのか知りたい | `docs/explanation/knowledge.md` |
+| ACP ベースの Web / CLI 再設計案で、backend・frontend・CLI の責務分離を知りたい | `docs/explanation/acp-web-cli-architecture.md` |
 | 現行構成に至る経緯を追いたい | `docs/explanation/history.md` |
 | 複数 repo / 複数 instance の配置方法を知りたい | `deploy/helm/control-plane/README.md` |
 | リポジトリ自体を改修したい | `CONTRIBUTING.md` |
@@ -32,6 +33,7 @@
 - How-to guides: `docs/how-to-guides/cookbook.md`
   - 既存環境で特定の操作だけを進める
 - Explanation: `docs/explanation/knowledge.md`,
+  `docs/explanation/acp-web-cli-architecture.md`,
   `docs/explanation/history.md`
   - 仕組みや判断理由を理解する
 - Deployment references: `deploy/kubernetes/README.md`,
