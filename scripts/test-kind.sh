@@ -813,7 +813,7 @@ spec:
               command:
                 - bash
                 - -lc
-                - ":</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}"
+                - ":</dev/tcp/127.0.0.1/\${CONTROL_PLANE_ACP_PORT:-3000}"
             periodSeconds: 5
             failureThreshold: 12
           livenessProbe:
@@ -821,7 +821,7 @@ spec:
               command:
                 - bash
                 - -lc
-                - ":</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}"
+                - ":</dev/tcp/127.0.0.1/\${CONTROL_PLANE_ACP_PORT:-3000}"
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 6
@@ -1630,9 +1630,9 @@ EOF
      test -L /etc/ssh/ssh_host_ed25519_key.pub; \
      test \"\$(readlink /etc/ssh/ssh_host_ed25519_key)\" = '/run/control-plane/ssh-host-keys/ssh_host_ed25519_key'; \
      test \"\$(readlink /etc/ssh/ssh_host_ed25519_key.pub)\" = '/run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub'; \
-     test \"\$(stat -c '%a %U %G' /run/control-plane/ssh-host-keys)\" = '700 root root'; \
-     test \"\$(stat -c '%a %U %G' /run/control-plane/ssh-host-keys/ssh_host_ed25519_key)\" = '600 root root'; \
-     test \"\$(stat -c '%a %U %G' /run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub)\" = '644 root root'"
+     test \"\$(env -u LD_PRELOAD stat -c '%a %U %G' /run/control-plane/ssh-host-keys)\" = '700 root root'; \
+     test \"\$(env -u LD_PRELOAD stat -c '%a %U %G' /run/control-plane/ssh-host-keys/ssh_host_ed25519_key)\" = '600 root root'; \
+     test \"\$(env -u LD_PRELOAD stat -c '%a %U %G' /run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub)\" = '644 root root'"
 
   second_host_fingerprint="$(ssh_host_fingerprint)"
   [[ "${first_host_fingerprint}" == "${second_host_fingerprint}" ]]

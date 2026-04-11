@@ -222,9 +222,9 @@ test -L /etc/ssh/ssh_host_ed25519_key
 test -L /etc/ssh/ssh_host_ed25519_key.pub
 test "$(readlink /etc/ssh/ssh_host_ed25519_key)" = '/run/control-plane/ssh-host-keys/ssh_host_ed25519_key'
 test "$(readlink /etc/ssh/ssh_host_ed25519_key.pub)" = '/run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub'
-test "$(stat -c '%a %U %G' /run/control-plane/ssh-host-keys)" = '700 root root'
-test "$(stat -c '%a %U %G' /run/control-plane/ssh-host-keys/ssh_host_ed25519_key)" = '600 root root'
-test "$(stat -c '%a %U %G' /run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub)" = '644 root root'
+test "$(env -u LD_PRELOAD stat -c '%a %U %G' /run/control-plane/ssh-host-keys)" = '700 root root'
+test "$(env -u LD_PRELOAD stat -c '%a %U %G' /run/control-plane/ssh-host-keys/ssh_host_ed25519_key)" = '600 root root'
+test "$(env -u LD_PRELOAD stat -c '%a %U %G' /run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub)" = '644 root root'
 EOF
 
 printf '%s\n' 'standalone-test: checking persisted state after restart' >&2
