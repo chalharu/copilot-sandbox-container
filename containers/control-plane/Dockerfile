@@ -263,7 +263,7 @@ RUN apt-get update -o Acquire::Retries=3 \
         > /tmp/yamllint-requirements.txt \
     && python3 -m venv "${YAMLLINT_VIRTUAL_ENV}" \
     && "${YAMLLINT_VIRTUAL_ENV}/bin/pip" install --no-cache-dir --only-binary=:all: --require-hashes -r /tmp/yamllint-requirements.txt \
-    && apt-get purge -y --auto-remove curl unzip \
+    && apt-get purge -y --auto-remove unzip \
     && printf '%s\n' \
         'en_US.UTF-8 UTF-8' \
         'ja_JP.UTF-8 UTF-8' \

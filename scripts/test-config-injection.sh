@@ -206,7 +206,11 @@ jq -e '.nested.keep == 1' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.nested.replace.fromBase == true and .nested.replace.fromOverlay == true' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.nested.array == ["overlay"]' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.topLevelOverlay == "configmap"' /home/copilot/.copilot/config.json >/dev/null
-grep -Fqx '  git_protocol: ssh' /home/copilot/.config/gh/hosts.yml
+if cat /home/copilot/.config/gh/hosts.yml >/dev/null 2>&1; then
+  printf '%s\n' 'Expected direct ~/.config/gh/hosts.yml reads to be blocked by the exec policy' >&2
+  exit 1
+fi
+env -u LD_PRELOAD grep -Fqx '  git_protocol: ssh' /home/copilot/.config/gh/hosts.yml
 printf '%s\n' file-backed-ok
 EOF
 )"
@@ -368,7 +372,11 @@ token_backed_output="$("${container_bin}" run --rm \
   bash -l -se 2>&1 <<'EOF'
 set -euo pipefail
 test "$(stat -c '%a %U %G' /home/copilot/.config/gh/hosts.yml)" = '600 copilot copilot'
-grep -Fqx '    git_protocol: https' /home/copilot/.config/gh/hosts.yml
+if cat /home/copilot/.config/gh/hosts.yml >/dev/null 2>&1; then
+  printf '%s\n' 'Expected direct ~/.config/gh/hosts.yml reads to be blocked by the exec policy' >&2
+  exit 1
+fi
+env -u LD_PRELOAD grep -Fqx '    git_protocol: https' /home/copilot/.config/gh/hosts.yml
 printf '%s\n' token-backed-ok
 EOF
 )"

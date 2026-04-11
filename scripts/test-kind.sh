@@ -718,24 +718,11 @@ spec:
             - |
               set -eu
               umask 077
+              # Keep the Kind fixture aligned with the shipped manifests. The
+              # deeper merge behavior is covered in test-config-injection.sh.
               [ -s /state/copilot-config.json ] || cat > /state/copilot-config.json <<'JSON'
               {
-                "auth": {
-                  "provider": "github"
-                },
-                "features": {
-                  "persisted": true,
-                  "sessionPicker": true
-                },
-                "nested": {
-                  "keep": 1,
-                  "replace": {
-                    "fromBase": true
-                  },
-                  "array": [
-                    "base"
-                  ]
-                }
+                "telemetry": false
               }
               JSON
               [ -f /state/gh/hosts.yml ] || cat > /state/gh/hosts.yml <<'YAML'
@@ -1146,12 +1133,10 @@ test "\$(stat -c '%a %U %G' ~/.copilot/config.json)" = '600 copilot copilot'
 test "\$(stat -c '%a %U %G' ~/.copilot/command-history-state.json)" = '600 copilot copilot'
 test "\$(stat -c '%a %U %G' ~/.config/gh/hosts.yml)" = '600 copilot copilot'
 printf '%s\n' 'kind-test remote: persisted files ok' >&2
-jq -e '.auth.provider == "github"' ~/.copilot/config.json >/dev/null
-jq -e '.features.sessionPicker == true' ~/.copilot/config.json >/dev/null
+jq -e '.telemetry == false' ~/.copilot/config.json >/dev/null
 jq -e '.features.persisted == false' ~/.copilot/config.json >/dev/null
 jq -e '.features.overlayOnly == true' ~/.copilot/config.json >/dev/null
-jq -e '.nested.keep == 1' ~/.copilot/config.json >/dev/null
-jq -e '.nested.replace.fromBase == true and .nested.replace.fromOverlay == true' ~/.copilot/config.json >/dev/null
+jq -e '.nested.replace.fromOverlay == true' ~/.copilot/config.json >/dev/null
 jq -e '.nested.array == ["overlay"]' ~/.copilot/config.json >/dev/null
 jq -e '.topLevelOverlay == "kind"' ~/.copilot/config.json >/dev/null
 printf '%s\n' 'kind-test remote: config merge ok' >&2
@@ -1159,6 +1144,7 @@ if cat ~/.config/gh/hosts.yml >/dev/null 2>&1; then
   printf '%s\n' 'expected direct ~/.config/gh/hosts.yml reads to be blocked by the exec policy' >&2
   exit 1
 fi
+env -u LD_PRELOAD grep -Fqx '  git_protocol: ssh' ~/.config/gh/hosts.yml
 printf '%s\n' 'kind-test remote: gh hosts confinement ok' >&2
 grep -Fqx 'CARGO_HOME=/home/copilot/.cargo' ~/.config/control-plane/runtime.env
 grep -Fqx 'CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target' ~/.config/control-plane/runtime.env

@@ -42,6 +42,9 @@ require_command "${container_bin}"
 mkdir -p \
   "${workdir}/fake-bin" \
   "${workdir}/state/copilot/session-state" \
+  "${workdir}/state/gh" \
+  "${workdir}/state/control-plane" \
+  "${workdir}/auth/..data" \
   "${workdir}/workspace"
 
 cat > "${workdir}/fake-bin/git" <<'EOF'
@@ -79,6 +82,13 @@ fi
 while IFS= read -r _; do :; done < "${HOME}/.config/gh/hosts.yml"
 EOF
 chmod 755 "${workdir}/fake-bin/gh"
+
+cat > "${workdir}/fake-bin/control-plane-copilot" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+while IFS= read -r _; do :; done < "${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}"
+EOF
+chmod 755 "${workdir}/fake-bin/control-plane-copilot"
 
 cat > "${workdir}/pre-tool-use-check.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -406,6 +416,49 @@ printf '%s\n' 'pre-tool-use-policy-ok'
 EOF
 chmod 755 "${workdir}/pre-tool-use-check.sh"
 
+printf '%s\n' 'copilot-secret-token' > "${workdir}/state/control-plane/copilot-github-token"
+cat > "${workdir}/state/gh/hosts.yml" <<'EOF'
+github.com:
+  oauth_token: managed-gh-token
+  user: managed-bot
+EOF
+printf '%s\n' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestMountedKey mounted@test' > "${workdir}/auth/..data/ssh-public-key"
+printf '%s\n' 'mounted-gh-token' > "${workdir}/auth/..data/gh-github-token"
+cat > "${workdir}/auth/..data/gh-hosts.yml" <<'EOF'
+github.com:
+  oauth_token: mounted-gh-token
+  user: mounted-bot
+EOF
+printf '%s\n' 'mounted-copilot-token' > "${workdir}/auth/..data/copilot-github-token"
+ln -sfn ..data/ssh-public-key "${workdir}/auth/ssh-public-key"
+ln -sfn ..data/gh-github-token "${workdir}/auth/gh-github-token"
+ln -sfn ..data/gh-hosts.yml "${workdir}/auth/gh-hosts.yml"
+ln -sfn ..data/copilot-github-token "${workdir}/auth/copilot-github-token"
+
+"${container_bin}" run --rm \
+  --user 0:0 \
+  -v "${workdir}:/setup" \
+  --entrypoint bash \
+  "${control_plane_image}" \
+  -lc '
+set -euo pipefail
+chown -R 1000:1000 /setup/state /setup/workspace /setup/auth/..data
+chmod 700 \
+  /setup/state/copilot \
+  /setup/state/copilot/session-state \
+  /setup/state/gh \
+  /setup/state/control-plane \
+  /setup/workspace
+chmod 755 /setup/auth /setup/auth/..data
+chmod 600 \
+  /setup/state/control-plane/copilot-github-token \
+  /setup/state/gh/hosts.yml \
+  /setup/auth/..data/ssh-public-key \
+  /setup/auth/..data/gh-github-token \
+  /setup/auth/..data/gh-hosts.yml \
+  /setup/auth/..data/copilot-github-token
+'
+
 printf '%s\n' 'test-pre-tool-use-policy.sh: verifying bundled preToolUse and exec policy deny paths' >&2
 set +e
 output="$("${container_bin}" run --rm \
@@ -414,70 +467,17 @@ output="$("${container_bin}" run --rm \
   -i \
   "${startup_caps[@]}" \
   -v "${workdir}/state/copilot:/home/copilot/.copilot" \
+  -v "${workdir}/state/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/state/control-plane:/home/copilot/.config/control-plane" \
   -v "${workdir}/workspace:/workspace" \
+  -v "${workdir}/auth:/var/run/control-plane-auth:ro" \
   -v "${workdir}/pre-tool-use-check.sh:/tmp/pre-tool-use-check.sh:ro" \
   -v "${workdir}/fake-bin:/tmp/fake-bin:ro" \
-"${control_plane_image}" \
+  -v "${workdir}/fake-bin/gh:/usr/bin/gh:ro" \
+  -v "${workdir}/fake-bin/control-plane-copilot:/usr/local/bin/control-plane-copilot:ro" \
+  "${control_plane_image}" \
   bash -l -se 2>&1 <<'EOF'
 set -euo pipefail
-env -u LD_PRELOAD bash -se <<'EOF_SETUP'
-set -euo pipefail
-install -d -o copilot -g copilot /home/copilot/.config/gh
-install -d -o copilot -g copilot /home/copilot/.config/control-plane
-install -d -o copilot -g copilot /run/control-plane-auth/..data
-printf '%s\n' 'copilot-secret-token' > /home/copilot/.config/control-plane/copilot-github-token
-cat > /home/copilot/.config/gh/hosts.yml <<'YAML'
-github.com:
-  oauth_token: managed-gh-token
-  user: managed-bot
-YAML
-printf '%s\n' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestMountedKey mounted@test' > /run/control-plane-auth/..data/ssh-public-key
-printf '%s\n' 'mounted-gh-token' > /run/control-plane-auth/..data/gh-github-token
-cat > /run/control-plane-auth/..data/gh-hosts.yml <<'YAML'
-github.com:
-  oauth_token: mounted-gh-token
-  user: mounted-bot
-YAML
-printf '%s\n' 'mounted-copilot-token' > /run/control-plane-auth/..data/copilot-github-token
-ln -s ..data/ssh-public-key /run/control-plane-auth/ssh-public-key
-ln -s ..data/gh-github-token /run/control-plane-auth/gh-github-token
-ln -s ..data/gh-hosts.yml /run/control-plane-auth/gh-hosts.yml
-ln -s ..data/copilot-github-token /run/control-plane-auth/copilot-github-token
-chown copilot:copilot \
-  /home/copilot/.config/control-plane/copilot-github-token \
-  /run/control-plane-auth/..data/ssh-public-key \
-  /run/control-plane-auth/..data/gh-github-token \
-  /run/control-plane-auth/..data/gh-hosts.yml \
-  /run/control-plane-auth/..data/copilot-github-token
-chmod 600 \
-  /home/copilot/.config/control-plane/copilot-github-token \
-  /run/control-plane-auth/..data/ssh-public-key \
-  /run/control-plane-auth/..data/gh-github-token \
-  /run/control-plane-auth/..data/gh-hosts.yml \
-  /run/control-plane-auth/..data/copilot-github-token
-chown copilot:copilot /home/copilot/.config/gh/hosts.yml
-chmod 600 /home/copilot/.config/gh/hosts.yml
-rm -f \
-  /usr/local/bin/control-plane-copilot \
-  /usr/bin/gh
-cat > /usr/local/bin/control-plane-copilot <<'EOF_COPILOT'
-#!/usr/bin/env bash
-set -euo pipefail
-while IFS= read -r _; do :; done < "${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}"
-EOF_COPILOT
-cat > /usr/bin/gh <<'EOF_GH'
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ "${1:-}" == "auth" ]] && [[ "${2:-}" == "token" ]]; then
-  printf '%s\n' 'gh auth token should have been denied before executing gh' >&2
-  exit 99
-fi
-while IFS= read -r _; do :; done < "${HOME}/.config/gh/hosts.yml"
-EOF_GH
-chmod 755 \
-  /usr/local/bin/control-plane-copilot \
-  /usr/bin/gh
-EOF_SETUP
 source /home/copilot/.config/control-plane/runtime.env
 su -s /bin/bash copilot -lc 'export PATH="${PATH}:/tmp/fake-bin"; /tmp/pre-tool-use-check.sh'
 EOF
