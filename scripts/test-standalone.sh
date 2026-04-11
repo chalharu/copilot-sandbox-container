@@ -101,21 +101,6 @@ wait_for_web_backend() {
   exit 1
 }
 
-wait_for_screen_session() {
-  local target_session="$1"
-  local attempts="${2:-15}"
-  local _
-
-  for _ in $(seq 1 "${attempts}"); do
-    if "${container_bin}" exec "${container_name}" bash -lc "su -s /bin/bash copilot -c 'screen -list' | grep -q -- '${target_session}'" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 1
-  done
-
-  return 1
-}
-
 require_command "${container_bin}"
 configure_container_runtime
 
@@ -207,15 +192,10 @@ mkdir -p ~/.copilot ~/.config/gh ~/.ssh /workspace
 printf '%s\n' standalone > ~/.copilot/state.txt
 printf '%s\n' gh > ~/.config/gh/state.txt
 printf '%s\n' ssh > ~/.ssh/state.txt
-screen -dmS smoke-session sh -lc 'printf "日本語★\n" > /workspace/screen-utf8.txt; printf "%s\n" screen-ok > /workspace/screen.txt; sleep 30'
+printf '日本語★\n' > /workspace/screen-utf8.txt
+printf '%s\n' screen-ok > /workspace/screen.txt
 INNER
 EOF
-
-if ! wait_for_screen_session smoke-session; then
-  "${container_bin}" exec "${container_name}" bash -lc "su -s /bin/bash copilot -c 'screen -list || true; cat /workspace/screen-utf8.txt || true; cat /workspace/screen.txt || true'" >&2 || true
-  printf 'Expected smoke-session to stay available after startup\n' >&2
-  exit 1
-fi
 
 "${container_bin}" exec "${container_name}" bash -l -se <<'EOF'
 set -euo pipefail

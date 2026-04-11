@@ -384,7 +384,7 @@ EOF
             - -lc
             - |
               set -euo pipefail
-              transfer_token="$(cat /var/run/control-plane-job-transfer/transfer-token)"
+              transfer_token="\$(cat /var/run/control-plane-job-transfer/transfer-token)"
               mkdir -p "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}"
               curl -fsSL \
                 -H "Authorization: Bearer \${transfer_token}" \
@@ -437,7 +437,7 @@ EOF
                   sleep 1
                 fi
               done
-              transfer_token="$(cat /var/run/control-plane-job-transfer/transfer-token)"
+              transfer_token="\$(cat /var/run/control-plane-job-transfer/transfer-token)"
               if [[ "\${execution_exit_code}" == "0" ]]; then
                 tar -cf - -C "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}" . \
                   | curl -fsS \

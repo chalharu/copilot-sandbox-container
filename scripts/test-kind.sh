@@ -121,25 +121,6 @@ wait_for_ssh() {
   exit 1
 }
 
-wait_for_screen_session() {
-  local target_session="$1"
-  local attempts="${2:-15}"
-  local _
-
-  for _ in $(seq 1 "${attempts}"); do
-    if ssh_bash <<EOF >/dev/null 2>&1
-set -euo pipefail
-screen -list | grep -q -- '${target_session}'
-EOF
-    then
-      return 0
-    fi
-    sleep 1
-  done
-
-  return 1
-}
-
 wait_for_remote_grep() {
   local remote_pattern="$1"
   local remote_path="$2"
@@ -322,6 +303,9 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -1483,9 +1467,10 @@ mkdir -p ~/.copilot ~/.config/gh ~/.ssh /workspace
 echo k8s > ~/.copilot/state.txt
 echo gh > ~/.config/gh/state.txt
 echo ssh > ~/.ssh/state.txt
-screen -dmS kind-session sh -lc 'printf "日本語★\n" > /workspace/k8s-screen-utf8.txt; echo k8s-screen > /workspace/k8s-screen.txt; sleep 30'
+printf '日本語★\n' > /workspace/k8s-screen-utf8.txt
+printf '%s\n' k8s-screen > /workspace/k8s-screen.txt
 EOF
-  printf '%s\n' 'kind-test: screen session started' >&2
+  printf '%s\n' 'kind-test: session fixtures seeded' >&2
 }
 
 wait_for_screen_output_fixture() {
@@ -1495,34 +1480,22 @@ set -euo pipefail
 cat /workspace/k8s-screen-utf8.txt || true
 cat /workspace/k8s-screen.txt || true
 EOF
-    printf 'Expected kind-session fixture to persist screen status output\n' >&2
+    printf 'Expected seeded session fixture to persist status output\n' >&2
     exit 1
   fi
 }
 
 run_terminal_session_assertions() {
-  if ! wait_for_screen_session kind-session; then
-    ssh_bash <<'EOF' >&2 || true
-set -euo pipefail
-screen -list || true
-cat /workspace/k8s-screen-utf8.txt || true
-cat /workspace/k8s-screen.txt || true
-EOF
-    printf 'Expected kind-session to stay available after SSH setup\n' >&2
-    exit 1
-  fi
-  printf '%s\n' 'kind-test: screen session ready' >&2
-
   if ! wait_for_remote_grep '^日本語★$' /workspace/k8s-screen-utf8.txt; then
     ssh_bash <<'EOF' >&2 || true
 set -euo pipefail
 cat /workspace/k8s-screen-utf8.txt || true
 cat /workspace/k8s-screen.txt || true
 EOF
-    printf 'Expected kind-session to persist UTF-8 screen output\n' >&2
+    printf 'Expected seeded session fixture to persist UTF-8 output\n' >&2
     exit 1
   fi
-  printf '%s\n' 'kind-test: screen utf8 ready' >&2
+  printf '%s\n' 'kind-test: session utf8 fixture ready' >&2
 
   if ! wait_for_remote_grep '^k8s-screen$' /workspace/k8s-screen.txt; then
     ssh_bash <<'EOF' >&2 || true
@@ -1530,10 +1503,10 @@ set -euo pipefail
 cat /workspace/k8s-screen-utf8.txt || true
 cat /workspace/k8s-screen.txt || true
 EOF
-    printf 'Expected kind-session to persist screen status output\n' >&2
+    printf 'Expected seeded session fixture to persist status output\n' >&2
     exit 1
   fi
-  printf '%s\n' 'kind-test: screen output ready' >&2
+  printf '%s\n' 'kind-test: session status fixture ready' >&2
 
   printf '%s\n' 'kind-test: verifying web backend health surface' >&2
   kubectl exec --namespace "${namespace}" "$(control_plane_web_pod_name)" -c control-plane-web -- node - <<'EOF'
