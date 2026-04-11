@@ -97,6 +97,10 @@ apply_output_file() {
 
   temp_path="$(mktemp "${source_dir}/.${source_name}.control-plane-job-transfer.XXXXXX")"
   cp "${output_path}" "${temp_path}"
+  if [[ -f "${source_path}" ]]; then
+    chown --reference="${source_path}" "${temp_path}"
+    chmod --reference="${source_path}" "${temp_path}"
+  fi
   mv "${temp_path}" "${source_path}"
   return 0
 }
