@@ -47,6 +47,8 @@ copilot session PVC へまとめるもの:
 `sshd` 自体は PVC 上の private host key をそのまま読まず、startup ごとに
 `/run/control-plane/ssh-host-keys` へ root-only copy を staging してから使います。
 これで、storage backend が persistent file に group bit を残す場合でも再起動を壊しません。
+sample manifest は SSH Service を公開しませんが、current-cluster smoke と
+legacy shell/runtime compatibility のためにこれらの path は残します。
 
 監査ログの保持件数は `control-plane-env` ConfigMap の
 `CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）で調整し、
@@ -193,11 +195,12 @@ bundled skill は image に同梱し、起動時に `~/.copilot/skills/` へ cop
 
 ## 7. Kubernetes Job file transfer
 
-Kubernetes Job path の `--mount-file` は、ConfigMap ではなく SSH/SFTP +
-`rclone` を使います。
+Kubernetes Job path の `--mount-file` は、ConfigMap ではなく web backend 経由の
+HTTP tar transfer を使います。
 
-- init container が入力ファイルを pull する
-- sidecar が Job 完了後に変更ファイルを push する
+- init container が web Service から入力 tar を pull する
+- sidecar が Job 完了後に出力 tar を web Service へ push する
+- finalize / release は `control-plane-job-transfer` が担当する
 - write-back は Job 開始時の SHA-256 と完了時の現在値を比較する
 - 外部更新と Job 側更新が衝突した場合は、黙って上書きせず staging area へ
   退避する

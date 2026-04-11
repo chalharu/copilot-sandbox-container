@@ -6,6 +6,7 @@
 {{- $jobNamespace := include "control-plane.instanceJobNamespace" $ctx -}}
 {{- $image := mergeOverwrite (dict) $.Values.global.image (default dict $instance.image) -}}
 {{- $service := mergeOverwrite (dict) $.Values.global.service (default dict $instance.service) -}}
+{{- $acpService := mergeOverwrite (dict) $.Values.global.acpService (default dict $instance.acpService) -}}
 {{- $workspace := mergeOverwrite (dict) $.Values.global.workspace (default dict $instance.workspace) -}}
 {{- $session := mergeOverwrite (dict) $.Values.global.session (default dict $instance.session) -}}
 {{- $globalAuth := default dict $.Values.global.auth -}}
@@ -44,9 +45,13 @@ data:
 {{- $_ := set $instanceEnv "CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT" (include "control-plane.execServiceAccountName" $ctx) -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_SERVICE_ACCOUNT" (include "control-plane.jobServiceAccountName" $ctx) -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_WORKSPACE_PVC" (include "control-plane.workspaceClaimName" $ctx) -}}
+{{- $_ := set $instanceEnv "CONTROL_PLANE_ACP_HOST" (printf "%s.%s.svc.%s" (include "control-plane.acpServiceName" $ctx) $mainNamespace $.Values.global.clusterDomain) -}}
+{{- $_ := set $instanceEnv "CONTROL_PLANE_ACP_PORT" ($acpService.port | toString) -}}
+{{- $_ := set $instanceEnv "CONTROL_PLANE_WEB_PORT" ($service.port | toString) -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE" (include "control-plane.imageRef" (dict "image" $image)) -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY" ($image.pullPolicy | toString) -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_TRANSFER_IMAGE" (include "control-plane.imageRef" (dict "image" $image)) -}}
+{{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_TRANSFER_ROOT" "/home/copilot/.copilot/session-state/job-transfers" -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_TRANSFER_HOST" (printf "%s.%s.svc.%s" (include "control-plane.serviceName" $ctx) $mainNamespace $.Values.global.clusterDomain) -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_TRANSFER_PORT" ($service.port | toString) -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_IMAGE_PULL_POLICY" ($image.pullPolicy | toString) -}}

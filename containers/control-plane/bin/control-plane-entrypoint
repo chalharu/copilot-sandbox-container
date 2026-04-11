@@ -67,11 +67,12 @@ job_workspace_pvc="${CONTROL_PLANE_JOB_WORKSPACE_PVC:-}"
 job_workspace_mount_path="${CONTROL_PLANE_JOB_WORKSPACE_MOUNT_PATH:-${CONTROL_PLANE_WORKSPACE_MOUNT_PATH:-/workspace}}"
 job_workspace_subpath="${CONTROL_PLANE_JOB_WORKSPACE_SUBPATH:-${CONTROL_PLANE_WORKSPACE_SUBPATH:-workspace}}"
 job_input_mount_path="${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH:-/var/run/control-plane/job-inputs}"
-job_transfer_root="${CONTROL_PLANE_JOB_TRANSFER_ROOT:-${tmp_dir}/job-transfers}"
+job_transfer_root="${CONTROL_PLANE_JOB_TRANSFER_ROOT:-${copilot_session_state_dir}/job-transfers}"
 job_transfer_image="${CONTROL_PLANE_JOB_TRANSFER_IMAGE:-}"
 job_transfer_host="${CONTROL_PLANE_JOB_TRANSFER_HOST:-control-plane.${CONTROL_PLANE_K8S_NAMESPACE:-default}.svc.cluster.local}"
-job_transfer_port="${CONTROL_PLANE_JOB_TRANSFER_PORT:-2222}"
+job_transfer_port="${CONTROL_PLANE_JOB_TRANSFER_PORT:-8080}"
 job_transfer_user="${CONTROL_PLANE_JOB_TRANSFER_USER:-${control_plane_user}}"
+acp_port="${CONTROL_PLANE_ACP_PORT:-3000}"
 reverse_exec_api_port="${CONTROL_PLANE_REVERSE_EXEC_API_PORT:-8081}"
 reverse_exec_api_token="${CONTROL_PLANE_REVERSE_EXEC_API_TOKEN:-}"
 reverse_exec_api_addr=""
@@ -103,6 +104,11 @@ fi
 
 if [[ ! "${reverse_exec_api_port}" =~ ^[0-9]+$ ]] || (( reverse_exec_api_port <= 0 || reverse_exec_api_port > 65535 )); then
   printf 'CONTROL_PLANE_REVERSE_EXEC_API_PORT must be a valid TCP port: %s\n' "${reverse_exec_api_port}" >&2
+  exit 1
+fi
+
+if [[ ! "${acp_port}" =~ ^[0-9]+$ ]] || (( acp_port <= 0 || acp_port > 65535 )); then
+  printf 'CONTROL_PLANE_ACP_PORT must be a valid TCP port: %s\n' "${acp_port}" >&2
   exit 1
 fi
 
@@ -919,6 +925,7 @@ runtime_config_tmp="$(mktemp "${runtime_config_path}.XXXXXX")"
   if [[ -n "${CONTROL_PLANE_COPILOT_BIN:-}" ]]; then
     write_runtime_var CONTROL_PLANE_COPILOT_BIN "${CONTROL_PLANE_COPILOT_BIN}"
   fi
+  write_runtime_var CONTROL_PLANE_ACP_PORT "${acp_port}"
   write_runtime_var CONTROL_PLANE_COPILOT_NICE_LEVEL "${copilot_nice_level}"
   if [[ -n "${CONTROL_PLANE_RUST_HOOK_IMAGE:-}" ]]; then
     write_runtime_var CONTROL_PLANE_RUST_HOOK_IMAGE "${CONTROL_PLANE_RUST_HOOK_IMAGE}"

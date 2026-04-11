@@ -8,9 +8,16 @@ global:
     tag: latest
     pullPolicy: IfNotPresent
   service:
+    # Browser-facing web service.
     name: control-plane
     type: LoadBalancer
-    port: 2222
+    port: 8080
+    annotations: {}
+  acpService:
+    # Internal Service that the web deployment uses to reach the Copilot ACP runtime.
+    name: control-plane-acp
+    type: ClusterIP
+    port: 3000
     annotations: {}
   auth:
     name: control-plane-auth
@@ -105,6 +112,7 @@ instances:
   - name: sandbox
     image: {}
     service: {}
+    acpService: {}
     auth: {}
     workspace: {}
     # Optional per-instance overrides for shared session mounts. stateSubPath

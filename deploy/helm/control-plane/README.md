@@ -1,7 +1,7 @@
 # Helm chart for multi-repository control planes
 
-`deploy/helm/control-plane/` は、repo ごとに `copilot + workspace PVC + Service`
-を複数並べたいケース向けの Helm chart です。既定では、すべての instance を
+`deploy/helm/control-plane/` は、repo ごとに `copilot ACP runtime + web UI +
+workspace PVC` を複数並べたいケース向けの Helm chart です。既定では、すべての instance を
 同じ main namespace / jobs namespace に置き、session PVC claim も共有します。
 
 chart 全体として、既定で次を生成します。
@@ -19,7 +19,9 @@ chart 全体として、既定で次を生成します。
 - instance ごとに一意な `control-plane-instance-env`
 - workspace PVC
 - `control-plane-<instance.name>` Deployment
-- `control-plane-<instance.name>` Service
+- `control-plane-web-<instance.name>` Deployment
+- web 用 `control-plane-<instance.name>` Service
+- internal ACP 用 `control-plane-acp-<instance.name>` Service
 
 workspace PVC と Service は、instance 側で明示 override しない限り
 `<base>-<instance.name>` で名前分離されます。Secret と `control-plane-config` は
@@ -30,7 +32,7 @@ global 値をそのまま使う限り shared resource を使い、instance overr
 ## 使い方
 
 まず最低限、shared namespace と session PVC の RWX storage class、各 instance の
-SSH 公開鍵を上書きします。
+認証情報を上書きします。
 
 ```yaml
 global:
@@ -121,7 +123,8 @@ instances:
 
 - `global.namespace` / `global.jobNamespace`: instance 群を置く共有 namespace
 - `instances[].image`: repo ごとの image tag / pullPolicy
-- `instances[].service`: Service の明示名、type、port
+- `instances[].service`: web Service の明示名、type、port
+- `instances[].acpService`: internal ACP Service の明示名、type、port
 - `instances[].workspace`: workspace PVC claim 名、size、storage class、subPath
 - `global.session`: 共有 session PVC の claim 名、size、storage class
 - `instances[].session`: repo ごとの stateSubPath や GH / SSH subPath override

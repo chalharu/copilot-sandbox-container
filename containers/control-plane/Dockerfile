@@ -85,6 +85,23 @@ COPY hooks/postToolUse/linters.json /build/hooks/postToolUse/linters.json
 RUN cargo test --locked --release \
     && cargo build --locked --release
 
+FROM cargo-chef AS web-planner
+
+WORKDIR /build/control-plane-web
+COPY web/Cargo.toml web/Cargo.lock ./
+COPY web/src ./src
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM cargo-chef AS web-builder
+
+WORKDIR /build/control-plane-web
+COPY --from=web-planner /build/control-plane-web/recipe.json ./recipe.json
+RUN cargo chef cook --locked --release --recipe-path recipe.json
+COPY web/Cargo.toml web/Cargo.lock ./
+COPY web/src ./src
+RUN cargo test --locked --release \
+    && cargo build --locked --release
+
 FROM cargo-chef AS rust-toolchain
 
 RUN rustup component add clippy rustfmt
@@ -229,7 +246,7 @@ RUN apt-get update -o Acquire::Retries=3 \
         > /tmp/yamllint-requirements.txt \
     && python3 -m venv "${YAMLLINT_VIRTUAL_ENV}" \
     && "${YAMLLINT_VIRTUAL_ENV}/bin/pip" install --no-cache-dir --only-binary=:all: --require-hashes -r /tmp/yamllint-requirements.txt \
-    && apt-get purge -y --auto-remove curl unzip \
+    && apt-get purge -y --auto-remove unzip \
     && printf '%s\n' \
         'en_US.UTF-8 UTF-8' \
         'ja_JP.UTF-8 UTF-8' \
@@ -305,6 +322,7 @@ COPY --chmod=755 bin/control-plane-exec-api-launcher /usr/local/bin/control-plan
 COPY --chmod=755 bin/control-plane-session-exec /usr/local/bin/control-plane-session-exec
 COPY --chmod=755 bin/control-plane-copilot /usr/local/bin/control-plane-copilot
 COPY --from=exec-api-builder /build/control-plane-exec-api/target/release/control-plane-exec-api /usr/local/bin/control-plane-exec-api
+COPY --from=web-builder /build/control-plane-web/target/release/control-plane-web /usr/local/bin/control-plane-web
 COPY --chmod=755 bin/control-plane-job-transfer /usr/local/bin/control-plane-job-transfer
 COPY --chmod=755 bin/control-plane-run /usr/local/bin/control-plane-run
 COPY --chmod=755 bin/control-plane-session /usr/local/bin/control-plane-session
@@ -342,7 +360,7 @@ WORKDIR /workspace
 # provisions mounted state and SSH host keys.
 USER ${CONTROL_PLANE_USER}
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["bash", "-lc", "node --version >/dev/null && cargo --version >/dev/null && git --version >/dev/null && yamllint --version >/dev/null && control-plane-exec-api --help >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]
+    CMD ["bash", "-lc", "node --version >/dev/null && cargo --version >/dev/null && git --version >/dev/null && yamllint --version >/dev/null && control-plane-exec-api --help >/dev/null && test -x /usr/local/bin/control-plane-web && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]
 EXPOSE 2222
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/control-plane-entrypoint"]
 CMD ["/usr/sbin/sshd", "-D", "-e", "-f", "/etc/ssh/sshd_config"]

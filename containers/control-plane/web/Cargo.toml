@@ -1,0 +1,22 @@
+[package]
+name = "control-plane-web"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+
+[dependencies]
+any_spawner = { version = "=0.3.0", features = ["tokio"] }
+agent-client-protocol = "=0.10.4"
+async-trait = "=0.1.89"
+axum = "=0.8.8"
+leptos = { version = "=0.8.17", features = ["ssr"] }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.149"
+tokio = { version = "=1.48.0", features = [
+  "macros",
+  "net",
+  "rt-multi-thread",
+  "signal",
+  "sync",
+] }
+tokio-util = { version = "=0.7.18", features = ["compat"] }

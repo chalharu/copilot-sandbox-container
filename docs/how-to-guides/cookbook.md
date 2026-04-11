@@ -53,9 +53,9 @@ runtime / cache / hook の具体的な path は
 
 - bundled skill の `references/` が読める
 - `COPILOT_CONFIG_JSON_FILE` と `GH_HOSTS_YML_FILE` / `GH_GITHUB_TOKEN_FILE` による設定注入が効く
-- `drop: ALL` 系 capability 構成で interactive SSH login が接続維持後も入力を受け付ける
+- sample manifest の web UI / ACP wiring が期待どおり render される
 - bundled toolchain と runtime.env が期待どおり生成される
-- `--mount-file` が SSH/SFTP + `rclone` で大きめのファイルも運べ、競合時は安全に write-back を止める
+- `--mount-file` が web backend への HTTP tar transfer で大きめのファイルも運べ、競合時は安全に write-back を止める
 - `CONTROL_PLANE_FAST_EXECUTION_ENABLED=1` のとき、Copilot CLI の `bash`
   tool が session-scoped Execution Pod に委譲され、`sessionEnd` /
   OwnerReference で cleanup される
@@ -210,29 +210,29 @@ command の Job 経路です。
 control-plane-run ...
 ```
 
-## 6. SSH login を検証する
+## 6. web UI と ACP Service を検証する
 
 Service の `EXTERNAL-IP` がまだ無い場合は port-forward を使います。
 
 ```bash
-kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox
+kubectl port-forward service/control-plane 8080:8080 -n copilot-sandbox
 ```
 
-その後に SSH:
+その後に browser か health endpoint を確認します。
 
 ```bash
-ssh -p 2222 copilot@127.0.0.1
+curl -fsS http://127.0.0.1:8080/healthz
 ```
 
-interactive SSH login は常に Copilot 用 GNU Screen session を再利用または作成します。
-one-shot の shell command だけなら `ssh -p 2222 copilot@127.0.0.1 'bash -il'` のように
-command mode を使います。
+browser-facing Service は `control-plane`、internal ACP Service は
+`control-plane-acp` です。legacy SSH/screen 挙動は current-cluster smoke と
+standalone image validation 側で引き続き検証します。
 
 ## 7. 典型的なデバッグの入口
 
 - `ls: cannot access ... Permission denied`: bundled skill の同期結果と directory execute bit を確認する
 - `cannot clone: Operation not permitted`: rootless 前提の説明を見直し、Execution Pod / Job 経路へ寄せる
 - `cgroup.subtree_control: Read-only file system`: nested container 実行を前提にせず Job 経路を優先する
-- `cleanup_exit: kill(`: SSH capability 構成を見直す
+- `cleanup_exit: kill(`: legacy SSH compatibility smoke の capability 構成を見直す
 
 失敗ログの意味は `docs/reference/debug-log.md` を参照してください。

@@ -12,6 +12,7 @@ fi
 copilot_bin="${CONTROL_PLANE_COPILOT_BIN:-copilot}"
 copilot_github_token_file="${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE:-}"
 copilot_nice_level="${CONTROL_PLANE_COPILOT_NICE_LEVEL:-10}"
+acp_port="${CONTROL_PLANE_ACP_PORT:-3000}"
 
 die() {
   printf 'control-plane-copilot: %s\n' "$*" >&2
@@ -31,8 +32,9 @@ command -v "${copilot_bin}" >/dev/null 2>&1 || {
 }
 
 require_integer "${copilot_nice_level}" "CONTROL_PLANE_COPILOT_NICE_LEVEL"
+require_integer "${acp_port}" "CONTROL_PLANE_ACP_PORT"
 
-copilot_args=("${copilot_bin}" --yolo)
+copilot_args=("${copilot_bin}" --yolo --acp --port "${acp_port}")
 if [[ -n "${copilot_github_token_file}" ]] && [[ -f "${copilot_github_token_file}" ]]; then
   IFS= read -r copilot_github_token < "${copilot_github_token_file}" || true
   if [[ -n "${copilot_github_token:-}" ]]; then

@@ -2,7 +2,7 @@
 {{- $ctx := dict "root" $ "instance" $instance -}}
 {{- $mainNamespace := include "control-plane.instanceMainNamespace" $ctx -}}
 {{- $image := mergeOverwrite (dict) $.Values.global.image (default dict $instance.image) -}}
-{{- $acpService := mergeOverwrite (dict) $.Values.global.acpService (default dict $instance.acpService) -}}
+{{- $service := mergeOverwrite (dict) $.Values.global.service (default dict $instance.service) -}}
 {{- $workspace := mergeOverwrite (dict) $.Values.global.workspace (default dict $instance.workspace) -}}
 {{- $session := mergeOverwrite (dict) $.Values.global.session (default dict $instance.session) -}}
 {{- $sessionStateSubPath := include "control-plane.sessionStateSubPath" $ctx -}}
@@ -12,9 +12,9 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "control-plane.deploymentName" $ctx }}
+  name: {{ include "control-plane.webDeploymentName" $ctx }}
   namespace: {{ $mainNamespace }}
-  labels:{{ include "control-plane.acpCommonLabels" $ctx | nindent 4 }}
+  labels:{{ include "control-plane.webCommonLabels" $ctx | nindent 4 }}
 {{- if $deploymentAnnotations }}
   annotations:
 {{- range $key := keys $deploymentAnnotations | sortAlpha }}
@@ -26,10 +26,10 @@ spec:
   strategy:
     type: Recreate
   selector:
-    matchLabels:{{ include "control-plane.acpSelectorLabels" $ctx | nindent 6 }}
+    matchLabels:{{ include "control-plane.webSelectorLabels" $ctx | nindent 6 }}
   template:
     metadata:
-      labels:{{ include "control-plane.acpCommonLabels" $ctx | nindent 8 }}
+      labels:{{ include "control-plane.webCommonLabels" $ctx | nindent 8 }}
 {{- if $podAnnotations }}
       annotations:
 {{- range $key := keys $podAnnotations | sortAlpha }}
@@ -60,8 +60,7 @@ spec:
                 /copilot-session/{{ $sessionStateSubPath }}/state/ssh-auth \
                 /copilot-session/{{ $sessionStateSubPath }}/state/ssh-host-keys \
                 /copilot-session/{{ $sessionStateSubPath }}/session-state \
-                /workspace-state/{{ $workspace.subPath }} \
-                /cache/runtime-tmp
+                /workspace-state/{{ $workspace.subPath }}
               touch \
                 /copilot-session/{{ $sessionStateSubPath }}/state/copilot-config.json \
                 /copilot-session/{{ $sessionStateSubPath }}/state/command-history-state.json
@@ -84,8 +83,6 @@ spec:
                 -type f -exec chmod 600 {} +
               chown 1000:1000 /workspace-state/{{ $workspace.subPath }}
               chmod 700 /workspace-state/{{ $workspace.subPath }}
-              chown 0:1000 /cache/runtime-tmp
-              chmod 755 /cache/runtime-tmp
           securityContext:
             privileged: false
             runAsUser: 0
@@ -106,8 +103,6 @@ spec:
               mountPath: /copilot-session
             - name: workspace
               mountPath: /workspace-state
-            - name: cache
-              mountPath: /cache
         - name: init-state
           image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
           command:
@@ -136,73 +131,40 @@ spec:
               mountPath: /state
               subPath: {{ printf "%s/state" $sessionStateSubPath | quote }}
       containers:
-        - name: control-plane
+        - name: control-plane-web
           image: {{ include "control-plane.imageRef" (dict "image" $image) }}
           imagePullPolicy: {{ $image.pullPolicy }}
-          args:
-            - control-plane-copilot
+          command:
+            - /usr/local/bin/control-plane-web
           envFrom:
             - configMapRef:
                 name: {{ include "control-plane.controlPlaneEnvConfigMapName" $ctx }}
             - configMapRef:
                 name: {{ include "control-plane.instanceEnvConfigMapName" $ctx }}
-          env:
-            - name: CONTROL_PLANE_POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-            - name: CONTROL_PLANE_POD_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
-            - name: CONTROL_PLANE_POD_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
-            - name: CONTROL_PLANE_POD_UID
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.uid
-            - name: CONTROL_PLANE_NODE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
           securityContext:
             privileged: false
-            runAsUser: 0
-            runAsNonRoot: false
-            allowPrivilegeEscalation: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
             capabilities:
               drop:
                 - ALL
-              add:
-                - AUDIT_WRITE
-                - CHOWN
-                - DAC_OVERRIDE
-                - FOWNER
-                - KILL
-                - SETGID
-                - SETUID
-                - SYS_CHROOT
             seccompProfile:
               type: RuntimeDefault
           ports:
-            - containerPort: {{ $acpService.port }}
-              name: acp
+            - containerPort: {{ $service.port | default 8080 }}
+              name: http
           readinessProbe:
-            exec:
-              command:
-                - bash
-                - -lc
-                - ":</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}"
+            httpGet:
+              path: /healthz
+              port: http
             periodSeconds: 5
             failureThreshold: 12
           livenessProbe:
-            exec:
-              command:
-                - bash
-                - -lc
-                - ":</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}"
+            httpGet:
+              path: /healthz
+              port: http
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 6
@@ -233,15 +195,6 @@ spec:
             - name: workspace
               mountPath: /workspace
               subPath: {{ $workspace.subPath | quote }}
-            - name: cache
-              mountPath: /var/tmp/control-plane
-              subPath: runtime-tmp
-            - name: control-plane-auth
-              mountPath: /var/run/control-plane-auth
-              readOnly: true
-            - name: control-plane-config
-              mountPath: /var/run/control-plane-config
-              readOnly: true
       volumes:
         - name: copilot-session
           persistentVolumeClaim:
@@ -249,14 +202,6 @@ spec:
         - name: workspace
           persistentVolumeClaim:
             claimName: {{ include "control-plane.workspaceClaimName" $ctx }}
-        - name: cache
-          emptyDir: {}
-        - name: control-plane-auth
-          secret:
-            secretName: {{ include "control-plane.authSecretName" $ctx }}
-        - name: control-plane-config
-          configMap:
-            name: {{ include "control-plane.controlPlaneConfigConfigMapName" $ctx }}
 {{- if $instance.nodeSelector }}
       nodeSelector:{{ toYaml $instance.nodeSelector | nindent 8 }}
 {{- else if $.Values.global.nodeSelector }}

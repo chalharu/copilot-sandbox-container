@@ -125,8 +125,8 @@ printf '%s\n' 'helm-chart-test: rendering chart' >&2
 render_chart
 
 assert_kind_count Namespace 2
-assert_kind_count Deployment 2
-assert_kind_count Service 2
+assert_kind_count Deployment 4
+assert_kind_count Service 4
 assert_kind_count PersistentVolumeClaim 2
 assert_kind_count ConfigMap 5
 assert_kind_count Secret 1
@@ -165,6 +165,12 @@ assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-s
 assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT: "control-plane-exec"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'CONTROL_PLANE_JOB_SERVICE_ACCOUNT: "control-plane-job"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'CONTROL_PLANE_WORKSPACE_PVC: "control-plane-workspace-pvc-repo-one"'
+assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'CONTROL_PLANE_ACP_HOST: "control-plane-acp-repo-one.copilot-shared.svc.cluster.local"'
+assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'CONTROL_PLANE_ACP_PORT: "3000"'
+assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'CONTROL_PLANE_WEB_PORT: "8080"'
+assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'CONTROL_PLANE_JOB_TRANSFER_ROOT: "/home/copilot/.copilot/session-state/job-transfers"'
+assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'CONTROL_PLANE_JOB_TRANSFER_HOST: "control-plane-repo-one.copilot-shared.svc.cluster.local"'
+assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'CONTROL_PLANE_JOB_TRANSFER_PORT: "8080"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'TZ: "Asia/Tokyo"'
 
 assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_K8S_NAMESPACE: "copilot-shared"'
@@ -178,11 +184,15 @@ assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-s
 assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: "printf repo-two-startup"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT: "control-plane-exec"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_JOB_SERVICE_ACCOUNT: "control-plane-job"'
+assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_ACP_HOST: "control-plane-acp-repo-two.copilot-shared.svc.cluster.local"'
+assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_ACP_PORT: "3000"'
+assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_WEB_PORT: "2022"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'TZ: "Europe/Berlin"'
 assert_resource_not_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'GH_GITHUB_TOKEN_FILE: "/var/run/control-plane-auth/gh-github-token"'
 assert_resource_not_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'GH_HOSTS_YML_FILE: "/var/run/control-plane-auth/gh-hosts.yml"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_WORKSPACE_PVC: "repo-two-workspace-pvc"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_JOB_TRANSFER_HOST: "repo-two-control-plane.copilot-shared.svc.cluster.local"'
+assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_JOB_TRANSFER_ROOT: "/home/copilot/.copilot/session-state/job-transfers"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_JOB_TRANSFER_PORT: "2022"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: "ghcr.io/chalharu/copilot-sandbox-container/control-plane:sha-abcdef0"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: "ghcr.io/chalharu/copilot-sandbox-container/control-plane:sha-abcdef0"'
@@ -192,14 +202,26 @@ assert_resource_contains ConfigMap control-plane-config copilot-shared '"telemet
 assert_resource_contains ConfigMap control-plane-config-repo-two copilot-shared '"chat.warnOnLargeFiles": true'
 
 assert_resource_contains Service control-plane-repo-one copilot-shared 'type: LoadBalancer'
+assert_resource_contains Service control-plane-repo-one copilot-shared 'port: 8080'
+assert_resource_contains Service control-plane-repo-one copilot-shared 'targetPort: http'
+assert_resource_contains Service control-plane-acp-repo-one copilot-shared 'type: ClusterIP'
+assert_resource_contains Service control-plane-acp-repo-one copilot-shared 'port: 3000'
+assert_resource_contains Service control-plane-acp-repo-one copilot-shared 'targetPort: acp'
 assert_resource_contains Service repo-two-control-plane copilot-shared 'type: ClusterIP'
 assert_resource_contains Service repo-two-control-plane copilot-shared 'port: 2022'
+assert_resource_contains Service repo-two-control-plane copilot-shared 'targetPort: http'
+assert_resource_contains Service control-plane-acp-repo-two copilot-shared 'type: ClusterIP'
+assert_resource_contains Service control-plane-acp-repo-two copilot-shared 'port: 3000'
+assert_resource_contains Service control-plane-acp-repo-two copilot-shared 'targetPort: acp'
 
 assert_resource_contains Deployment control-plane-repo-one copilot-shared 'image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:test-global'
 assert_resource_contains Deployment control-plane-repo-one copilot-shared 'claimName: shared-session-pvc'
 assert_resource_contains Deployment control-plane-repo-one copilot-shared 'claimName: control-plane-workspace-pvc-repo-one'
 assert_resource_contains Deployment control-plane-repo-one copilot-shared 'serviceAccountName: control-plane'
 assert_resource_contains Deployment control-plane-repo-one copilot-shared 'name: control-plane-config'
+assert_resource_contains Deployment control-plane-repo-one copilot-shared 'app.kubernetes.io/component: acp'
+assert_resource_contains Deployment control-plane-repo-one copilot-shared 'control-plane-copilot'
+assert_resource_contains Deployment control-plane-repo-one copilot-shared 'name: acp'
 assert_resource_contains Deployment control-plane-repo-one copilot-shared 'subPath: "instances/repo-one/state/copilot-config.json"'
 assert_resource_contains Deployment control-plane-repo-one copilot-shared 'subPath: "instances/repo-one/session-state"'
 assert_resource_contains Deployment control-plane-repo-two copilot-shared 'image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:sha-abcdef0'
@@ -209,11 +231,24 @@ assert_resource_contains Deployment control-plane-repo-two copilot-shared 'claim
 assert_resource_contains Deployment control-plane-repo-two copilot-shared 'secretName: repo-two-auth'
 assert_resource_contains Deployment control-plane-repo-two copilot-shared 'serviceAccountName: control-plane'
 assert_resource_contains Deployment control-plane-repo-two copilot-shared 'name: control-plane-config-repo-two'
+assert_resource_contains Deployment control-plane-repo-two copilot-shared 'app.kubernetes.io/component: acp'
+assert_resource_contains Deployment control-plane-repo-two copilot-shared 'control-plane-copilot'
+assert_resource_contains Deployment control-plane-repo-two copilot-shared 'name: acp'
 assert_resource_contains Deployment control-plane-repo-two copilot-shared 'subPath: "repositories/repo-two"'
 assert_resource_contains Deployment control-plane-repo-two copilot-shared 'subPath: "repo-state/repo-two/state/copilot-config.json"'
 assert_resource_contains Deployment control-plane-repo-two copilot-shared 'subPath: "repo-state/repo-two/session-state"'
 assert_resource_contains Deployment control-plane-repo-two copilot-shared 'subPath: "session/gh"'
 assert_resource_contains Deployment control-plane-repo-two copilot-shared 'subPath: "session/ssh"'
+assert_resource_contains Deployment control-plane-web-repo-one copilot-shared '/usr/local/bin/control-plane-web'
+assert_resource_contains Deployment control-plane-web-repo-one copilot-shared 'app.kubernetes.io/component: web'
+assert_resource_contains Deployment control-plane-web-repo-one copilot-shared 'runAsNonRoot: true'
+assert_resource_contains Deployment control-plane-web-repo-one copilot-shared 'path: /healthz'
+assert_resource_not_contains Deployment control-plane-web-repo-one copilot-shared 'name: control-plane-config'
+assert_resource_contains Deployment control-plane-web-repo-two copilot-shared '/usr/local/bin/control-plane-web'
+assert_resource_contains Deployment control-plane-web-repo-two copilot-shared 'app.kubernetes.io/component: web'
+assert_resource_contains Deployment control-plane-web-repo-two copilot-shared 'runAsNonRoot: true'
+assert_resource_contains Deployment control-plane-web-repo-two copilot-shared 'path: /healthz'
+assert_resource_not_contains Deployment control-plane-web-repo-two copilot-shared 'name: control-plane-config'
 
 assert_resource_contains RoleBinding control-plane-jobs-copilot-shared copilot-shared-jobs 'namespace: copilot-shared'
 assert_resource_contains RoleBinding control-plane-exec-workloads-copilot-shared copilot-shared-jobs 'namespace: copilot-shared'

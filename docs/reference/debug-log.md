@@ -25,6 +25,10 @@
 | gh Secret の指定が足りない | [§11](#11-gh-secret-の指定が足りない) |
 | execution image の bootstrap に失敗する | [§12](#12-execution-image-の-bootstrap-に失敗する) |
 
+※ §3 と §7 の SSH 症状は、sample manifest の browser-facing web UI ではなく、
+current-cluster smoke / standalone image の legacy SSH compatibility 面を
+確認するときの参照先です。
+
 ## 1. bundled skill が読めない
 
 ### 代表ログ
@@ -54,9 +58,13 @@ Missing Linux capabilities for control-plane startup: CHOWN DAC_OVERRIDE FOWNER 
 
 ### 意味
 
-`drop: ALL` は有効でも、SSH と entrypoint の初期化に必要な capability が戻っていません。最低でも `AUDIT_WRITE CHOWN DAC_OVERRIDE FOWNER SETGID SETUID SYS_CHROOT` が必要で、`CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service` のときは追加で `KILL MKNOD NET_ADMIN SETFCAP SETPCAP SYS_ADMIN` も必要です。
+`drop: ALL` は有効でも、entrypoint の初期化に必要な capability が戻っていません。
+ACP/web の sample manifest では最低でも `CHOWN DAC_OVERRIDE FOWNER` が必要で、
+legacy SSH compatibility 面まで動かす場合はさらに `AUDIT_WRITE SETGID SETUID
+SYS_CHROOT` などが必要です。`CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service` の
+ときは追加で `KILL MKNOD NET_ADMIN SETFCAP SETPCAP SYS_ADMIN` も必要です。
 
-## 3. interactive SSH で切れる / `sshd` cleanup 警告が出る
+## 3. legacy interactive SSH で切れる / `sshd` cleanup 警告が出る
 
 ### 代表ログ
 
@@ -75,7 +83,7 @@ job-check: ssh-clean=ok
 job-check: ssh-interactive=ok
 ```
 
-`scripts/test-ssh-session-persistence.sh` は SSH 接続をしばらく保持したまま、接続後に追加の入力を流して marker file を更新します。`job-check: ssh-interactive=ok` は「session が見えた」だけでなく、SSH login が十分に維持されて post-login input も処理できたことを意味します。
+`scripts/test-ssh-session-persistence.sh` は SSH 接続をしばらく保持したまま、接続後に追加の入力を流して marker file を更新します。`job-check: ssh-interactive=ok` は「session が見えた」だけでなく、legacy SSH login が十分に維持されて post-login input も処理できたことを意味します。
 
 ## 4. rootless Podman が outer runtime に止められている
 
@@ -124,7 +132,7 @@ job-check: podman-build=ok
 current-cluster-test: podman-build=ok
 ```
 
-## 7. interactive SSH が Copilot session へ入らない
+## 7. legacy interactive SSH が Copilot session へ入らない
 
 ### 代表ログ
 
@@ -134,7 +142,7 @@ mode=login action=bash-il
 
 ### 意味
 
-`CONTROL_PLANE_SSH_SHELL_LOG` にこの行が出るのは、interactive SSH login が
+`CONTROL_PLANE_SSH_SHELL_LOG` にこの行が出るのは、legacy interactive SSH login が
 Copilot 用 Screen session へ入らず通常の login shell へ落ちたことを示します。
 典型例は TTY が無い、`control-plane-session` が見つからない、あるいは login
 shell を command mode (`ssh host '...'`) で使っている場合です。
@@ -163,7 +171,9 @@ kubectl get svc -n copilot-sandbox
 
 ### 意味
 
-LoadBalancer の割り当て待ちです。SSH 自体の検証は `kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox` で先に進められます。
+LoadBalancer の割り当て待ちです。sample manifest の web UI 検証は
+`kubectl port-forward service/control-plane 8080:8080 -n copilot-sandbox`
+で先に進められます。
 
 ## 10. injected Copilot config が壊れている
 

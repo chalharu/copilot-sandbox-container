@@ -76,6 +76,7 @@ replacements:
           kind: ConfigMap
           name: control-plane-instance-env
         fieldPaths:
+          - data.CONTROL_PLANE_ACP_HOST
           - data.CONTROL_PLANE_JOB_TRANSFER_HOST
         options:
           delimiter: .
@@ -136,6 +137,11 @@ replacements:
           name: control-plane
         fieldPaths:
           - spec.template.spec.volumes.[name=copilot-session].persistentVolumeClaim.claimName
+      - select:
+          kind: Deployment
+          name: control-plane-web
+        fieldPaths:
+          - spec.template.spec.volumes.[name=copilot-session].persistentVolumeClaim.claimName
   - source:
       kind: PersistentVolumeClaim
       name: control-plane-workspace-pvc
@@ -151,6 +157,24 @@ replacements:
           name: control-plane
         fieldPaths:
           - spec.template.spec.volumes.[name=workspace].persistentVolumeClaim.claimName
+      - select:
+          kind: Deployment
+          name: control-plane-web
+        fieldPaths:
+          - spec.template.spec.volumes.[name=workspace].persistentVolumeClaim.claimName
+  - source:
+      kind: Service
+      name: control-plane-acp
+      fieldPath: metadata.name
+    targets:
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
+          - data.CONTROL_PLANE_ACP_HOST
+        options:
+          delimiter: .
+          index: 0
   - source:
       kind: Service
       name: control-plane
@@ -164,6 +188,26 @@ replacements:
         options:
           delimiter: .
           index: 0
+  - source:
+      kind: Service
+      name: control-plane-acp
+      fieldPath: spec.ports.0.port
+    targets:
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
+          - data.CONTROL_PLANE_ACP_PORT
+  - source:
+      kind: Service
+      name: control-plane
+      fieldPath: spec.ports.0.port
+    targets:
+      - select:
+          kind: ConfigMap
+          name: control-plane-instance-env
+        fieldPaths:
+          - data.CONTROL_PLANE_JOB_TRANSFER_PORT
   - source:
       kind: Deployment
       name: control-plane
@@ -191,7 +235,7 @@ replacements:
 # Copy this directory when you want a sibling overlay. Keep the replacements
 # block: it re-runs the shipped alignment logic after your local patches so
 # namespace / PVC / Service / image changes still propagate into ConfigMap
-# values such as job-transfer host and helper image refs.
+# values such as ACP/job-transfer service hosts and helper image refs.
 #
 # Common remaining customizations:
 # - patch Namespace names

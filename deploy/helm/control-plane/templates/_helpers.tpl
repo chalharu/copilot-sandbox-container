@@ -46,6 +46,15 @@ app.kubernetes.io/name: control-plane
 {{- include "control-plane.explicitOrQualifiedName" (dict "base" $service.name "explicit" $instanceService.name "instance" $instance) -}}
 {{- end -}}
 
+{{- define "control-plane.acpServiceName" -}}
+{{- $root := .root -}}
+{{- $instance := .instance -}}
+{{- $globalService := default dict $root.Values.global.acpService -}}
+{{- $instanceService := default dict $instance.acpService -}}
+{{- $service := mergeOverwrite (dict) $globalService $instanceService -}}
+{{- include "control-plane.explicitOrQualifiedName" (dict "base" $service.name "explicit" $instanceService.name "instance" $instance) -}}
+{{- end -}}
+
 {{- define "control-plane.workspaceClaimName" -}}
 {{- $root := .root -}}
 {{- $instance := .instance -}}
@@ -133,6 +142,10 @@ control-plane-config
 {{- include "control-plane.instanceQualifiedName" (dict "base" "control-plane" "instance" .instance) -}}
 {{- end -}}
 
+{{- define "control-plane.webDeploymentName" -}}
+{{- include "control-plane.instanceQualifiedName" (dict "base" "control-plane-web" "instance" .instance) -}}
+{{- end -}}
+
 {{- define "control-plane.controlPlaneServiceAccountName" -}}
 control-plane
 {{- end -}}
@@ -184,7 +197,27 @@ app.kubernetes.io/name: control-plane
 control-plane.github.com/instance: {{ .instance.name | quote }}
 {{- end -}}
 
+{{- define "control-plane.acpSelectorLabels" -}}
+{{ include "control-plane.selectorLabels" . }}
+app.kubernetes.io/component: acp
+{{- end -}}
+
+{{- define "control-plane.webSelectorLabels" -}}
+{{ include "control-plane.selectorLabels" . }}
+app.kubernetes.io/component: web
+{{- end -}}
+
 {{- define "control-plane.commonLabels" -}}
 {{ include "control-plane.releaseLabels" . }}
 {{ include "control-plane.selectorLabels" . }}
+{{- end -}}
+
+{{- define "control-plane.acpCommonLabels" -}}
+{{ include "control-plane.commonLabels" . }}
+app.kubernetes.io/component: acp
+{{- end -}}
+
+{{- define "control-plane.webCommonLabels" -}}
+{{ include "control-plane.commonLabels" . }}
+app.kubernetes.io/component: web
 {{- end -}}

@@ -125,32 +125,6 @@ job_transfer_secret_name() {
   printf '%s-transfer-%s\n' "${prefix}" "${checksum}"
 }
 
-append_authorized_key_block() {
-  local marker="$1"
-  local public_key_path="$2"
-  local real_authorized_keys_path=""
-  local lock_file=""
-
-  real_authorized_keys_path="$(readlink -f -- "${authorized_keys_path}")" || real_authorized_keys_path="${authorized_keys_path}"
-  lock_file="${real_authorized_keys_path}.lock"
-
-  mkdir -p "$(dirname "${real_authorized_keys_path}")"
-  touch "${real_authorized_keys_path}"
-  chmod 600 "${real_authorized_keys_path}"
-
-  (
-    flock -x 9
-    if grep -Fxq "# BEGIN ${marker}" "${real_authorized_keys_path}"; then
-      die "authorized_keys already contains marker ${marker}"
-    fi
-    {
-      printf '# BEGIN %s\n' "${marker}"
-      cat "${public_key_path}"
-      printf '# END %s\n' "${marker}"
-    } >> "${real_authorized_keys_path}"
-  ) 9>"${lock_file}"
-}
-
 namespace="${CONTROL_PLANE_JOB_NAMESPACE:-${CONTROL_PLANE_K8S_NAMESPACE:-default}}"
 image=""
 job_name=""
@@ -168,16 +142,12 @@ job_run_as_uid="${CONTROL_PLANE_JOB_RUN_AS_UID:-1000}"
 job_run_as_gid="${CONTROL_PLANE_JOB_RUN_AS_GID:-1000}"
 job_transfer_image="${CONTROL_PLANE_JOB_TRANSFER_IMAGE:-}"
 job_transfer_host="${CONTROL_PLANE_JOB_TRANSFER_HOST:-control-plane.${CONTROL_PLANE_K8S_NAMESPACE:-default}.svc.cluster.local}"
-job_transfer_port="${CONTROL_PLANE_JOB_TRANSFER_PORT:-2222}"
-job_transfer_user="${CONTROL_PLANE_JOB_TRANSFER_USER:-${USER:-copilot}}"
+job_transfer_port="${CONTROL_PLANE_JOB_TRANSFER_PORT:-8080}"
 job_transfer_root="${CONTROL_PLANE_JOB_TRANSFER_ROOT:-${TMPDIR:-/tmp}/job-transfers}"
-host_key_dir="${CONTROL_PLANE_HOST_KEY_DIR:-/var/lib/control-plane/ssh-host-keys}"
-authorized_keys_path="${HOME:-/home/${USER:-copilot}}/.config/control-plane/ssh-auth/authorized_keys"
 mount_files=()
 created_transfer_secret=""
 created_transfer_id=""
 job_created=0
-job_transfer_key_dir=""
 
 [[ "${job_run_as_uid}" =~ ^[0-9]+$ ]] || die "job run UID must be numeric"
 [[ "${job_run_as_gid}" =~ ^[0-9]+$ ]] || die "job run GID must be numeric"
@@ -188,9 +158,6 @@ cleanup() {
   fi
   if [[ "${job_created}" -eq 0 ]] && [[ -n "${created_transfer_id}" ]]; then
     control-plane-job-transfer release-access --transfer-id "${created_transfer_id}" --remove-transfer-dir >/dev/null 2>&1 || true
-  fi
-  if [[ -n "${job_transfer_key_dir}" ]]; then
-    rm -rf "${job_transfer_key_dir}" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -293,31 +260,21 @@ if [[ ${#mount_files[@]} -gt 0 ]]; then
   command -v control-plane-job-transfer >/dev/null 2>&1 || die "missing control-plane-job-transfer helper"
   command -v jq >/dev/null 2>&1 || die "missing jq"
   command -v kubectl >/dev/null 2>&1 || die "missing kubectl"
-  command -v ssh-keygen >/dev/null 2>&1 || die "missing ssh-keygen"
   [[ -n "${job_transfer_image}" ]] || die "CONTROL_PLANE_JOB_TRANSFER_IMAGE is required when --mount-file is used"
   [[ -n "${job_transfer_host}" ]] || die "CONTROL_PLANE_JOB_TRANSFER_HOST is required when --mount-file is used"
   [[ -n "${job_transfer_port}" ]] || die "CONTROL_PLANE_JOB_TRANSFER_PORT is required when --mount-file is used"
-  [[ -n "${job_transfer_user}" ]] || die "CONTROL_PLANE_JOB_TRANSFER_USER is required when --mount-file is used"
   validate_single_line_value "CONTROL_PLANE_JOB_TRANSFER_HOST" "${job_transfer_host}"
   validate_single_line_value "CONTROL_PLANE_JOB_TRANSFER_PORT" "${job_transfer_port}"
-  validate_single_line_value "CONTROL_PLANE_JOB_TRANSFER_USER" "${job_transfer_user}"
-  [[ -f "${host_key_dir}/ssh_host_ed25519_key.pub" ]] || die "missing SSH host key at ${host_key_dir}/ssh_host_ed25519_key.pub"
 
   created_transfer_id="$(printf '%s-%s-%s\n' "${job_name}" "$(date +%s)" "$RANDOM" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
   created_transfer_id="${created_transfer_id%-}"
   created_transfer_secret="$(job_transfer_secret_name "${job_name}")"
   created_transfer_dir="${job_transfer_root%/}/${created_transfer_id}"
-  authorized_key_marker="control-plane-job-transfer:${created_transfer_id}"
-  job_transfer_key_dir="$(mktemp -d "${TMPDIR:-/tmp}/k8s-job-transfer.XXXXXX")"
-  ssh_private_key_path="${job_transfer_key_dir}/id_ed25519"
-  ssh_known_hosts_path="${job_transfer_key_dir}/known_hosts"
   manifest_path="${created_transfer_dir}/manifest.json"
+  transfer_token="$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
+  transfer_url="http://${job_transfer_host}:${job_transfer_port}/api/transfers/${created_transfer_id}"
   transfer_files_json='[]'
   mkdir -p "${created_transfer_dir}/input" "${created_transfer_dir}/output"
-  ssh-keygen -q -t ed25519 -N '' -f "${ssh_private_key_path}" >/dev/null
-  printf '[%s]:%s ' "${job_transfer_host}" "${job_transfer_port}" > "${ssh_known_hosts_path}"
-  cat "${host_key_dir}/ssh_host_ed25519_key.pub" >> "${ssh_known_hosts_path}"
-  append_authorized_key_block "${authorized_key_marker}" "${ssh_private_key_path}.pub"
 
   for mount_file in "${mount_files[@]}"; do
     normalized_mount_file="$(normalize_mount_file_spec "${mount_file}")"
@@ -343,7 +300,7 @@ if [[ ${#mount_files[@]} -gt 0 ]]; then
     --arg job_name "${job_name}" \
     --arg job_namespace "${namespace}" \
     --arg secret_name "${created_transfer_secret}" \
-    --arg authorized_key_marker "${authorized_key_marker}" \
+    --arg transfer_token "${transfer_token}" \
     --arg input_root "${created_transfer_dir}/input" \
     --arg output_root "${created_transfer_dir}/output" \
     --argjson files "${transfer_files_json}" \
@@ -352,7 +309,7 @@ if [[ ${#mount_files[@]} -gt 0 ]]; then
       job_name: $job_name,
       job_namespace: $job_namespace,
       secret_name: $secret_name,
-      authorized_key_marker: $authorized_key_marker,
+      transfer_token: $transfer_token,
       input_root: $input_root,
       output_root: $output_root,
       files: $files
@@ -360,8 +317,7 @@ if [[ ${#mount_files[@]} -gt 0 ]]; then
 
   kubectl create secret generic "${created_transfer_secret}" \
     --namespace "${namespace}" \
-    --from-file=id_ed25519="${ssh_private_key_path}" \
-    --from-file=known_hosts="${ssh_known_hosts_path}" \
+    --from-literal=transfer-token="${transfer_token}" \
     >/dev/null
 
   volume_mount_entries="$(append_yaml_block "${volume_mount_entries}" "$(cat <<EOF
@@ -409,14 +365,8 @@ EOF
             seccompProfile:
               type: RuntimeDefault
           env:
-            - name: CONTROL_PLANE_TRANSFER_HOST
-              value: $(yaml_quote "${job_transfer_host}")
-            - name: CONTROL_PLANE_TRANSFER_PORT
-              value: $(yaml_quote "${job_transfer_port}")
-            - name: CONTROL_PLANE_TRANSFER_USER
-              value: $(yaml_quote "${job_transfer_user}")
-            - name: CONTROL_PLANE_TRANSFER_REMOTE_PATH
-              value: $(yaml_quote "${created_transfer_dir}/input")
+            - name: CONTROL_PLANE_TRANSFER_URL
+              value: $(yaml_quote "${transfer_url}")
             - name: CONTROL_PLANE_JOB_INPUT_MOUNT_PATH
               value: $(yaml_quote "${input_mount_path}")
             - name: CONTROL_PLANE_JOB_RUN_AS_UID
@@ -428,24 +378,12 @@ EOF
             - -lc
             - |
               set -euo pipefail
-              {
-                printf '%s\n' '[control-plane]'
-                printf '%s\n' 'type = sftp'
-                printf 'host = %s\n' "\${CONTROL_PLANE_TRANSFER_HOST}"
-                printf 'user = %s\n' "\${CONTROL_PLANE_TRANSFER_USER}"
-                printf 'port = %s\n' "\${CONTROL_PLANE_TRANSFER_PORT}"
-                printf '%s\n' 'key_file = /var/run/control-plane-job-transfer/id_ed25519'
-                printf '%s\n' 'known_hosts_file = /var/run/control-plane-job-transfer/known_hosts'
-                printf '%s\n' 'shell_type = none'
-              } > /tmp/rclone.conf
-              rclone_flags=(
-                --transfers 1
-                --checkers 1
-                --sftp-disable-concurrent-reads
-                --sftp-disable-concurrent-writes
-              )
+              transfer_token="\$(cat /var/run/control-plane-job-transfer/transfer-token)"
               mkdir -p "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}"
-              rclone --config /tmp/rclone.conf "\${rclone_flags[@]}" copy "control-plane:\${CONTROL_PLANE_TRANSFER_REMOTE_PATH}" "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}"
+              curl -fsSL \
+                -H "Authorization: Bearer \${transfer_token}" \
+                "\${CONTROL_PLANE_TRANSFER_URL}/input.tar" \
+                | tar -xf - -C "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}"
               chown -R "\${CONTROL_PLANE_JOB_RUN_AS_UID}:\${CONTROL_PLANE_JOB_RUN_AS_GID}" "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}"
               chmod -R u+rwX "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}"
           volumeMounts:
@@ -475,14 +413,8 @@ EOF
           env:
             - name: CONTROL_PLANE_TRANSFER_ID
               value: $(yaml_quote "${created_transfer_id}")
-            - name: CONTROL_PLANE_TRANSFER_HOST
-              value: $(yaml_quote "${job_transfer_host}")
-            - name: CONTROL_PLANE_TRANSFER_PORT
-              value: $(yaml_quote "${job_transfer_port}")
-            - name: CONTROL_PLANE_TRANSFER_USER
-              value: $(yaml_quote "${job_transfer_user}")
-            - name: CONTROL_PLANE_TRANSFER_OUTPUT_PATH
-              value: $(yaml_quote "${created_transfer_dir}/output")
+            - name: CONTROL_PLANE_TRANSFER_URL
+              value: $(yaml_quote "${transfer_url}")
             - name: CONTROL_PLANE_JOB_INPUT_MOUNT_PATH
               value: $(yaml_quote "${input_mount_path}")
           command:
@@ -499,37 +431,24 @@ EOF
                   sleep 1
                 fi
               done
-              ssh_opts=(
-                -i /var/run/control-plane-job-transfer/id_ed25519
-                -p "\${CONTROL_PLANE_TRANSFER_PORT}"
-                -o BatchMode=yes
-                -o StrictHostKeyChecking=yes
-                -o UserKnownHostsFile=/var/run/control-plane-job-transfer/known_hosts
-              )
-              {
-                printf '%s\n' '[control-plane]'
-                printf '%s\n' 'type = sftp'
-                printf 'host = %s\n' "\${CONTROL_PLANE_TRANSFER_HOST}"
-                printf 'user = %s\n' "\${CONTROL_PLANE_TRANSFER_USER}"
-                printf 'port = %s\n' "\${CONTROL_PLANE_TRANSFER_PORT}"
-                printf '%s\n' 'key_file = /var/run/control-plane-job-transfer/id_ed25519'
-                printf '%s\n' 'known_hosts_file = /var/run/control-plane-job-transfer/known_hosts'
-                printf '%s\n' 'shell_type = none'
-              } > /tmp/rclone.conf
-              rclone_flags=(
-                --transfers 1
-                --checkers 1
-                --sftp-disable-concurrent-reads
-                --sftp-disable-concurrent-writes
-              )
+              transfer_token="\$(cat /var/run/control-plane-job-transfer/transfer-token)"
               if [[ "\${execution_exit_code}" == "0" ]]; then
-                rclone --config /tmp/rclone.conf "\${rclone_flags[@]}" copy "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}" "control-plane:\${CONTROL_PLANE_TRANSFER_OUTPUT_PATH}"
-                ssh "\${ssh_opts[@]}" "\${CONTROL_PLANE_TRANSFER_USER}@\${CONTROL_PLANE_TRANSFER_HOST}" \
-                  "control-plane-job-transfer finalize --transfer-id \${CONTROL_PLANE_TRANSFER_ID}"
+                tar -cf - -C "\${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH}" . \
+                  | curl -fsS \
+                      -X PUT \
+                      -H "Authorization: Bearer \${transfer_token}" \
+                      --data-binary @- \
+                      "\${CONTROL_PLANE_TRANSFER_URL}/output.tar"
+                curl -fsS \
+                  -X POST \
+                  -H "Authorization: Bearer \${transfer_token}" \
+                  "\${CONTROL_PLANE_TRANSFER_URL}/finalize"
                 exit 0
               fi
-              ssh "\${ssh_opts[@]}" "\${CONTROL_PLANE_TRANSFER_USER}@\${CONTROL_PLANE_TRANSFER_HOST}" \
-                "control-plane-job-transfer release-access --transfer-id \${CONTROL_PLANE_TRANSFER_ID}"
+              curl -fsS \
+                -X POST \
+                -H "Authorization: Bearer \${transfer_token}" \
+                "\${CONTROL_PLANE_TRANSFER_URL}/release"
               exit "\${execution_exit_code}"
           volumeMounts:
             - name: job-inputs

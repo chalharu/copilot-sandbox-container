@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: control-plane
+  name: control-plane-web
   namespace: copilot-sandbox
   labels:
     app.kubernetes.io/name: control-plane
@@ -12,15 +12,13 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: control-plane
-      app.kubernetes.io/component: acp
+      app.kubernetes.io/component: web
   template:
     metadata:
       labels:
         app.kubernetes.io/name: control-plane
-        app.kubernetes.io/component: acp
+        app.kubernetes.io/component: web
     spec:
-      # Keep the default hostUsers path so shared-volume ownership handling stays
-      # compatible with the current cluster runtime.
       securityContext:
         fsGroup: 1000
       serviceAccountName: control-plane
@@ -40,21 +38,15 @@ spec:
                 /copilot-session/state/ssh \
                 /copilot-session/state/ssh-host-keys \
                 /copilot-session/session-state \
-                /workspace-state/workspace \
-                /cache/runtime-tmp
+                /workspace-state/workspace
               touch \
                 /copilot-session/state/copilot-config.json \
                 /copilot-session/state/command-history-state.json
               chown -R 1000:1000 /copilot-session/state /copilot-session/session-state
               find /copilot-session/state /copilot-session/session-state -type d -exec chmod 700 {} +
               find /copilot-session/state /copilot-session/session-state -type f -exec chmod 600 {} +
-              # Preserve user workspace file modes; only hand the shared mount root
-              # back to UID/GID 1000 so the control-plane session can use it.
               chown 1000:1000 /workspace-state/workspace
               chmod 700 /workspace-state/workspace
-              # Keep the shared tmp/cache root traversable for the copilot user.
-              chown 0:1000 /cache/runtime-tmp
-              chmod 755 /cache/runtime-tmp
           securityContext:
             privileged: false
             runAsUser: 0
@@ -75,25 +67,21 @@ spec:
               mountPath: /copilot-session
             - name: workspace
               mountPath: /workspace-state
-            - name: cache
-              mountPath: /cache
-        - name: init-state
-          # renovate: datasource=docker depName=busybox versioning=docker
-          image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
+      containers:
+        - name: control-plane-web
+          image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest
+          imagePullPolicy: IfNotPresent
           command:
-            - sh
-            - -c
-            - |
-              set -eu
-              umask 077
-              [ -s /state/copilot-config.json ] || cat > /state/copilot-config.json <<'JSON'
-              {
-                "telemetry": false
-              }
-              JSON
+            - /usr/local/bin/control-plane-web
+          envFrom:
+            - configMapRef:
+                name: control-plane-env
+            - configMapRef:
+                name: control-plane-instance-env
           securityContext:
             privileged: false
             runAsUser: 1000
+            runAsGroup: 1000
             runAsNonRoot: true
             allowPrivilegeEscalation: false
             capabilities:
@@ -101,86 +89,19 @@ spec:
                 - ALL
             seccompProfile:
               type: RuntimeDefault
-          volumeMounts:
-            - name: copilot-session
-              mountPath: /state
-              subPath: state
-      containers:
-        - name: control-plane
-          # The sample starts with the repository's published latest tag so a
-          # first install works without editing image refs. The shipped
-          # replacements keep the bootstrap / job-transfer helper image env vars
-          # aligned with this value unless an overlay intentionally overrides the
-          # derived config. Pin this to a full commit SHA tag when you want
-          # revision-stable rollouts.
-          image: ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest
-          imagePullPolicy: IfNotPresent
-          envFrom:
-            - configMapRef:
-                name: control-plane-env
-            - configMapRef:
-                name: control-plane-instance-env
-          env:
-            - name: CONTROL_PLANE_POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-            - name: CONTROL_PLANE_POD_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
-            - name: CONTROL_PLANE_POD_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
-            - name: CONTROL_PLANE_POD_UID
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.uid
-            - name: CONTROL_PLANE_NODE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
-          args:
-            - control-plane-copilot
-          # Non-SSH startup still needs ownership-related capabilities on the
-          # mounted shared state prepared by the entrypoint.
-          securityContext:
-            privileged: false
-            runAsUser: 0
-            runAsNonRoot: false
-            allowPrivilegeEscalation: true
-            capabilities:
-              drop:
-                - ALL
-              add:
-                - AUDIT_WRITE
-                - CHOWN
-                - DAC_OVERRIDE
-                - FOWNER
-                - KILL
-                - SETGID
-                - SETUID
-                - SYS_CHROOT
-            seccompProfile:
-              type: RuntimeDefault
           ports:
-            - containerPort: 3000
-              name: acp
+            - containerPort: 8080
+              name: http
           readinessProbe:
-            exec:
-              command:
-                - bash
-                - -lc
-                - ":</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}"
+            httpGet:
+              path: /healthz
+              port: http
             periodSeconds: 5
             failureThreshold: 12
           livenessProbe:
-            exec:
-              command:
-                - bash
-                - -lc
-                - ":</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}"
+            httpGet:
+              path: /healthz
+              port: http
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 6
@@ -216,15 +137,6 @@ spec:
             - name: workspace
               mountPath: /workspace
               subPath: workspace
-            - name: cache
-              mountPath: /var/tmp/control-plane
-              subPath: runtime-tmp
-            - name: control-plane-auth
-              mountPath: /var/run/control-plane-auth
-              readOnly: true
-            - name: control-plane-config
-              mountPath: /var/run/control-plane-config
-              readOnly: true
       volumes:
         - name: copilot-session
           persistentVolumeClaim:
@@ -232,11 +144,3 @@ spec:
         - name: workspace
           persistentVolumeClaim:
             claimName: control-plane-workspace-pvc
-        - name: cache
-          emptyDir: {}
-        - name: control-plane-auth
-          secret:
-            secretName: control-plane-auth
-        - name: control-plane-config
-          configMap:
-            name: control-plane-config
