@@ -412,6 +412,11 @@ assert_file_not_contains "${workflow_path}" 'localhost/yamllint:test'
 assert_file_not_contains "${renovate_config_path}" 'yamllint'
 assert_file_not_contains "${workflow_path}" '- sccache'
 
+printf '%s\n' 'image-maintenance-test: verifying rclone checksum source follows the Renovate-managed version' >&2
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "rclone_download_root=\"https://downloads.rclone.org/\${RCLONE_VERSION}\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "curl -fsSLo /tmp/rclone-SHA256SUMS \"\${rclone_download_root}/SHA256SUMS\""
+assert_file_not_contains "${repo_root}/containers/control-plane/Dockerfile" 'rclone_sha256='
+
 printf '%s\n' 'image-maintenance-test: verifying GHCR cleanup keeps tagged images' >&2
 assert_file_contains "${workflow_path}" 'delete-only-untagged-versions: '\''true'\'''
 

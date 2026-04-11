@@ -113,7 +113,7 @@ ARG JQ_VERSION=jq-1.8.1
 # renovate: datasource=github-releases depName=kubernetes/kubernetes
 ARG KUBECTL_VERSION=v1.35.3
 # renovate: datasource=github-releases depName=rclone/rclone
-ARG RCLONE_VERSION=v1.73.3
+ARG RCLONE_VERSION=v1.73.4
 # renovate: datasource=github-releases depName=astral-sh/ruff
 ARG RUFF_VERSION=0.15.10
 ARG RUFF_SHA256_AARCH64=b775a5a09484549ac3fd377b5ce34955cf633165169671d1c4a215c113ce15df
@@ -178,7 +178,6 @@ RUN apt-get update -o Acquire::Retries=3 \
             kubectl_arch=amd64; \
             kubectl_sha256=fd31c7d7129260e608f6faf92d5984c3267ad0b5ead3bced2fe125686e286ad6; \
             rclone_arch=amd64; \
-            rclone_sha256=70278c22b98c7d02aed01828b70053904dbce4c8a1a15d7781d836c6fdb036ea; \
             ruff_arch=x86_64; \
             ruff_sha256=${RUFF_SHA256_AMD64}; \
             hadolint_asset=hadolint-linux-x86_64; \
@@ -192,7 +191,6 @@ RUN apt-get update -o Acquire::Retries=3 \
             kubectl_arch=arm64; \
             kubectl_sha256=6f0cd088a82dde5d5807122056069e2fac4ed447cc518efc055547ae46525f14; \
             rclone_arch=arm64; \
-            rclone_sha256=ed2a638b4cb15abe4f01d6d9c015f3a1cb41aa7a17c96db2725542c61f353b8e; \
             ruff_arch=aarch64; \
             ruff_sha256=${RUFF_SHA256_AARCH64}; \
             hadolint_asset=hadolint-linux-arm64; \
@@ -210,8 +208,10 @@ RUN apt-get update -o Acquire::Retries=3 \
     && printf '%s  %s\n' "${kubectl_sha256}" /tmp/kubectl | sha256sum -c - \
     && install -m 0755 /tmp/kubectl /usr/local/bin/kubectl \
     && rclone_asset="rclone-${RCLONE_VERSION}-linux-${rclone_arch}.zip" \
-    && curl -fsSLo "/tmp/${rclone_asset}" "https://github.com/rclone/rclone/releases/download/${RCLONE_VERSION}/${rclone_asset}" \
-    && printf '%s  %s\n' "${rclone_sha256}" "/tmp/${rclone_asset}" | sha256sum -c - \
+    && rclone_download_root="https://downloads.rclone.org/${RCLONE_VERSION}" \
+    && curl -fsSLo "/tmp/${rclone_asset}" "${rclone_download_root}/${rclone_asset}" \
+    && curl -fsSLo /tmp/rclone-SHA256SUMS "${rclone_download_root}/SHA256SUMS" \
+    && awk -v asset="${rclone_asset}" '$2 == asset { print $1 "  /tmp/" asset; found=1 } END { exit(found ? 0 : 1) }' /tmp/rclone-SHA256SUMS | sha256sum -c - \
     && unzip -q "/tmp/${rclone_asset}" -d /tmp \
     && install -m 0755 "/tmp/rclone-${RCLONE_VERSION}-linux-${rclone_arch}/rclone" /usr/local/bin/rclone \
     && ruff_asset="ruff-${ruff_arch}-unknown-linux-gnu.tar.gz" \
