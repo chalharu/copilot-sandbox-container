@@ -14,6 +14,7 @@ global:
     annotations: {}
   auth:
     name: control-plane-auth
+    existingSecretName: ""
     sshPublicKey: |
       ssh-ed25519 AAAA... replace-me
     ghGithubToken: ""
@@ -107,8 +108,8 @@ instances:
     # the shared session PVC; ghSubPath / sshSubPath can isolate client auth
     # state too when needed.
     session: {}
-    # Repo-specific control-plane-env overrides such as TZ, Git identity, or an
-    # exec-pod startup script.
+    # Repo-specific env overrides merge into the per-instance
+    # control-plane-instance-env ConfigMap on top of global.controlPlaneEnv.
     controlPlaneEnv: {}
     instanceEnv: {}
     resources: {}

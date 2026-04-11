@@ -8,6 +8,11 @@ app.kubernetes.io/managed-by: {{ .root.Release.Service | quote }}
 helm.sh/chart: {{ include "control-plane.chart" .root | quote }}
 {{- end -}}
 
+{{- define "control-plane.sharedLabels" -}}
+app.kubernetes.io/name: control-plane
+{{ include "control-plane.releaseLabels" . }}
+{{- end -}}
+
 {{- define "control-plane.instanceMainNamespace" -}}
 {{- $root := .root -}}
 {{- $instance := .instance -}}
@@ -93,25 +98,35 @@ helm.sh/chart: {{ include "control-plane.chart" .root | quote }}
 {{- $instance := .instance -}}
 {{- $globalAuth := default dict $root.Values.global.auth -}}
 {{- $instanceAuth := default dict $instance.auth -}}
-{{- $auth := mergeOverwrite (dict) $globalAuth $instanceAuth -}}
-{{- $existingSecret := $auth.existingSecretName -}}
-{{- if $existingSecret -}}
-{{- $existingSecret | trunc 63 | trimSuffix "-" -}}
+{{- if $instanceAuth.existingSecretName -}}
+{{- $instanceAuth.existingSecretName | trunc 63 | trimSuffix "-" -}}
+{{- else if gt (len $instanceAuth) 0 -}}
+{{- include "control-plane.explicitOrQualifiedName" (dict "base" $globalAuth.name "explicit" $instanceAuth.name "instance" $instance) -}}
+{{- else if $globalAuth.existingSecretName -}}
+{{- $globalAuth.existingSecretName | trunc 63 | trimSuffix "-" -}}
 {{- else -}}
-{{- include "control-plane.explicitOrQualifiedName" (dict "base" $auth.name "explicit" $instanceAuth.name "instance" $instance) -}}
+{{- $globalAuth.name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 {{- end -}}
 
 {{- define "control-plane.controlPlaneEnvConfigMapName" -}}
-{{- include "control-plane.instanceQualifiedName" (dict "base" "control-plane-env" "instance" .instance) -}}
+control-plane-env
 {{- end -}}
 
 {{- define "control-plane.instanceEnvConfigMapName" -}}
 {{- include "control-plane.instanceQualifiedName" (dict "base" "control-plane-instance-env" "instance" .instance) -}}
 {{- end -}}
 
+{{- define "control-plane.sharedControlPlaneConfigConfigMapName" -}}
+control-plane-config
+{{- end -}}
+
 {{- define "control-plane.controlPlaneConfigConfigMapName" -}}
+{{- if .instance.controlPlaneConfigJson -}}
 {{- include "control-plane.instanceQualifiedName" (dict "base" "control-plane-config" "instance" .instance) -}}
+{{- else -}}
+{{- include "control-plane.sharedControlPlaneConfigConfigMapName" . -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "control-plane.deploymentName" -}}
@@ -119,31 +134,39 @@ helm.sh/chart: {{ include "control-plane.chart" .root | quote }}
 {{- end -}}
 
 {{- define "control-plane.controlPlaneServiceAccountName" -}}
-{{- include "control-plane.instanceQualifiedName" (dict "base" "control-plane" "instance" .instance) -}}
+control-plane
 {{- end -}}
 
 {{- define "control-plane.execServiceAccountName" -}}
-{{- include "control-plane.instanceQualifiedName" (dict "base" "control-plane-exec" "instance" .instance) -}}
+control-plane-exec
 {{- end -}}
 
 {{- define "control-plane.jobServiceAccountName" -}}
-{{- include "control-plane.instanceQualifiedName" (dict "base" "control-plane-job" "instance" .instance) -}}
+control-plane-job
 {{- end -}}
 
 {{- define "control-plane.execPodsRoleName" -}}
-{{- include "control-plane.instanceQualifiedName" (dict "base" "control-plane-exec-pods" "instance" .instance) -}}
+control-plane-exec-pods
 {{- end -}}
 
 {{- define "control-plane.jobsRoleName" -}}
-{{- include "control-plane.instanceQualifiedName" (dict "base" "control-plane-jobs" "instance" .instance) -}}
+control-plane-jobs
 {{- end -}}
 
 {{- define "control-plane.jobSelfReadRoleName" -}}
-{{- include "control-plane.instanceQualifiedName" (dict "base" "control-plane-job-self-read" "instance" .instance) -}}
+control-plane-job-self-read
 {{- end -}}
 
 {{- define "control-plane.execWorkloadsRoleName" -}}
-{{- include "control-plane.instanceQualifiedName" (dict "base" "control-plane-exec-workloads" "instance" .instance) -}}
+control-plane-exec-workloads
+{{- end -}}
+
+{{- define "control-plane.jobsRoleBindingName" -}}
+{{- printf "%s-%s" (include "control-plane.jobsRoleName" .) (include "control-plane.instanceMainNamespace" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "control-plane.execWorkloadsRoleBindingName" -}}
+{{- printf "%s-%s" (include "control-plane.execWorkloadsRoleName" .) (include "control-plane.instanceMainNamespace" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{- define "control-plane.imageRef" -}}

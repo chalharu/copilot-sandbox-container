@@ -1,13 +1,19 @@
+{{- $seenMainNamespaces := dict -}}
+{{- $seenJobNamespaces := dict -}}
+{{- $seenNamespacePairs := dict -}}
 {{- range $instance := .Values.instances }}
 {{- $ctx := dict "root" $ "instance" $instance -}}
 {{- $mainNamespace := include "control-plane.instanceMainNamespace" $ctx -}}
 {{- $jobNamespace := include "control-plane.instanceJobNamespace" $ctx -}}
+{{- $namespacePairKey := printf "%s/%s" $mainNamespace $jobNamespace -}}
+{{- if not (hasKey $seenMainNamespaces $mainNamespace) }}
+{{- $_ := set $seenMainNamespaces $mainNamespace true -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: {{ include "control-plane.execPodsRoleName" $ctx }}
   namespace: {{ $mainNamespace }}
-  labels:{{ include "control-plane.commonLabels" $ctx | nindent 4 }}
+  labels:{{ include "control-plane.sharedLabels" $ctx | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: ["pods"]
@@ -20,11 +26,29 @@ rules:
     verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "control-plane.execPodsRoleName" $ctx }}
+  namespace: {{ $mainNamespace }}
+  labels:{{ include "control-plane.sharedLabels" $ctx | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "control-plane.controlPlaneServiceAccountName" $ctx }}
+    namespace: {{ $mainNamespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "control-plane.execPodsRoleName" $ctx }}
+---
+{{- end }}
+{{- if not (hasKey $seenJobNamespaces $jobNamespace) }}
+{{- $_ := set $seenJobNamespaces $jobNamespace true -}}
+apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: {{ include "control-plane.jobsRoleName" $ctx }}
   namespace: {{ $jobNamespace }}
-  labels:{{ include "control-plane.commonLabels" $ctx | nindent 4 }}
+  labels:{{ include "control-plane.sharedLabels" $ctx | nindent 4 }}
 rules:
   - apiGroups: ["batch"]
     resources: ["jobs"]
@@ -44,7 +68,7 @@ kind: Role
 metadata:
   name: {{ include "control-plane.jobSelfReadRoleName" $ctx }}
   namespace: {{ $jobNamespace }}
-  labels:{{ include "control-plane.commonLabels" $ctx | nindent 4 }}
+  labels:{{ include "control-plane.sharedLabels" $ctx | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: ["pods"]
@@ -55,7 +79,7 @@ kind: Role
 metadata:
   name: {{ include "control-plane.execWorkloadsRoleName" $ctx }}
   namespace: {{ $jobNamespace }}
-  labels:{{ include "control-plane.commonLabels" $ctx | nindent 4 }}
+  labels:{{ include "control-plane.sharedLabels" $ctx | nindent 4 }}
 rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
@@ -76,39 +100,9 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ include "control-plane.execPodsRoleName" $ctx }}
-  namespace: {{ $mainNamespace }}
-  labels:{{ include "control-plane.commonLabels" $ctx | nindent 4 }}
-subjects:
-  - kind: ServiceAccount
-    name: {{ include "control-plane.controlPlaneServiceAccountName" $ctx }}
-    namespace: {{ $mainNamespace }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: {{ include "control-plane.execPodsRoleName" $ctx }}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: {{ include "control-plane.jobsRoleName" $ctx }}
-  namespace: {{ $jobNamespace }}
-  labels:{{ include "control-plane.commonLabels" $ctx | nindent 4 }}
-subjects:
-  - kind: ServiceAccount
-    name: {{ include "control-plane.controlPlaneServiceAccountName" $ctx }}
-    namespace: {{ $mainNamespace }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: {{ include "control-plane.jobsRoleName" $ctx }}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
   name: {{ include "control-plane.jobSelfReadRoleName" $ctx }}
   namespace: {{ $jobNamespace }}
-  labels:{{ include "control-plane.commonLabels" $ctx | nindent 4 }}
+  labels:{{ include "control-plane.sharedLabels" $ctx | nindent 4 }}
 subjects:
   - kind: ServiceAccount
     name: {{ include "control-plane.jobServiceAccountName" $ctx }}
@@ -118,12 +112,30 @@ roleRef:
   kind: Role
   name: {{ include "control-plane.jobSelfReadRoleName" $ctx }}
 ---
+{{- end }}
+{{- if not (hasKey $seenNamespacePairs $namespacePairKey) }}
+{{- $_ := set $seenNamespacePairs $namespacePairKey true -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ include "control-plane.execWorkloadsRoleName" $ctx }}
+  name: {{ include "control-plane.jobsRoleBindingName" $ctx }}
   namespace: {{ $jobNamespace }}
-  labels:{{ include "control-plane.commonLabels" $ctx | nindent 4 }}
+  labels:{{ include "control-plane.sharedLabels" $ctx | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "control-plane.controlPlaneServiceAccountName" $ctx }}
+    namespace: {{ $mainNamespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "control-plane.jobsRoleName" $ctx }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "control-plane.execWorkloadsRoleBindingName" $ctx }}
+  namespace: {{ $jobNamespace }}
+  labels:{{ include "control-plane.sharedLabels" $ctx | nindent 4 }}
 subjects:
   - kind: ServiceAccount
     name: {{ include "control-plane.execServiceAccountName" $ctx }}
@@ -133,4 +145,5 @@ roleRef:
   kind: Role
   name: {{ include "control-plane.execWorkloadsRoleName" $ctx }}
 ---
+{{- end }}
 {{- end }}

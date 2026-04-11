@@ -3,6 +3,9 @@ global:
   jobNamespace: copilot-shared-jobs
   image:
     tag: test-global
+  auth:
+    sshPublicKey: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestSharedKey shared
   session:
     claimName: shared-session-pvc
     size: 4Gi
@@ -13,9 +16,6 @@ global:
     CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: printf global-startup
 instances:
   - name: repo-one
-    auth:
-      sshPublicKey: |
-        ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestRepoOne repo-one
     workspace:
       size: 20Gi
       storageClassName: fast-rwo

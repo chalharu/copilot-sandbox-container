@@ -9,17 +9,22 @@ chart 全体として、既定で次を生成します。
 - shared main namespace
 - shared jobs namespace
 - shared session PVC
+- shared `control-plane-env` ConfigMap
+- shared `control-plane-config` ConfigMap
+- shared `control-plane-auth` Secret
+- shared ServiceAccount / RBAC
 
 各 `instances[]` エントリは、既定で次を 1 セット生成します。
 
-- instance ごとに一意な ServiceAccount / RBAC
-- instance ごとに一意な `control-plane-env` / `control-plane-instance-env` / `control-plane-config`
+- instance ごとに一意な `control-plane-instance-env`
 - workspace PVC
 - `control-plane-<instance.name>` Deployment
 - `control-plane-<instance.name>` Service
 
-workspace PVC / Secret / Service も、instance 側で明示 override しない限り
-`<base>-<instance.name>` で名前分離されます。複数 repo を持つ場合は `instances[]`
+workspace PVC と Service は、instance 側で明示 override しない限り
+`<base>-<instance.name>` で名前分離されます。Secret と `control-plane-config` は
+global 値をそのまま使う限り shared resource を使い、instance override を入れた
+ときだけ per-instance resource を追加します。複数 repo を持つ場合は `instances[]`
 を増やしてください。
 
 ## 使い方
@@ -31,14 +36,14 @@ SSH 公開鍵を上書きします。
 global:
   namespace: copilot-workspaces
   jobNamespace: copilot-workspaces-jobs
+  auth:
+    sshPublicKey: |
+      ssh-ed25519 AAAA... shared-login-key
   session:
     storageClassName: nfs-rwx
 
 instances:
   - name: repo-a
-    auth:
-      sshPublicKey: |
-        ssh-ed25519 AAAA... repo-a
 
   - name: repo-b
     auth:
@@ -62,13 +67,14 @@ GitHub CLI / SSH client state は `global.session.{ghSubPath,sshSubPath}` を使
 ## runtime env の設定先
 
 Git の `user.name` / `user.email`、`TZ`、Execution Pod の startup script は、
-どれも各 instance の `control-plane-env` ConfigMap に入る値です。Helm では
+shared な `control-plane-env` と、instance ごとの
+`control-plane-instance-env-<name>` overlay へ分かれて入ります。Helm では
 次の 2 箇所から設定します。
 
 | 用途 | values のキー | 反映先 |
 | --- | --- | --- |
-| 全 instance 共通の既定値 | `global.controlPlaneEnv` | すべての `control-plane-env` ConfigMap |
-| repo ごとの上書き | `instances[].controlPlaneEnv` | 対象 instance の `control-plane-env` ConfigMap |
+| 全 instance 共通の既定値 | `global.controlPlaneEnv` | shared `control-plane-env` ConfigMap |
+| repo ごとの上書き | `instances[].controlPlaneEnv` | 対象 instance の `control-plane-instance-env-<name>` ConfigMap |
 
 `instances[].instanceEnv` は workspace PVC 名や job-transfer host のような
 chart 側の派生値向けなので、これらの設定先には使いません。
@@ -111,7 +117,11 @@ instances:
 - `instances[].workspace`: workspace PVC claim 名、size、storage class、subPath
 - `global.session`: 共有 session PVC の claim 名、size、storage class
 - `instances[].session`: repo ごとの stateSubPath や GH / SSH subPath override
+- `global.auth`: shared `control-plane-auth` Secret
 - `instances[].auth.existingSecretName`: Secret を chart 外で管理したい場合
+- `instances[].auth`: SSH 公開鍵や token を repo ごとに変えたい場合だけ per-instance Secret を作る
+- `global.controlPlaneConfigJson`: shared `control-plane-config` ConfigMap
+- `instances[].controlPlaneConfigJson`: repo ごとの config overlay が必要な場合だけ per-instance ConfigMap を作る
 - `instances[].controlPlaneEnv`: runtime 用 ConfigMap の追加 override
 - `instances[].instanceEnv`: kustomize replacement 相当の派生 env に対する追加 override
 
