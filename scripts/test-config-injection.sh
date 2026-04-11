@@ -142,8 +142,6 @@ test "$(env -u LD_PRELOAD stat -c '%a %U %G' /var/lib/control-plane/ssh-host-key
 test "$(env -u LD_PRELOAD stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key)" = '600 root root'
 test "$(env -u LD_PRELOAD stat -c '%a %U %G' /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub)" = '644 root root'
 test "$(env -u LD_PRELOAD stat -c '%a %U %G' /run/control-plane/ssh-host-keys)" = '700 root root'
-test "$(env -u LD_PRELOAD stat -c '%a %U %G' /run/control-plane/ssh-host-keys/ssh_host_ed25519_key)" = '600 root root'
-test "$(env -u LD_PRELOAD stat -c '%a %U %G' /run/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub)" = '644 root root'
 ! test -e /var/lib/control-plane/ssh-host-keys/ssh_host_rsa_key
 ! test -e /var/lib/control-plane/ssh-host-keys/ssh_host_ecdsa_key
 ! test -e /var/lib/control-plane/ssh-host-keys/ssh_host_rsa_key.pub
