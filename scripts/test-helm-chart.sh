@@ -250,6 +250,8 @@ assert_resource_contains Deployment control-plane-web-repo-two copilot-shared 'r
 assert_resource_contains Deployment control-plane-web-repo-two copilot-shared 'path: /healthz'
 assert_resource_not_contains Deployment control-plane-web-repo-two copilot-shared 'name: control-plane-config'
 
+assert_resource_contains Role control-plane-exec-pods copilot-shared 'pods/exec'
+assert_resource_contains RoleBinding control-plane-exec-pods copilot-shared 'namespace: copilot-shared'
 assert_resource_contains RoleBinding control-plane-jobs-copilot-shared copilot-shared-jobs 'namespace: copilot-shared'
 assert_resource_contains RoleBinding control-plane-exec-workloads-copilot-shared copilot-shared-jobs 'namespace: copilot-shared'
 

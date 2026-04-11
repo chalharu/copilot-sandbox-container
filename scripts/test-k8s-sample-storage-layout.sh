@@ -307,6 +307,8 @@ assert_resource_contains ConfigMap control-plane-config 'copilot-config.json: |'
 assert_resource_present ConfigMap control-plane-env
 assert_resource_present ConfigMap control-plane-instance-env
 assert_resource_present ServiceAccount control-plane-exec
+assert_resource_present Role control-plane-exec-pods
+assert_resource_present RoleBinding control-plane-exec-pods
 assert_resource_present Role control-plane-exec-workloads
 assert_resource_present RoleBinding control-plane-exec-workloads
 assert_resource_absent ServiceAccount garage-bootstrap
@@ -353,6 +355,9 @@ assert_resource_contains Role control-plane-exec-workloads '  - deployments'
 assert_resource_contains Role control-plane-exec-workloads '  - services'
 assert_resource_contains Role control-plane-exec-workloads '  - jobs'
 assert_resource_contains Role control-plane-exec-workloads '  - pods'
+assert_resource_contains Role control-plane-exec-pods '  - pods/exec'
+assert_resource_contains RoleBinding control-plane-exec-pods 'name: control-plane'
+assert_resource_contains RoleBinding control-plane-exec-pods 'namespace: copilot-sandbox'
 assert_resource_contains RoleBinding control-plane-exec-workloads 'name: control-plane-exec'
 assert_resource_contains RoleBinding control-plane-exec-workloads 'namespace: copilot-sandbox'
 assert_resource_not_contains ConfigMap control-plane-env 'CONTROL_PLANE_COPILOT_CPU_LIMIT_PERCENT:'

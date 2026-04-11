@@ -133,6 +133,8 @@ struct TransferManifest {
     transfer_token: String,
     input_root: String,
     output_root: String,
+    control_plane_pod_name: Option<String>,
+    control_plane_pod_namespace: Option<String>,
 }
 
 #[component]
@@ -439,18 +441,13 @@ async fn run_transfer_helper(
     match tokio::task::spawn_blocking(move || {
         let manifest = read_transfer_manifest(&state, &transfer_id)?;
         authorize_transfer(&manifest, &headers)?;
-        let status = Command::new("control-plane-job-transfer")
-            .arg(subcommand)
-            .arg("--transfer-id")
-            .arg(&transfer_id)
+        let status = transfer_helper_command(&manifest, subcommand, &transfer_id)
             .status()
-            .map_err(|error| format!("failed to start control-plane-job-transfer: {error}"))?;
+            .map_err(|error| format!("failed to start transfer helper: {error}"))?;
         if status.success() {
             Ok::<_, String>(())
         } else {
-            Err(format!(
-                "control-plane-job-transfer {subcommand} exited with {status}"
-            ))
+            Err(format!("transfer helper {subcommand} exited with {status}"))
         }
     })
     .await
@@ -462,6 +459,47 @@ async fn run_transfer_helper(
             format!("failed to join transfer helper: {error}"),
         ),
     }
+}
+
+fn transfer_helper_command(
+    manifest: &TransferManifest,
+    subcommand: &'static str,
+    transfer_id: &str,
+) -> Command {
+    let control_plane_pod_name = manifest
+        .control_plane_pod_name
+        .as_deref()
+        .filter(|value| !value.is_empty());
+    let control_plane_pod_namespace = manifest
+        .control_plane_pod_namespace
+        .as_deref()
+        .filter(|value| !value.is_empty());
+
+    if let (Some(pod_name), Some(namespace)) = (control_plane_pod_name, control_plane_pod_namespace)
+    {
+        let mut command = Command::new("kubectl");
+        command
+            .arg("exec")
+            .arg("--namespace")
+            .arg(namespace)
+            .arg(pod_name)
+            .arg("-c")
+            .arg("control-plane")
+            .arg("--")
+            .arg("control-plane-job-transfer");
+        command
+            .arg(subcommand)
+            .arg("--transfer-id")
+            .arg(transfer_id);
+        return command;
+    }
+
+    let mut command = Command::new("control-plane-job-transfer");
+    command
+        .arg(subcommand)
+        .arg("--transfer-id")
+        .arg(transfer_id);
+    command
 }
 
 fn render_page(

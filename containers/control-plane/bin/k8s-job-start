@@ -144,6 +144,8 @@ job_transfer_image="${CONTROL_PLANE_JOB_TRANSFER_IMAGE:-}"
 job_transfer_host="${CONTROL_PLANE_JOB_TRANSFER_HOST:-control-plane.${CONTROL_PLANE_K8S_NAMESPACE:-default}.svc.cluster.local}"
 job_transfer_port="${CONTROL_PLANE_JOB_TRANSFER_PORT:-8080}"
 job_transfer_root="${CONTROL_PLANE_JOB_TRANSFER_ROOT:-${TMPDIR:-/tmp}/job-transfers}"
+control_plane_pod_name="${CONTROL_PLANE_POD_NAME:-${HOSTNAME:-}}"
+control_plane_pod_namespace="${CONTROL_PLANE_POD_NAMESPACE:-${CONTROL_PLANE_K8S_NAMESPACE:-}}"
 mount_files=()
 created_transfer_secret=""
 created_transfer_id=""
@@ -303,6 +305,8 @@ if [[ ${#mount_files[@]} -gt 0 ]]; then
     --arg transfer_token "${transfer_token}" \
     --arg input_root "${created_transfer_dir}/input" \
     --arg output_root "${created_transfer_dir}/output" \
+    --arg control_plane_pod_name "${control_plane_pod_name}" \
+    --arg control_plane_pod_namespace "${control_plane_pod_namespace}" \
     --argjson files "${transfer_files_json}" \
     '{
       transfer_id: $transfer_id,
@@ -312,6 +316,8 @@ if [[ ${#mount_files[@]} -gt 0 ]]; then
       transfer_token: $transfer_token,
       input_root: $input_root,
       output_root: $output_root,
+      control_plane_pod_name: $control_plane_pod_name,
+      control_plane_pod_namespace: $control_plane_pod_namespace,
       files: $files
     }' > "${manifest_path}"
 
