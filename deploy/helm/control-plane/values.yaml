@@ -17,7 +17,11 @@ global:
     existingSecretName: ""
     sshPublicKey: |
       ssh-ed25519 AAAA... replace-me
+    # When this chart manages the Secret, GH_GITHUB_TOKEN_FILE is injected
+    # automatically; no extra controlPlaneEnv entry is required.
     ghGithubToken: ""
+    # When this chart manages the Secret, GH_HOSTS_YML_FILE is injected
+    # automatically; no extra controlPlaneEnv entry is required.
     ghHostsYml: ""
     copilotGithubToken: ""
   workspace:

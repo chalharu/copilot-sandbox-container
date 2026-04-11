@@ -6,6 +6,12 @@ global:
   auth:
     sshPublicKey: |
       ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestSharedKey shared
+    ghGithubToken: shared-gh-token
+    ghHostsYml: |
+      github.com:
+        user: shared-user
+        oauth_token: shared-host-token
+        git_protocol: https
   session:
     claimName: shared-session-pvc
     size: 4Gi
