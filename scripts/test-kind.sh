@@ -249,7 +249,7 @@ wait_for_control_plane_pod() {
 assert_control_plane_probe_spec() {
   local deployment_json="${workdir}/control-plane-deployment.json"
   local web_deployment_json="${workdir}/control-plane-web-deployment.json"
-  local expected_acp_probe='bash -lc :</dev/tcp/127.0.0.1/${CONTROL_PLANE_ACP_PORT:-3000}'
+  local expected_acp_probe="bash -lc :</dev/tcp/127.0.0.1/\${CONTROL_PLANE_ACP_PORT:-3000}"
 
   kubectl get deployment/control-plane --namespace "${namespace}" -o json > "${deployment_json}"
   test "$(jq -r '.spec.template.spec.containers[] | select(.name == "control-plane").readinessProbe.exec.command | join(" ")' "${deployment_json}")" = "${expected_acp_probe}"
