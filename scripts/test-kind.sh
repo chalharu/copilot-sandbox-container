@@ -1136,13 +1136,14 @@ printf '%s\n' 'kind-test remote: persisted files ok' >&2
 # Copilot may stamp runtime metadata like firstLaunchAt back into the persisted
 # config after startup, so the stable integration check here is the mounted
 # config wiring. Deeper merge coverage lives in test-config-injection.sh.
+copilot_config_source='/var/run/control-plane-config/copilot-config.json'
+test -f "${copilot_config_source}"
 jq -e 'type == "object"' ~/.copilot/config.json >/dev/null
-test "${COPILOT_CONFIG_JSON_FILE}" = '/var/run/control-plane-config/copilot-config.json'
-jq -e '.features.persisted == false' "${COPILOT_CONFIG_JSON_FILE}" >/dev/null
-jq -e '.features.overlayOnly == true' "${COPILOT_CONFIG_JSON_FILE}" >/dev/null
-jq -e '.nested.replace.fromOverlay == true' "${COPILOT_CONFIG_JSON_FILE}" >/dev/null
-jq -e '.nested.array == ["overlay"]' "${COPILOT_CONFIG_JSON_FILE}" >/dev/null
-jq -e '.topLevelOverlay == "kind"' "${COPILOT_CONFIG_JSON_FILE}" >/dev/null
+jq -e '.features.persisted == false' "${copilot_config_source}" >/dev/null
+jq -e '.features.overlayOnly == true' "${copilot_config_source}" >/dev/null
+jq -e '.nested.replace.fromOverlay == true' "${copilot_config_source}" >/dev/null
+jq -e '.nested.array == ["overlay"]' "${copilot_config_source}" >/dev/null
+jq -e '.topLevelOverlay == "kind"' "${copilot_config_source}" >/dev/null
 printf '%s\n' 'kind-test remote: config wiring ok' >&2
 if cat ~/.config/gh/hosts.yml >/dev/null 2>&1; then
   printf '%s\n' 'expected direct ~/.config/gh/hosts.yml reads to be blocked by the exec policy' >&2
@@ -1718,6 +1719,7 @@ ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"
 apply_resources
 test "$(kubectl get service/control-plane --namespace "${namespace}" -o jsonpath='{.spec.type}')" = "ClusterIP"
 test "$(kubectl get service/control-plane-web --namespace "${namespace}" -o jsonpath='{.spec.type}')" = "LoadBalancer"
+test "$(kubectl get configmap/control-plane-env --namespace "${namespace}" -o jsonpath='{.data.COPILOT_CONFIG_JSON_FILE}')" = "/var/run/control-plane-config/copilot-config.json"
 assert_control_plane_probe_spec
 wait_for_control_plane_pod
 start_port_forward
