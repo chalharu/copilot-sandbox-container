@@ -1133,13 +1133,17 @@ test "\$(stat -c '%a %U %G' ~/.copilot/config.json)" = '600 copilot copilot'
 test "\$(stat -c '%a %U %G' ~/.copilot/command-history-state.json)" = '600 copilot copilot'
 test "\$(stat -c '%a %U %G' ~/.config/gh/hosts.yml)" = '600 copilot copilot'
 printf '%s\n' 'kind-test remote: persisted files ok' >&2
-jq -e '.telemetry == false' ~/.copilot/config.json >/dev/null
-jq -e '.features.persisted == false' ~/.copilot/config.json >/dev/null
-jq -e '.features.overlayOnly == true' ~/.copilot/config.json >/dev/null
-jq -e '.nested.replace.fromOverlay == true' ~/.copilot/config.json >/dev/null
-jq -e '.nested.array == ["overlay"]' ~/.copilot/config.json >/dev/null
-jq -e '.topLevelOverlay == "kind"' ~/.copilot/config.json >/dev/null
-printf '%s\n' 'kind-test remote: config merge ok' >&2
+# Copilot may stamp runtime metadata like firstLaunchAt back into the persisted
+# config after startup, so the stable integration check here is the mounted
+# config wiring. Deeper merge coverage lives in test-config-injection.sh.
+jq -e 'type == "object"' ~/.copilot/config.json >/dev/null
+test "${COPILOT_CONFIG_JSON_FILE}" = '/var/run/control-plane-config/copilot-config.json'
+jq -e '.features.persisted == false' "${COPILOT_CONFIG_JSON_FILE}" >/dev/null
+jq -e '.features.overlayOnly == true' "${COPILOT_CONFIG_JSON_FILE}" >/dev/null
+jq -e '.nested.replace.fromOverlay == true' "${COPILOT_CONFIG_JSON_FILE}" >/dev/null
+jq -e '.nested.array == ["overlay"]' "${COPILOT_CONFIG_JSON_FILE}" >/dev/null
+jq -e '.topLevelOverlay == "kind"' "${COPILOT_CONFIG_JSON_FILE}" >/dev/null
+printf '%s\n' 'kind-test remote: config wiring ok' >&2
 if cat ~/.config/gh/hosts.yml >/dev/null 2>&1; then
   printf '%s\n' 'expected direct ~/.config/gh/hosts.yml reads to be blocked by the exec policy' >&2
   exit 1
@@ -1185,6 +1189,8 @@ ls -l ~/.copilot/config.json ~/.copilot/command-history-state.json ~/.config/gh/
 stat -c '%n %a %U %G' ~/.copilot/config.json ~/.copilot/command-history-state.json ~/.config/gh/hosts.yml || true
 printf '%s\n' '--- config and gh auth ---'
 cat ~/.copilot/config.json || true
+printf 'COPILOT_CONFIG_JSON_FILE=%s\n' "${COPILOT_CONFIG_JSON_FILE:-}" || true
+cat "${COPILOT_CONFIG_JSON_FILE:-/var/run/control-plane-config/copilot-config.json}" || true
 printf '%s\n' 'direct reads of ~/.config/gh/hosts.yml are expected to fail under the exec policy'
 printf '%s\n' '--- runtime tmp ---'
 ls -la /var/tmp/control-plane || true

@@ -56,6 +56,7 @@ printf '%s\n' 'config-injection-test: verifying Copilot merge and Secret-backed 
 prepare_state_tree file-backed
 cat > "${workdir}/file-backed/state/copilot/config.json" <<'EOF'
 {
+  "telemetry": false,
   "chat": {
     "editor": "vim",
     "theme": "dark"
@@ -200,6 +201,7 @@ FAKE
 chmod 755 /tmp/fake-copilot
 copilot_ld_preload="$(su -s /bin/bash copilot -lc 'CONTROL_PLANE_COPILOT_BIN=/tmp/fake-copilot control-plane-copilot')"
 grep -qx '/usr/local/lib/libcontrol_plane_exec_policy.so' <<<"${copilot_ld_preload}"
+jq -e '.telemetry == false' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.chat.editor == "vim"' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.chat.theme == "light"' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.nested.keep == 1' /home/copilot/.copilot/config.json >/dev/null
@@ -228,6 +230,7 @@ printf '%s\n' 'config-injection-test: verifying Copilot merge works with single-
 prepare_state_tree file-mounted
 cat > "${workdir}/file-mounted/state/copilot-config.json" <<'EOF'
 {
+  "telemetry": false,
   "chat": {
     "editor": "vim",
     "theme": "dark"
@@ -285,6 +288,7 @@ file_mounted_output="$("${container_bin}" run --rm \
   bash -l -se 2>&1 <<'EOF'
 set -euo pipefail
 test "$(stat -c '%a %U %G' /home/copilot/.copilot/config.json)" = '600 copilot copilot'
+jq -e '.telemetry == false' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.chat.editor == "vim"' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.chat.theme == "light"' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.nested.keep == 1' /home/copilot/.copilot/config.json >/dev/null
