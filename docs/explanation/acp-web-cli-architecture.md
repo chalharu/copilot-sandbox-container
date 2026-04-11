@@ -79,6 +79,239 @@ Web / CLI の両方に一貫した API と SSE を提供すること**です。
 この構成では、Web と CLI は同じ backend contract を共有し、ACP との TCP 通信は
 Axum バックエンドだけが引き受けます。
 
+### 4.1 システムランドスケープ図
+
+以下は、この再設計が置かれる周辺システム全体を俯瞰する C4 の
+System Landscape 相当の図です。
+
+```mermaid
+flowchart LR
+    webUser["Web User<br/>browser から対話する利用者"]
+    cliUser["CLI User<br/>terminal から対話する利用者"]
+    sre["SRE / Operator<br/>運用監視と障害対応を行う"]
+
+    acpUi["ACP UI System<br/>Axum backend / Leptos Web / Ratatui CLI"]
+    copilotCli["Copilot CLI System<br/>ACP mode で agent と会話する実行系"]
+    githubCopilot["GitHub Copilot Service<br/>Copilot CLI の上流サービス"]
+    k8sPlatform["Kubernetes Platform<br/>backend を配置する基盤"]
+    observability["Observability Stack<br/>metrics / logs / alerts"]
+
+    webUser -->|uses| acpUi
+    cliUser -->|uses| acpUi
+    sre -->|operates| acpUi
+    k8sPlatform -->|hosts| acpUi
+    acpUi -->|controls via ACP/TCP| copilotCli
+    copilotCli -->|calls upstream APIs| githubCopilot
+    acpUi -->|emits telemetry| observability
+
+    classDef person fill:#fff3bf,stroke:#8f6b00,color:#111;
+    classDef system fill:#dbeafe,stroke:#1d4ed8,color:#111;
+    classDef platform fill:#e5e7eb,stroke:#6b7280,color:#111;
+
+    class webUser,cliUser,sre person;
+    class acpUi,copilotCli,githubCopilot,observability system;
+    class k8sPlatform platform;
+```
+
+### 4.2 コンテキスト図
+
+以下は、対象システムを black box として見た C4 の System Context 相当の図です。
+
+```mermaid
+flowchart LR
+    webUser["Web User<br/>browser で会話と tool 出力を確認する"]
+    cliUser["CLI User<br/>terminal で会話と command 操作を行う"]
+    sre["SRE / Operator<br/>health / metrics / logs を確認する"]
+
+    acpUi["ACP UI System<br/>Web / CLI 向けの共通 backend 契約を提供する"]
+
+    acpWorker["Copilot CLI ACP Worker<br/>copilot --acp --port PORT"]
+    observability["Observability Stack<br/>metrics / logs / alerts"]
+    githubCopilot["GitHub Copilot Service<br/>Copilot CLI の上流サービス"]
+
+    webUser -->|uses via Web UI| acpUi
+    cliUser -->|uses via CLI UI| acpUi
+    sre -->|monitors and operates| acpUi
+    acpUi -->|spawns and talks via ACP/TCP| acpWorker
+    acpUi -->|publishes telemetry| observability
+    acpWorker -->|calls upstream APIs| githubCopilot
+
+    classDef person fill:#fff3bf,stroke:#8f6b00,color:#111;
+    classDef system fill:#dbeafe,stroke:#1d4ed8,color:#111;
+    classDef external fill:#ede9fe,stroke:#6d28d9,color:#111;
+
+    class webUser,cliUser,sre person;
+    class acpUi system;
+    class acpWorker,observability,githubCopilot external;
+```
+
+### 4.3 コンテナ図
+
+以下は、ACP UI System の内部を deployable / runnable unit ごとに分解した
+C4 の Container 相当の図です。
+
+```mermaid
+flowchart LR
+    webUser["Web User"]
+    cliUser["CLI User"]
+
+    subgraph acpSystem["ACP UI System"]
+        direction LR
+        webApp["Web Frontend Container<br/>Leptos CSR / virtual scroll<br/>Runs in browser"]
+        cliApp["CLI Frontend Container<br/>Ratatui / TAB completion<br/>Runs in terminal"]
+        backend["Axum Backend Container<br/>HTTP API / SSE / session supervisor"]
+        stateDb["Session State Store Container<br/>SQLite + append-only event log"]
+    end
+
+    worker["Copilot CLI ACP Worker<br/>External executable in ACP mode"]
+    observability["Observability Stack"]
+    githubCopilot["GitHub Copilot Service"]
+
+    webUser -->|uses| webApp
+    cliUser -->|uses| cliApp
+    webApp -->|HTTPS: app assets + HTTP API + SSE| backend
+    cliApp -->|HTTP + SSE| backend
+    backend -->|ACP/TCP| worker
+    backend -->|reads and writes| stateDb
+    backend -->|emits metrics / logs| observability
+    worker -->|fulfills assistant requests| githubCopilot
+
+    classDef person fill:#fff3bf,stroke:#8f6b00,color:#111;
+    classDef container fill:#dbeafe,stroke:#1d4ed8,color:#111;
+    classDef external fill:#ede9fe,stroke:#6d28d9,color:#111;
+
+    class webUser,cliUser person;
+    class webApp,cliApp,backend,stateDb container;
+    class worker,observability,githubCopilot external;
+```
+
+### 4.4 デプロイメント図
+
+以下は、想定する実行配置を示す C4 の Deployment 相当の図です。
+
+```mermaid
+flowchart TB
+    subgraph workstation["Client Workstation"]
+        direction TB
+        browser["Web Browser<br/>Leptos CSR app"]
+        terminal["CLI Terminal<br/>Ratatui app"]
+    end
+
+    subgraph cluster["Kubernetes Cluster"]
+        direction TB
+        ingress["Ingress / HTTPS Endpoint"]
+        service["Service"]
+
+        subgraph backendPod["Backend Pod"]
+            direction TB
+            axum["Axum Backend Process<br/>HTTP API / SSE / WASM hosting"]
+            workerPool["Spawned Copilot CLI Processes<br/>external ACP workers"]
+        end
+
+        volume["Persistent Volume<br/>SQLite + event log"]
+    end
+
+    observability["Observability Stack"]
+    githubCopilot["GitHub Copilot Service"]
+
+    browser -->|HTTPS + SSE| ingress
+    terminal -->|HTTPS + SSE| ingress
+    ingress --> service
+    service --> axum
+    axum -->|spawns / supervises| workerPool
+    axum -->|reads and writes| volume
+    axum -->|exports metrics / logs| observability
+    workerPool -->|egress to APIs| githubCopilot
+
+    classDef client fill:#fff3bf,stroke:#8f6b00,color:#111;
+    classDef node fill:#e5e7eb,stroke:#6b7280,color:#111;
+    classDef workload fill:#dbeafe,stroke:#1d4ed8,color:#111;
+    classDef external fill:#ede9fe,stroke:#6d28d9,color:#111;
+
+    class browser,terminal client;
+    class ingress,service,volume node;
+    class axum workload;
+    class workerPool,observability,githubCopilot external;
+```
+
+### 4.5 コンポーネント図
+
+以下は、Axum Backend Container の内部責務を分解した C4 の Component 相当の図です。
+
+```mermaid
+flowchart LR
+    clients["Web Frontend / CLI Frontend"]
+
+    subgraph presentation["Presentation Layer"]
+        direction TB
+        router["Axum Router<br/>route / middleware / path split"]
+        httpHandlers["HTTP Handlers<br/>sessions / messages / history / completions"]
+        sseHandlers["SSE Handlers<br/>snapshot / stream / heartbeat / resume"]
+    end
+
+    subgraph application["Application Layer"]
+        direction TB
+        sessionUseCases["Session Lifecycle Use Cases<br/>CreateSession / CloseSession / GetSessionSnapshot"]
+        conversationUseCases["Conversation Use Cases<br/>SendPrompt / CancelTurn / GetHistoryWindow / AttachEventStream"]
+        completionUseCases["Completion Use Cases<br/>ResolveSlashCompletions"]
+    end
+
+    subgraph domain["Domain Layer"]
+        direction TB
+        sessionModel["Session Model<br/>Session / ConnectionState"]
+        conversationModel["Conversation Model<br/>ConversationItem / SessionEvent / ToolInvocation"]
+        completionModel["Completion Model<br/>SlashCommand / CompletionCandidate"]
+    end
+
+    subgraph infrastructure["Infrastructure Layer"]
+        direction TB
+        supervisor["AcpProcessSupervisor<br/>spawn / stop / health"]
+        tcpClient["AcpTcpClient<br/>ACP over TCP transport"]
+        normalizer["EventNormalizer<br/>raw ACP -> canonical event"]
+        persistence["SessionRepository + EventStore<br/>metadata / snapshot / event log"]
+        wasmAssets["WasmAssetProvider<br/>/app/* asset delivery"]
+    end
+
+    worker["Copilot CLI ACP Worker"]
+    stateDb["SQLite + append-only event log"]
+
+    clients --> router
+    router --> httpHandlers
+    router --> sseHandlers
+    router --> wasmAssets
+
+    httpHandlers --> sessionUseCases
+    httpHandlers --> conversationUseCases
+    httpHandlers --> completionUseCases
+    sseHandlers --> conversationUseCases
+    sseHandlers --> sessionUseCases
+
+    sessionUseCases --> sessionModel
+    conversationUseCases --> conversationModel
+    completionUseCases --> completionModel
+
+    sessionUseCases --> supervisor
+    sessionUseCases --> persistence
+    conversationUseCases --> tcpClient
+    conversationUseCases --> persistence
+    completionUseCases --> tcpClient
+    completionUseCases --> persistence
+    tcpClient --> normalizer
+    normalizer --> persistence
+
+    supervisor --> worker
+    tcpClient --> worker
+    persistence --> stateDb
+
+    classDef external fill:#ede9fe,stroke:#6d28d9,color:#111;
+    classDef layer fill:#dbeafe,stroke:#1d4ed8,color:#111;
+    classDef store fill:#dcfce7,stroke:#15803d,color:#111;
+
+    class clients,worker external;
+    class router,httpHandlers,sseHandlers,sessionUseCases,conversationUseCases,completionUseCases,sessionModel,conversationModel,completionModel,supervisor,tcpClient,normalizer,wasmAssets layer;
+    class persistence,stateDb store;
+```
+
 ## 5. なぜ Web と CLI を backend 経由で統一するのか
 
 ブラウザや CLI から ACP へ直接接続させると、接続管理、再接続、イベント整形、
