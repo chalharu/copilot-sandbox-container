@@ -346,6 +346,7 @@ if grep -Fq 'CONTROL_PLANE_TRANSFER_HOST' "${workdir}/k8s-job-manifest.yaml" \
   exit 1
 fi
 grep -Fq 'curl -fsSL' "${workdir}/k8s-job-manifest.yaml"
+grep -Fq -- '--fail-with-body' "${workdir}/k8s-job-manifest.yaml"
 grep -Fq "\"\${CONTROL_PLANE_TRANSFER_URL}/input.tar\"" "${workdir}/k8s-job-manifest.yaml"
 grep -Fq "\"\${CONTROL_PLANE_TRANSFER_URL}/output.tar\"" "${workdir}/k8s-job-manifest.yaml"
 grep -Fq "\"\${CONTROL_PLANE_TRANSFER_URL}/finalize\"" "${workdir}/k8s-job-manifest.yaml"

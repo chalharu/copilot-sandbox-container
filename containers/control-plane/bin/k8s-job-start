@@ -445,13 +445,13 @@ EOF
                       -H "Authorization: Bearer \${transfer_token}" \
                       --data-binary @- \
                       "\${CONTROL_PLANE_TRANSFER_URL}/output.tar"
-                curl -fsS \
+                curl --fail-with-body -sS \
                   -X POST \
                   -H "Authorization: Bearer \${transfer_token}" \
                   "\${CONTROL_PLANE_TRANSFER_URL}/finalize"
                 exit 0
               fi
-              curl -fsS \
+              curl --fail-with-body -sS \
                 -X POST \
                 -H "Authorization: Bearer \${transfer_token}" \
                 "\${CONTROL_PLANE_TRANSFER_URL}/release"

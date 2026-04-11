@@ -13,7 +13,7 @@ use std::fs;
 use std::io::Write;
 use std::net::SocketAddr;
 use std::path::{Path as FsPath, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -441,13 +441,14 @@ async fn run_transfer_helper(
     match tokio::task::spawn_blocking(move || {
         let manifest = read_transfer_manifest(&state, &transfer_id)?;
         authorize_transfer(&manifest, &headers)?;
-        let status = transfer_helper_command(&manifest, subcommand, &transfer_id)
-            .status()
+        let output = transfer_helper_command(&manifest, subcommand, &transfer_id)
+            .output()
             .map_err(|error| format!("failed to start transfer helper: {error}"))?;
-        if status.success() {
+        forward_transfer_helper_output(&output)?;
+        if output.status.success() {
             Ok::<_, String>(())
         } else {
-            Err(format!("transfer helper {subcommand} exited with {status}"))
+            Err(render_transfer_helper_failure(subcommand, &output))
         }
     })
     .await
@@ -458,6 +459,46 @@ async fn run_transfer_helper(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("failed to join transfer helper: {error}"),
         ),
+    }
+}
+
+fn forward_transfer_helper_output(output: &Output) -> Result<(), String> {
+    if !output.stdout.is_empty() {
+        let mut stdout = std::io::stdout();
+        stdout
+            .write_all(&output.stdout)
+            .map_err(|error| format!("failed to forward transfer helper stdout: {error}"))?;
+        stdout
+            .flush()
+            .map_err(|error| format!("failed to flush transfer helper stdout: {error}"))?;
+    }
+    if !output.stderr.is_empty() {
+        let mut stderr = std::io::stderr();
+        stderr
+            .write_all(&output.stderr)
+            .map_err(|error| format!("failed to forward transfer helper stderr: {error}"))?;
+        stderr
+            .flush()
+            .map_err(|error| format!("failed to flush transfer helper stderr: {error}"))?;
+    }
+    Ok(())
+}
+
+fn render_transfer_helper_failure(subcommand: &str, output: &Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !stderr.is_empty() {
+        format!(
+            "transfer helper {subcommand} exited with {}: {stderr}",
+            output.status
+        )
+    } else if !stdout.is_empty() {
+        format!(
+            "transfer helper {subcommand} exited with {}: {stdout}",
+            output.status
+        )
+    } else {
+        format!("transfer helper {subcommand} exited with {}", output.status)
     }
 }
 
