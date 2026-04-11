@@ -416,12 +416,6 @@ printf '%s\n' 'pre-tool-use-policy-ok'
 EOF
 chmod 755 "${workdir}/pre-tool-use-check.sh"
 
-printf '%s\n' 'copilot-secret-token' > "${workdir}/state/control-plane/copilot-github-token"
-cat > "${workdir}/state/gh/hosts.yml" <<'EOF'
-github.com:
-  oauth_token: managed-gh-token
-  user: managed-bot
-EOF
 printf '%s\n' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestMountedKey mounted@test' > "${workdir}/auth/..data/ssh-public-key"
 printf '%s\n' 'mounted-gh-token' > "${workdir}/auth/..data/gh-github-token"
 cat > "${workdir}/auth/..data/gh-hosts.yml" <<'EOF'
@@ -451,8 +445,6 @@ chmod 700 \
   /setup/workspace
 chmod 755 /setup/auth /setup/auth/..data
 chmod 600 \
-  /setup/state/control-plane/copilot-github-token \
-  /setup/state/gh/hosts.yml \
   /setup/auth/..data/ssh-public-key \
   /setup/auth/..data/gh-github-token \
   /setup/auth/..data/gh-hosts.yml \
@@ -466,6 +458,9 @@ output="$("${container_bin}" run --rm \
   "${control_plane_run_user[@]}" \
   -i \
   "${startup_caps[@]}" \
+  -e GH_HOSTS_YML_FILE=/var/run/control-plane-auth/gh-hosts.yml \
+  -e GH_GITHUB_TOKEN_FILE=/var/run/control-plane-auth/gh-github-token \
+  -e COPILOT_GITHUB_TOKEN_FILE=/var/run/control-plane-auth/copilot-github-token \
   -v "${workdir}/state/copilot:/home/copilot/.copilot" \
   -v "${workdir}/state/gh:/home/copilot/.config/gh" \
   -v "${workdir}/state/control-plane:/home/copilot/.config/control-plane" \
