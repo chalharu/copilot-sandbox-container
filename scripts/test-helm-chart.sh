@@ -95,6 +95,20 @@ assert_resource_contains() {
   }
 }
 
+assert_resource_not_contains() {
+  local kind="$1"
+  local name="$2"
+  local namespace="$3"
+  local unexpected="$4"
+  local block
+
+  block="$(resource_block "${kind}" "${name}" "${namespace}")"
+  if grep -Fq -- "${unexpected}" <<<"${block}"; then
+    printf 'Did not expect %s/%s namespace %s to contain: %s\n' "${kind}" "${name}" "${namespace}" "${unexpected}" >&2
+    exit 1
+  fi
+}
+
 assert_kind_count() {
   local kind="$1"
   local expected="$2"
@@ -126,6 +140,9 @@ assert_resource_present Namespace copilot-shared-jobs
 assert_resource_present Secret control-plane-auth copilot-shared
 assert_resource_absent Secret control-plane-auth-repo-two copilot-shared
 assert_resource_absent Secret repo-two-auth copilot-shared
+assert_resource_contains Secret control-plane-auth copilot-shared 'gh-github-token: "shared-gh-token"'
+assert_resource_contains Secret control-plane-auth copilot-shared 'gh-hosts.yml: |'
+assert_resource_contains Secret control-plane-auth copilot-shared 'oauth_token: shared-host-token'
 
 assert_resource_present PersistentVolumeClaim control-plane-workspace-pvc-repo-one copilot-shared
 assert_resource_present PersistentVolumeClaim shared-session-pvc copilot-shared
@@ -143,6 +160,8 @@ assert_resource_contains ConfigMap control-plane-env copilot-shared 'CONTROL_PLA
 assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'CONTROL_PLANE_K8S_NAMESPACE: "copilot-shared"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'CONTROL_PLANE_JOB_NAMESPACE: "copilot-shared-jobs"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'CONTROL_PLANE_COPILOT_SESSION_PVC: "shared-session-pvc"'
+assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'GH_GITHUB_TOKEN_FILE: "/var/run/control-plane-auth/gh-github-token"'
+assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'GH_HOSTS_YML_FILE: "/var/run/control-plane-auth/gh-hosts.yml"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT: "control-plane-exec"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'CONTROL_PLANE_JOB_SERVICE_ACCOUNT: "control-plane-job"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'CONTROL_PLANE_WORKSPACE_PVC: "control-plane-workspace-pvc-repo-one"'
@@ -160,6 +179,8 @@ assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-s
 assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT: "control-plane-exec"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_JOB_SERVICE_ACCOUNT: "control-plane-job"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'TZ: "Europe/Berlin"'
+assert_resource_not_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'GH_GITHUB_TOKEN_FILE: "/var/run/control-plane-auth/gh-github-token"'
+assert_resource_not_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'GH_HOSTS_YML_FILE: "/var/run/control-plane-auth/gh-hosts.yml"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_WORKSPACE_PVC: "repo-two-workspace-pvc"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_JOB_TRANSFER_HOST: "repo-two-control-plane.copilot-shared.svc.cluster.local"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-two copilot-shared 'CONTROL_PLANE_JOB_TRANSFER_PORT: "2022"'
