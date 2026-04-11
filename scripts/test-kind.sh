@@ -629,6 +629,7 @@ data:
   CONTROL_PLANE_JOB_TRANSFER_IMAGE: ${control_plane_image}
   CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane-web.${namespace}.svc.cluster.local
   CONTROL_PLANE_JOB_TRANSFER_PORT: "8080"
+  CONTROL_PLANE_JOB_TRANSFER_ROOT: /home/copilot/.copilot/session-state/job-transfers
   CONTROL_PLANE_WEB_PORT: "8080"
   CONTROL_PLANE_RUST_HOOK_IMAGE: ${rust_hook_image}
   CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: Never
