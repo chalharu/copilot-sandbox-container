@@ -58,5 +58,5 @@ That script:
 
 The authoritative hosted validation definition lives in `.github/workflows/control-plane-ci.yml`.
 
-- `pull_request` relies on the external `linter-service`, builds integration images for both x64 and aarch64, then fans out dual-arch `Integration Smoke` plus x64-only `Integration Regressions`, `Integration Kind Session`, `Integration Kind Jobs Core`, and `Integration Kind Jobs Transfer`
-- `push` to `main` additionally gates `Publish Architecture Images`, `publish-manifests`, and `cleanup-packages` on the integration fan-out results
+- `pull_request` relies on the external `linter-service`; when a change only touches non-runtime Markdown files, the workflow exits after the lightweight change-detection job, otherwise it builds integration images for both x64 and aarch64 and then fans out dual-arch `Integration Smoke` plus x64-only `Integration Regressions`, `Integration Kind Session`, `Integration Kind Jobs Core`, and `Integration Kind Jobs Transfer`
+- `push` to `main` uses the same change-detection gate; when build-relevant files changed it additionally gates `Publish Architecture Images`, `publish-manifests`, and `cleanup-packages` on the integration fan-out results
