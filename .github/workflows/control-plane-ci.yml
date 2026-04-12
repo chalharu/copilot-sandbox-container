@@ -1,9 +1,17 @@
 name: Control Plane CI
 on:
   pull_request:
+    paths:
+      - '**'
+      - '!**/*.md'
+      - 'containers/control-plane/skills/**/SKILL.md'
   push:
     branches:
       - main
+    paths:
+      - '**'
+      - '!**/*.md'
+      - 'containers/control-plane/skills/**/SKILL.md'
 jobs:
   integration:
     name: Integration Images (${{ matrix.architecture_label }})
