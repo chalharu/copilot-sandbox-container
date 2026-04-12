@@ -5,7 +5,6 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 workflow_path="${repo_root}/.github/workflows/control-plane-ci.yml"
 build_test_path="${script_dir}/build-test.sh"
-change_filter_path="${script_dir}/ci-changes-require-build.sh"
 kind_test_path="${script_dir}/test-kind.sh"
 
 require_command() {
@@ -39,6 +38,16 @@ assert_file_contains() {
     printf 'Expected %s to contain: %s\n' "${path}" "${expected}" >&2
     exit 1
   }
+}
+
+assert_file_not_contains() {
+  local path="$1"
+  local unexpected="$2"
+
+  if grep -Fq -- "${unexpected}" "${path}"; then
+    printf 'Did not expect %s to contain: %s\n' "${path}" "${unexpected}" >&2
+    exit 1
+  fi
 }
 
 assert_block_contains() {
@@ -83,17 +92,6 @@ assert_block_contains_one_of() {
   exit 1
 }
 
-assert_equals() {
-  local actual="$1"
-  local expected="$2"
-  local description="$3"
-
-  [[ "${actual}" == "${expected}" ]] || {
-    printf 'Expected %s to equal %s, got %s\n' "${description}" "${expected}" "${actual}" >&2
-    exit 1
-  }
-}
-
 require_command awk
 require_command grep
 
@@ -108,7 +106,6 @@ assert_file_contains "${kind_test_path}" "if [[ \"\${kind_test_group}\" == \"all
 assert_file_contains "${kind_test_path}" '  all|session|jobs|jobs-core|jobs-transfer)'
 
 printf '%s\n' 'ci-workflow-test: verifying workflow fan-out wiring' >&2
-changes_block="$(job_block changes)"
 integration_block="$(job_block integration)"
 integration_smoke_block="$(job_block integration-smoke)"
 integration_regressions_block="$(job_block integration-regressions)"
@@ -122,10 +119,6 @@ if grep -Fqx '  lint:' "${workflow_path}"; then
   exit 1
 fi
 
-[[ -n "${changes_block}" ]] || {
-  printf 'Expected changes job in %s\n' "${workflow_path}" >&2
-  exit 1
-}
 [[ -n "${integration_block}" ]] || {
   printf 'Expected integration job in %s\n' "${workflow_path}" >&2
   exit 1
@@ -155,14 +148,17 @@ fi
   exit 1
 }
 
-assert_block_contains "${changes_block}" 'fetch-depth: 0' 'changes job block'
-# shellcheck disable=SC2016
-assert_block_contains "${changes_block}" 'should_build: ${{ steps.decide.outputs.should_build }}' 'changes job block'
-assert_block_contains "${changes_block}" 'git diff --name-only "${PULL_REQUEST_BASE_SHA}...${PULL_REQUEST_HEAD_SHA}" > changed-paths.txt' 'changes job block'
-assert_block_contains "${changes_block}" './scripts/ci-changes-require-build.sh < changed-paths.txt' 'changes job block'
-# shellcheck disable=SC2016
-assert_block_contains "${integration_block}" "if: needs.changes.outputs.should_build == 'true'" 'integration job block'
-assert_block_contains "${integration_block}" 'needs: changes' 'integration job block'
+assert_file_contains "${workflow_path}" '  pull_request:'
+assert_file_contains "${workflow_path}" '    paths:'
+assert_file_contains "${workflow_path}" "      - '**'"
+assert_file_contains "${workflow_path}" "      - '!**/*.md'"
+assert_file_contains "${workflow_path}" "      - 'containers/control-plane/skills/**/SKILL.md'"
+assert_file_contains "${workflow_path}" '  push:'
+assert_file_not_contains "${workflow_path}" './scripts/ci-changes-require-build.sh'
+if grep -Fqx '  changes:' "${workflow_path}"; then
+  printf 'Did not expect changes job in %s\n' "${workflow_path}" >&2
+  exit 1
+fi
 # shellcheck disable=SC2016
 assert_block_contains "${integration_block}" 'path: /tmp/control-plane-buildx-cache-${{ matrix.image_arch }}' 'integration job block'
 # shellcheck disable=SC2016
@@ -224,9 +220,6 @@ assert_block_contains "${integration_kind_jobs_transfer_block}" '*download-integ
 assert_block_contains "${integration_kind_jobs_transfer_block}" 'CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar' 'integration-kind-jobs-transfer job block'
 assert_block_contains "${integration_kind_jobs_transfer_block}" './scripts/build-test.sh --skip-image-build --group kind-jobs-transfer' 'integration-kind-jobs-transfer job block'
 assert_block_not_contains "${publish_block}" '- lint' 'publish-architecture-images job block'
-assert_block_contains "${publish_block}" '- changes' 'publish-architecture-images job block'
-# shellcheck disable=SC2016
-assert_block_contains "${publish_block}" "if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.should_build == 'true'" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" '- integration-kind-session' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" '- integration-kind-jobs' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" '- integration-kind-jobs-transfer' 'publish-architecture-images job block'
@@ -235,12 +228,5 @@ if grep -Fqx '  integration-kind:' "${workflow_path}"; then
   printf 'Did not expect legacy integration-kind job to remain in %s\n' "${workflow_path}" >&2
   exit 1
 fi
-
-printf '%s\n' 'ci-workflow-test: verifying markdown-only build skipping' >&2
-assert_equals "$("${change_filter_path}")" 'true' 'empty change set default'
-assert_equals "$(printf '%s\n' README.md docs/README.md | "${change_filter_path}")" 'false' 'markdown-only stdin change set'
-assert_equals "$("${change_filter_path}" README.md docs/README.md)" 'false' 'markdown-only argv change set'
-assert_equals "$("${change_filter_path}" README.md scripts/build-test.sh)" 'true' 'mixed markdown and non-markdown change set'
-assert_equals "$("${change_filter_path}" containers/control-plane/skills/git-commit/SKILL.md)" 'true' 'bundled skill manifest change set'
 
 printf '%s\n' 'ci-workflow-test: workflow fan-out ok' >&2

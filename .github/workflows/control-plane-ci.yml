@@ -1,50 +1,20 @@
 name: Control Plane CI
 on:
   pull_request:
+    paths:
+      - '**'
+      - '!**/*.md'
+      - 'containers/control-plane/skills/**/SKILL.md'
   push:
     branches:
       - main
+    paths:
+      - '**'
+      - '!**/*.md'
+      - 'containers/control-plane/skills/**/SKILL.md'
 jobs:
-  changes:
-    name: Detect build-relevant changes
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    outputs:
-      should_build: ${{ steps.decide.outputs.should_build }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - name: Collect changed paths
-        env:
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PUSH_BEFORE_SHA: ${{ github.event.before }}
-          CURRENT_SHA: ${{ github.sha }}
-        run: |
-          if [[ "${GITHUB_EVENT_NAME}" == 'pull_request' ]]; then
-            git diff --name-only "${PULL_REQUEST_BASE_SHA}...${PULL_REQUEST_HEAD_SHA}" > changed-paths.txt
-          elif [[ -n "${PUSH_BEFORE_SHA}" ]] && [[ "${PUSH_BEFORE_SHA}" != '0000000000000000000000000000000000000000' ]]; then
-            git diff --name-only "${PUSH_BEFORE_SHA}" "${CURRENT_SHA}" > changed-paths.txt
-          else
-            git show --pretty='' --name-only "${CURRENT_SHA}" > changed-paths.txt
-          fi
-      - name: Decide whether container build jobs should run
-        id: decide
-        run: |
-          should_build="$(./scripts/ci-changes-require-build.sh < changed-paths.txt)"
-          printf 'should_build=%s\n' "${should_build}" >> "${GITHUB_OUTPUT}"
-      - name: Explain skipped container build jobs
-        if: steps.decide.outputs.should_build != 'true'
-        run: printf '%s\n' 'Skipping container build jobs because no build-relevant files changed.'
   integration:
-    if: needs.changes.outputs.should_build == 'true'
     name: Integration Images (${{ matrix.architecture_label }})
-    needs: changes
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy: &architecture-matrix
@@ -213,12 +183,11 @@ jobs:
           CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar
         run: ./scripts/build-test.sh --skip-image-build --group kind-jobs-transfer
   publish-architecture-images:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.should_build == 'true'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Publish Architecture Images (${{ matrix.architecture_label }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     needs:
-      - changes
       - integration-smoke
       - integration-regressions
       - integration-kind-session
