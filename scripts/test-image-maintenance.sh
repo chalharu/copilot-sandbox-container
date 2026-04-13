@@ -352,6 +352,8 @@ rust_cache_dir="$(rust_container_cache_dir_for_scope control-plane-rust-regressi
 [[ "${rust_cache_target_dir}" == "${rust_cache_dir}/target" ]]
 [[ -d "${rust_cache_home_dir}/.cargo" ]]
 [[ -d "${rust_cache_target_dir}" ]]
+grep -Fqx '[build]' "${rust_cache_home_dir}/.cargo/config.toml"
+grep -Fqx 'target-dir = "/var/tmp/control-plane/cargo-target"' "${rust_cache_home_dir}/.cargo/config.toml"
 [[ -z "${rust_cache_temp_root}" ]]
 unset CONTROL_PLANE_RUST_CONTAINER_CACHE_ROOT
 
@@ -364,6 +366,8 @@ prepare_rust_container_cache control-plane-rust-regressions rust_temp_home_dir r
 [[ "${rust_temp_target_dir}" == "${rust_temp_root}/target" ]]
 [[ -d "${rust_temp_home_dir}/.cargo" ]]
 [[ -d "${rust_temp_target_dir}" ]]
+grep -Fqx '[build]' "${rust_temp_home_dir}/.cargo/config.toml"
+grep -Fqx 'target-dir = "/var/tmp/control-plane/cargo-target"' "${rust_temp_home_dir}/.cargo/config.toml"
 
 printf '%s\n' 'image-maintenance-test: verifying retired helper image contexts were removed' >&2
 [[ ! -e "${sccache_dockerfile_path}" ]]
@@ -408,12 +412,14 @@ assert_file_not_contains "${workflow_path}" 'GHCR_SCCACHE_IMAGE'
 assert_file_not_contains "${github_hooks_test_path}" "-c 'cargo test'"
 assert_file_contains "${session_exec_test_path}" 'cargo chef prepare'
 assert_file_contains "${session_exec_test_path}" 'cargo chef cook'
+assert_file_contains "${session_exec_test_path}" 'ln -sfn /var/tmp/control-plane/cargo-target /tmp/control-plane-workspace/target'
 assert_file_present "${repo_root}/containers/control-plane/Cargo.toml"
 assert_file_present "${repo_root}/containers/control-plane/Cargo.lock"
 assert_file_contains "${repo_root}/containers/control-plane/Cargo.toml" '[workspace]'
 assert_path_absent "${repo_root}/containers/control-plane/exec-api/Cargo.lock"
 assert_path_absent "${repo_root}/containers/control-plane/exec-policy-preload/Cargo.lock"
 assert_path_absent "${repo_root}/containers/control-plane/runtime-tools/Cargo.lock"
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" 'ln -sfn /var/tmp/control-plane/cargo-target /build/control-plane/target'
 assert_file_contains "${git_skills_manifest_installer_path}" '/usr/local/bin/control-plane-runtime-tool'
 assert_file_not_contains "${git_skills_manifest_installer_path}" 'cargo build --release'
 assert_file_contains "${workflow_path}" 'path: /tmp/control-plane-rust-regression-cache'

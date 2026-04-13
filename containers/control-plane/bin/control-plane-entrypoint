@@ -22,6 +22,7 @@ npm_cache_dir="${CONTROL_PLANE_NPM_CACHE_DIR:-${hook_tmp_root}/npm-cache}"
 screen_dir="${SCREENDIR:-${runtime_dir}/screen}"
 cargo_home_dir="${CARGO_HOME:-${control_plane_home}/.cargo}"
 cargo_target_dir="${CARGO_TARGET_DIR:-${tmp_root}/cargo-target}"
+cargo_config_path="${cargo_home_dir}/config.toml"
 rustup_home_dir="${RUSTUP_HOME:-/usr/local/rustup}"
 host_key_dir="${CONTROL_PLANE_HOST_KEY_DIR:-/var/lib/control-plane/ssh-host-keys}"
 runtime_host_key_dir="${CONTROL_PLANE_RUNTIME_HOST_KEY_DIR:-/run/control-plane/ssh-host-keys}"
@@ -121,6 +122,13 @@ fi
 
 write_runtime_var() {
   printf '%s=%q\n' "$1" "$2"
+}
+
+write_cargo_config() {
+  local config_path="$1"
+  local target_dir="$2"
+
+  printf '[build]\ntarget-dir = "%s"\n' "${target_dir}" > "${config_path}"
 }
 
 safe_chown_tree() {
@@ -696,6 +704,9 @@ chmod 700 \
 chmod 711 "${host_key_dir}"
 chmod 700 "${runtime_host_key_dir}"
 chmod 755 /run/sshd
+write_cargo_config "${cargo_config_path}" "${cargo_target_dir}"
+chown "${control_plane_user}:${control_plane_user}" "${cargo_config_path}"
+chmod 600 "${cargo_config_path}"
 
 export XDG_RUNTIME_DIR="${runtime_dir}"
 export CONTROL_PLANE_TMP_ROOT="${tmp_root}"

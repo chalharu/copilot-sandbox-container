@@ -353,6 +353,18 @@ rust_container_cache_dir_for_scope() {
   printf '%s/%s\n' "${cache_root}" "$(printf '%s' "${cache_scope}" | sha256sum | awk '{print $1}')"
 }
 
+rust_container_target_mount_path() {
+  printf '%s\n' "${CONTROL_PLANE_RUST_CONTAINER_TARGET_MOUNT_PATH:-/var/tmp/control-plane/cargo-target}"
+}
+
+write_rust_container_cargo_config() {
+  local cargo_home_dir="$1"
+  local target_dir="$2"
+
+  mkdir -p "${cargo_home_dir}"
+  printf '[build]\ntarget-dir = "%s"\n' "${target_dir}" > "${cargo_home_dir}/config.toml"
+}
+
 prepare_rust_container_cache() {
   local cache_scope="$1"
   local home_dir_name="$2"
@@ -374,6 +386,7 @@ prepare_rust_container_cache() {
   fi
 
   mkdir -p "${home_dir}/.cargo" "${target_dir}"
+  write_rust_container_cargo_config "${home_dir}/.cargo" "$(rust_container_target_mount_path)"
   printf -v "${home_dir_name}" '%s' "${home_dir}"
   printf -v "${target_dir_name}" '%s' "${target_dir}"
   printf -v "${temp_root_name}" '%s' "${temp_root}"
