@@ -153,9 +153,12 @@ pre-commit では bundled `postToolUse` linter を走らせます。必要なら
 
 bundled `preToolUse/exec-forward` は、
 `CONTROL_PLANE_FAST_EXECUTION_ENABLED=1` のときに有効です。
-Copilot CLI の `bash` tool を `control-plane-session-exec proxy` へ書き換えます。
-helper は same-namespace / same-node の Execution Pod を on-demand で作成または
-再利用します。`/workspace` PVC を共有したまま、gRPC 経由で転送します。
+Copilot CLI の `bash` tool 自体はそのまま使います。bundled `preToolUse` hook と
+runtime が、内部 helper の `control-plane-session-exec proxy` を呼んで
+same-namespace / same-node の Execution Pod へ自動委譲します。operator や
+agent が `bash` tool からこの helper を直接呼ぶ想定はありません。helper は
+same-namespace / same-node の Execution Pod を on-demand で作成または再利用します。
+`/workspace` PVC を共有したまま、gRPC 経由で転送します。
 Execution Pod は任意の Linux image を起点にできます。
 node-scoped な `/environment` PVC を同じ node 上で共有します。
 `/environment/root` の chroot runtime と cached `control-plane-exec-api`、

@@ -205,8 +205,9 @@ kubectl get pod <pod-name> -n copilot-sandbox -o jsonpath='{.spec.containers[*].
 
 `control-plane-run` は Kubernetes Job 専用です。Copilot CLI 自身の `bash`
 tool は別経路で、bundled `preToolUse` hook が session-scoped Execution Pod
-へ自動委譲します。`control-plane-run` は operator が explicit に叩く短命
-command の Job 経路です。
+へ自動委譲します。`control-plane-session-exec proxy` はこの自動委譲の内部
+helper です。operator や agent が `bash` tool から直接呼びません。
+`control-plane-run` は operator が explicit に叩く短命 command の Job 経路です。
 
 基本形は次のとおりです。
 
