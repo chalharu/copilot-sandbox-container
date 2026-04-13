@@ -1,7 +1,9 @@
 use std::process::{Command, Stdio};
 
 use crate::error::{ToolError, ToolResult};
-use crate::session_exec::{fast_execution_enabled, session_exec_bin, session_key};
+use crate::session_exec::{
+    clear_session_key, fast_execution_enabled, session_exec_bin, session_key,
+};
 use crate::support::{output_message, read_stdin_string};
 
 pub fn run(_args: &[String]) -> ToolResult<i32> {
@@ -18,16 +20,18 @@ pub fn handle(_raw_input: &str) -> Result<(), String> {
         return Ok(());
     }
 
+    let session_key = session_key()?;
     let output = Command::new(session_exec_bin())
         .arg("cleanup")
         .arg("--session-key")
-        .arg(session_key())
+        .arg(&session_key)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
         .map_err(|error| format!("failed to clean up session execution pod: {error}"))?;
 
     if output.status.success() {
+        clear_session_key()?;
         Ok(())
     } else {
         Err(output_message(
@@ -43,6 +47,7 @@ mod tests {
 
     use tempfile::TempDir;
 
+    use crate::session_exec::session_key;
     use crate::support::shell_quote;
     use crate::test_support::{EnvRestore, lock_env, write_executable};
 
@@ -73,5 +78,50 @@ mod tests {
 
         let recorded = fs::read_to_string(&record_path).unwrap();
         assert_eq!(recorded.trim(), "cleanup --session-key cleanup-key");
+    }
+
+    #[test]
+    fn clears_scoped_hook_session_key_state_after_cleanup() {
+        let _env_lock = lock_env();
+        let temp_dir = TempDir::new().unwrap();
+        let helper_path = temp_dir.path().join("control-plane-session-exec");
+        let record_path = temp_dir.path().join("cleanup-args");
+        write_executable(
+            &helper_path,
+            &format!(
+                "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s %s %s\\n' \"$1\" \"$2\" \"$3\" > {}\n",
+                shell_quote(record_path.to_str().unwrap())
+            ),
+        );
+
+        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
+        let _home = EnvRestore::set("HOME", temp_dir.path().to_str().unwrap());
+        let _session_exec = EnvRestore::set(
+            "CONTROL_PLANE_SESSION_EXEC_BIN",
+            helper_path.to_str().unwrap(),
+        );
+        let _session_key = EnvRestore::set(
+            "CONTROL_PLANE_HOOK_SESSION_KEY",
+            &std::process::id().to_string(),
+        );
+        let resolved_session_key = session_key().unwrap();
+
+        handle("").unwrap();
+
+        let recorded = fs::read_to_string(&record_path).unwrap();
+        assert_eq!(
+            recorded.trim(),
+            format!("cleanup --session-key {resolved_session_key}")
+        );
+
+        let key_dir = temp_dir
+            .path()
+            .join(".copilot/session-state/hook-session-keys");
+        let is_empty = match fs::read_dir(&key_dir) {
+            Ok(mut entries) => entries.next().is_none(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+            Err(error) => panic!("{error}"),
+        };
+        assert!(is_empty);
     }
 }
