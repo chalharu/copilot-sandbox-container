@@ -176,8 +176,10 @@ gRPC 経路は cluster 内 plaintext を前提にしています。
 flat network ではなく、pod-to-pod 通信を信用できる namespace / CNI で
 使ってください。bundled `sessionEnd/cleanup` は同じ session key で明示 cleanup
 を行います。Control Plane Pod 側の OwnerReference でも Pod 漏れを抑えます。
-bash hook では `CONTROL_PLANE_HOOK_SESSION_KEY="$PPID"` を渡します。transient shell
-PID ではなく、Copilot session 側の親プロセスを key に使います。
+bash hook では `CONTROL_PLANE_HOOK_SESSION_KEY="$PPID"` を渡します。runtime は
+この値を transient shell PID ではなく Copilot session 側の親プロセス識別子として
+扱い、同じ親プロセスの start time と組み合わせた scope ごとに UUIDv4 の
+推測困難な session key を `~/.copilot/session-state/` 配下へ解決します。
 
 bundled `control-plane-biome` は次のように動きます。
 
