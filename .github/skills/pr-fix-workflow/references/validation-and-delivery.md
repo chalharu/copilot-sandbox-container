@@ -78,6 +78,8 @@ and `.github/linter-service.yaml`.
 - it also runs x64-only `Integration Regressions`, `Integration Kind Session`,
   `Integration Kind Jobs Core`, and `Integration Kind Jobs Transfer`
 - `push` to `main` uses the same trigger-level filtering
-- for build-relevant changes, it additionally gates `Publish Architecture Images`
-- it also gates `publish-manifests` and `cleanup-packages`
-- those jobs depend on the integration fan-out results
+- for build-relevant changes, it additionally gates a single x64-hosted
+  `publish-architecture-images` job
+- that job downloads both architecture artifacts, publishes both architecture
+  tags, creates the multi-arch manifests, and then runs the GHCR cleanup step
+- that job depends on the integration fan-out results
