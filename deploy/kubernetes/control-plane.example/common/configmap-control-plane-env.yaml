@@ -78,6 +78,7 @@ data:
   CONTROL_PLANE_JOB_INPUT_MOUNT_PATH: /var/run/control-plane/job-inputs
   # JS/TS postToolUse lint runs in this dedicated Biome image via Kubernetes Job
   # so large scans do not grow the long-lived control-plane container.
+  # renovate: datasource=docker depName=ghcr.io/biomejs/biome versioning=docker
   CONTROL_PLANE_BIOME_HOOK_IMAGE: ghcr.io/biomejs/biome:2.4.11
   # Compile-heavy Rust hooks should run through a dedicated toolchain image
   # instead of the slim control-plane image.

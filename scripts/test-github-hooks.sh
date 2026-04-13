@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/.." && pwd)"
+# shellcheck source=scripts/lib-biome-hook-image.sh
+source "${script_dir}/lib-biome-hook-image.sh"
 control_plane_image="${1:-}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-docker}"
 control_plane_run_user=(--user 0:0)
@@ -65,13 +69,13 @@ EOF
     cd "${repo_dir}"
     TEST_WRAPPER_LOG="${remote_log}" \
       PATH="${bin_dir}:/usr/bin:/bin" \
-      CONTROL_PLANE_BIOME_HOOK_IMAGE='ghcr.io/biomejs/biome:2.4.11' \
+      CONTROL_PLANE_BIOME_HOOK_IMAGE="${biome_hook_image}" \
       CONTROL_PLANE_JOB_INPUT_MOUNT_PATH='/job-inputs' \
-      /workspace/containers/control-plane/bin/control-plane-biome check --write src/index.ts
+      "${repo_root}/containers/control-plane/bin/control-plane-biome" check --write src/index.ts
   )
 
   grep -Fqx -- '--image' "${remote_log}"
-  grep -Fqx 'ghcr.io/biomejs/biome:2.4.11' "${remote_log}"
+  grep -Fqx "${biome_hook_image}" "${remote_log}"
   grep -Fqx -- '--input-mount-path' "${remote_log}"
   grep -Fqx '/job-inputs' "${remote_log}"
   grep -Fqx -- '--mount-file' "${remote_log}"
@@ -92,7 +96,7 @@ EOF
     TEST_WRAPPER_LOG="${local_log}" \
       PATH="${bin_dir}:/usr/bin:/bin" \
       CONTROL_PLANE_BIOME_HOOK_IMAGE='' \
-      /workspace/containers/control-plane/bin/control-plane-biome check --write src/index.ts
+      "${repo_root}/containers/control-plane/bin/control-plane-biome" check --write src/index.ts
   )
   grep -Fqx 'biome check --write src/index.ts' "${local_log}"
 
@@ -109,7 +113,7 @@ EOF
     TEST_WRAPPER_LOG="${npx_log}" \
       PATH="${bin_dir}:/usr/bin:/bin" \
       CONTROL_PLANE_BIOME_HOOK_IMAGE='' \
-      /workspace/containers/control-plane/bin/control-plane-biome check --write src/index.ts
+      "${repo_root}/containers/control-plane/bin/control-plane-biome" check --write src/index.ts
   )
   grep -Fqx 'npx --yes @biomejs/biome check --write src/index.ts' "${npx_log}"
 )

@@ -2,6 +2,8 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib-biome-hook-image.sh
+source "${script_dir}/lib-biome-hook-image.sh"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 chart_path="./deploy/helm/control-plane"
 fixture_values="./deploy/helm/control-plane/ci/multi-instance-values.yaml"
@@ -158,7 +160,7 @@ assert_resource_contains PersistentVolumeClaim shared-session-pvc copilot-shared
 assert_resource_contains ConfigMap control-plane-env copilot-shared 'CONTROL_PLANE_GIT_USER_NAME: "Control Plane Bot"'
 assert_resource_contains ConfigMap control-plane-env copilot-shared 'CONTROL_PLANE_GIT_USER_EMAIL: "control-plane@example.com"'
 assert_resource_contains ConfigMap control-plane-env copilot-shared 'CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: "printf global-startup"'
-assert_resource_contains ConfigMap control-plane-env copilot-shared 'CONTROL_PLANE_BIOME_HOOK_IMAGE: "ghcr.io/biomejs/biome:2.4.11"'
+assert_resource_contains ConfigMap control-plane-env copilot-shared "CONTROL_PLANE_BIOME_HOOK_IMAGE: \"${biome_hook_image}\""
 
 assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'CONTROL_PLANE_K8S_NAMESPACE: "copilot-shared"'
 assert_resource_contains ConfigMap control-plane-instance-env-repo-one copilot-shared 'CONTROL_PLANE_JOB_NAMESPACE: "copilot-shared-jobs"'

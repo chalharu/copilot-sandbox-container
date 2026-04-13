@@ -107,6 +107,7 @@ label_store="${workdir}/docker-label"
 workflow_path="${repo_root}/.github/workflows/control-plane-ci.yml"
 renovate_config_path="${repo_root}/renovate.json5"
 validate_renovate_script_path="${repo_root}/scripts/validate-renovate-config.sh"
+biome_image_helper_path="${repo_root}/scripts/lib-biome-hook-image.sh"
 git_skills_manifest_installer_path="${repo_root}/scripts/install-git-skills-from-manifest.sh"
 session_exec_test_path="${repo_root}/scripts/test-session-exec.sh"
 sccache_dockerfile_path="${repo_root}/containers/sccache/Dockerfile"
@@ -371,6 +372,9 @@ assert_block_contains "${publish_block}" "CONTROL_PLANE_COMPONENT_TAG: \${{ step
 
 assert_block_contains "${manifest_block}" "CONTROL_PLANE_COMPONENT_TAG: \${{ steps.image_versions.outputs.control_plane_component_tag }}" 'publish-manifests job block'
 assert_file_contains "${renovate_config_path}" '/^containers\\/control-plane\\/Dockerfile$/'
+assert_file_contains "${renovate_config_path}" '/^scripts\\/(lint|test-github-hooks|lib-biome-hook-image)\\.sh$/'
+assert_file_contains "${renovate_config_path}" '/^(deploy\\/helm\\/control-plane\\/values\\.yaml|deploy\\/kubernetes\\/control-plane\\.example\\/common\\/configmap-control-plane-env\\.yaml)$/'
+assert_file_contains "${renovate_config_path}" 'CONTROL_PLANE_BIOME_HOOK_IMAGE'
 assert_file_contains "${renovate_config_path}" 'separateMultipleMajor: true'
 assert_file_contains "${renovate_config_path}" 'separateMultipleMinor: true'
 assert_file_contains "${renovate_config_path}" '"{{{depNameSanitized}}}{{#if newVersion}}__v{{{newVersion}}}{{/if}}{{#if newDigestShort}}__d{{{newDigestShort}}}{{/if}}",'
@@ -378,6 +382,7 @@ assert_file_not_contains "${renovate_config_path}" '__{{updateType}}'
 assert_file_not_contains "${renovate_config_path}" 'validate-renovate-config'
 assert_file_not_contains "${renovate_config_path}" 'containers\\/control-plane\\/bin\\/install-git-skills-from-manifest'
 assert_file_not_contains "${renovate_config_path}" 'mozilla/sccache'
+assert_file_contains "${biome_image_helper_path}" 'depName=ghcr.io/biomejs/biome'
 assert_file_not_contains "${workflow_path}" 'sccache-changes'
 assert_file_not_contains "${workflow_path}" 'containers/sccache'
 assert_file_not_contains "${workflow_path}" 'GHCR_SCCACHE_IMAGE'
