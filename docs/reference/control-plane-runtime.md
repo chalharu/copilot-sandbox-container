@@ -173,15 +173,18 @@ flat network ではなく、pod-to-pod 通信を信用できる namespace / CNI 
 bash hook では `CONTROL_PLANE_HOOK_SESSION_KEY="$PPID"` を渡します。transient shell
 PID ではなく、Copilot session 側の親プロセスを key に使います。
 
-bundled `control-plane-biome` は、`CONTROL_PLANE_BIOME_HOOK_IMAGE` があれば
-changed file と repo root の `biome.jsonc` / `.gitignore` だけを
-`control-plane-run --mount-file` で Kubernetes Job へ stage します。
-その Job で official `ghcr.io/biomejs/biome` image 上の `biome check` を
-実行します。
-Biome scanner は root `biome.jsonc` で JS/TS/JSON 系だけを対象にします。
-`target/`、`build/`、`dist/`、`node_modules/` などの大きい出力 path は
-force-ignore します。cluster 側で Job が使えない場合だけ、
-local `biome` / `npx @biomejs/biome` fallback に戻ります。
+bundled `control-plane-biome` は次のように動きます。
+
+- `CONTROL_PLANE_BIOME_HOOK_IMAGE` があれば、changed file と repo root の
+  `biome.jsonc` / `.gitignore` だけを `control-plane-run --mount-file` で
+  Kubernetes Job へ stage する。
+- その Job で official `ghcr.io/biomejs/biome` image 上の `biome check` を
+  実行する。
+- root `biome.jsonc` では JS/TS/JSON 系だけを対象にする。
+- `target/`、`build/`、`dist/`、`node_modules/` などの大きい出力 path は
+  force-ignore する。
+- cluster 側で Job が使えない場合だけ、local `biome` /
+  `npx @biomejs/biome` fallback に戻る。
 
 bundled `postToolUse/control-plane-rust.sh` は、`CONTROL_PLANE_RUST_HOOK_IMAGE` が
 あれば `control-plane-run` 経由でその image に cargo work を逃がします。
