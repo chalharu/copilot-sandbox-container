@@ -251,7 +251,9 @@ mod tests {
         let _home = EnvRestore::set("HOME", temp_dir.path().to_str().unwrap());
         let cached_scope = "2147483647-12345";
         let cached_key = Uuid::new_v4().to_string();
-        let key_dir = temp_dir.path().join(".copilot/session-state/hook-session-keys");
+        let key_dir = temp_dir
+            .path()
+            .join(".copilot/session-state/hook-session-keys");
         fs::create_dir_all(&key_dir).unwrap();
         fs::write(
             key_dir.join(format!("{cached_scope}.key")),
