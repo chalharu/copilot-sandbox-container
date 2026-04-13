@@ -43,6 +43,9 @@ run_regressions_group() {
     "${script_dir}/test-session-exec.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
+    "${script_dir}/test-session-exec-docs.sh"
+
+  CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-kind-prereqs.sh"
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
