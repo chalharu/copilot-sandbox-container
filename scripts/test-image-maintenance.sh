@@ -359,19 +359,19 @@ printf '%s\n' 'image-maintenance-test: verifying legacy helper images were remov
 [[ ! -e "${legacy_yamllint_dockerfile_path}" ]]
 
 publish_block="$(job_block publish-architecture-images)"
-manifest_block="$(job_block publish-manifests)"
 [[ -n "${publish_block}" ]] || {
   printf 'Expected publish-architecture-images job in %s\n' "${workflow_path}" >&2
   exit 1
 }
-[[ -n "${manifest_block}" ]] || {
-  printf 'Expected publish-manifests job in %s\n' "${workflow_path}" >&2
-  exit 1
-}
 
 assert_block_contains "${publish_block}" "CONTROL_PLANE_COMPONENT_TAG: \${{ steps.image_versions.outputs.control_plane_component_tag }}" 'publish-architecture-images job block'
-
-assert_block_contains "${manifest_block}" "CONTROL_PLANE_COMPONENT_TAG: \${{ steps.image_versions.outputs.control_plane_component_tag }}" 'publish-manifests job block'
+assert_block_contains "${publish_block}" 'Publish GHCR multi-arch manifests' 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" 'Delete old GHCR package versions' 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" 'publish_architecture_image downloaded-images/amd64/control-plane-images.tar amd64' 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" 'publish_architecture_image downloaded-images/arm64/control-plane-images.tar arm64' 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" 'GHCR_MIN_UNTAGGED_VERSIONS_TO_KEEP: "30"' 'publish-architecture-images job block'
+assert_file_not_contains "${workflow_path}" '  publish-manifests:'
+assert_file_not_contains "${workflow_path}" '  cleanup-packages:'
 assert_file_contains "${renovate_config_path}" '/^containers\\/control-plane\\/Dockerfile$/'
 assert_file_contains "${renovate_config_path}" '/^scripts\\/(lint|test-github-hooks|lib-biome-hook-image)\\.sh$/'
 assert_file_contains "${renovate_config_path}" '/^(deploy\\/helm\\/control-plane\\/values\\.yaml|deploy\\/kubernetes\\/control-plane\\.example\\/common\\/configmap-control-plane-env\\.yaml)$/'

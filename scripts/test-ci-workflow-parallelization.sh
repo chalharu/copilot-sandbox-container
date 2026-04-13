@@ -177,6 +177,14 @@ if grep -Fqx '  integration-smoke:' "${workflow_path}"; then
   printf 'Did not expect legacy integration-smoke job in %s\n' "${workflow_path}" >&2
   exit 1
 fi
+if grep -Fqx '  publish-manifests:' "${workflow_path}"; then
+  printf 'Did not expect publish-manifests job to remain in %s\n' "${workflow_path}" >&2
+  exit 1
+fi
+if grep -Fqx '  cleanup-packages:' "${workflow_path}"; then
+  printf 'Did not expect cleanup-packages job to remain in %s\n' "${workflow_path}" >&2
+  exit 1
+fi
 
 assert_block_contains "${integration_amd64_block}" 'name: Integration Images (x64)' 'integration-amd64 job block'
 assert_block_contains "${integration_amd64_block}" 'runs-on: ubuntu-24.04' 'integration-amd64 job block'
@@ -287,11 +295,19 @@ assert_block_contains "${integration_kind_jobs_transfer_block}" '*download-integ
 assert_block_contains "${integration_kind_jobs_transfer_block}" 'CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar' 'integration-kind-jobs-transfer job block'
 assert_block_contains "${integration_kind_jobs_transfer_block}" './scripts/build-test.sh --skip-image-build --group kind-jobs-transfer' 'integration-kind-jobs-transfer job block'
 assert_block_not_contains "${publish_block}" '- lint' 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" 'name: Publish Architecture Images' 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" 'runs-on: ubuntu-24.04' 'publish-architecture-images job block'
+assert_block_not_contains "${publish_block}" 'strategy:' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" '- integration-smoke-amd64' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" '- integration-smoke-arm64' 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" '- integration-regressions' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" '- integration-kind-session' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" '- integration-kind-jobs' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" '- integration-kind-jobs-transfer' 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" 'name: control-plane-images-amd64' 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" 'path: downloaded-images/amd64' 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" 'name: control-plane-images-arm64' 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" 'path: downloaded-images/arm64' 'publish-architecture-images job block'
 
 if grep -Fqx '  integration-kind:' "${workflow_path}"; then
   printf 'Did not expect legacy integration-kind job to remain in %s\n' "${workflow_path}" >&2
