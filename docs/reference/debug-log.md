@@ -2,11 +2,16 @@
 
 このページは、current-cluster と Control Plane 周辺で実際に重要になる
 ログ断片を引くための Reference です。手順は
-`docs/how-to-guides/cookbook.md`、背景説明は
+`docs/how-to-guides/cookbook.md` を参照してください。背景説明は
 `docs/explanation/knowledge.md`、runtime / path の事実関係は
 `docs/reference/control-plane-runtime.md` を参照してください。
 
-このリポジトリの rootful-service sample では、local Podman の graphroot を既定で `/var/lib/control-plane/rootful-podman/rootful-overlay/storage` に置き、runtime dir は `/var/tmp/control-plane/rootful-overlay` へ寄せます。graphroot の背後は disposable な `emptyDir` cache、runtime dir も disk-backed `emptyDir` を想定し、Pod 再作成時に再生成できる local image store を persistent volume から切り離しています。
+このリポジトリの rootful-service sample では、local Podman の graphroot を既定で
+`/var/lib/control-plane/rootful-podman/rootful-overlay/storage` に置きます。
+runtime dir は `/var/tmp/control-plane/rootful-overlay` へ寄せます。graphroot の
+背後は disposable な `emptyDir` cache です。runtime dir も disk-backed
+`emptyDir` を想定します。Pod 再作成時に再生成できる local image store を
+persistent volume から切り離しています。
 
 ## Quick index by symptom
 
@@ -54,7 +59,11 @@ Missing Linux capabilities for control-plane startup: CHOWN DAC_OVERRIDE FOWNER 
 
 ### 意味
 
-`drop: ALL` は有効でも、SSH と entrypoint の初期化に必要な capability が戻っていません。最低でも `AUDIT_WRITE CHOWN DAC_OVERRIDE FOWNER SETGID SETUID SYS_CHROOT` が必要で、`CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service` のときは追加で `KILL MKNOD NET_ADMIN SETFCAP SETPCAP SYS_ADMIN` も必要です。
+`drop: ALL` は有効でも、SSH と entrypoint の初期化に必要な capability が
+戻っていません。最低でも
+`AUDIT_WRITE CHOWN DAC_OVERRIDE FOWNER SETGID SETUID SYS_CHROOT` が必要です。
+`CONTROL_PLANE_LOCAL_PODMAN_MODE=rootful-service` のときは、
+`KILL MKNOD NET_ADMIN SETFCAP SETPCAP SYS_ADMIN` も追加で必要です。
 
 ## 3. interactive SSH で切れる / `sshd` cleanup 警告が出る
 
@@ -66,7 +75,10 @@ cleanup_exit: kill(...): Operation not permitted
 
 ### 意味
 
-preauth cleanup か privilege separation / PTY login accounting 周辺で capability が不足しています。`drop: ALL` でも `AUDIT_WRITE`, `KILL`, `SETUID`, `SETGID`, `SYS_CHROOT` などを戻す必要があります。
+preauth cleanup か privilege separation / PTY login accounting 周辺で capability が
+不足しています。`drop: ALL` でも戻すべき capability があります。
+少なくとも `AUDIT_WRITE` と `KILL` が必要です。`SETUID`、`SETGID`、
+`SYS_CHROOT` も戻してください。
 
 ### 回帰テストの目印
 
@@ -75,7 +87,10 @@ job-check: ssh-clean=ok
 job-check: ssh-interactive=ok
 ```
 
-`scripts/test-ssh-session-persistence.sh` は SSH 接続をしばらく保持したまま、接続後に追加の入力を流して marker file を更新します。`job-check: ssh-interactive=ok` は「session が見えた」だけでなく、SSH login が十分に維持されて post-login input も処理できたことを意味します。
+`scripts/test-ssh-session-persistence.sh` は SSH 接続をしばらく保持したまま動きます。
+接続後に追加の入力を流して marker file を更新します。
+`job-check: ssh-interactive=ok` は「session が見えた」だけではありません。
+SSH login が十分に維持されて、post-login input も処理できたことを意味します。
 
 ## 4. rootless Podman が outer runtime に止められている
 
@@ -90,7 +105,9 @@ newuidmap: write to uid_map failed: Operation not permitted
 
 ### 意味
 
-Pod 内設定ではなく outer runtime / CRI / host 側が nested user namespace を許していません。rootless へ固執せず、Kubernetes Job または rootful-service fallback を優先してください。
+Pod 内設定ではなく、outer runtime / CRI / host 側が nested user namespace を
+許していません。rootless へ固執せず、Kubernetes Job または
+rootful-service fallback を優先してください。
 
 ## 5. stale state は `podman system migrate` で直る
 
@@ -115,7 +132,9 @@ opening file `/sys/fs/cgroup/cgroup.subtree_control` for writing: Read-only file
 
 ### 意味
 
-current-cluster の rootful-service build は既定 isolation のままだと詰まります。`CONTROL_PLANE_PODMAN_BUILD_ISOLATION=chroot` か `BUILDAH_ISOLATION=chroot` が必要です。
+current-cluster の rootful-service build は、既定 isolation のままだと詰まります。
+`CONTROL_PLANE_PODMAN_BUILD_ISOLATION=chroot` か
+`BUILDAH_ISOLATION=chroot` が必要です。
 
 ### 期待する確認結果
 
@@ -149,7 +168,14 @@ unable to retrieve auth token: invalid username/password: unauthorized: authenti
 
 ### 意味
 
-Kubernetes 側の image pull 認証が足りていません。`CONTROL_PLANE_FAST_EXECUTION_IMAGE` や `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` に private registry を使う場合は、Deployment / ServiceAccount に `imagePullSecrets` を付けてください。fast exec を dedicated な `control-plane-exec` ServiceAccount で動かすなら、その ServiceAccount 側にも同じ pull secret が必要です。Control Plane の runtime file や `/run/control-plane-auth` の Secret mount では代替しません。
+Kubernetes 側の image pull 認証が足りていません。
+`CONTROL_PLANE_FAST_EXECUTION_IMAGE` や
+`CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` に private registry を使う場合があります。
+そのときは Deployment / ServiceAccount に `imagePullSecrets` を付けてください。
+fast exec を dedicated な `control-plane-exec` ServiceAccount で動かすなら、
+その ServiceAccount 側にも同じ pull secret が必要です。
+Control Plane の runtime file や `/run/control-plane-auth` の Secret mount では
+代替しません。
 
 ## 9. Service の `EXTERNAL-IP` が未割当て
 
@@ -163,7 +189,10 @@ kubectl get svc -n copilot-sandbox
 
 ### 意味
 
-LoadBalancer の割り当て待ちです。SSH 自体の検証は `kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox` で先に進められます。
+LoadBalancer の割り当て待ちです。
+SSH 自体の検証は
+`kubectl port-forward service/control-plane 2222:2222 -n copilot-sandbox`
+で先に進められます。
 
 ## 10. injected Copilot config が壊れている
 
@@ -175,7 +204,10 @@ Expected injected Copilot config at /var/run/control-plane-config/copilot-config
 
 ### 意味
 
-`COPILOT_CONFIG_JSON_FILE` へ渡したファイルが JSON object ではないか、JSON 自体が壊れています。entrypoint は PVC 上の既存 `~/.copilot/config.json` と deep-merge する前提なので、top-level array / string / invalid JSON は受け付けません。
+`COPILOT_CONFIG_JSON_FILE` へ渡したファイルが JSON object ではないか、
+JSON 自体が壊れています。entrypoint は PVC 上の既存
+`~/.copilot/config.json` と deep-merge する前提です。
+top-level array / string / invalid JSON は受け付けません。
 
 ## 11. gh Secret の指定が足りない
 
@@ -188,7 +220,10 @@ Refusing to install an empty gh hosts source from /var/run/control-plane-auth/gh
 
 ### 意味
 
-`GH_GITHUB_TOKEN_FILE` または `GH_HOSTS_YML_FILE` を env で指定したのに、対応する Secret key が無いか空です。`gh-hosts.yml` を使う場合はその file が優先され、無ければ `gh-github-token` から最小 `~/.config/gh/hosts.yml` を生成する、という順序で動きます。
+`GH_GITHUB_TOKEN_FILE` または `GH_HOSTS_YML_FILE` を env で指定したのに、
+対応する Secret key が無いか空です。`gh-hosts.yml` を使う場合は、その file が
+優先されます。無ければ `gh-github-token` から最小
+`~/.config/gh/hosts.yml` を生成する順序で動きます。
 
 ## 12. execution image の bootstrap に失敗する
 

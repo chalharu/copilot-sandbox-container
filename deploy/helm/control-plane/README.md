@@ -58,26 +58,27 @@ helm upgrade --install control-plane deploy/helm/control-plane \
 ```
 
 既定では、すべての instance が `global.namespace` と `global.jobNamespace` を
-共有します。Session PVC は `global.session.claimName` を共有しつつ、
-`copilot-config.json`、`command-history-state.json`、`session-state`、
-SSH auth/host keys は `instances/<name>/...` 配下へ自動で分離されます。
-GitHub CLI / SSH client state は `global.session.{ghSubPath,sshSubPath}` を使うため、
-必要なら `instances[].session` で repo ごとに分けてください。
+共有します。Session PVC は `global.session.claimName` も共有します。
+`copilot-config.json`、`command-history-state.json`、`session-state`、SSH auth/host
+keys は `instances/<name>/...` 配下へ自動で分離されます。GitHub CLI / SSH client
+state は `global.session.{ghSubPath,sshSubPath}` を使います。repo ごとに
+分けたい場合は `instances[].session` で上書きしてください。
 
-chart-managed な `global.auth` / `instances[].auth` に `ghGithubToken` や
-`ghHostsYml` を入れた場合は、Deployment 側の `GH_GITHUB_TOKEN_FILE` /
-`GH_HOSTS_YML_FILE` も自動で `/var/run/control-plane-auth/...` へ向くように
-注入されます。`gh-hosts.yml` は `gh-github-token` より優先されるため、
-両方を入れた場合も追加の `controlPlaneEnv` override は不要です。逆に
-`existingSecretName` で chart 外の Secret を使う場合は、その Secret の中身を
-chart が推測できないため、非標準 key/path を使うなら明示 override してください。
+chart-managed な `global.auth` / `instances[].auth` に `ghGithubToken` を入れると、
+Deployment 側の `GH_GITHUB_TOKEN_FILE` も自動で注入されます。
+`ghHostsYml` を入れると、`GH_HOSTS_YML_FILE` も
+`/var/run/control-plane-auth/...` へ向くように注入されます。
+`gh-hosts.yml` は `gh-github-token` より優先されます。
+両方を入れても追加の `controlPlaneEnv` override は不要です。
+`existingSecretName` で chart 外の Secret を使う場合は、chart が中身を
+推測できません。非標準 key/path を使うなら明示 override してください。
 
 ## runtime env の設定先
 
 Git の `user.name` / `user.email`、`TZ`、Execution Pod の startup script は、
-shared な `control-plane-env` と、instance ごとの
-`control-plane-instance-env-<name>` overlay へ分かれて入ります。Helm では
-次の 2 箇所から設定します。
+2 つの ConfigMap に分かれます。shared な `control-plane-env` と、instance
+ごとの `control-plane-instance-env-<name>` overlay です。Helm では次の 2 箇所
+から設定します。
 
 | 用途 | values のキー | 反映先 |
 | --- | --- | --- |
@@ -111,11 +112,11 @@ instances:
 ```
 
 - `CONTROL_PLANE_GIT_USER_NAME` / `CONTROL_PLANE_GIT_USER_EMAIL` は startup 時に
-  managed global Git config へ書かれます。
-- `TZ` は login shell と job tooling に渡されます。
+  managed global Git config へ書かれる。
+- `TZ` は login shell と job tooling に渡される。
 - `CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT` は各 Execution Pod の chroot 内で
-  `/bin/sh -lc` として実行されます。inline shell snippet でも、そこで見える
-  script path でも構いません。
+  `/bin/sh -lc` として実行される。
+- 値は inline shell snippet でも、そこで見える script path でもよい。
 
 ## 主な override
 
