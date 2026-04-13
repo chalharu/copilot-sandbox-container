@@ -33,6 +33,7 @@ printf '%s\n' 'test-github-hooks.sh: building runtime-tool binary for git hook t
 "${container_bin}" run --rm \
   "${control_plane_run_user[@]}" \
   -i \
+  -e CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target \
   -v "${PWD}:/workspace" \
   -w /workspace/containers/control-plane/runtime-tools \
   --entrypoint sh \

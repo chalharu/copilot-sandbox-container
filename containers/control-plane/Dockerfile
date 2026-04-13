@@ -7,31 +7,27 @@ FROM ${RUST_BASE_IMAGE} AS cargo-chef
 ARG CARGO_CHEF_VERSION
 RUN cargo install cargo-chef --locked --version "${CARGO_CHEF_VERSION}"
 
-FROM cargo-chef AS exec-policy-planner
+FROM cargo-chef AS workspace-planner
 
-WORKDIR /build/control-plane-exec-policy
-COPY exec-policy-preload/Cargo.toml exec-policy-preload/Cargo.lock ./
-COPY exec-policy-preload/src ./src
+WORKDIR /build/control-plane
+COPY Cargo.toml Cargo.lock ./
+COPY exec-api/ ./exec-api/
+COPY exec-policy-preload/ ./exec-policy-preload/
+COPY runtime-tools/ ./runtime-tools/
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM cargo-chef AS exec-policy-builder
 
-WORKDIR /build/control-plane-exec-policy
-COPY --from=exec-policy-planner /build/control-plane-exec-policy/recipe.json ./recipe.json
-RUN cargo chef cook --locked --release --recipe-path recipe.json
-COPY exec-policy-preload/Cargo.toml exec-policy-preload/Cargo.lock ./
-COPY exec-policy-preload/src ./src
+WORKDIR /build/control-plane
+COPY --from=workspace-planner /build/control-plane/recipe.json ./recipe.json
+RUN cargo chef cook --locked --release --recipe-path recipe.json -p control-plane-exec-policy-preload
+COPY Cargo.toml Cargo.lock ./
+COPY exec-api/ ./exec-api/
+COPY exec-policy-preload/ ./exec-policy-preload/
+COPY runtime-tools/ ./runtime-tools/
 COPY hooks/preToolUse/deny-rules.yaml ./hooks/preToolUse/deny-rules.yaml
-RUN cargo test --locked --release \
-    && cargo build --locked --release
-
-FROM cargo-chef AS exec-api-planner
-
-WORKDIR /build/control-plane-exec-api
-COPY exec-api/Cargo.toml exec-api/Cargo.lock exec-api/build.rs ./
-COPY exec-api/proto ./proto
-COPY exec-api/src ./src
-RUN cargo chef prepare --recipe-path recipe.json
+RUN cargo test --locked --release -p control-plane-exec-policy-preload \
+    && cargo build --locked --release -p control-plane-exec-policy-preload
 
 FROM cargo-chef AS exec-api-builder
 
@@ -41,49 +37,34 @@ RUN apt-get update -o Acquire::Retries=3 \
          musl-tools \
      && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /build/control-plane-exec-api
+WORKDIR /build/control-plane
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-COPY --from=exec-api-planner /build/control-plane-exec-api/recipe.json ./recipe.json
+COPY --from=workspace-planner /build/control-plane/recipe.json ./recipe.json
 RUN target="$(rustc -vV | awk '/^host:/ { print $2 }' | sed 's/-unknown-linux-gnu/-unknown-linux-musl/')" \
     && rustup target add "${target}" \
-    && cargo chef cook --locked --release --target "${target}" --recipe-path recipe.json
-COPY exec-api/Cargo.toml exec-api/Cargo.lock exec-api/build.rs ./
-COPY exec-api/proto ./proto
-COPY exec-api/src ./src
+    && cargo chef cook --locked --release --target "${target}" --recipe-path recipe.json -p control-plane-exec-api
+COPY Cargo.toml Cargo.lock ./
+COPY exec-api/ ./exec-api/
+COPY exec-policy-preload/ ./exec-policy-preload/
+COPY runtime-tools/ ./runtime-tools/
 RUN target="$(rustc -vV | awk '/^host:/ { print $2 }' | sed 's/-unknown-linux-gnu/-unknown-linux-musl/')" \
     && rustup target add "${target}" \
-    && cargo test --locked --release --target "${target}" \
-    && cargo build --locked --release --target "${target}" \
+    && cargo test --locked --release --target "${target}" -p control-plane-exec-api \
+    && cargo build --locked --release --target "${target}" -p control-plane-exec-api \
     && cp "target/${target}/release/control-plane-exec-api" "target/release/control-plane-exec-api"
-
-FROM cargo-chef AS runtime-tools-planner
-
-WORKDIR /build/control-plane-runtime-tools
-COPY runtime-tools/Cargo.toml runtime-tools/Cargo.lock ./
-COPY exec-api/Cargo.toml /build/exec-api/Cargo.toml
-COPY exec-api/build.rs /build/exec-api/build.rs
-COPY exec-api/proto /build/exec-api/proto
-COPY exec-api/src /build/exec-api/src
-COPY runtime-tools/src ./src
-COPY runtime-tools/tests ./tests
-RUN cargo chef prepare --recipe-path recipe.json
 
 FROM cargo-chef AS runtime-tools-builder
 
-WORKDIR /build/control-plane-runtime-tools
-COPY --from=runtime-tools-planner /build/exec-api /build/exec-api
-COPY --from=runtime-tools-planner /build/control-plane-runtime-tools/recipe.json ./recipe.json
-RUN cargo chef cook --locked --release --recipe-path recipe.json
-COPY runtime-tools/Cargo.toml runtime-tools/Cargo.lock ./
-COPY exec-api/Cargo.toml /build/exec-api/Cargo.toml
-COPY exec-api/build.rs /build/exec-api/build.rs
-COPY exec-api/proto /build/exec-api/proto
-COPY exec-api/src /build/exec-api/src
-COPY runtime-tools/src ./src
-COPY runtime-tools/tests ./tests
-COPY hooks/postToolUse/linters.json /build/hooks/postToolUse/linters.json
-RUN cargo test --locked --release \
-    && cargo build --locked --release
+WORKDIR /build/control-plane
+COPY --from=workspace-planner /build/control-plane/recipe.json ./recipe.json
+RUN cargo chef cook --locked --release --recipe-path recipe.json -p control-plane-runtime-tools
+COPY Cargo.toml Cargo.lock ./
+COPY exec-api/ ./exec-api/
+COPY exec-policy-preload/ ./exec-policy-preload/
+COPY runtime-tools/ ./runtime-tools/
+COPY hooks/postToolUse/linters.json ./hooks/postToolUse/linters.json
+RUN cargo test --locked --release -p control-plane-runtime-tools \
+    && cargo build --locked --release -p control-plane-runtime-tools
 
 FROM cargo-chef AS rust-toolchain
 
@@ -97,7 +78,7 @@ RUN apt-get update -o Acquire::Retries=3 \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/bin/install-git-skills-from-manifest
+COPY --from=runtime-tools-builder /build/control-plane/target/release/control-plane-runtime-tool /usr/local/bin/install-git-skills-from-manifest
 COPY --chmod=644 config/external-skills.yaml /tmp/external-skills.yaml
 
 RUN /usr/local/bin/install-git-skills-from-manifest /tmp/external-skills.yaml /opt/control-plane/external-skills
@@ -296,16 +277,16 @@ COPY --from=skills-builder /opt/control-plane/external-skills/ /usr/local/share/
 COPY hooks/ /usr/local/share/control-plane/hooks/
 COPY --from=rust-toolchain /usr/local/cargo/bin /usr/local/cargo/bin
 COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
-COPY --from=runtime-tools-builder /build/control-plane-runtime-tools/target/release/control-plane-runtime-tool /usr/local/bin/control-plane-runtime-tool
-COPY --from=exec-policy-builder /build/control-plane-exec-policy/target/release/libcontrol_plane_exec_policy.so /usr/local/lib/libcontrol_plane_exec_policy.so
-COPY --from=exec-policy-builder /build/control-plane-exec-policy/target/release/control-plane-pre-tool-use-hook /usr/local/share/control-plane/hooks/preToolUse/main
+COPY --from=runtime-tools-builder /build/control-plane/target/release/control-plane-runtime-tool /usr/local/bin/control-plane-runtime-tool
+COPY --from=exec-policy-builder /build/control-plane/target/release/libcontrol_plane_exec_policy.so /usr/local/lib/libcontrol_plane_exec_policy.so
+COPY --from=exec-policy-builder /build/control-plane/target/release/control-plane-pre-tool-use-hook /usr/local/share/control-plane/hooks/preToolUse/main
 COPY --chmod=755 bin/control-plane-screen /usr/local/bin/control-plane-screen
 COPY --chmod=755 bin/control-plane-entrypoint /usr/local/bin/control-plane-entrypoint
 COPY --chmod=755 bin/control-plane-exec-api-launcher /usr/local/bin/control-plane-exec-api-launcher
 COPY --chmod=755 bin/control-plane-session-exec /usr/local/bin/control-plane-session-exec
 COPY --chmod=755 bin/control-plane-copilot /usr/local/bin/control-plane-copilot
 COPY --chmod=755 bin/control-plane-biome /usr/local/bin/control-plane-biome
-COPY --from=exec-api-builder /build/control-plane-exec-api/target/release/control-plane-exec-api /usr/local/bin/control-plane-exec-api
+COPY --from=exec-api-builder /build/control-plane/target/release/control-plane-exec-api /usr/local/bin/control-plane-exec-api
 COPY --chmod=755 bin/control-plane-job-transfer /usr/local/bin/control-plane-job-transfer
 COPY --chmod=755 bin/control-plane-run /usr/local/bin/control-plane-run
 COPY --chmod=755 bin/control-plane-session /usr/local/bin/control-plane-session
