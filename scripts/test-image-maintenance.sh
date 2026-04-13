@@ -352,6 +352,8 @@ rust_cache_dir="$(rust_container_cache_dir_for_scope control-plane-rust-regressi
 [[ "${rust_cache_target_dir}" == "${rust_cache_dir}/target" ]]
 [[ -d "${rust_cache_home_dir}/.cargo" ]]
 [[ -d "${rust_cache_target_dir}" ]]
+grep -Fqx '[build]' "${rust_cache_home_dir}/.cargo/config.toml"
+grep -Fqx 'target-dir = "/var/tmp/control-plane/cargo-target"' "${rust_cache_home_dir}/.cargo/config.toml"
 [[ -z "${rust_cache_temp_root}" ]]
 unset CONTROL_PLANE_RUST_CONTAINER_CACHE_ROOT
 
@@ -364,6 +366,8 @@ prepare_rust_container_cache control-plane-rust-regressions rust_temp_home_dir r
 [[ "${rust_temp_target_dir}" == "${rust_temp_root}/target" ]]
 [[ -d "${rust_temp_home_dir}/.cargo" ]]
 [[ -d "${rust_temp_target_dir}" ]]
+grep -Fqx '[build]' "${rust_temp_home_dir}/.cargo/config.toml"
+grep -Fqx 'target-dir = "/var/tmp/control-plane/cargo-target"' "${rust_temp_home_dir}/.cargo/config.toml"
 
 printf '%s\n' 'image-maintenance-test: verifying retired helper image contexts were removed' >&2
 [[ ! -e "${sccache_dockerfile_path}" ]]

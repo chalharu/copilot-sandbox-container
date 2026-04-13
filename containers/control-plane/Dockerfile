@@ -5,7 +5,10 @@ ARG CARGO_CHEF_VERSION=0.1.77
 FROM ${RUST_BASE_IMAGE} AS cargo-chef
 
 ARG CARGO_CHEF_VERSION
-RUN cargo install cargo-chef --locked --version "${CARGO_CHEF_VERSION}"
+RUN cargo_home="${CARGO_HOME:-${HOME}/.cargo}" \
+    && mkdir -p "${cargo_home}" /var/tmp/control-plane/cargo-target \
+    && printf '[build]\ntarget-dir = "/var/tmp/control-plane/cargo-target"\n' > "${cargo_home}/config.toml" \
+    && cargo install cargo-chef --locked --version "${CARGO_CHEF_VERSION}"
 
 FROM cargo-chef AS workspace-planner
 
@@ -51,7 +54,8 @@ RUN target="$(rustc -vV | awk '/^host:/ { print $2 }' | sed 's/-unknown-linux-gn
     && rustup target add "${target}" \
     && cargo test --locked --release --target "${target}" -p control-plane-exec-api \
     && cargo build --locked --release --target "${target}" -p control-plane-exec-api \
-    && cp "target/${target}/release/control-plane-exec-api" "target/release/control-plane-exec-api"
+    && install -D "/var/tmp/control-plane/cargo-target/${target}/release/control-plane-exec-api" \
+        /var/tmp/control-plane/cargo-target/release/control-plane-exec-api
 
 FROM cargo-chef AS runtime-tools-builder
 
@@ -78,7 +82,7 @@ RUN apt-get update -o Acquire::Retries=3 \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=runtime-tools-builder /build/control-plane/target/release/control-plane-runtime-tool /usr/local/bin/install-git-skills-from-manifest
+COPY --from=runtime-tools-builder /var/tmp/control-plane/cargo-target/release/control-plane-runtime-tool /usr/local/bin/install-git-skills-from-manifest
 COPY --chmod=644 config/external-skills.yaml /tmp/external-skills.yaml
 
 RUN /usr/local/bin/install-git-skills-from-manifest /tmp/external-skills.yaml /opt/control-plane/external-skills
@@ -260,10 +264,13 @@ RUN existing_group="$(getent group "${CONTROL_PLANE_GID}" | cut -d: -f1 || true)
         "/home/${CONTROL_PLANE_USER}/.config/control-plane" \
         "/home/${CONTROL_PLANE_USER}/.config/gh" \
         "/home/${CONTROL_PLANE_USER}/.ssh" \
+        /var/tmp/control-plane/cargo-target \
         /run/sshd \
         /workspace \
+    && printf '[build]\ntarget-dir = "/var/tmp/control-plane/cargo-target"\n' > "/home/${CONTROL_PLANE_USER}/.cargo/config.toml" \
     && chown -R "${CONTROL_PLANE_USER}:${CONTROL_PLANE_USER}" \
         "/home/${CONTROL_PLANE_USER}" \
+        /var/tmp/control-plane \
         /workspace \
     && chmod 700 "/home/${CONTROL_PLANE_USER}/.ssh" \
     && ln -sf /usr/sbin/sshd /usr/local/bin/sshd
@@ -277,16 +284,16 @@ COPY --from=skills-builder /opt/control-plane/external-skills/ /usr/local/share/
 COPY hooks/ /usr/local/share/control-plane/hooks/
 COPY --from=rust-toolchain /usr/local/cargo/bin /usr/local/cargo/bin
 COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
-COPY --from=runtime-tools-builder /build/control-plane/target/release/control-plane-runtime-tool /usr/local/bin/control-plane-runtime-tool
-COPY --from=exec-policy-builder /build/control-plane/target/release/libcontrol_plane_exec_policy.so /usr/local/lib/libcontrol_plane_exec_policy.so
-COPY --from=exec-policy-builder /build/control-plane/target/release/control-plane-pre-tool-use-hook /usr/local/share/control-plane/hooks/preToolUse/main
+COPY --from=runtime-tools-builder /var/tmp/control-plane/cargo-target/release/control-plane-runtime-tool /usr/local/bin/control-plane-runtime-tool
+COPY --from=exec-policy-builder /var/tmp/control-plane/cargo-target/release/libcontrol_plane_exec_policy.so /usr/local/lib/libcontrol_plane_exec_policy.so
+COPY --from=exec-policy-builder /var/tmp/control-plane/cargo-target/release/control-plane-pre-tool-use-hook /usr/local/share/control-plane/hooks/preToolUse/main
 COPY --chmod=755 bin/control-plane-screen /usr/local/bin/control-plane-screen
 COPY --chmod=755 bin/control-plane-entrypoint /usr/local/bin/control-plane-entrypoint
 COPY --chmod=755 bin/control-plane-exec-api-launcher /usr/local/bin/control-plane-exec-api-launcher
 COPY --chmod=755 bin/control-plane-session-exec /usr/local/bin/control-plane-session-exec
 COPY --chmod=755 bin/control-plane-copilot /usr/local/bin/control-plane-copilot
 COPY --chmod=755 bin/control-plane-biome /usr/local/bin/control-plane-biome
-COPY --from=exec-api-builder /build/control-plane/target/release/control-plane-exec-api /usr/local/bin/control-plane-exec-api
+COPY --from=exec-api-builder /var/tmp/control-plane/cargo-target/release/control-plane-exec-api /usr/local/bin/control-plane-exec-api
 COPY --chmod=755 bin/control-plane-job-transfer /usr/local/bin/control-plane-job-transfer
 COPY --chmod=755 bin/control-plane-run /usr/local/bin/control-plane-run
 COPY --chmod=755 bin/control-plane-session /usr/local/bin/control-plane-session
