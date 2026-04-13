@@ -1,6 +1,6 @@
 use base64::Engine as _;
 use control_plane_exec_api::{
-    DynError, check_health, execute_remote, load_server_config_from_env, serve,
+    DynError, check_health, execute_remote, load_server_config_from_env, log_message, serve,
 };
 use std::time::Duration;
 
@@ -26,7 +26,7 @@ enum Command {
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     if let Err(error) = run().await {
-        eprintln!("control-plane-exec-api: {error}");
+        log_message(&error.to_string());
         std::process::exit(1);
     }
 }
