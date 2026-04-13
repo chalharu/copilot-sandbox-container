@@ -106,8 +106,10 @@ assert_file_contains "${kind_test_path}" "if [[ \"\${kind_test_group}\" == \"all
 assert_file_contains "${kind_test_path}" '  all|session|jobs|jobs-core|jobs-transfer)'
 
 printf '%s\n' 'ci-workflow-test: verifying workflow fan-out wiring' >&2
-integration_block="$(job_block integration)"
-integration_smoke_block="$(job_block integration-smoke)"
+integration_amd64_block="$(job_block integration-amd64)"
+integration_arm64_block="$(job_block integration-arm64)"
+integration_smoke_amd64_block="$(job_block integration-smoke-amd64)"
+integration_smoke_arm64_block="$(job_block integration-smoke-arm64)"
 integration_regressions_block="$(job_block integration-regressions)"
 integration_kind_session_block="$(job_block integration-kind-session)"
 integration_kind_jobs_block="$(job_block integration-kind-jobs)"
@@ -119,12 +121,20 @@ if grep -Fqx '  lint:' "${workflow_path}"; then
   exit 1
 fi
 
-[[ -n "${integration_block}" ]] || {
-  printf 'Expected integration job in %s\n' "${workflow_path}" >&2
+[[ -n "${integration_amd64_block}" ]] || {
+  printf 'Expected integration-amd64 job in %s\n' "${workflow_path}" >&2
   exit 1
 }
-[[ -n "${integration_smoke_block}" ]] || {
-  printf 'Expected integration-smoke job in %s\n' "${workflow_path}" >&2
+[[ -n "${integration_arm64_block}" ]] || {
+  printf 'Expected integration-arm64 job in %s\n' "${workflow_path}" >&2
+  exit 1
+}
+[[ -n "${integration_smoke_amd64_block}" ]] || {
+  printf 'Expected integration-smoke-amd64 job in %s\n' "${workflow_path}" >&2
+  exit 1
+}
+[[ -n "${integration_smoke_arm64_block}" ]] || {
+  printf 'Expected integration-smoke-arm64 job in %s\n' "${workflow_path}" >&2
   exit 1
 }
 [[ -n "${integration_regressions_block}" ]] || {
@@ -159,14 +169,63 @@ if grep -Fqx '  changes:' "${workflow_path}"; then
   printf 'Did not expect changes job in %s\n' "${workflow_path}" >&2
   exit 1
 fi
-# shellcheck disable=SC2016
-assert_block_contains "${integration_block}" 'path: /tmp/control-plane-buildx-cache-${{ matrix.image_arch }}' 'integration job block'
-# shellcheck disable=SC2016
-assert_block_contains "${integration_block}" 'CONTROL_PLANE_BUILDX_CACHE_ROOT: /tmp/control-plane-buildx-cache-${{ matrix.image_arch }}' 'integration job block'
-assert_block_contains "${integration_block}" 'docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd' 'integration job block'
-assert_block_contains "${integration_block}" 'driver: docker-container' 'integration job block'
-assert_block_contains "${integration_smoke_block}" 'Load integration images' 'integration-smoke job block'
-assert_block_contains "${integration_smoke_block}" 'docker load -i downloaded-images/control-plane-images.tar' 'integration-smoke job block'
+if grep -Fqx '  integration:' "${workflow_path}"; then
+  printf 'Did not expect legacy integration job in %s\n' "${workflow_path}" >&2
+  exit 1
+fi
+if grep -Fqx '  integration-smoke:' "${workflow_path}"; then
+  printf 'Did not expect legacy integration-smoke job in %s\n' "${workflow_path}" >&2
+  exit 1
+fi
+
+assert_block_contains "${integration_amd64_block}" 'name: Integration Images (x64)' 'integration-amd64 job block'
+assert_block_contains "${integration_amd64_block}" 'runs-on: ubuntu-24.04' 'integration-amd64 job block'
+assert_block_contains "${integration_amd64_block}" 'path: /tmp/control-plane-buildx-cache-amd64' 'integration-amd64 job block'
+assert_block_contains "${integration_amd64_block}" 'CONTROL_PLANE_BUILDX_CACHE_ROOT: /tmp/control-plane-buildx-cache-amd64' 'integration-amd64 job block'
+assert_block_contains "${integration_amd64_block}" 'name: control-plane-images-amd64' 'integration-amd64 job block'
+assert_block_contains "${integration_amd64_block}" 'docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd' 'integration-amd64 job block'
+assert_block_contains "${integration_amd64_block}" 'driver: docker-container' 'integration-amd64 job block'
+
+assert_block_contains "${integration_arm64_block}" 'name: Integration Images (aarch64)' 'integration-arm64 job block'
+assert_block_contains "${integration_arm64_block}" 'runs-on: ubuntu-24.04-arm' 'integration-arm64 job block'
+assert_block_contains "${integration_arm64_block}" 'path: /tmp/control-plane-buildx-cache-arm64' 'integration-arm64 job block'
+assert_block_contains "${integration_arm64_block}" 'CONTROL_PLANE_BUILDX_CACHE_ROOT: /tmp/control-plane-buildx-cache-arm64' 'integration-arm64 job block'
+assert_block_contains "${integration_arm64_block}" 'name: control-plane-images-arm64' 'integration-arm64 job block'
+assert_block_contains_one_of \
+  "${integration_arm64_block}" \
+  'integration-arm64 job block' \
+  'docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd' \
+  '*setup-buildx'
+assert_block_contains_one_of \
+  "${integration_arm64_block}" \
+  'integration-arm64 job block' \
+  'driver: docker-container' \
+  '*setup-buildx'
+
+assert_block_contains "${integration_smoke_amd64_block}" 'runs-on: ubuntu-24.04' 'integration-smoke-amd64 job block'
+assert_block_not_contains "${integration_smoke_amd64_block}" 'strategy:' 'integration-smoke-amd64 job block'
+assert_block_contains "${integration_smoke_amd64_block}" 'needs: integration-amd64' 'integration-smoke-amd64 job block'
+assert_block_not_contains "${integration_smoke_amd64_block}" 'needs: integration-arm64' 'integration-smoke-amd64 job block'
+assert_block_contains "${integration_smoke_amd64_block}" 'name: control-plane-images-amd64' 'integration-smoke-amd64 job block'
+assert_block_contains "${integration_smoke_amd64_block}" 'Load integration images' 'integration-smoke-amd64 job block'
+assert_block_contains "${integration_smoke_amd64_block}" 'docker load -i downloaded-images/control-plane-images.tar' 'integration-smoke-amd64 job block'
+
+assert_block_contains "${integration_smoke_arm64_block}" 'runs-on: ubuntu-24.04-arm' 'integration-smoke-arm64 job block'
+assert_block_not_contains "${integration_smoke_arm64_block}" 'strategy:' 'integration-smoke-arm64 job block'
+assert_block_contains "${integration_smoke_arm64_block}" 'needs: integration-arm64' 'integration-smoke-arm64 job block'
+assert_block_not_contains "${integration_smoke_arm64_block}" 'needs: integration-amd64' 'integration-smoke-arm64 job block'
+assert_block_contains "${integration_smoke_arm64_block}" 'name: control-plane-images-arm64' 'integration-smoke-arm64 job block'
+assert_block_contains_one_of \
+  "${integration_smoke_arm64_block}" \
+  'integration-smoke-arm64 job block' \
+  'Load integration images' \
+  '*load-integration-images'
+assert_block_contains_one_of \
+  "${integration_smoke_arm64_block}" \
+  'integration-smoke-arm64 job block' \
+  'docker load -i downloaded-images/control-plane-images.tar' \
+  '*load-integration-images'
+
 # shellcheck disable=SC2016
 assert_block_contains "${integration_regressions_block}" 'path: /tmp/control-plane-buildx-cache-amd64' 'integration-regressions job block'
 # shellcheck disable=SC2016
@@ -178,6 +237,8 @@ assert_block_contains "${integration_regressions_block}" 'CONTROL_PLANE_BUILDX_C
 # shellcheck disable=SC2016
 assert_block_contains "${integration_regressions_block}" 'CONTROL_PLANE_RUST_CONTAINER_CACHE_ROOT: /tmp/control-plane-rust-regression-cache' 'integration-regressions job block'
 assert_block_contains "${integration_regressions_block}" 'runs-on: ubuntu-24.04' 'integration-regressions job block'
+assert_block_contains "${integration_regressions_block}" 'needs: integration-amd64' 'integration-regressions job block'
+assert_block_not_contains "${integration_regressions_block}" 'needs: integration-arm64' 'integration-regressions job block'
 assert_block_not_contains "${integration_regressions_block}" 'strategy:' 'integration-regressions job block'
 assert_block_contains "${integration_regressions_block}" 'name: control-plane-images-amd64' 'integration-regressions job block'
 assert_block_contains_one_of \
@@ -191,6 +252,8 @@ assert_block_contains_one_of \
   'docker load -i downloaded-images/control-plane-images.tar' \
   '*load-integration-images'
 assert_block_contains "${integration_kind_session_block}" 'runs-on: ubuntu-24.04' 'integration-kind-session job block'
+assert_block_contains "${integration_kind_session_block}" 'needs: integration-amd64' 'integration-kind-session job block'
+assert_block_not_contains "${integration_kind_session_block}" 'needs: integration-arm64' 'integration-kind-session job block'
 assert_block_not_contains "${integration_kind_session_block}" 'strategy:' 'integration-kind-session job block'
 assert_block_contains "${integration_kind_session_block}" 'skipClusterCreation: true' 'integration-kind-session job block'
 assert_block_not_contains "${integration_kind_session_block}" 'Load integration images' 'integration-kind-session job block'
@@ -198,6 +261,8 @@ assert_block_contains "${integration_kind_session_block}" '*download-integration
 assert_block_contains "${integration_kind_session_block}" 'CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar' 'integration-kind-session job block'
 assert_block_contains "${integration_kind_session_block}" './scripts/build-test.sh --skip-image-build --group kind-session' 'integration-kind-session job block'
 assert_block_contains "${integration_kind_jobs_block}" 'runs-on: ubuntu-24.04' 'integration-kind-jobs job block'
+assert_block_contains "${integration_kind_jobs_block}" 'needs: integration-amd64' 'integration-kind-jobs job block'
+assert_block_not_contains "${integration_kind_jobs_block}" 'needs: integration-arm64' 'integration-kind-jobs job block'
 assert_block_not_contains "${integration_kind_jobs_block}" 'strategy:' 'integration-kind-jobs job block'
 assert_block_contains_one_of \
   "${integration_kind_jobs_block}" \
@@ -209,6 +274,8 @@ assert_block_contains "${integration_kind_jobs_block}" '*download-integration-im
 assert_block_contains "${integration_kind_jobs_block}" 'CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar' 'integration-kind-jobs job block'
 assert_block_contains "${integration_kind_jobs_block}" './scripts/build-test.sh --skip-image-build --group kind-jobs-core' 'integration-kind-jobs job block'
 assert_block_contains "${integration_kind_jobs_transfer_block}" 'runs-on: ubuntu-24.04' 'integration-kind-jobs-transfer job block'
+assert_block_contains "${integration_kind_jobs_transfer_block}" 'needs: integration-amd64' 'integration-kind-jobs-transfer job block'
+assert_block_not_contains "${integration_kind_jobs_transfer_block}" 'needs: integration-arm64' 'integration-kind-jobs-transfer job block'
 assert_block_not_contains "${integration_kind_jobs_transfer_block}" 'strategy:' 'integration-kind-jobs-transfer job block'
 assert_block_contains_one_of \
   "${integration_kind_jobs_transfer_block}" \
@@ -220,6 +287,8 @@ assert_block_contains "${integration_kind_jobs_transfer_block}" '*download-integ
 assert_block_contains "${integration_kind_jobs_transfer_block}" 'CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar' 'integration-kind-jobs-transfer job block'
 assert_block_contains "${integration_kind_jobs_transfer_block}" './scripts/build-test.sh --skip-image-build --group kind-jobs-transfer' 'integration-kind-jobs-transfer job block'
 assert_block_not_contains "${publish_block}" '- lint' 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" '- integration-smoke-amd64' 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" '- integration-smoke-arm64' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" '- integration-kind-session' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" '- integration-kind-jobs' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" '- integration-kind-jobs-transfer' 'publish-architecture-images job block'
