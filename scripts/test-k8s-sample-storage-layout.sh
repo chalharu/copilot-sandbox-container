@@ -323,6 +323,7 @@ assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTI
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS: standard'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE: 10Gi'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH: /environment'
+assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_BIOME_HOOK_IMAGE: ghcr.io/biomejs/biome:2.4.11'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_RUST_HOOK_IMAGE: docker.io/library/rust:1.94.1-bookworm'
 assert_resource_not_contains ConfigMap control-plane-env 'replace-with-digest'
 assert_resource_not_contains ConfigMap control-plane-env 'replace-me-with-commit-sha'

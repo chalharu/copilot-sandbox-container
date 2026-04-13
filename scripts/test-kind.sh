@@ -613,6 +613,7 @@ data:
   CONTROL_PLANE_JOB_TRANSFER_IMAGE: ${control_plane_image}
   CONTROL_PLANE_JOB_TRANSFER_HOST: control-plane.${namespace}.svc.cluster.local
   CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"
+  CONTROL_PLANE_BIOME_HOOK_IMAGE: ghcr.io/biomejs/biome:2.4.11
   CONTROL_PLANE_RUST_HOOK_IMAGE: ${rust_hook_image}
   CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: Never
 ---
@@ -943,6 +944,7 @@ grep -Fqx 'CARGO_HOME=/home/copilot/.cargo' ~/.config/control-plane/runtime.env
 grep -Fqx 'CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target' ~/.config/control-plane/runtime.env
 grep -Fqx 'LANG=C.UTF-8' ~/.config/control-plane/runtime.env
 grep -Fqx 'LC_CTYPE=C.UTF-8' ~/.config/control-plane/runtime.env
+grep -Fqx 'CONTROL_PLANE_BIOME_HOOK_IMAGE=ghcr.io/biomejs/biome:2.4.11' ~/.config/control-plane/runtime.env
 grep -Fqx "CONTROL_PLANE_RUST_HOOK_IMAGE=${rust_hook_image}" ~/.config/control-plane/runtime.env
 grep -Fqx 'CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT=control-plane-exec' ~/.config/control-plane/runtime.env
 grep -Fqx "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR=http://\${CONTROL_PLANE_POD_IP}:8081" ~/.config/control-plane/runtime.env
@@ -963,6 +965,7 @@ test "\${CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR}" = "http://\${CONTROL_PLANE_P
 test -n "\${CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN}"
 test "\${CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC}" = "3600"
 test "\${CONTROL_PLANE_COPILOT_SESSION_PVC}" = "control-plane-copilot-session-pvc"
+test "\${CONTROL_PLANE_BIOME_HOOK_IMAGE}" = "ghcr.io/biomejs/biome:2.4.11"
 test "\${CONTROL_PLANE_RUST_HOOK_IMAGE}" = "${rust_hook_image}"
 cat /proc/self/uid_map > /workspace/k8s-pod-uid-map.txt
 printf '%s\n' 'kind-test remote: runtime env and workspace write ok' >&2

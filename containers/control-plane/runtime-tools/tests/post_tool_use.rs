@@ -190,8 +190,8 @@ fn create_tool_stubs(repo: &Path, options: StubOptions) -> HookEnv {
     }
     if options.biome {
         write_executable(
-            &bin_dir.join("biome"),
-            "#!/bin/sh\nprintf \"biome %s\\n\" \"$*\" >> \"$HOOK_LOG\"\nfile=\"$2\"\nif [ \"$2\" = \"--write\" ]; then\n  file=\"$3\"\n  exit 0\nfi\nprintf \"biome unresolved in %s\\n\" \"$file\" >&2\nexit 1\n",
+            &bin_dir.join("control-plane-biome"),
+            "#!/bin/sh\nprintf \"control-plane-biome %s\\n\" \"$*\" >> \"$HOOK_LOG\"\nfile=\"$2\"\nif [ \"$2\" = \"--write\" ]; then\n  file=\"$3\"\n  exit 0\nfi\nprintf \"biome unresolved in %s\\n\" \"$file\" >&2\nexit 1\n",
         );
     }
     if options.oxlint {
@@ -364,6 +364,10 @@ fn linters_config_defines_language_pipelines() {
         .iter()
         .find(|tool| tool["id"] == "markdownlint-fix-npx")
         .unwrap();
+    let biome_check_write = tools
+        .iter()
+        .find(|tool| tool["id"] == "biome-check-write")
+        .unwrap();
     let control_plane_rust_fmt = tools
         .iter()
         .find(|tool| tool["id"] == "control-plane-rust-fmt")
@@ -394,6 +398,7 @@ fn linters_config_defines_language_pipelines() {
         .unwrap();
 
     assert_eq!(markdownlint_fix_npx["command"], "npx");
+    assert_eq!(biome_check_write["command"], "control-plane-biome");
     assert_eq!(control_plane_rust_fmt["command"], "bash");
     assert_eq!(control_plane_rust_fmt["appendFiles"], true);
     assert_eq!(yamllint_check["command"], "yamllint");
@@ -431,7 +436,7 @@ fn hook_runs_incrementally() {
     assert_eq!(second_log.trim().lines().count(), 7);
     assert_eq!(third_log.trim().lines().count(), 14);
     assert!(first_log.contains("--fix README.md"));
-    assert!(first_log.contains("biome check --write index.ts"));
+    assert!(first_log.contains("control-plane-biome check --write index.ts"));
     assert!(first_log.contains("oxlint --fix index.ts"));
     let first_stderr = String::from_utf8_lossy(&first_run.stderr);
     assert!(first_stderr.contains("remaining markdown issue in README.md"));

@@ -304,6 +304,7 @@ COPY --chmod=755 bin/control-plane-entrypoint /usr/local/bin/control-plane-entry
 COPY --chmod=755 bin/control-plane-exec-api-launcher /usr/local/bin/control-plane-exec-api-launcher
 COPY --chmod=755 bin/control-plane-session-exec /usr/local/bin/control-plane-session-exec
 COPY --chmod=755 bin/control-plane-copilot /usr/local/bin/control-plane-copilot
+COPY --chmod=755 bin/control-plane-biome /usr/local/bin/control-plane-biome
 COPY --from=exec-api-builder /build/control-plane-exec-api/target/release/control-plane-exec-api /usr/local/bin/control-plane-exec-api
 COPY --chmod=755 bin/control-plane-job-transfer /usr/local/bin/control-plane-job-transfer
 COPY --chmod=755 bin/control-plane-run /usr/local/bin/control-plane-run

@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+runtime_config_file="${CONTROL_PLANE_RUNTIME_ENV_FILE:-${HOME:-/home/${USER:-copilot}}/.config/control-plane/runtime.env}"
+if [[ -f "${runtime_config_file}" ]]; then
+  # shellcheck disable=SC1090
+  source "${runtime_config_file}"
+fi
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  control-plane-biome <biome args...>
+
+Run Biome for the current repository. When CONTROL_PLANE_BIOME_HOOK_IMAGE is set and
+control-plane-run is available, affected files plus biome.jsonc/.gitignore are staged
+into a Kubernetes Job. Otherwise the wrapper falls back to a local biome CLI or npx.
+USAGE
+}
+
+die() {
+  printf 'control-plane-biome: %s\n' "$*" >&2
+  exit 64
+}
+
+find_repo_root() {
+  if command -v git >/dev/null 2>&1; then
+    git rev-parse --show-toplevel 2>/dev/null && return 0
+  fi
+
+  pwd
+}
+
+normalize_relative_path() {
+  local candidate="$1"
+  local relative_path="${candidate}"
+
+  [[ -n "${relative_path}" ]] || return 1
+  if [[ "${relative_path}" == /* ]]; then
+    if [[ "${relative_path}" == "${repo_root}" ]]; then
+      relative_path="."
+    elif [[ "${relative_path}" == "${repo_root}/"* ]]; then
+      relative_path="${relative_path#"${repo_root}/"}"
+    else
+      return 1
+    fi
+  fi
+
+  while [[ "${relative_path}" == ./* ]]; do
+    relative_path="${relative_path#./}"
+  done
+
+  [[ -n "${relative_path}" ]] || return 1
+  case "/${relative_path}/" in
+    *"/../"*|*"/./"*)
+      return 1
+      ;;
+  esac
+
+  printf '%s\n' "${relative_path}"
+}
+
+queue_repo_file() {
+  local relative_path="$1"
+  local absolute_path="${repo_root}/${relative_path}"
+
+  [[ -f "${absolute_path}" ]] || return 0
+  [[ ! -L "${absolute_path}" ]] || die "refusing to stage symlink input: ${relative_path}"
+  if [[ -n "${seen_mounts["${relative_path}"]+x}" ]]; then
+    return 0
+  fi
+
+  seen_mounts["${relative_path}"]=1
+  mount_specs+=("${absolute_path}:${relative_path}")
+}
+
+queue_argument_file() {
+  local candidate="$1"
+  local relative_path=""
+  local absolute_path=""
+
+  relative_path="$(normalize_relative_path "${candidate}" || true)"
+  [[ -n "${relative_path}" ]] || return 0
+  absolute_path="${repo_root}/${relative_path}"
+  if [[ -f "${absolute_path}" ]] && [[ -z "${seen_mounts["${relative_path}"]+x}" ]]; then
+    mounted_input_files=$((mounted_input_files + 1))
+  fi
+  queue_repo_file "${relative_path}"
+}
+
+rewrite_argument_for_remote() {
+  local argument="$1"
+  local option_name=""
+  local option_value=""
+
+  case "${argument}" in
+    --config-path=*|--stdin-file-path=*)
+      option_name="${argument%%=*}"
+      option_value="${argument#*=}"
+      option_value="$(normalize_relative_path "${option_value}" || printf '%s' "${option_value}")"
+      printf '%s=%s\n' "${option_name}" "${option_value}"
+      ;;
+    *)
+      option_value="$(normalize_relative_path "${argument}" || printf '%s' "${argument}")"
+      printf '%s\n' "${option_value}"
+      ;;
+  esac
+}
+
+collect_mount_files() {
+  local args=("$@")
+  local arg
+  local next_arg
+  local index
+
+  for (( index=0; index<${#args[@]}; index++ )); do
+    arg="${args[index]}"
+    case "${arg}" in
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      --config-path|--stdin-file-path)
+        if (( index + 1 < ${#args[@]} )); then
+          next_arg="${args[index + 1]}"
+          queue_argument_file "${next_arg}"
+          (( index += 1 ))
+        fi
+        ;;
+      --config-path=*|--stdin-file-path=*)
+        queue_argument_file "${arg#*=}"
+        ;;
+      --*)
+        ;;
+      *)
+        queue_argument_file "${arg}"
+        ;;
+    esac
+  done
+
+  queue_repo_file "biome.jsonc"
+  queue_repo_file "biome.json"
+  queue_repo_file ".gitignore"
+}
+
+run_remote_biome() {
+  local remote_command=""
+  local rewritten_argument
+  local argument
+
+  printf -v remote_command 'cd %q && exec /usr/local/bin/biome' "${job_input_mount_path}"
+  for argument in "$@"; do
+    rewritten_argument="$(rewrite_argument_for_remote "${argument}")"
+    printf -v remote_command '%s %q' "${remote_command}" "${rewritten_argument}"
+  done
+
+  exec control-plane-run \
+    --image "${remote_image}" \
+    --input-mount-path "${job_input_mount_path}" \
+    "${mount_args[@]}" \
+    -- /bin/sh -lc "${remote_command}"
+}
+
+run_local_biome() {
+  if command -v biome >/dev/null 2>&1; then
+    exec biome "$@"
+  fi
+
+  if command -v npx >/dev/null 2>&1; then
+    exec npx --yes @biomejs/biome "$@"
+  fi
+
+  die "missing local biome CLI; install biome or set CONTROL_PLANE_BIOME_HOOK_IMAGE"
+}
+
+[[ $# -gt 0 ]] || {
+  usage
+  exit 64
+}
+
+repo_root="$(find_repo_root)"
+declare -A seen_mounts=()
+mount_specs=()
+mount_args=()
+mounted_input_files=0
+remote_image="${CONTROL_PLANE_BIOME_HOOK_IMAGE:-}"
+job_input_mount_path="${CONTROL_PLANE_JOB_INPUT_MOUNT_PATH:-/var/run/control-plane/job-inputs}"
+
+collect_mount_files "$@"
+if [[ -n "${remote_image}" ]] && command -v control-plane-run >/dev/null 2>&1 && [[ "${mounted_input_files}" -gt 0 ]]; then
+  for mount_spec in "${mount_specs[@]}"; do
+    mount_args+=(--mount-file "${mount_spec}")
+  done
+  run_remote_biome "$@"
+fi
+
+run_local_biome "$@"

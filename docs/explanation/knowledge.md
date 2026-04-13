@@ -40,8 +40,11 @@ delegated shell から `kubectl -n copilot-sandbox-jobs ...` を使っても、
 control-plane 本体の権限をそのまま広げずに済みます。
 
 つまりこの repo は「対話中の Copilot bash は session fast path」「operator が
-明示的に叩く command は Kubernetes Job」という二経路を持ちます。どちらも
-Kubernetes 上で動かすことで、権限分離・再現性・異常時の影響範囲をそろえます。
+明示的に叩く command や heavy hook は Kubernetes Job」という二経路を持ちます。
+最近は JS/TS 向け Biome hook も `control-plane-run --mount-file` で official
+Biome image へ逃がし、long-lived control-plane container のメモリ膨張を避けます。
+どちらも Kubernetes 上で動かすことで、権限分離・再現性・異常時の影響範囲を
+そろえます。
 
 ## 4. なぜ local nested runtime を既定にしないのか
 
