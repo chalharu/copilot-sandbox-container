@@ -80,6 +80,7 @@ and `.github/linter-service.yaml`.
 - `push` to `main` uses the same trigger-level filtering
 - for build-relevant changes, it additionally gates a single x64-hosted
   `publish-architecture-images` job
-- that job downloads both architecture artifacts, publishes both architecture
-  tags, creates the multi-arch manifests, and then runs the GHCR cleanup step
+- that job downloads both architecture artifacts and publishes both
+  architecture tags
+- it then creates the multi-arch manifests and runs the GHCR cleanup step
 - that job depends on the integration fan-out results
