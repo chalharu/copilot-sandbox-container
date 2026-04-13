@@ -778,7 +778,7 @@ worker や backend をまたいで live session を復旧したい場合は、wo
     この mock agent を `AcpWorker` として起動する
 
 mock agent の責務は、ACP server ではなく**Agent 側のふるまいを再現すること**です。
-少なくとも次の応答を deterministic に返せるようにします。
+少なくとも次の応答を deterministic な形で返せるようにします。
 
 - `initialize` の応答
   - `protocolVersion`, `agentCapabilities`, `authMethods`
