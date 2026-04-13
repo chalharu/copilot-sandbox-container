@@ -13,19 +13,23 @@ Run the repository-managed baseline with Docker:
 
 - `./scripts/build-test.sh`
 
-When the Docker daemon is unavailable but the current cluster allows pod/service
-creation in the job namespace, `./scripts/build-test.sh --build-only` can fall
-back to an ephemeral Kubernetes Buildkitd. Use
+When the Docker daemon is unavailable, `./scripts/build-test.sh --build-only`
+can fall back to an ephemeral Kubernetes Buildkitd. This path requires the
+current cluster to allow pod/service creation in the job namespace. Use
 `CONTROL_PLANE_TOOLCHAIN=buildkitd` when you need to force that path.
 
 Hosted lint is provided by the external `linter-service`, including the Renovate
 dry-run coverage that used to live in `lint.sh`.
 
-Add a focused `scripts/test-*.sh` regression check for the behavior you changed and run it directly during iteration. Wire it into `scripts/build-test.sh` when it is deterministic and worth covering in the standard regression path.
+Add a focused `scripts/test-*.sh` regression check for the behavior you changed.
+Run it directly during iteration. Wire it into `scripts/build-test.sh` when it
+is deterministic and worth covering in the standard regression path.
 
 ## Kubernetes and current-cluster verification
 
-When the change affects Kubernetes manifests, control-plane runtime behavior, or cluster interactions, verify it against a real cluster path instead of relying only on static inspection.
+When the change affects Kubernetes manifests, verify it against a real cluster
+path. Do the same for control-plane runtime behavior and cluster interactions.
+Do not rely only on static inspection.
 
 Preferred pre-deploy check:
 
@@ -35,11 +39,16 @@ When the current cluster already runs the workspace image you are editing, also 
 
 - `./scripts/test-current-cluster-regressions.sh`
 
-Use `kubectl get`, `kubectl describe`, and `kubectl logs` for extra inspection when needed. `scripts/build-test.sh` already assumes `kind`, `kubectl`, `ssh`, and `ssh-keygen` are available.
+Use `kubectl get`, `kubectl describe`, and `kubectl logs` for extra inspection
+when needed. `scripts/build-test.sh` already assumes `kind`, `kubectl`, `ssh`,
+and `ssh-keygen` are available.
 
 ## Skill-specific validation
 
-When the change touches repo-local skills under `.github/skills/` or bundled skills under `containers/control-plane/skills/`, validate every changed skill as part of the delivery loop.
+When the change touches repo-local skills under `.github/skills/`, validate
+every changed skill. Do the same for bundled skills under
+`containers/control-plane/skills/`. Treat that validation as part of the
+delivery loop.
 
 Start with the repository regression script:
 
@@ -56,7 +65,19 @@ That script:
 
 ## CI surfaces
 
-The authoritative hosted validation definition lives in `.github/workflows/control-plane-ci.yml`.
+The hosted validation definitions live in `.github/workflows/control-plane-ci.yml`
+and `.github/linter-service.yaml`.
 
-- `pull_request` relies on the external `linter-service`; unless the change only touches trigger-filtered Markdown paths, it builds integration images for both x64 and aarch64 and then fans out dual-arch `Integration Smoke` plus x64-only `Integration Regressions`, `Integration Kind Session`, `Integration Kind Jobs Core`, and `Integration Kind Jobs Transfer`
-- `push` to `main` uses the same trigger-level filtering and, for build-relevant changes, additionally gates `Publish Architecture Images`, `publish-manifests`, and `cleanup-packages` on the integration fan-out results
+- `.github/linter-service.yaml` configures hosted `textlint`
+- `pull_request` in `.github/workflows/control-plane-ci.yml` relies on the
+  external `linter-service`
+- if the change only touches trigger-filtered Markdown paths, build jobs stay
+  skipped
+- otherwise it builds integration images for both x64 and aarch64
+- it then runs dual-arch `Integration Smoke`
+- it also runs x64-only `Integration Regressions`, `Integration Kind Session`,
+  `Integration Kind Jobs Core`, and `Integration Kind Jobs Transfer`
+- `push` to `main` uses the same trigger-level filtering
+- for build-relevant changes, it additionally gates `Publish Architecture Images`
+- it also gates `publish-manifests` and `cleanup-packages`
+- those jobs depend on the integration fan-out results

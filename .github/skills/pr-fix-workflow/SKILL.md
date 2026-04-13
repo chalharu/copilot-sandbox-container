@@ -20,11 +20,14 @@ Use this repo-local skill as the repository-specific companion to the bundled `r
    - sub-agent delegation
    - regression coverage expectations
    - critical review and revalidation
-   - commit, rebase, push, PR, and wait-for-CI flow
+   - commit and rebase flow
+   - push / PR / wait-for-CI handling
 
 ## Repository anchors
 
-- Use `./scripts/build-test.sh` for the standard repo-managed validation baseline in this repository; hosted lint comes from the external `linter-service`.
-- When the change touches `.github/skills/` or `containers/control-plane/skills/`, validate every changed skill and the control-plane runtime surfaces that expose bundled skills.
+- Use `./scripts/build-test.sh` for the standard repo-managed validation baseline in this repository.
+- Hosted lint comes from the external `linter-service`.
+- When the change touches `.github/skills/` or `containers/control-plane/skills/`, validate every changed skill.
+- Also validate the control-plane runtime surfaces that expose bundled skills.
 - Use `./scripts/test-k8s-job.sh` or the current-cluster checks when runtime or Kubernetes behavior changes.
 - Read `references/validation-and-delivery.md` for the exact commands and CI surfaces in this repository.

@@ -13,9 +13,11 @@
 
 <!-- Update this section as the project takes shape -->
 
-**Project type:** Container image and shell-script repository for a Copilot Control Plane and reference Execution Planes
-**Primary language:** Bash with Dockerfiles and Kubernetes manifests
-**Key dependencies:** Docker Buildx, kubectl, Kind, gh, GNU Screen
+- **Project type:** Container image and shell-script repository for a Copilot Control Plane
+- **Also includes:** Reference Execution Planes
+- **Primary language:** Bash with Dockerfiles and Kubernetes manifests
+- **Key dependencies:** Docker Buildx, kubectl, Kind, and gh
+- **Also required:** GNU Screen
 
 ---
 

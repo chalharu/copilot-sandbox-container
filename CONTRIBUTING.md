@@ -45,18 +45,21 @@ Types:
   back to an ephemeral Kubernetes Buildkitd when the Docker daemon is unavailable.
 - Use `CONTROL_PLANE_TOOLCHAIN=docker` or `CONTROL_PLANE_TOOLCHAIN=buildkitd` to
   force the build surface explicitly.
-- Use trusted upstream images when they already satisfy the contract; if only a
-  third-party image exists, build a thin repository-managed image and publish it
-  to GHCR for reuse.
-- GitHub Actions validation should pass without extra registry secrets; keep the
-  Renovate dry-run scoped to public dependencies and the pinned external skills
-  repository.
+- Use trusted upstream images when they already satisfy the contract.
+- If only a third-party image exists, build a thin repository-managed image and
+  publish it to GHCR for reuse.
+- GitHub Actions validation should pass without extra registry secrets.
+- Keep the Renovate dry-run scoped to public dependencies and the pinned
+  external skills repository.
 - `scripts/test-standalone.sh` and `scripts/test-kind.sh` remain the lower-level
   smoke / integration scripts used by `scripts/build-test.sh`.
 - When this repository is developed from inside a containerized tooling
-  environment, keep these scripts unchanged and provide `docker buildx` together
-  with `kubectl`, `ssh`, and `ssh-keygen`. Full runtime / Kind coverage still
-  needs a Docker-compatible container runtime; the Buildkitd fallback only covers
+  environment, keep these scripts unchanged.
+- In that environment, also provide `docker buildx` together with `kubectl`,
+  `ssh`, and `ssh-keygen`.
+- In that environment, full runtime / Kind coverage still needs a
+  Docker-compatible container runtime.
+- In that environment, the Buildkitd fallback only covers
   `scripts/build-test.sh --build-only`.
 - When behavior or operator guidance changes, keep `README.md`,
   `docs/README.md`, `docs/how-to-guides/cookbook.md`,
