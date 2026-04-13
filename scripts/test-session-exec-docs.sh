@@ -28,12 +28,12 @@ assert_file_not_contains() {
 }
 
 printf '%s\n' 'session-exec-docs-test: verifying proxy helper stays internal in docs' >&2
-assert_file_not_contains "${runtime_doc_path}" 'Copilot CLI の `bash` tool を `control-plane-session-exec proxy` へ書き換えます。'
-assert_file_contains "${runtime_doc_path}" 'Copilot CLI の `bash` tool 自体はそのまま使います。'
-assert_file_contains "${runtime_doc_path}" 'agent が `bash` tool からこの helper を直接呼ぶ想定はありません。'
+assert_file_not_contains "${runtime_doc_path}" "Copilot CLI の \`bash\` tool を \`control-plane-session-exec proxy\` へ書き換えます。"
+assert_file_contains "${runtime_doc_path}" "Copilot CLI の \`bash\` tool 自体はそのまま使います。"
+assert_file_contains "${runtime_doc_path}" "agent が \`bash\` tool からこの helper を直接呼ぶ想定はありません。"
 assert_file_contains "${knowledge_doc_path}" '内部 helper の'
-assert_file_contains "${knowledge_doc_path}" '`control-plane-session-exec proxy` はこの経路でだけ使います。'
+assert_file_contains "${knowledge_doc_path}" "\`control-plane-session-exec proxy\` はこの経路でだけ使います。"
 assert_file_contains "${knowledge_doc_path}" 'tool から直接呼ぶ想定はありません。'
-assert_file_contains "${cookbook_path}" '`control-plane-session-exec proxy` はこの自動委譲の内部'
-assert_file_contains "${cookbook_path}" 'helper です。operator や agent が `bash` tool から直接呼びません。'
+assert_file_contains "${cookbook_path}" "\`control-plane-session-exec proxy\` はこの自動委譲の内部"
+assert_file_contains "${cookbook_path}" "helper です。operator や agent が \`bash\` tool から直接呼びません。"
 printf '%s\n' 'session-exec-docs-test: docs ok' >&2
