@@ -53,6 +53,24 @@ assert_file_not_contains() {
   fi
 }
 
+assert_file_present() {
+  local path="$1"
+
+  [[ -f "${path}" ]] || {
+    printf 'Expected file: %s\n' "${path}" >&2
+    exit 1
+  }
+}
+
+assert_path_absent() {
+  local path="$1"
+
+  [[ ! -e "${path}" ]] || {
+    printf 'Did not expect path: %s\n' "${path}" >&2
+    exit 1
+  }
+}
+
 assert_line_order() {
   local path="$1"
   local earlier="$2"
@@ -390,6 +408,12 @@ assert_file_not_contains "${workflow_path}" 'GHCR_SCCACHE_IMAGE'
 assert_file_not_contains "${github_hooks_test_path}" "-c 'cargo test'"
 assert_file_contains "${session_exec_test_path}" 'cargo chef prepare'
 assert_file_contains "${session_exec_test_path}" 'cargo chef cook'
+assert_file_present "${repo_root}/containers/control-plane/Cargo.toml"
+assert_file_present "${repo_root}/containers/control-plane/Cargo.lock"
+assert_file_contains "${repo_root}/containers/control-plane/Cargo.toml" '[workspace]'
+assert_path_absent "${repo_root}/containers/control-plane/exec-api/Cargo.lock"
+assert_path_absent "${repo_root}/containers/control-plane/exec-policy-preload/Cargo.lock"
+assert_path_absent "${repo_root}/containers/control-plane/runtime-tools/Cargo.lock"
 assert_file_contains "${git_skills_manifest_installer_path}" '/usr/local/bin/control-plane-runtime-tool'
 assert_file_not_contains "${git_skills_manifest_installer_path}" 'cargo build --release'
 assert_file_contains "${workflow_path}" 'path: /tmp/control-plane-rust-regression-cache'

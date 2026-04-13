@@ -8,8 +8,34 @@ source "${script_dir}/lib-biome-hook-image.sh"
 control_plane_image="${1:-}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-docker}"
 control_plane_run_user=(--user 0:0)
+host_uid="$(id -u)"
+host_gid="$(id -g)"
 # renovate: datasource=docker depName=docker.io/library/rust versioning=docker
 rust_test_image="${CONTROL_PLANE_RUST_TEST_IMAGE:-docker.io/library/rust:1.94.1-bookworm@sha256:6ae102bdbf528294bc79ad6e1fae682f6f7c2a6e6621506ba959f9685b308a55}"
+
+cleanup_runtime_tool_target_dir() {
+  [[ -n "${runtime_tool_target_dir:-}" ]] || return 0
+  [[ -e "${runtime_tool_target_dir}" ]] || return 0
+
+  rm -rf "${runtime_tool_target_dir}" 2>/dev/null && return 0
+
+  if command -v "${container_bin}" >/dev/null 2>&1; then
+    "${container_bin}" run --rm \
+      "${control_plane_run_user[@]}" \
+      -v "${runtime_tool_target_dir}:/var/tmp/control-plane/cargo-target" \
+      --entrypoint sh \
+      "${rust_test_image}" \
+      -c 'find /var/tmp/control-plane/cargo-target -mindepth 1 -exec rm -rf -- {} +' \
+      >/dev/null 2>&1 || true
+  fi
+
+  rm -rf "${runtime_tool_target_dir}" 2>/dev/null || true
+}
+
+runtime_tool_target_root="${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane}"
+mkdir -p "${runtime_tool_target_root}"
+runtime_tool_target_dir="$(mktemp -d "${runtime_tool_target_root}/github-hooks-target.XXXXXX")"
+trap cleanup_runtime_tool_target_dir EXIT
 
 command -v node >/dev/null 2>&1 || {
   printf 'test-github-hooks.sh: node is required\n' >&2
@@ -33,13 +59,16 @@ printf '%s\n' 'test-github-hooks.sh: building runtime-tool binary for git hook t
 "${container_bin}" run --rm \
   "${control_plane_run_user[@]}" \
   -i \
+  -e CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target \
+  -v "${runtime_tool_target_dir}:/var/tmp/control-plane/cargo-target" \
   -v "${PWD}:/workspace" \
-  -w /workspace/containers/control-plane/runtime-tools \
+  -w /workspace/containers/control-plane \
   --entrypoint sh \
   "${rust_test_image}" \
-  -c 'cargo build --locked --bin control-plane-runtime-tool'
+  -c "cargo build --locked -p control-plane-runtime-tools --bin control-plane-runtime-tool; build_status=\$?; chown -R ${host_uid}:${host_gid} /var/tmp/control-plane/cargo-target || true; exit \$build_status"
 
 printf '%s\n' 'test-github-hooks.sh: verifying remaining git hook tests' >&2
+export CONTROL_PLANE_RUNTIME_TOOL_BIN="${runtime_tool_target_dir}/debug/control-plane-runtime-tool"
 node --test \
   containers/control-plane/hooks/git/main.test.mjs
 

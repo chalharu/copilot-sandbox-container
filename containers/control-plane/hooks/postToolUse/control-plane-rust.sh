@@ -36,12 +36,17 @@ find_repo_root() {
 
 repo_root="$(find_repo_root)"
 control_plane_tree="${repo_root}/containers/control-plane"
+workspace_manifest="${control_plane_tree}/Cargo.toml"
 [[ -d "${control_plane_tree}" ]] || die "run this hook from the repository root"
 
 load_all_manifests() {
   local manifest
 
   manifests=()
+  if [[ -f "${workspace_manifest}" ]]; then
+    manifests=("${workspace_manifest}")
+    return 0
+  fi
   while IFS= read -r manifest; do
     manifests+=("${manifest}")
   done < <(
@@ -69,6 +74,10 @@ manifest_for_path() {
 
   path="$(normalize_candidate_path "${candidate}")"
   [[ "${path}" == "${control_plane_tree}" || "${path}" == "${control_plane_tree}/"* ]] || return 1
+  if [[ "${path}" == "${workspace_manifest}" ]]; then
+    printf '%s\n' "${workspace_manifest}"
+    return 0
+  fi
   if [[ -d "${path}" ]]; then
     search_dir="${path}"
   else
@@ -108,11 +117,34 @@ collect_target_manifests() {
 }
 
 cargo_target_dir() {
-  local crate_dir="$1"
-  local crate_name
+  printf '%s\n' "${CONTROL_PLANE_RUST_TARGET_DIR:-${CARGO_TARGET_DIR:-${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane}/cargo-target}}"
+}
 
-  crate_name="$(basename "${crate_dir}")"
-  printf '%s\n' "${CONTROL_PLANE_RUST_TARGET_DIR:-/tmp/control-plane-rust-target/${crate_name}}"
+resolved_cargo_args() {
+  local manifest="$1"
+
+  command_args=("${cargo_args[@]}")
+  [[ "${manifest}" == "${workspace_manifest}" ]] || return 0
+
+  case "${preset}" in
+    fmt|fmt-check)
+      ;;
+    check)
+      command_args=(check --workspace --all-targets)
+      ;;
+    clippy-fix)
+      command_args=(clippy --workspace --fix --allow-dirty --allow-staged --all-targets)
+      ;;
+    clippy)
+      command_args=(clippy --workspace --all-targets -- -D warnings)
+      ;;
+    build)
+      command_args=(build --workspace)
+      ;;
+    test)
+      command_args=(test --workspace --all-targets)
+      ;;
+  esac
 }
 
 [[ $# -ge 1 ]] || {
@@ -170,28 +202,36 @@ case "${preset}" in
 esac
 
 run_local_cargo() {
-  local crate_dir="$1"
+  local manifest="$1"
+  local crate_dir
   local target_dir
 
+  crate_dir="$(dirname "${manifest}")"
   require_command cargo
-  target_dir="$(cargo_target_dir "${crate_dir}")"
+  resolved_cargo_args "${manifest}"
+  target_dir="$(cargo_target_dir)"
   (
     cd "${crate_dir}"
-    CARGO_TARGET_DIR="${target_dir}" cargo "${cargo_args[@]}"
+    CARGO_TARGET_DIR="${target_dir}" cargo "${command_args[@]}"
   )
 }
 
 run_remote_cargo() {
-  local crate_dir="$1"
-  local crate_relative="${crate_dir#"${repo_root}/"}"
-  local remote_dir="/workspace/${crate_relative}"
+  local manifest="$1"
+  local crate_dir
+  local crate_relative
+  local remote_dir
   local remote_command
   local target_dir
 
-  target_dir="$(cargo_target_dir "${crate_dir}")"
+  crate_dir="$(dirname "${manifest}")"
+  crate_relative="${crate_dir#"${repo_root}/"}"
+  remote_dir="/workspace/${crate_relative}"
+  resolved_cargo_args "${manifest}"
+  target_dir="$(cargo_target_dir)"
 
   printf -v remote_command 'export CARGO_TARGET_DIR=%q && cd %q && cargo' "${target_dir}" "${remote_dir}"
-  for cargo_arg in "${cargo_args[@]}"; do
+  for cargo_arg in "${command_args[@]}"; do
     printf -v remote_command '%s %q' "${remote_command}" "${cargo_arg}"
   done
 

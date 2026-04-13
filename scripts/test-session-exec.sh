@@ -31,22 +31,21 @@ printf '%s\n' 'test-session-exec.sh: verifying exec-api integration coverage' >&
 "${container_bin}" run --rm --user "$(id -u):$(id -g)" \
   -e HOME=/control-plane-rust-home \
   -e CARGO_HOME=/control-plane-rust-home/.cargo \
-  -e CARGO_TARGET_DIR=/control-plane-rust-target \
+  -e CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target \
   -v "${rust_cache_home_dir}:/control-plane-rust-home" \
-  -v "${rust_cache_target_dir}:/control-plane-rust-target" \
+  -v "${rust_cache_target_dir}:/var/tmp/control-plane/cargo-target" \
   -v "${PWD}:/workspace" \
   -w /workspace \
   "${rust_test_image}" \
   bash -lc "export PATH=/usr/local/cargo/bin:\$PATH \
-    && rm -rf /tmp/control-plane-exec-api \
-    && mkdir -p /tmp/control-plane-exec-api \
-    && cp /workspace/containers/control-plane/exec-api/Cargo.toml /tmp/control-plane-exec-api/Cargo.toml \
-    && cp /workspace/containers/control-plane/exec-api/Cargo.lock /tmp/control-plane-exec-api/Cargo.lock \
-    && cp /workspace/containers/control-plane/exec-api/build.rs /tmp/control-plane-exec-api/build.rs \
-    && cp -R /workspace/containers/control-plane/exec-api/proto /tmp/control-plane-exec-api/proto \
-    && cp -R /workspace/containers/control-plane/exec-api/src /tmp/control-plane-exec-api/src \
-    && cp -R /workspace/containers/control-plane/exec-api/tests /tmp/control-plane-exec-api/tests \
-    && cd /tmp/control-plane-exec-api \
-    && cargo chef prepare --recipe-path /control-plane-rust-target/exec-api-recipe.json \
-    && cargo chef cook --locked --recipe-path /control-plane-rust-target/exec-api-recipe.json \
-    && cargo test --locked"
+    && rm -rf /tmp/control-plane-workspace \
+    && mkdir -p /tmp/control-plane-workspace \
+    && cp /workspace/containers/control-plane/Cargo.toml /tmp/control-plane-workspace/Cargo.toml \
+    && cp /workspace/containers/control-plane/Cargo.lock /tmp/control-plane-workspace/Cargo.lock \
+    && cp -R /workspace/containers/control-plane/exec-api /tmp/control-plane-workspace/exec-api \
+    && cp -R /workspace/containers/control-plane/exec-policy-preload /tmp/control-plane-workspace/exec-policy-preload \
+    && cp -R /workspace/containers/control-plane/runtime-tools /tmp/control-plane-workspace/runtime-tools \
+    && cd /tmp/control-plane-workspace \
+    && cargo chef prepare --recipe-path /var/tmp/control-plane/cargo-target/exec-api-recipe.json \
+    && cargo chef cook --locked --recipe-path /var/tmp/control-plane/cargo-target/exec-api-recipe.json -p control-plane-exec-api \
+    && cargo test --locked -p control-plane-exec-api"
