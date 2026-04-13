@@ -8,8 +8,6 @@ source "${script_dir}/lib-biome-hook-image.sh"
 control_plane_image="${1:-}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-docker}"
 control_plane_run_user=(--user 0:0)
-# renovate: datasource=docker depName=docker.io/library/rust versioning=docker
-rust_test_image="${CONTROL_PLANE_RUST_TEST_IMAGE:-docker.io/library/rust:1.94.1-bookworm@sha256:6ae102bdbf528294bc79ad6e1fae682f6f7c2a6e6621506ba959f9685b308a55}"
 
 command -v node >/dev/null 2>&1 || {
   printf 'test-github-hooks.sh: node is required\n' >&2
@@ -26,16 +24,8 @@ command -v "${container_bin}" >/dev/null 2>&1 || {
   exit 1
 }
 
-printf '%s\n' 'test-github-hooks.sh: verifying Rust-backed hook helpers' >&2
-"${container_bin}" run --rm \
-  "${control_plane_run_user[@]}" \
-  -i \
-  -v "${PWD}:/workspace" \
-  -w /workspace/containers/control-plane/runtime-tools \
-  --entrypoint sh \
-  "${rust_test_image}" \
-  -c 'cargo test'
-
+# The control-plane image build already runs runtime-tools cargo tests in the
+# runtime-tools-builder stage, so keep this regression focused on hook wiring.
 printf '%s\n' 'test-github-hooks.sh: verifying remaining git hook tests' >&2
 node --test \
   containers/control-plane/hooks/git/main.test.mjs

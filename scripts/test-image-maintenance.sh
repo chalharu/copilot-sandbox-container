@@ -109,6 +109,7 @@ renovate_config_path="${repo_root}/renovate.json5"
 validate_renovate_script_path="${repo_root}/scripts/validate-renovate-config.sh"
 biome_image_helper_path="${repo_root}/scripts/lib-biome-hook-image.sh"
 git_skills_manifest_installer_path="${repo_root}/scripts/install-git-skills-from-manifest.sh"
+github_hooks_test_path="${repo_root}/scripts/test-github-hooks.sh"
 session_exec_test_path="${repo_root}/scripts/test-session-exec.sh"
 sccache_dockerfile_path="${repo_root}/containers/sccache/Dockerfile"
 legacy_execution_plane_go_dockerfile_path="${repo_root}/containers/execution-plane-go/Dockerfile"
@@ -386,6 +387,7 @@ assert_file_contains "${biome_image_helper_path}" 'depName=ghcr.io/biomejs/biome
 assert_file_not_contains "${workflow_path}" 'sccache-changes'
 assert_file_not_contains "${workflow_path}" 'containers/sccache'
 assert_file_not_contains "${workflow_path}" 'GHCR_SCCACHE_IMAGE'
+assert_file_not_contains "${github_hooks_test_path}" "-c 'cargo test'"
 assert_file_contains "${session_exec_test_path}" 'cargo chef prepare'
 assert_file_contains "${session_exec_test_path}" 'cargo chef cook'
 assert_file_contains "${git_skills_manifest_installer_path}" '/usr/local/bin/control-plane-runtime-tool'
