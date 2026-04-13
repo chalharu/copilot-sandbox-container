@@ -920,6 +920,9 @@ runtime_config_tmp="$(mktemp "${runtime_config_path}.XXXXXX")"
     write_runtime_var CONTROL_PLANE_COPILOT_BIN "${CONTROL_PLANE_COPILOT_BIN}"
   fi
   write_runtime_var CONTROL_PLANE_COPILOT_NICE_LEVEL "${copilot_nice_level}"
+  if [[ -n "${CONTROL_PLANE_BIOME_HOOK_IMAGE:-}" ]]; then
+    write_runtime_var CONTROL_PLANE_BIOME_HOOK_IMAGE "${CONTROL_PLANE_BIOME_HOOK_IMAGE}"
+  fi
   if [[ -n "${CONTROL_PLANE_RUST_HOOK_IMAGE:-}" ]]; then
     write_runtime_var CONTROL_PLANE_RUST_HOOK_IMAGE "${CONTROL_PLANE_RUST_HOOK_IMAGE}"
   fi

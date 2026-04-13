@@ -2,6 +2,8 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib-biome-hook-image.sh
+source "${script_dir}/lib-biome-hook-image.sh"
 manifest_root="${script_dir}/../deploy/kubernetes/control-plane.example"
 install_manifest_root="${script_dir}/../deploy/kubernetes/control-plane.example/install"
 manifest_path="$(mktemp)"
@@ -323,6 +325,7 @@ assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTI
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS: standard'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE: 10Gi'
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH: /environment'
+assert_resource_contains ConfigMap control-plane-env "CONTROL_PLANE_BIOME_HOOK_IMAGE: ${biome_hook_image}"
 assert_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_RUST_HOOK_IMAGE: docker.io/library/rust:1.94.1-bookworm'
 assert_resource_not_contains ConfigMap control-plane-env 'replace-with-digest'
 assert_resource_not_contains ConfigMap control-plane-env 'replace-me-with-commit-sha'

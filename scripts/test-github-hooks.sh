@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/.." && pwd)"
+# shellcheck source=scripts/lib-biome-hook-image.sh
+source "${script_dir}/lib-biome-hook-image.sh"
 control_plane_image="${1:-}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-docker}"
 control_plane_run_user=(--user 0:0)
@@ -36,6 +40,84 @@ printf '%s\n' 'test-github-hooks.sh: verifying remaining git hook tests' >&2
 node --test \
   containers/control-plane/hooks/git/main.test.mjs
 
+printf '%s\n' 'test-github-hooks.sh: verifying control-plane-biome wrapper' >&2
+(
+  set -euo pipefail
+
+  workdir="$(mktemp -d)"
+  trap 'rm -rf "${workdir}"' EXIT
+
+  repo_dir="${workdir}/repo"
+  bin_dir="${workdir}/bin"
+  remote_log="${workdir}/remote.log"
+  local_log="${workdir}/local.log"
+  npx_log="${workdir}/npx.log"
+  mkdir -p "${repo_dir}/src" "${bin_dir}"
+
+  printf 'node_modules/\n' > "${repo_dir}/.gitignore"
+  printf '{\n  "files": {\n    "ignoreUnknown": true,\n    "includes": ["**/*.ts"]\n  }\n}\n' > "${repo_dir}/biome.jsonc"
+  printf 'export const value = 1;\n' > "${repo_dir}/src/index.ts"
+
+  cat > "${bin_dir}/control-plane-run" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" > "${TEST_WRAPPER_LOG}"
+EOF
+  chmod 755 "${bin_dir}/control-plane-run"
+
+  (
+    cd "${repo_dir}"
+    TEST_WRAPPER_LOG="${remote_log}" \
+      PATH="${bin_dir}:/usr/bin:/bin" \
+      CONTROL_PLANE_BIOME_HOOK_IMAGE="${biome_hook_image}" \
+      CONTROL_PLANE_JOB_INPUT_MOUNT_PATH='/job-inputs' \
+      "${repo_root}/containers/control-plane/bin/control-plane-biome" check --write src/index.ts
+  )
+
+  grep -Fqx -- '--image' "${remote_log}"
+  grep -Fqx "${biome_hook_image}" "${remote_log}"
+  grep -Fqx -- '--input-mount-path' "${remote_log}"
+  grep -Fqx '/job-inputs' "${remote_log}"
+  grep -Fqx -- '--mount-file' "${remote_log}"
+  grep -Fqx "${repo_dir}/src/index.ts:src/index.ts" "${remote_log}"
+  grep -Fqx "${repo_dir}/biome.jsonc:biome.jsonc" "${remote_log}"
+  grep -Fqx "${repo_dir}/.gitignore:.gitignore" "${remote_log}"
+  grep -Fqx 'cd /job-inputs && exec /usr/local/bin/biome check --write src/index.ts' "${remote_log}"
+
+  cat > "${bin_dir}/biome" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'biome %s\n' "$*" > "${TEST_WRAPPER_LOG}"
+EOF
+  chmod 755 "${bin_dir}/biome"
+
+  (
+    cd "${repo_dir}"
+    TEST_WRAPPER_LOG="${local_log}" \
+      PATH="${bin_dir}:/usr/bin:/bin" \
+      CONTROL_PLANE_BIOME_HOOK_IMAGE='' \
+      "${repo_root}/containers/control-plane/bin/control-plane-biome" check --write src/index.ts
+  )
+  grep -Fqx 'biome check --write src/index.ts' "${local_log}"
+
+  rm -f "${bin_dir}/biome"
+  cat > "${bin_dir}/npx" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'npx %s\n' "$*" > "${TEST_WRAPPER_LOG}"
+EOF
+  chmod 755 "${bin_dir}/npx"
+
+  (
+    cd "${repo_dir}"
+    TEST_WRAPPER_LOG="${npx_log}" \
+      PATH="${bin_dir}:/usr/bin:/bin" \
+      CONTROL_PLANE_BIOME_HOOK_IMAGE='' \
+      "${repo_root}/containers/control-plane/bin/control-plane-biome" check --write src/index.ts
+  )
+  grep -Fqx 'npx --yes @biomejs/biome check --write src/index.ts' "${npx_log}"
+)
+
 if [[ -z "${control_plane_image}" ]]; then
   exit 0
 fi
@@ -59,6 +141,7 @@ test -f /usr/local/share/control-plane/hooks/git/lib/common.sh
 test -x /usr/local/share/control-plane/hooks/postToolUse/main
 test -x /usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh
 test -f /usr/local/share/control-plane/hooks/postToolUse/linters.json
+test -x /usr/local/bin/control-plane-biome
 test -x /usr/local/share/control-plane/hooks/sessionEnd/cleanup
 test -x /usr/local/bin/control-plane-exec-api
 test -x /usr/local/bin/control-plane-exec-api-launcher
@@ -97,6 +180,7 @@ grep -Fq "hooks/audit/main" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/preToolUse/main" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/preToolUse/exec-forward" /home/copilot/.copilot/hooks/hooks.json
 grep -Fq "hooks/postToolUse/main" /home/copilot/.copilot/hooks/hooks.json
+grep -Fq '"command": "control-plane-biome"' /usr/local/share/control-plane/hooks/postToolUse/linters.json
 grep -Fq "hooks/postToolUse/control-plane-rust.sh" /usr/local/share/control-plane/hooks/postToolUse/linters.json
 grep -Fq "hooks/sessionEnd/cleanup" /home/copilot/.copilot/hooks/hooks.json
 ! grep -Fq "powershell" /home/copilot/.copilot/hooks/hooks.json

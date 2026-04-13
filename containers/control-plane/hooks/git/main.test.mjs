@@ -141,10 +141,12 @@ function createSuccessToolStubs(repo) {
 		].join("\n"),
 	);
 	writeExecutable(
-		path.join(binDir, "biome"),
-		["#!/bin/sh", 'printf "biome %s\\n" "$*" >> "$HOOK_LOG"', "exit 0"].join(
-			"\n",
-		),
+		path.join(binDir, "control-plane-biome"),
+		[
+			"#!/bin/sh",
+			'printf "control-plane-biome %s\\n" "$*" >> "$HOOK_LOG"',
+			"exit 0",
+		].join("\n"),
 	);
 	writeExecutable(
 		path.join(binDir, "oxlint"),
@@ -157,6 +159,7 @@ function createSuccessToolStubs(repo) {
 		PATH: `${binDir}:${process.env.PATH}`,
 		HOOK_LOG: hookLog,
 		CONTROL_PLANE_HOOK_TMP_ROOT: path.join(repo, ".hook-cache"),
+		CONTROL_PLANE_POST_TOOL_USE_FORWARD_ACTIVE: "1",
 	};
 }
 
@@ -229,7 +232,7 @@ test("global pre-commit runs bundled linter and repository hook on feature branc
 	assert.equal(result.status, 0);
 	assert.match(
 		fs.readFileSync(toolEnv.HOOK_LOG, "utf8"),
-		/biome check --write index\.ts/,
+		/control-plane-biome check --write index\.ts/,
 	);
 	assert.match(
 		fs.readFileSync(toolEnv.HOOK_LOG, "utf8"),

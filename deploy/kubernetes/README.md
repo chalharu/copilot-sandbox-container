@@ -53,13 +53,15 @@ kubectl apply -k deploy/kubernetes/control-plane.example
    - sample 既定の `ReadWriteOnce` のままでも、Execution Pod が
       control-plane Pod と同じ node に pin されるため共有できる
 4. `control-plane.example/common/configmap-control-plane-env.yaml`
-   - cluster 固有の runtime 設定だけを調整する
-   - `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS` を、cluster に
-      `standard` が無い場合は導入前に置き換える
-   - `CONTROL_PLANE_FAST_EXECUTION_IMAGE` を変える場合は `/bin/sh` と
-      `apt-get` または `apk` を持つ image を使う
-   - namespace / session PVC / helper image の追従は shipped sample の
-     replacements が持つので、名前変更のたびにここを書き換える必要はない
+    - cluster 固有の runtime 設定だけを調整する
+    - `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS` を、cluster に
+       `standard` が無い場合は導入前に置き換える
+    - `CONTROL_PLANE_FAST_EXECUTION_IMAGE` を変える場合は `/bin/sh` と
+       `apt-get` または `apk` を持つ image を使う
+    - `CONTROL_PLANE_BIOME_HOOK_IMAGE` は bundled Biome hook を別 Job image
+      へ逃がす。sample 既定は `ghcr.io/biomejs/biome:2.4.11`
+    - namespace / session PVC / helper image の追従は shipped sample の
+      replacements が持つので、名前変更のたびにここを書き換える必要はない
 5. `control-plane.example/base/deployment-control-plane.yaml` または
     `control-plane.example/overlays/default/kustomization.yaml`
    - sample 既定は

@@ -120,12 +120,14 @@ ConfigMap / Secret / write-back の具体的な path は
    delegated shell の default namespace は control-plane 側のままなので、
    `kubectl -n "${CONTROL_PLANE_JOB_NAMESPACE}" ...` のように明示する
 10. `CONTROL_PLANE_FAST_EXECUTION_IMAGE` には delegated bash を実行したい
-   任意の Linux image（例: `ubuntu:24.04` や `alpine:3.22`）を置けるが、
-   `/bin/sh` と `apt-get` または `apk` を必ず含め、本番では digest-pinned ref
-   を使う。
-   `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` には Rust 製 exec-plane
-   binary と bundled Git hook を持つ control-plane image を置く。sample
-   既定では bootstrap 時に `bash` / `git` / `gh` / `kubectl` /
+    任意の Linux image（例: `ubuntu:24.04` や `alpine:3.22`）を置けるが、
+    `/bin/sh` と `apt-get` または `apk` を必ず含め、本番では digest-pinned ref
+    を使う。
+    `CONTROL_PLANE_BIOME_HOOK_IMAGE` は bundled JS/TS Biome hook を別 Job image
+    へ逃がす設定で、sample 既定は `ghcr.io/biomejs/biome:2.4.11`。
+    `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` には Rust 製 exec-plane
+    binary と bundled Git hook を持つ control-plane image を置く。sample
+    既定では bootstrap 時に `bash` / `git` / `gh` / `kubectl` /
    `openssh-client` を chroot 内へ入れる。
    node-scoped cache は `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX` /
    `..._STORAGE_CLASS` / `..._SIZE` / `..._MOUNT_PATH` で調整し、既定では

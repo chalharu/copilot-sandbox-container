@@ -169,9 +169,14 @@ unable to retrieve auth token: invalid username/password: unauthorized: authenti
 ### 意味
 
 Kubernetes 側の image pull 認証が足りていません。
-`CONTROL_PLANE_FAST_EXECUTION_IMAGE` や
-`CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` に private registry を使う場合があります。
-そのときは Deployment / ServiceAccount に `imagePullSecrets` を付けてください。
+次のような Job / exec 用 image に private registry を使う場合があります。
+
+- `CONTROL_PLANE_FAST_EXECUTION_IMAGE`
+- `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE`
+- `CONTROL_PLANE_BIOME_HOOK_IMAGE`
+
+そのときは Deployment / ServiceAccount に `imagePullSecrets` を
+付けてください。
 fast exec を dedicated な `control-plane-exec` ServiceAccount で動かすなら、
 その ServiceAccount 側にも同じ pull secret が必要です。
 Control Plane の runtime file や `/run/control-plane-auth` の Secret mount では

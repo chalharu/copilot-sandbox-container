@@ -31,7 +31,7 @@
     },
     {
       "id": "biome-check-write",
-      "command": "biome",
+      "command": "control-plane-biome",
       "args": [
         "check",
         "--write"
@@ -49,7 +49,7 @@
     },
     {
       "id": "biome-check",
-      "command": "biome",
+      "command": "control-plane-biome",
       "args": [
         "check"
       ]

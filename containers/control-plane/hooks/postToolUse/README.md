@@ -29,6 +29,13 @@ printf '%s' '{"cwd":"/workspace","toolResult":{"resultType":"success"}}' | ~/.co
 
 空入力のまま EOF (`Ctrl-D`) を送る方法でも確認できます。
 
+JS/TS 系の bundled lint は `control-plane-biome` を使います。repo root の
+`biome.jsonc` と `.gitignore` を優先します。
+`CONTROL_PLANE_BIOME_HOOK_IMAGE` が設定されていれば、changed file だけを
+`control-plane-run --mount-file` で Kubernetes Job に stage します。
+その Job で official `ghcr.io/biomejs/biome` image 上の Biome を実行します。
+local fallback 時は `biome` CLI、無ければ `npx @biomejs/biome` を使います。
+
 実行対象は bundled hook と同じ `postToolUse` ディレクトリ内の `linters.json` と、
 repo root の `.github/linters.json` をマージして定義します。このリポジトリの
 bundled 定義は `containers/control-plane/hooks/postToolUse/linters.json` にあります。
