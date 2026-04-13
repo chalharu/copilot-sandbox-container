@@ -394,6 +394,7 @@ assert_block_contains "${publish_block}" 'publish_architecture_image downloaded-
 assert_block_contains "${publish_block}" 'GHCR_MIN_UNTAGGED_VERSIONS_TO_KEEP: "30"' 'publish-architecture-images job block'
 assert_file_not_contains "${workflow_path}" '  publish-manifests:'
 assert_file_not_contains "${workflow_path}" '  cleanup-packages:'
+assert_file_contains "${renovate_config_path}" 'enabledManagers: ["cargo", "dockerfile", "github-actions", "custom.regex"],'
 assert_file_contains "${renovate_config_path}" '/^containers\\/control-plane\\/Dockerfile$/'
 assert_file_contains "${renovate_config_path}" '/^scripts\\/(lint|test-github-hooks|lib-biome-hook-image)\\.sh$/'
 assert_file_contains "${renovate_config_path}" '/^(deploy\\/helm\\/control-plane\\/values\\.yaml|deploy\\/kubernetes\\/control-plane\\.example\\/common\\/configmap-control-plane-env\\.yaml)$/'

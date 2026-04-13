@@ -169,8 +169,9 @@ chroot 側へ複製しません。Exec API は per-pod token が必須です。
 delegated command 自体は `CONTROL_PLANE_FAST_EXECUTION_RUN_AS_{UID,GID}` で指定した
 非 root UID/GID へ drop してから実行します。delegated stdout の先頭には
 submit された command line をそのまま出力します。remote 実行時でも何を流したかを
-追跡できます。`control-plane-exec-api serve` は request / response を JSON 1 行で
-標準出力へ出すので、Kubernetes の pod log から `requestId` ごとに追跡できます。
+追跡できます。`control-plane-exec-api serve` は request / response を
+`timestamp` (UNIX epoch ms) と `requestId` 付きの JSON 1 行で標準出力へ出します。
+Kubernetes の pod log から追跡できます。
 gRPC 経路は cluster 内 plaintext を前提にしています。
 flat network ではなく、pod-to-pod 通信を信用できる namespace / CNI で
 使ってください。bundled `sessionEnd/cleanup` は同じ session key で明示 cleanup

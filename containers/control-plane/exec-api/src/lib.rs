@@ -13,7 +13,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::process::Command as TokioCommand;
@@ -120,6 +120,7 @@ pub struct ExecResult {
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct ExecuteRequestLog<'a> {
+    timestamp: u64,
     event: &'static str,
     request_id: u64,
     mode: &'static str,
@@ -130,6 +131,7 @@ struct ExecuteRequestLog<'a> {
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct ExecuteResponseLog<'a> {
+    timestamp: u64,
     event: &'static str,
     request_id: u64,
     status: &'static str,
@@ -145,6 +147,21 @@ struct ExecuteResponseLog<'a> {
 
 trait TrafficLogger: Send + Sync + std::fmt::Debug {
     fn log_line(&self, line: &str) -> Result<(), String>;
+}
+
+fn current_timestamp_ms() -> u64 {
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+}
+
+fn format_log_line(timestamp_ms: u64, message: &str) -> String {
+    format!("{timestamp_ms} control-plane-exec-api: {message}")
+}
+
+pub fn log_message(message: &str) {
+    eprintln!("{}", format_log_line(current_timestamp_ms(), message));
 }
 
 #[derive(Debug, Default)]
@@ -236,6 +253,7 @@ impl ExecApiService {
 
     fn log_request(&self, request_id: u64, request: &proto::ExecuteRequest) {
         self.log_traffic(&ExecuteRequestLog {
+            timestamp: current_timestamp_ms(),
             event: "executeRequest",
             request_id,
             mode: self.mode.as_str(),
@@ -251,6 +269,7 @@ impl ExecApiService {
         result: &ExecResult,
     ) {
         self.log_traffic(&ExecuteResponseLog {
+            timestamp: current_timestamp_ms(),
             event: "executeResponse",
             request_id,
             status: "ok",
@@ -273,6 +292,7 @@ impl ExecApiService {
     ) {
         let grpc_code = format!("{:?}", status.code());
         self.log_traffic(&ExecuteResponseLog {
+            timestamp: current_timestamp_ms(),
             event: "executeResponse",
             request_id,
             status: "error",
@@ -291,14 +311,12 @@ impl ExecApiService {
         let line = match serde_json::to_string(value) {
             Ok(line) => line,
             Err(error) => {
-                eprintln!(
-                    "control-plane-exec-api: failed to serialize stdout traffic log: {error}"
-                );
+                log_message(&format!("failed to serialize stdout traffic log: {error}"));
                 return;
             }
         };
         if let Err(error) = self.traffic_logger.log_line(&line) {
-            eprintln!("control-plane-exec-api: {error}");
+            log_message(&error);
         }
     }
 
@@ -598,11 +616,11 @@ where
         .set_serving::<proto::exec_service_server::ExecServiceServer<ExecApiService>>()
         .await;
 
-    eprintln!(
-        "control-plane-exec-api: listening on {} for {}",
+    log_message(&format!(
+        "listening on {} for {}",
         local_addr,
         config.logical_workspace_root.display()
-    );
+    ));
 
     Server::builder()
         .add_service(health_service)
@@ -2123,8 +2141,16 @@ mod tests {
 
         let lines = logger.lines();
         assert_eq!(lines.len(), 2);
+        let mut request_log = serde_json::from_str::<serde_json::Value>(&lines[0]).unwrap();
+        let request_timestamp = request_log
+            .as_object_mut()
+            .unwrap()
+            .remove("timestamp")
+            .and_then(|value| value.as_u64())
+            .expect("request log should include a millisecond timestamp");
+        assert!(request_timestamp > 0);
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&lines[0]).unwrap(),
+            request_log,
             json!({
                 "event": "executeRequest",
                 "requestId": 1,
@@ -2133,8 +2159,16 @@ mod tests {
                 "command": command,
             })
         );
+        let mut response_log = serde_json::from_str::<serde_json::Value>(&lines[1]).unwrap();
+        let response_timestamp = response_log
+            .as_object_mut()
+            .unwrap()
+            .remove("timestamp")
+            .and_then(|value| value.as_u64())
+            .expect("response log should include a millisecond timestamp");
+        assert!(response_timestamp > 0);
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&lines[1]).unwrap(),
+            response_log,
             json!({
                 "event": "executeResponse",
                 "requestId": 1,
@@ -2148,6 +2182,17 @@ mod tests {
                 "grpcCode": null,
                 "error": null,
             })
+        );
+    }
+
+    #[test]
+    fn format_log_line_prefixes_epoch_milliseconds() {
+        assert_eq!(
+            super::format_log_line(
+                1_704_614_400_000,
+                "listening on 127.0.0.1:7777 for /workspace"
+            ),
+            "1704614400000 control-plane-exec-api: listening on 127.0.0.1:7777 for /workspace"
         );
     }
 
