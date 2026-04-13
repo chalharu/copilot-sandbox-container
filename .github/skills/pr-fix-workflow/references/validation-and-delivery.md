@@ -65,13 +65,17 @@ That script:
 
 ## CI surfaces
 
-The authoritative hosted validation definition lives in `.github/workflows/control-plane-ci.yml`.
+The authoritative hosted validation definition lives in
+`.github/workflows/control-plane-ci.yml`.
 
 - `pull_request` relies on the external `linter-service`
-- it builds integration images for both x64 and aarch64
+- if the change only touches trigger-filtered Markdown paths, build jobs stay
+  skipped
+- otherwise it builds integration images for both x64 and aarch64
 - it then runs dual-arch `Integration Smoke`
 - it also runs x64-only `Integration Regressions`, `Integration Kind Session`,
   `Integration Kind Jobs Core`, and `Integration Kind Jobs Transfer`
-- `push` to `main` additionally gates `Publish Architecture Images`
+- `push` to `main` uses the same trigger-level filtering
+- for build-relevant changes, it additionally gates `Publish Architecture Images`
 - it also gates `publish-manifests` and `cleanup-packages`
 - those jobs depend on the integration fan-out results

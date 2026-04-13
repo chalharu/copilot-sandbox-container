@@ -40,6 +40,16 @@ assert_file_contains() {
   }
 }
 
+assert_file_not_contains() {
+  local path="$1"
+  local unexpected="$2"
+
+  if grep -Fq -- "${unexpected}" "${path}"; then
+    printf 'Did not expect %s to contain: %s\n' "${path}" "${unexpected}" >&2
+    exit 1
+  fi
+}
+
 assert_block_contains() {
   local block="$1"
   local expected="$2"
@@ -138,6 +148,17 @@ fi
   exit 1
 }
 
+assert_file_contains "${workflow_path}" '  pull_request:'
+assert_file_contains "${workflow_path}" '    paths:'
+assert_file_contains "${workflow_path}" "      - '**'"
+assert_file_contains "${workflow_path}" "      - '!**/*.md'"
+assert_file_contains "${workflow_path}" "      - 'containers/control-plane/skills/**/SKILL.md'"
+assert_file_contains "${workflow_path}" '  push:'
+assert_file_not_contains "${workflow_path}" './scripts/ci-changes-require-build.sh'
+if grep -Fqx '  changes:' "${workflow_path}"; then
+  printf 'Did not expect changes job in %s\n' "${workflow_path}" >&2
+  exit 1
+fi
 # shellcheck disable=SC2016
 assert_block_contains "${integration_block}" 'path: /tmp/control-plane-buildx-cache-${{ matrix.image_arch }}' 'integration job block'
 # shellcheck disable=SC2016
