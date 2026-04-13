@@ -29,4 +29,4 @@ protoc-bin-vendored = "=3.2.0"
 tonic-build = "=0.12.3"
 
 [dev-dependencies]
-tempfile = "=3.23.0"
+tempfile = "=3.27.0"
