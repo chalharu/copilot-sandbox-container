@@ -412,6 +412,7 @@ assert_file_not_contains "${workflow_path}" 'GHCR_SCCACHE_IMAGE'
 assert_file_not_contains "${github_hooks_test_path}" "-c 'cargo test'"
 assert_file_contains "${session_exec_test_path}" 'cargo chef prepare'
 assert_file_contains "${session_exec_test_path}" 'cargo chef cook'
+assert_file_contains "${session_exec_test_path}" 'ln -sfn /var/tmp/control-plane/cargo-target /tmp/control-plane-workspace/target'
 assert_file_present "${repo_root}/containers/control-plane/Cargo.toml"
 assert_file_present "${repo_root}/containers/control-plane/Cargo.lock"
 assert_file_contains "${repo_root}/containers/control-plane/Cargo.toml" '[workspace]'

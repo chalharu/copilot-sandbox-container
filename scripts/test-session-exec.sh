@@ -46,9 +46,11 @@ printf '%s\n' 'test-session-exec.sh: verifying exec-api integration coverage' >&
     && cp -R /workspace/containers/control-plane/exec-api /tmp/control-plane-workspace/exec-api \
     && cp -R /workspace/containers/control-plane/exec-policy-preload /tmp/control-plane-workspace/exec-policy-preload \
     && cp -R /workspace/containers/control-plane/runtime-tools /tmp/control-plane-workspace/runtime-tools \
+    && ln -sfn /var/tmp/control-plane/cargo-target /tmp/control-plane-workspace/target \
     && cd /tmp/control-plane-workspace \
     && cargo chef prepare --recipe-path /var/tmp/control-plane/cargo-target/exec-api-recipe.json \
     && cargo chef cook --locked --recipe-path /var/tmp/control-plane/cargo-target/exec-api-recipe.json -p control-plane-exec-api \
     && cargo test --locked -p control-plane-exec-api \
     && test -d /var/tmp/control-plane/cargo-target/debug \
-    && ! test -d /tmp/control-plane-workspace/target"
+    && test -L /tmp/control-plane-workspace/target \
+    && test \"\$(readlink /tmp/control-plane-workspace/target)\" = /var/tmp/control-plane/cargo-target"
