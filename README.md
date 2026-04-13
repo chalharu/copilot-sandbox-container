@@ -52,8 +52,9 @@ sample manifest では Copilot CLI の `bash` tool を session-scoped Execution 
   - `deploy/kubernetes/control-plane.example/base/pvc-control-plane-workspace.yaml`
     の storage class / size
   - `deploy/kubernetes/control-plane.example/common/configmap-control-plane-env.yaml`
-    の `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS` と
-    `CONTROL_PLANE_BIOME_HOOK_IMAGE`
+    の `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS`
+  - `deploy/kubernetes/control-plane.example/common/configmap-control-plane-env.yaml`
+    の `CONTROL_PLANE_BIOME_HOOK_IMAGE`
 - **既定のまま試せる値**
   - Control Plane / bootstrap / job transfer image は
     `ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest`

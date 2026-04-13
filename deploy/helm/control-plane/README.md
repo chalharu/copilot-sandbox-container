@@ -115,10 +115,10 @@ instances:
 ```
 
 - `CONTROL_PLANE_GIT_USER_NAME` / `CONTROL_PLANE_GIT_USER_EMAIL` は startup 時に
-  managed global Git config へ書かれます。
-- `TZ` は login shell と job tooling に渡されます。
+  managed global Git config へ書かれる。
+- `TZ` は login shell と job tooling に渡される。
 - `CONTROL_PLANE_BIOME_HOOK_IMAGE` は JS/TS 向け bundled Biome hook を
-  Kubernetes Job の official Biome image へ逃がします。
+  Kubernetes Job の official Biome image へ逃がす。
 
 - `CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT` は各 Execution Pod の chroot 内で
   `/bin/sh -lc` として実行される。
