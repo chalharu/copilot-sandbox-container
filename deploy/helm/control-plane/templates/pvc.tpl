@@ -1,10 +1,10 @@
 {{- $seenSessionClaims := dict -}}
 {{- range $instance := .Values.instances }}
 {{- $ctx := dict "root" $ "instance" $instance -}}
-{{- $workspace := mergeOverwrite (dict) $.Values.global.workspace (default dict $instance.workspace) -}}
-{{- $session := mergeOverwrite (dict) $.Values.global.session (default dict $instance.session) -}}
+{{- $workspace := mergeOverwrite (dict) (deepCopy (default dict $.Values.global.workspace)) (deepCopy (default dict $instance.workspace)) -}}
+{{- $session := mergeOverwrite (dict) (deepCopy (default dict $.Values.global.session)) (deepCopy (default dict $instance.session)) -}}
 {{- if not $workspace.existingClaim }}
-{{- $workspaceAnnotations := mergeOverwrite (dict) (default dict $workspace.annotations) -}}
+{{- $workspaceAnnotations := mergeOverwrite (dict) (deepCopy (default dict $workspace.annotations)) -}}
 {{- if $workspace.retainOnDelete }}
 {{- $_ := set $workspaceAnnotations "helm.sh/resource-policy" "keep" -}}
 {{- end }}
@@ -33,7 +33,7 @@ spec:
 {{- $sessionKey := printf "%s/%s" (include "control-plane.instanceMainNamespace" $ctx) $sessionClaimName -}}
 {{- if and (not $session.existingClaim) (not (hasKey $seenSessionClaims $sessionKey)) }}
 {{- $_ := set $seenSessionClaims $sessionKey true -}}
-{{- $sessionAnnotations := mergeOverwrite (dict) (default dict $session.annotations) -}}
+{{- $sessionAnnotations := mergeOverwrite (dict) (deepCopy (default dict $session.annotations)) -}}
 {{- if $session.retainOnDelete }}
 {{- $_ := set $sessionAnnotations "helm.sh/resource-policy" "keep" -}}
 {{- end }}

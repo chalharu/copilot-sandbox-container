@@ -4,13 +4,13 @@
 {{- $ctx := dict "root" $ "instance" $instance -}}
 {{- $mainNamespace := include "control-plane.instanceMainNamespace" $ctx -}}
 {{- $jobNamespace := include "control-plane.instanceJobNamespace" $ctx -}}
-{{- $image := mergeOverwrite (dict) $.Values.global.image (default dict $instance.image) -}}
-{{- $service := mergeOverwrite (dict) $.Values.global.service (default dict $instance.service) -}}
-{{- $workspace := mergeOverwrite (dict) $.Values.global.workspace (default dict $instance.workspace) -}}
-{{- $session := mergeOverwrite (dict) $.Values.global.session (default dict $instance.session) -}}
+{{- $image := mergeOverwrite (dict) (deepCopy (default dict $.Values.global.image)) (deepCopy (default dict $instance.image)) -}}
+{{- $service := mergeOverwrite (dict) (deepCopy (default dict $.Values.global.service)) (deepCopy (default dict $instance.service)) -}}
+{{- $workspace := mergeOverwrite (dict) (deepCopy (default dict $.Values.global.workspace)) (deepCopy (default dict $instance.workspace)) -}}
+{{- $session := mergeOverwrite (dict) (deepCopy (default dict $.Values.global.session)) (deepCopy (default dict $instance.session)) -}}
 {{- $globalAuth := default dict $.Values.global.auth -}}
 {{- $instanceAuth := default dict $instance.auth -}}
-{{- $auth := mergeOverwrite (dict) $globalAuth $instanceAuth -}}
+{{- $auth := mergeOverwrite (dict) (deepCopy $globalAuth) (deepCopy $instanceAuth) -}}
 {{- if not (hasKey $seenGlobalEnvNamespaces $mainNamespace) }}
 {{- $_ := set $seenGlobalEnvNamespaces $mainNamespace true -}}
 apiVersion: v1
@@ -25,7 +25,7 @@ data:
 {{- end }}
 ---
 {{- end }}
-{{- $instanceEnv := mergeOverwrite (dict) $.Values.global.instanceEnv (default dict $instance.instanceEnv) (default dict $instance.controlPlaneEnv) -}}
+{{- $instanceEnv := mergeOverwrite (dict) (deepCopy (default dict $.Values.global.instanceEnv)) (deepCopy (default dict $instance.instanceEnv)) (deepCopy (default dict $instance.controlPlaneEnv)) -}}
 {{- $usesManagedInstanceSecret := and (not $instanceAuth.existingSecretName) (gt (len $instanceAuth) 0) -}}
 {{- $usesManagedSharedSecret := and (eq (len $instanceAuth) 0) (not $globalAuth.existingSecretName) -}}
 {{- $globalControlPlaneEnv := default dict $.Values.global.controlPlaneEnv -}}

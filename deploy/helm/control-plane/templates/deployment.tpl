@@ -1,13 +1,13 @@
 {{- range $instance := .Values.instances }}
 {{- $ctx := dict "root" $ "instance" $instance -}}
 {{- $mainNamespace := include "control-plane.instanceMainNamespace" $ctx -}}
-{{- $image := mergeOverwrite (dict) $.Values.global.image (default dict $instance.image) -}}
-{{- $workspace := mergeOverwrite (dict) $.Values.global.workspace (default dict $instance.workspace) -}}
-{{- $session := mergeOverwrite (dict) $.Values.global.session (default dict $instance.session) -}}
+{{- $image := mergeOverwrite (dict) (deepCopy (default dict $.Values.global.image)) (deepCopy (default dict $instance.image)) -}}
+{{- $workspace := mergeOverwrite (dict) (deepCopy (default dict $.Values.global.workspace)) (deepCopy (default dict $instance.workspace)) -}}
+{{- $session := mergeOverwrite (dict) (deepCopy (default dict $.Values.global.session)) (deepCopy (default dict $instance.session)) -}}
 {{- $sessionStateSubPath := include "control-plane.sessionStateSubPath" $ctx -}}
-{{- $resources := mergeOverwrite (dict) $.Values.global.resources (default dict $instance.resources) -}}
-{{- $deploymentAnnotations := mergeOverwrite (dict) $.Values.global.deploymentAnnotations (default dict $instance.deploymentAnnotations) -}}
-{{- $podAnnotations := mergeOverwrite (dict) $.Values.global.podAnnotations (default dict $instance.podAnnotations) -}}
+{{- $resources := mergeOverwrite (dict) (deepCopy (default dict $.Values.global.resources)) (deepCopy (default dict $instance.resources)) -}}
+{{- $deploymentAnnotations := mergeOverwrite (dict) (deepCopy (default dict $.Values.global.deploymentAnnotations)) (deepCopy (default dict $instance.deploymentAnnotations)) -}}
+{{- $podAnnotations := mergeOverwrite (dict) (deepCopy (default dict $.Values.global.podAnnotations)) (deepCopy (default dict $instance.podAnnotations)) -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

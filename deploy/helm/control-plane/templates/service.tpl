@@ -1,6 +1,6 @@
 {{- range $instance := .Values.instances }}
 {{- $ctx := dict "root" $ "instance" $instance -}}
-{{- $service := mergeOverwrite (dict) $.Values.global.service (default dict $instance.service) -}}
+{{- $service := mergeOverwrite (dict) (deepCopy (default dict $.Values.global.service)) (deepCopy (default dict $instance.service)) -}}
 apiVersion: v1
 kind: Service
 metadata:
