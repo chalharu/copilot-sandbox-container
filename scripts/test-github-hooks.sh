@@ -26,7 +26,10 @@ command -v "${container_bin}" >/dev/null 2>&1 || {
   exit 1
 }
 
-printf '%s\n' 'test-github-hooks.sh: verifying Rust-backed hook helpers' >&2
+# The control-plane image build already runs runtime-tools cargo tests in the
+# runtime-tools-builder stage. Build only the local binary that the git hook
+# node tests expect, then keep this regression focused on hook wiring.
+printf '%s\n' 'test-github-hooks.sh: building runtime-tool binary for git hook tests' >&2
 "${container_bin}" run --rm \
   "${control_plane_run_user[@]}" \
   -i \
@@ -34,7 +37,7 @@ printf '%s\n' 'test-github-hooks.sh: verifying Rust-backed hook helpers' >&2
   -w /workspace/containers/control-plane/runtime-tools \
   --entrypoint sh \
   "${rust_test_image}" \
-  -c 'cargo test'
+  -c 'cargo build --locked --bin control-plane-runtime-tool'
 
 printf '%s\n' 'test-github-hooks.sh: verifying remaining git hook tests' >&2
 node --test \
