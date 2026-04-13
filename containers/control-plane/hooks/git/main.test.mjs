@@ -24,15 +24,16 @@ const sourceBundledPostToolUseDir = path.join(
 	"hooks",
 	"postToolUse",
 );
-const runtimeToolBin = path.join(
-	repoRoot,
-	"containers",
-	"control-plane",
-	"runtime-tools",
-	"target",
-	"debug",
-	"control-plane-runtime-tool",
-);
+const runtimeToolBin =
+	process.env.CONTROL_PLANE_RUNTIME_TOOL_BIN ||
+	path.join(
+		repoRoot,
+		"containers",
+		"control-plane",
+		"target",
+		"debug",
+		"control-plane-runtime-tool",
+	);
 
 function run(command, args, options = {}) {
 	const result = spawnSync(command, args, {
