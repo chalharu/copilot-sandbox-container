@@ -6,7 +6,8 @@ FROM ${RUST_BASE_IMAGE} AS cargo-chef
 
 ARG CARGO_CHEF_VERSION
 RUN cargo_home="${CARGO_HOME:-${HOME}/.cargo}" \
-    && mkdir -p "${cargo_home}" /var/tmp/control-plane/cargo-target \
+    && mkdir -p "${cargo_home}" /var/tmp/control-plane/cargo-target /build/control-plane \
+    && ln -sfn /var/tmp/control-plane/cargo-target /build/control-plane/target \
     && printf '[build]\ntarget-dir = "/var/tmp/control-plane/cargo-target"\n' > "${cargo_home}/config.toml" \
     && cargo install cargo-chef --locked --version "${CARGO_CHEF_VERSION}"
 

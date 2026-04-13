@@ -418,6 +418,7 @@ assert_file_contains "${repo_root}/containers/control-plane/Cargo.toml" '[worksp
 assert_path_absent "${repo_root}/containers/control-plane/exec-api/Cargo.lock"
 assert_path_absent "${repo_root}/containers/control-plane/exec-policy-preload/Cargo.lock"
 assert_path_absent "${repo_root}/containers/control-plane/runtime-tools/Cargo.lock"
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" 'ln -sfn /var/tmp/control-plane/cargo-target /build/control-plane/target'
 assert_file_contains "${git_skills_manifest_installer_path}" '/usr/local/bin/control-plane-runtime-tool'
 assert_file_not_contains "${git_skills_manifest_installer_path}" 'cargo build --release'
 assert_file_contains "${workflow_path}" 'path: /tmp/control-plane-rust-regression-cache'
