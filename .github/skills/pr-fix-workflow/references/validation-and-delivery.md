@@ -65,10 +65,12 @@ That script:
 
 ## CI surfaces
 
-The authoritative hosted validation definition lives in
-`.github/workflows/control-plane-ci.yml`.
+The hosted validation definitions live in `.github/workflows/control-plane-ci.yml`
+and `.github/linter-service.yaml`.
 
-- `pull_request` relies on the external `linter-service`
+- `.github/linter-service.yaml` configures hosted `textlint`
+- `pull_request` in `.github/workflows/control-plane-ci.yml` relies on the
+  external `linter-service`
 - if the change only touches trigger-filtered Markdown paths, build jobs stay
   skipped
 - otherwise it builds integration images for both x64 and aarch64
