@@ -1,0 +1,13 @@
+global:
+  resources:
+    requests:
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+instances:
+  - name: copilot-sandbox-container
+  - name: copilot-sandbox-container-2
+    resources:
+      limits:
+        memory: 8Gi
+  - name: copilot-sandbox-container-3

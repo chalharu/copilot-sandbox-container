@@ -4,7 +4,7 @@
 {{- $mainNamespace := include "control-plane.instanceMainNamespace" $ctx -}}
 {{- $globalAuth := default dict $.Values.global.auth -}}
 {{- $instanceAuth := default dict $instance.auth -}}
-{{- $auth := mergeOverwrite (dict) $globalAuth $instanceAuth -}}
+{{- $auth := mergeOverwrite (dict) (deepCopy $globalAuth) (deepCopy $instanceAuth) -}}
 {{- if and (not $instanceAuth.existingSecretName) (gt (len $instanceAuth) 0) }}
 apiVersion: v1
 kind: Secret

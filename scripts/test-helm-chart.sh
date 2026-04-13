@@ -5,6 +5,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 chart_path="./deploy/helm/control-plane"
 fixture_values="./deploy/helm/control-plane/ci/multi-instance-values.yaml"
+resource_isolation_values="./deploy/helm/control-plane/ci/per-instance-resource-isolation-values.yaml"
 manifest_path="$(mktemp)"
 
 cleanup() {
@@ -40,7 +41,8 @@ run_helm() {
 }
 
 render_chart() {
-  run_helm template test-release "${chart_path}" -f "${fixture_values}" >"${manifest_path}"
+  local values_path="${1:-${fixture_values}}"
+  run_helm template test-release "${chart_path}" -f "${values_path}" >"${manifest_path}"
 }
 
 resource_block() {
@@ -217,5 +219,14 @@ assert_resource_contains Deployment control-plane-repo-two copilot-shared 'subPa
 
 assert_resource_contains RoleBinding control-plane-jobs-copilot-shared copilot-shared-jobs 'namespace: copilot-shared'
 assert_resource_contains RoleBinding control-plane-exec-workloads-copilot-shared copilot-shared-jobs 'namespace: copilot-shared'
+
+printf '%s\n' 'helm-chart-test: verifying per-instance resource isolation' >&2
+render_chart "${resource_isolation_values}"
+
+assert_kind_count Deployment 3
+assert_resource_contains Deployment control-plane-copilot-sandbox-container copilot-sandbox 'memory: 2Gi'
+assert_resource_contains Deployment control-plane-copilot-sandbox-container-2 copilot-sandbox 'memory: 8Gi'
+assert_resource_contains Deployment control-plane-copilot-sandbox-container-3 copilot-sandbox 'memory: 2Gi'
+assert_resource_not_contains Deployment control-plane-copilot-sandbox-container-3 copilot-sandbox 'memory: 8Gi'
 
 printf '%s\n' 'helm-chart-test: ok' >&2

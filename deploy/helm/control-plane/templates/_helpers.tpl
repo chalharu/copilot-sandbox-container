@@ -42,7 +42,7 @@ app.kubernetes.io/name: control-plane
 {{- $instance := .instance -}}
 {{- $globalService := default dict $root.Values.global.service -}}
 {{- $instanceService := default dict $instance.service -}}
-{{- $service := mergeOverwrite (dict) $globalService $instanceService -}}
+{{- $service := mergeOverwrite (dict) (deepCopy $globalService) (deepCopy $instanceService) -}}
 {{- include "control-plane.explicitOrQualifiedName" (dict "base" $service.name "explicit" $instanceService.name "instance" $instance) -}}
 {{- end -}}
 
@@ -51,7 +51,7 @@ app.kubernetes.io/name: control-plane
 {{- $instance := .instance -}}
 {{- $globalWorkspace := default dict $root.Values.global.workspace -}}
 {{- $instanceWorkspace := default dict $instance.workspace -}}
-{{- $workspace := mergeOverwrite (dict) $globalWorkspace $instanceWorkspace -}}
+{{- $workspace := mergeOverwrite (dict) (deepCopy $globalWorkspace) (deepCopy $instanceWorkspace) -}}
 {{- $existingClaim := $workspace.existingClaim -}}
 {{- if $existingClaim -}}
 {{- $existingClaim | trunc 63 | trimSuffix "-" -}}
