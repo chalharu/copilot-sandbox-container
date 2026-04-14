@@ -12,7 +12,10 @@ runtime dir は `/var/tmp/control-plane/rootful-overlay` へ寄せます。graph
 背後は disposable な `emptyDir` cache です。runtime dir も disk-backed
 `emptyDir` を想定します。Pod 再作成時に再生成できる local image store を
 persistent volume から切り離しています。
-fast-exec Execution Pod の `/tmp` と `/var/tmp` も同様に ephemeral です。
+fast-exec Execution Pod の `/tmp` と `/var/tmp` も同様に generic ephemeral volume
+で切り離します。storage class と合計サイズは
+`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` /
+`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で制御します。
 Rust の `cargo-target` は `/root/.cargo/config.toml` 経由で
 `/var/tmp/control-plane/cargo-target` へ寄せます。
 

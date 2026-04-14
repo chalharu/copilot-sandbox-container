@@ -19,7 +19,7 @@
 | 目的 | 文書 |
 | --- | --- |
 | まず README から全体像をつかみたい | `README.md` |
-| runtime.env、永続 state、hook / Git policy、exec pod の kubectl 権限や cargo/tmp path を引きたい | `docs/reference/control-plane-runtime.md` |
+| runtime.env、永続 state、hook / Git policy、exec pod の kubectl 権限や cargo/tmp/generic ephemeral volume path を引きたい | `docs/reference/control-plane-runtime.md` |
 | なぜ session-scoped Execution Pod と Kubernetes Job を併用するのか知りたい | `docs/explanation/knowledge.md` |
 | 現行構成に至る経緯を追いたい | `docs/explanation/history.md` |
 | 複数 repo / 複数 instance の配置方法を知りたい | `deploy/helm/control-plane/README.md` |

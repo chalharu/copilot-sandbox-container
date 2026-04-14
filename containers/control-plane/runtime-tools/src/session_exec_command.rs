@@ -61,6 +61,8 @@ struct SessionExecConfig {
     environment_storage_class: Option<String>,
     environment_size: String,
     environment_mount_path: String,
+    ephemeral_storage_class: Option<String>,
+    ephemeral_size: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,6 +119,10 @@ const CHROOT_EXEC_POLICY_RULES_PATH: &str =
     "/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml";
 const CHROOT_RUNTIME_TOOL_PATH: &str = "/usr/local/bin/control-plane-runtime-tool";
 const CHROOT_POST_TOOL_USE_HOOKS_PATH: &str = "/usr/local/share/control-plane/hooks/postToolUse";
+const EXEC_EPHEMERAL_VOLUME_NAME: &str = "ephemeral-storage";
+const EXEC_EPHEMERAL_INIT_MOUNT_PATH: &str = "/control-plane/ephemeral-storage";
+const EXEC_EPHEMERAL_TMP_SUBPATH: &str = "tmp";
+const EXEC_EPHEMERAL_VAR_TMP_SUBPATH: &str = "var/tmp";
 
 pub fn run(args: &[String]) -> ToolResult<i32> {
     if args.len() == 1 && matches!(args[0].as_str(), "--help" | "-h") {
@@ -327,6 +333,9 @@ fn load_config() -> ToolResult<SessionExecConfig> {
         "/environment",
         "environment mount path",
     )?;
+    let ephemeral_storage_class =
+        optional_env("CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS");
+    let ephemeral_size = env_or_default("CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE", "10Gi");
 
     Ok(SessionExecConfig {
         state_file,
@@ -373,6 +382,8 @@ fn load_config() -> ToolResult<SessionExecConfig> {
         environment_storage_class,
         environment_size,
         environment_mount_path,
+        ephemeral_storage_class,
+        ephemeral_size,
     })
 }
 
@@ -983,7 +994,11 @@ fn build_environment_pvc(
     .map_err(|error| format!("failed to build environment PVC manifest: {error}"))
 }
 
-fn build_bootstrap_assets_init_command(environment_root: &str, runtime_bin_dir: &str) -> String {
+fn build_bootstrap_assets_init_command(
+    environment_root: &str,
+    runtime_bin_dir: &str,
+    ephemeral_storage_dir: &str,
+) -> String {
     let chroot_root = format!("{environment_root}/root");
     let policy_library_source = CHROOT_EXEC_POLICY_LIBRARY_PATH;
     let policy_rules_source = CHROOT_EXEC_POLICY_RULES_PATH;
@@ -997,6 +1012,7 @@ fn build_bootstrap_assets_init_command(environment_root: &str, runtime_bin_dir: 
             "set -eu\n",
             "environment_root={environment_root:?}\n",
             "runtime_bin_dir={runtime_bin_dir:?}\n",
+            "ephemeral_storage_dir={ephemeral_storage_dir:?}\n",
             "policy_library_path={policy_library_path:?}\n",
             "policy_rules_path={policy_rules_path:?}\n",
             "chroot_kubectl_path={chroot_kubectl_path:?}\n",
@@ -1007,6 +1023,8 @@ fn build_bootstrap_assets_init_command(environment_root: &str, runtime_bin_dir: 
             "chroot_kubectl_dir=\"$(dirname \"$chroot_kubectl_path\")\"\n",
             "chroot_runtime_tool_dir=\"$(dirname \"$chroot_runtime_tool_path\")\"\n",
             "install -d -m 0755 \"$environment_root/root\" \"$environment_root/hooks/git\" \"$runtime_bin_dir\" \"$policy_library_dir\" \"$policy_rules_dir\" \"$chroot_kubectl_dir\" \"$chroot_runtime_tool_dir\" \"$post_tool_use_dir\"\n",
+            "install -d -m 0755 \"$ephemeral_storage_dir/var\"\n",
+            "install -d -m 1777 \"$ephemeral_storage_dir/tmp\" \"$ephemeral_storage_dir/var/tmp\"\n",
             "install -m 0755 /usr/local/bin/control-plane-exec-api \"$runtime_bin_dir/control-plane-exec-api\"\n",
             "install -m 0755 /usr/local/bin/kubectl \"$chroot_kubectl_path\"\n",
             "install -m 0755 /usr/local/bin/control-plane-runtime-tool \"$chroot_runtime_tool_path\"\n",
@@ -1028,6 +1046,7 @@ fn build_bootstrap_assets_init_command(environment_root: &str, runtime_bin_dir: 
         ),
         environment_root = environment_root,
         runtime_bin_dir = runtime_bin_dir,
+        ephemeral_storage_dir = ephemeral_storage_dir,
         policy_library_source = policy_library_source,
         policy_rules_source = policy_rules_source,
         policy_library_path = policy_library_path,
@@ -1037,6 +1056,28 @@ fn build_bootstrap_assets_init_command(environment_root: &str, runtime_bin_dir: 
         post_tool_use_dir = post_tool_use_dir,
         runtime_tool_path = CHROOT_RUNTIME_TOOL_PATH,
     )
+}
+
+fn build_exec_ephemeral_volume(config: &SessionExecConfig) -> Value {
+    let mut claim_spec = json!({
+        "accessModes": ["ReadWriteOnce"],
+        "resources": {
+            "requests": {
+                "storage": config.ephemeral_size
+            }
+        }
+    });
+    if let Some(storage_class) = &config.ephemeral_storage_class {
+        claim_spec["storageClassName"] = json!(storage_class);
+    }
+    json!({
+        "name": EXEC_EPHEMERAL_VOLUME_NAME,
+        "ephemeral": {
+            "volumeClaimTemplate": {
+                "spec": claim_spec
+            }
+        }
+    })
 }
 
 fn startup_probe_failure_threshold(start_timeout: Duration) -> u64 {
@@ -1066,7 +1107,11 @@ fn build_exec_pod(
     let var_tmp_mount = nested_mount_path(&chroot_root, "/var/tmp")?;
     let gh_mount = format!("{remote_home_mount}/.config/gh");
     let ssh_mount = format!("{remote_home_mount}/.ssh");
-    let init_command = build_bootstrap_assets_init_command(environment_root, runtime_bin_dir);
+    let init_command = build_bootstrap_assets_init_command(
+        environment_root,
+        runtime_bin_dir,
+        EXEC_EPHEMERAL_INIT_MOUNT_PATH,
+    );
 
     let mut volume_mounts = vec![
         json!({
@@ -1084,12 +1129,14 @@ fn build_exec_pod(
             "subPath": config.workspace_subpath,
         }),
         json!({
-            "name": "tmp",
+            "name": EXEC_EPHEMERAL_VOLUME_NAME,
             "mountPath": tmp_mount,
+            "subPath": EXEC_EPHEMERAL_TMP_SUBPATH,
         }),
         json!({
-            "name": "var-tmp",
+            "name": EXEC_EPHEMERAL_VOLUME_NAME,
             "mountPath": var_tmp_mount,
+            "subPath": EXEC_EPHEMERAL_VAR_TMP_SUBPATH,
         }),
     ];
     let mut volumes = vec![
@@ -1103,14 +1150,7 @@ fn build_exec_pod(
             "name": "runtime-bin",
             "emptyDir": {}
         }),
-        json!({
-            "name": "tmp",
-            "emptyDir": {}
-        }),
-        json!({
-            "name": "var-tmp",
-            "emptyDir": {}
-        }),
+        build_exec_ephemeral_volume(config),
         json!({
             "name": "workspace",
             "persistentVolumeClaim": {
@@ -1193,6 +1233,9 @@ fn build_exec_pod(
                 }, {
                     "name": "runtime-bin",
                     "mountPath": runtime_bin_dir,
+                }, {
+                    "name": EXEC_EPHEMERAL_VOLUME_NAME,
+                    "mountPath": EXEC_EPHEMERAL_INIT_MOUNT_PATH,
                 }]
             }],
             "containers": [{
@@ -1426,9 +1469,11 @@ impl Drop for StateLock {
 #[cfg(test)]
 mod tests {
     use super::{
-        PreparedPod, SessionEntry, SessionExecConfig, build_bootstrap_assets_init_command,
-        build_environment_pvc, build_exec_pod, entry_from_prepared, environment_pvc_name,
-        pod_matches_session_entry, pod_name_for_session, pod_ready,
+        EXEC_EPHEMERAL_INIT_MOUNT_PATH, EXEC_EPHEMERAL_TMP_SUBPATH, EXEC_EPHEMERAL_VAR_TMP_SUBPATH,
+        EXEC_EPHEMERAL_VOLUME_NAME, PreparedPod, SessionEntry, SessionExecConfig,
+        build_bootstrap_assets_init_command, build_environment_pvc, build_exec_pod,
+        entry_from_prepared, environment_pvc_name, pod_matches_session_entry, pod_name_for_session,
+        pod_ready,
     };
     use k8s_openapi::api::core::v1::Pod;
 
@@ -1475,6 +1520,8 @@ mod tests {
             environment_storage_class: Some("standard".to_string()),
             environment_size: "10Gi".to_string(),
             environment_mount_path: "/environment".to_string(),
+            ephemeral_storage_class: Some("standard".to_string()),
+            ephemeral_size: "10Gi".to_string(),
         }
     }
 
@@ -1588,6 +1635,7 @@ mod tests {
             "node-workspace-kind-control-plane",
         )
         .unwrap();
+        let pod_value = serde_json::to_value(&pod).unwrap();
         let spec = pod.spec.unwrap();
         assert_eq!(
             spec.service_account_name.as_deref(),
@@ -1648,11 +1696,17 @@ mod tests {
         assert!(
             mounts
                 .iter()
-                .any(|mount| mount.name == "tmp" && mount.mount_path == "/environment/root/tmp")
+                .any(|mount| mount.name == EXEC_EPHEMERAL_VOLUME_NAME
+                    && mount.mount_path == "/environment/root/tmp"
+                    && mount.sub_path.as_deref() == Some(EXEC_EPHEMERAL_TMP_SUBPATH))
         );
-        assert!(mounts.iter().any(
-            |mount| mount.name == "var-tmp" && mount.mount_path == "/environment/root/var/tmp"
-        ));
+        assert!(
+            mounts
+                .iter()
+                .any(|mount| mount.name == EXEC_EPHEMERAL_VOLUME_NAME
+                    && mount.mount_path == "/environment/root/var/tmp"
+                    && mount.sub_path.as_deref() == Some(EXEC_EPHEMERAL_VAR_TMP_SUBPATH))
+        );
         assert!(mounts.iter().any(|mount| {
             mount.name == "runtime-bin"
                 && mount.mount_path == "/control-plane/bin"
@@ -1726,6 +1780,15 @@ mod tests {
                     |mount| mount.name == "runtime-bin" && mount.mount_path == "/control-plane/bin"
                 )
         );
+        assert!(
+            init_container
+                .volume_mounts
+                .as_ref()
+                .unwrap()
+                .iter()
+                .any(|mount| mount.name == EXEC_EPHEMERAL_VOLUME_NAME
+                    && mount.mount_path == EXEC_EPHEMERAL_INIT_MOUNT_PATH)
+        );
         let env = execution.env.as_ref().unwrap();
         assert!(env.iter().any(
             |value| value.name == "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT"
@@ -1766,21 +1829,39 @@ mod tests {
                 .any(|volume| volume.name == "runtime-bin" && volume.empty_dir.is_some())
         );
         assert!(
-            volumes
+            pod_value["spec"]["volumes"]
+                .as_array()
+                .unwrap()
                 .iter()
-                .any(|volume| volume.name == "tmp" && volume.empty_dir.is_some())
+                .any(|volume| {
+                    volume["name"].as_str() == Some(EXEC_EPHEMERAL_VOLUME_NAME)
+                        && volume["ephemeral"]["volumeClaimTemplate"]["spec"]["storageClassName"]
+                            .as_str()
+                            == Some("standard")
+                        && volume["ephemeral"]["volumeClaimTemplate"]["spec"]["resources"]
+                            ["requests"]["storage"]
+                            .as_str()
+                            == Some("10Gi")
+                })
         );
         assert!(
-            volumes
+            !pod_value["spec"]["volumes"]
+                .as_array()
+                .unwrap()
                 .iter()
-                .any(|volume| volume.name == "var-tmp" && volume.empty_dir.is_some())
+                .any(|volume| volume["name"].as_str() == Some("tmp")
+                    || volume["name"].as_str() == Some("var-tmp"))
         );
         assert!(!volumes.iter().any(|volume| volume.name == "bootstrap"));
     }
 
     #[test]
     fn bootstrap_assets_refresh_exec_policy_files() {
-        let command = build_bootstrap_assets_init_command("/environment", "/control-plane/bin");
+        let command = build_bootstrap_assets_init_command(
+            "/environment",
+            "/control-plane/bin",
+            EXEC_EPHEMERAL_INIT_MOUNT_PATH,
+        );
         assert!(
             command.contains(
                 "install -m 0755 /usr/local/bin/control-plane-exec-api \"$runtime_bin_dir/control-plane-exec-api\""
@@ -1795,6 +1876,10 @@ mod tests {
         assert!(!command.contains("/environment/control-plane-exec-api"));
         assert!(command.contains("rm -rf \"$environment_root/hooks/git\""));
         assert!(command.contains("rm -rf \"$post_tool_use_dir\""));
+        assert!(command.contains("install -d -m 0755 \"$ephemeral_storage_dir/var\""));
+        assert!(command.contains(
+            "install -d -m 1777 \"$ephemeral_storage_dir/tmp\" \"$ephemeral_storage_dir/var/tmp\""
+        ));
         assert!(command.contains(
             "cp -R /usr/local/share/control-plane/hooks/postToolUse/. \"$post_tool_use_dir/\""
         ));

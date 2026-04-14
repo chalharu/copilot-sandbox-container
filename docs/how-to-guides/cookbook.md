@@ -151,8 +151,11 @@ ConfigMap / Secret / write-back の具体的な path は
    - `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS` で作る node-local
      cache PVC
 2. `~/.copilot/tmp` と Podman cache、fast-exec Execution Pod の `/tmp` と
-   `/var/tmp` は emptyDir の ephemeral storage に逃がし、再生成可能な cache が
-   session PVC を食い潰さないようにする
+   `/var/tmp` は generic ephemeral volume へ逃がし、再生成可能な cache が
+   session PVC を食い潰さないようにする。
+   `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` と
+   `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で storage class と合計サイズを
+   調整する
 3. shared PVC の spec は bound 後に自由に変更できないため、
    `control-plane.example/install/pvc-control-plane-copilot-session.yaml` は
    初回導入前に storage class / サイズを実クラスタ向けへ確定させる。
