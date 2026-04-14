@@ -22,7 +22,7 @@ tokio = { version = "=1.51.1", features = [
 tokio-stream = { version = "=0.1.18", features = ["net"] }
 tonic = { version = "=0.13.1", features = ["transport"] }
 tonic-health = "=0.13.1"
-prost = "=0.13.5"
+prost = "=0.14.3"
 
 [build-dependencies]
 protoc-bin-vendored = "=3.2.0"
