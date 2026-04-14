@@ -155,7 +155,8 @@ ConfigMap / Secret / write-back の具体的な path は
    session PVC を食い潰さないようにする。
    `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` と
    `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で storage class と合計サイズを
-   調整する
+   調整する。storage class を省略する場合は cluster の default StorageClass を
+   使う
 3. shared PVC の spec は bound 後に自由に変更できないため、
    `control-plane.example/install/pvc-control-plane-copilot-session.yaml` は
    初回導入前に storage class / サイズを実クラスタ向けへ確定させる。

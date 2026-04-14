@@ -38,6 +38,7 @@ kubectl apply -k deploy/kubernetes/control-plane.example
 4. Execution Pod の `/tmp` と `/var/tmp` に使う generic ephemeral volume の設定
    - storage class: `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS`
    - 合計サイズ: `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE`
+   - 未設定時は cluster の default StorageClass を使う
 5. `control-plane-auth` Secret に入れる SSH 公開鍵
 6. namespace や PVC 名を既定値のまま使うかどうか
 7. `latest` のまま試すか、published image を full commit SHA tag へ pin するか
@@ -58,11 +59,12 @@ kubectl apply -k deploy/kubernetes/control-plane.example
 4. `control-plane.example/common/configmap-control-plane-env.yaml`
    - cluster 固有の runtime 設定だけを調整する
    - `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS` を、cluster に
-     `standard` が無い場合は導入前に置き換える
+      `standard` が無い場合は導入前に置き換える
    - `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` を、dynamic
-     provisioning 可能な storage class へ置き換える
+      provisioning 可能な storage class へ置き換える
+   - この変数を省略する場合は、cluster に default StorageClass を必ず用意する
    - `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で `/tmp` と `/var/tmp` の
-     合計上限を調整する
+      合計上限を調整する
    - `CONTROL_PLANE_FAST_EXECUTION_IMAGE` を変える場合は `/bin/sh` と
      `apt-get` または `apk` を持つ image を使う
    - `CONTROL_PLANE_BIOME_HOOK_IMAGE` は bundled Biome hook を別 Job image
@@ -123,6 +125,9 @@ ServiceAccount も含みます。`copilot-sandbox-jobs` 側の
 `control-plane-exec-workloads` Role / RoleBinding も含みます。SSH shell や
 delegated `bash` では `kubectl -n copilot-sandbox-jobs ...` を使えます。
 作業後に削除する前提の Deployment / Service / Job / Pod を扱えます。
+さらに、`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` を省略したときに
+cluster default StorageClass を解決できるよう、`control-plane`
+ServiceAccount には read-only の ClusterRole / ClusterRoleBinding も含みます。
 
 ## default overlay のカスタマイズ
 

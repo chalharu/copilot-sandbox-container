@@ -21,6 +21,19 @@ replacements:
           - metadata.namespace
           - subjects.[name=control-plane].namespace
       - select:
+          kind: ClusterRoleBinding
+          name: control-plane-storage-classes.copilot-sandbox
+        fieldPaths:
+          - subjects.[name=control-plane].namespace
+      - select:
+          kind: ClusterRoleBinding
+          name: control-plane-storage-classes.copilot-sandbox
+        fieldPaths:
+          - metadata.name
+        options:
+          delimiter: .
+          index: 1
+      - select:
           kind: RoleBinding
           name: control-plane-jobs
         fieldPaths:

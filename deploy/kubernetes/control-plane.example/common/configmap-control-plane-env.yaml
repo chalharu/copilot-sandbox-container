@@ -64,7 +64,7 @@ data:
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE: 10Gi
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH: /environment
   # /tmp と /var/tmp を共有する generic ephemeral volume。storage class は動的
-  # provisioning に対応したものを指定する。
+  # provisioning に対応したものを指定する。未設定時は cluster default を使う。
   CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS: standard
   CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE: 10Gi
   CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST: 250m

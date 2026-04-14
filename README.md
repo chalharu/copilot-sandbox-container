@@ -42,6 +42,7 @@ sample manifest では Copilot CLI の `bash` tool を session-scoped Execution 
   storage class
   - 対応する変数は `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS`
   - sample の既定値は `standard`
+  - 未設定時は cluster の default StorageClass を使います
 - SSH 公開鍵
 - `latest` 以外へ pin したい場合だけ published image tag
 
@@ -165,7 +166,9 @@ Job / Pod を control-plane 本体とは分離した権限で扱えます。
 Execution Pod の `/tmp` と `/var/tmp` は pod ごとの generic ephemeral volume です。
 storage class / 合計サイズは
 `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` /
-`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で調整できます。
+`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で調整できます。storage class を
+省略した場合は cluster の default StorageClass を解決し、default が無ければ
+prepare を失敗させます。
 Rust を使う場合も `/root/.cargo/config.toml` を自動生成し、`target-dir` を
 `/var/tmp/control-plane/cargo-target` へ固定します。
 

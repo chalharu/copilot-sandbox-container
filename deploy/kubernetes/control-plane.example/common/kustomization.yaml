@@ -8,6 +8,8 @@ resources:
   - serviceaccount-control-plane-job.yaml
   - role-control-plane-exec-pods.yaml
   - rolebinding-control-plane-exec-pods.yaml
+  - clusterrole-control-plane-storage-classes.yaml
+  - clusterrolebinding-control-plane-storage-classes.yaml
   - role-control-plane-jobs.yaml
   - rolebinding-control-plane-jobs.yaml
   - role-control-plane-exec-workloads.yaml

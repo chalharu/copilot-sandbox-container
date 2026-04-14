@@ -1,6 +1,16 @@
 {{- $seenMainNamespaces := dict -}}
 {{- $seenJobNamespaces := dict -}}
 {{- $seenNamespacePairs := dict -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "control-plane.storageClassesClusterRoleName" (dict "root" $) }}
+  labels:{{ include "control-plane.releaseLabels" (dict "root" $) | nindent 4 }}
+rules:
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["list"]
+---
 {{- range $instance := .Values.instances }}
 {{- $ctx := dict "root" $ "instance" $instance -}}
 {{- $mainNamespace := include "control-plane.instanceMainNamespace" $ctx -}}
@@ -39,6 +49,20 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ include "control-plane.execPodsRoleName" $ctx }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "control-plane.storageClassesClusterRoleBindingName" $ctx }}
+  labels:{{ include "control-plane.sharedLabels" $ctx | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "control-plane.controlPlaneServiceAccountName" $ctx }}
+    namespace: {{ $mainNamespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "control-plane.storageClassesClusterRoleName" $ctx }}
 ---
 {{- end }}
 {{- if not (hasKey $seenJobNamespaces $jobNamespace) }}
