@@ -162,8 +162,8 @@ ServiceAccount で起動します。`copilot-sandbox-jobs` namespace の
 `control-plane-exec-workloads` Role に bind します。Execution Pod 内で
 `kubectl -n copilot-sandbox-jobs ...` を使えば、一時的な Deployment / Service /
 Job / Pod を control-plane 本体とは分離した権限で扱えます。
-Execution Pod の `/tmp` と `/var/tmp` は pod ごとの ephemeral storage です。
-generic ephemeral volume の storage class / 合計サイズは
+Execution Pod の `/tmp` と `/var/tmp` は pod ごとの generic ephemeral volume です。
+storage class / 合計サイズは
 `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` /
 `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で調整できます。
 Rust を使う場合も `/root/.cargo/config.toml` を自動生成し、`target-dir` を
