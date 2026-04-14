@@ -1098,6 +1098,8 @@ test "$(jq -r '.spec.volumes[] | select(.name == "workspace").persistentVolumeCl
 test "$(jq -r '.spec.volumes[] | select(.name == "copilot-session").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "control-plane-copilot-session-pvc"
 test "$(jq -r '.spec.volumes[] | select(.name == "environment").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "${environment_pvc}"
 test "$(jq -r '.spec.volumes[] | select(.name == "runtime-bin").emptyDir | type' /workspace/k8s-fast-exec-pod.json)" = "object"
+test "$(jq -r '.spec.volumes[] | select(.name == "tmp").emptyDir | type' /workspace/k8s-fast-exec-pod.json)" = "object"
+test "$(jq -r '.spec.volumes[] | select(.name == "var-tmp").emptyDir | type' /workspace/k8s-fast-exec-pod.json)" = "object"
 test "$(jq -r '.spec.containers[0].command[0]' /workspace/k8s-fast-exec-pod.json)" = "/control-plane/bin/control-plane-exec-api"
 test "$(jq -r '.spec.containers[0].startupProbe.grpc.port' /workspace/k8s-fast-exec-pod.json)" = "8080"
 test "$(jq -r '.spec.containers[0].startupProbe.periodSeconds' /workspace/k8s-fast-exec-pod.json)" = "5"
@@ -1107,6 +1109,8 @@ test "$(jq -r '.spec.automountServiceAccountToken' /workspace/k8s-fast-exec-pod.
 test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "environment").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/environment"
 test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "runtime-bin").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/control-plane/bin"
 test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "workspace").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/environment/root/workspace"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "tmp").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/environment/root/tmp"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "var-tmp").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/environment/root/var/tmp"
 test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/environment/root/root/.config/gh") | (.readOnly // false)' /workspace/k8s-fast-exec-pod.json)" = "false"
 test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/environment/root/root/.ssh") | (.readOnly // false)' /workspace/k8s-fast-exec-pod.json)" = "true"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/root"
@@ -1125,6 +1129,20 @@ hook_readonly_command=$'set -euo pipefail\ntest -x /root/.copilot/hooks/postTool
 hook_readonly_command_base64="$(printf '%s' "${hook_readonly_command}" | base64 | tr -d '\n')"
 control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${hook_readonly_command_base64}" >/dev/null
 grep -qx 'exec-hooks-readonly-ok' /workspace/fast-exec-hooks-readonly.txt
+ephemeral_session_key=kind-fast-exec-ephemeral
+control-plane-session-exec cleanup --session-key "${ephemeral_session_key}" >/dev/null 2>&1 || true
+cargo_and_tmp_write_command=$'set -euo pipefail\ngrep -Fqx "[build]" /root/.cargo/config.toml\ngrep -Fqx "target-dir = \"/var/tmp/control-plane/cargo-target\"" /root/.cargo/config.toml\ntest "$(stat -c %a /tmp)" = "1777"\ntest "$(stat -c %a /var/tmp)" = "1777"\nprintf "tmp-state\\n" > /tmp/fast-exec-ephemeral.txt\nmkdir -p /var/tmp/control-plane\nprintf "var-tmp-state\\n" > /var/tmp/control-plane/fast-exec-ephemeral.txt\nprintf "fast-exec-cargo-config-ok\\n" > /workspace/fast-exec-cargo-config.txt'
+cargo_and_tmp_write_command_base64="$(printf '%s' "${cargo_and_tmp_write_command}" | base64 | tr -d '\n')"
+control-plane-session-exec prepare --session-key "${ephemeral_session_key}" >/dev/null
+control-plane-session-exec proxy --session-key "${ephemeral_session_key}" --cwd /workspace --command-base64 "${cargo_and_tmp_write_command_base64}" >/dev/null
+grep -qx 'fast-exec-cargo-config-ok' /workspace/fast-exec-cargo-config.txt
+control-plane-session-exec cleanup --session-key "${ephemeral_session_key}" >/dev/null
+ephemeral_verify_command=$'set -euo pipefail\ngrep -Fqx "[build]" /root/.cargo/config.toml\ngrep -Fqx "target-dir = \"/var/tmp/control-plane/cargo-target\"" /root/.cargo/config.toml\ntest "$(stat -c %a /tmp)" = "1777"\ntest "$(stat -c %a /var/tmp)" = "1777"\n! test -e /tmp/fast-exec-ephemeral.txt\n! test -e /var/tmp/control-plane/fast-exec-ephemeral.txt\nprintf "fast-exec-ephemeral-ok\\n" > /workspace/fast-exec-ephemeral.txt'
+ephemeral_verify_command_base64="$(printf '%s' "${ephemeral_verify_command}" | base64 | tr -d '\n')"
+control-plane-session-exec prepare --session-key "${ephemeral_session_key}" >/dev/null
+control-plane-session-exec proxy --session-key "${ephemeral_session_key}" --cwd /workspace --command-base64 "${ephemeral_verify_command_base64}" >/dev/null
+grep -qx 'fast-exec-ephemeral-ok' /workspace/fast-exec-ephemeral.txt
+control-plane-session-exec cleanup --session-key "${ephemeral_session_key}" >/dev/null
 command_text=$'printf "fast-exec-stdout\\n"; printf "fast-exec-stderr\\n" >&2; printf "delegated\\n" > /workspace/fast-exec-marker.txt; exit 7'
 command_base64="$(printf '%s' "${command_text}" | base64 | tr -d '\n')"
 set +e

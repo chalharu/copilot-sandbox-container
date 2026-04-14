@@ -38,6 +38,7 @@ const CHROOT_GIT_HOOKS_DIR: &str = "/usr/local/share/control-plane/hooks/git";
 const CHROOT_EXEC_POLICY_LIBRARY_PATH: &str = "/usr/local/lib/libcontrol_plane_exec_policy.so";
 const CHROOT_EXEC_POLICY_RULES_PATH: &str =
     "/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml";
+const REMOTE_CARGO_TARGET_DIR: &str = "/var/tmp/control-plane/cargo-target";
 
 pub type DynError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -205,6 +206,8 @@ struct ResolvedCwd {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RemoteHomePaths {
     home_dir: PathBuf,
+    cargo_home_dir: PathBuf,
+    cargo_config_path: PathBuf,
     config_dir: PathBuf,
     copilot_dir: PathBuf,
     copilot_hooks_path: PathBuf,
@@ -722,9 +725,9 @@ fn prepare_server_environment(config: &ServerConfig) -> Result<(), DynError> {
             chroot_root.display()
         )
     })?;
-    sync_git_config(config).map_err(|error| {
+    sync_remote_home_config(config).map_err(|error| {
         format!(
-            "failed to sync git config into {}: {error}",
+            "failed to sync remote home config into {}: {error}",
             chroot_root.display()
         )
     })?;
@@ -1212,7 +1215,7 @@ fn set_directory_mode_recursive(
     Ok(())
 }
 
-fn sync_git_config(config: &ServerConfig) -> Result<(), DynError> {
+fn sync_remote_home_config(config: &ServerConfig) -> Result<(), DynError> {
     let Some(chroot_root) = config.chroot_root.as_deref() else {
         return Ok(());
     };
@@ -1223,6 +1226,15 @@ fn sync_git_config(config: &ServerConfig) -> Result<(), DynError> {
     ensure_symlink_path(
         &paths.copilot_hooks_path,
         Path::new(CHROOT_COPILOT_HOOKS_DIR),
+    )?;
+    with_context(
+        fs::write(&paths.cargo_config_path, render_remote_cargo_config()),
+        || {
+            format!(
+                "failed to write remote cargo config {}",
+                paths.cargo_config_path.display()
+            )
+        },
     )?;
     with_context(
         fs::write(
@@ -1236,6 +1248,7 @@ fn sync_git_config(config: &ServerConfig) -> Result<(), DynError> {
             )
         },
     )?;
+    set_path_mode(&paths.cargo_config_path, 0o644, "remote cargo config")?;
     set_path_mode(&paths.gitconfig_path, 0o640, "remote git config")?;
     finalize_remote_home_permissions(&paths, config.run_as_uid, config.run_as_gid)?;
     Ok(())
@@ -1246,12 +1259,16 @@ fn resolve_remote_home_paths(
     remote_home: &Path,
 ) -> Result<RemoteHomePaths, DynError> {
     let home_dir = nested_absolute_path(chroot_root, remote_home)?;
+    let cargo_home_dir = home_dir.join(".cargo");
+    let cargo_config_path = cargo_home_dir.join("config.toml");
     let config_dir = home_dir.join(".config");
     let copilot_dir = home_dir.join(".copilot");
     let copilot_hooks_path = copilot_dir.join("hooks");
     let gitconfig_path = home_dir.join(".gitconfig");
     Ok(RemoteHomePaths {
         home_dir,
+        cargo_home_dir,
+        cargo_config_path,
         config_dir,
         copilot_dir,
         copilot_hooks_path,
@@ -1260,6 +1277,12 @@ fn resolve_remote_home_paths(
 }
 
 fn ensure_remote_home_dirs(paths: &RemoteHomePaths) -> Result<(), DynError> {
+    with_context(fs::create_dir_all(&paths.cargo_home_dir), || {
+        format!(
+            "failed to create remote cargo directory {}",
+            paths.cargo_home_dir.display()
+        )
+    })?;
     with_context(fs::create_dir_all(&paths.config_dir), || {
         format!(
             "failed to create remote config directory {}",
@@ -1276,8 +1299,16 @@ fn ensure_remote_home_dirs(paths: &RemoteHomePaths) -> Result<(), DynError> {
 }
 
 fn prepare_remote_home_for_update(paths: &RemoteHomePaths) -> Result<(), DynError> {
-    for path in [&paths.home_dir, &paths.config_dir, &paths.copilot_dir] {
+    for path in [
+        &paths.home_dir,
+        &paths.cargo_home_dir,
+        &paths.config_dir,
+        &paths.copilot_dir,
+    ] {
         set_path_owner(path, 0, 0, "remote home path")?;
+    }
+    if paths.cargo_config_path.exists() {
+        set_path_owner(&paths.cargo_config_path, 0, 0, "remote cargo config")?;
     }
     if paths.gitconfig_path.exists() {
         set_path_owner(&paths.gitconfig_path, 0, 0, "remote git config")?;
@@ -1292,8 +1323,10 @@ fn finalize_remote_home_permissions(
 ) -> Result<(), DynError> {
     for (path, owner_uid, description) in [
         (&paths.home_dir, 0, "remote home"),
+        (&paths.cargo_home_dir, uid, "remote cargo directory"),
         (&paths.config_dir, uid, "remote config directory"),
         (&paths.copilot_dir, 0, "remote Copilot directory"),
+        (&paths.cargo_config_path, uid, "remote cargo config"),
         (&paths.gitconfig_path, 0, "remote git config"),
     ] {
         set_path_owner(path, owner_uid, gid, description)?;
@@ -1394,6 +1427,10 @@ fn render_remote_git_config(
         }
     }
     content
+}
+
+fn render_remote_cargo_config() -> String {
+    format!("[build]\ntarget-dir = \"{REMOTE_CARGO_TARGET_DIR}\"\n")
 }
 
 fn canonicalize_absolute_path(path: &Path, variable_name: &str) -> Result<PathBuf, String> {
@@ -1809,8 +1846,9 @@ mod tests {
         CHROOT_KUBERNETES_SERVICE_ACCOUNT_DIR, DEFAULT_EXEC_PATH, EXEC_API_TOKEN_METADATA_KEY,
         ExecApiService, ServerConfig, ServerMode, TrafficLogger, apt_required_packages,
         build_rootfs_extract_command, build_server_config, ensure_runtime_dirs,
-        managed_shell_environment, normalize_path, render_remote_git_config,
-        required_commands_present, resolve_cwd, stdout_with_command_line, sync_git_config,
+        managed_shell_environment, normalize_path, render_remote_cargo_config,
+        render_remote_git_config, required_commands_present, resolve_cwd, stdout_with_command_line,
+        sync_remote_home_config,
     };
     use crate::RawServerConfig;
     use crate::proto;
@@ -2274,7 +2312,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn sync_git_config_handles_reused_runtime_owned_home() {
+    fn sync_remote_home_config_handles_reused_runtime_owned_home() {
         use nix::unistd::{Gid, Uid, chown};
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
         use std::os::unix::process::CommandExt;
@@ -2304,16 +2342,26 @@ mod tests {
         })
         .unwrap();
         let home_dir = chroot_root.path().join("root");
+        let cargo_dir = home_dir.join(".cargo");
+        let cargo_config_path = cargo_dir.join("config.toml");
         let config_dir = home_dir.join(".config");
         let copilot_dir = home_dir.join(".copilot");
         let copilot_hooks_path = copilot_dir.join("hooks");
         let gitconfig_path = home_dir.join(".gitconfig");
 
+        fs::create_dir_all(&cargo_dir).unwrap();
         fs::create_dir_all(&config_dir).unwrap();
         fs::create_dir_all(&copilot_dir).unwrap();
+        fs::write(&cargo_config_path, "stale\n").unwrap();
         fs::write(&gitconfig_path, "stale\n").unwrap();
         chown(
             &home_dir,
+            Some(Uid::from_raw(1000)),
+            Some(Gid::from_raw(1000)),
+        )
+        .unwrap();
+        chown(
+            &cargo_dir,
             Some(Uid::from_raw(1000)),
             Some(Gid::from_raw(1000)),
         )
@@ -2331,21 +2379,33 @@ mod tests {
         )
         .unwrap();
         chown(
+            &cargo_config_path,
+            Some(Uid::from_raw(1000)),
+            Some(Gid::from_raw(1000)),
+        )
+        .unwrap();
+        chown(
             &gitconfig_path,
             Some(Uid::from_raw(1000)),
             Some(Gid::from_raw(1000)),
         )
         .unwrap();
 
-        sync_git_config(&config).unwrap();
+        sync_remote_home_config(&config).unwrap();
 
         let home_metadata = fs::metadata(&home_dir).unwrap();
+        let cargo_metadata = fs::metadata(&cargo_dir).unwrap();
+        let cargo_config_metadata = fs::metadata(&cargo_config_path).unwrap();
         let config_metadata = fs::metadata(&config_dir).unwrap();
         let copilot_metadata = fs::metadata(&copilot_dir).unwrap();
         let copilot_hooks_metadata = fs::symlink_metadata(&copilot_hooks_path).unwrap();
         let gitconfig_metadata = fs::metadata(&gitconfig_path).unwrap();
         assert_eq!(home_metadata.uid(), 0);
         assert_eq!(home_metadata.gid(), 1000);
+        assert_eq!(cargo_metadata.uid(), 1000);
+        assert_eq!(cargo_metadata.gid(), 1000);
+        assert_eq!(cargo_config_metadata.uid(), 1000);
+        assert_eq!(cargo_config_metadata.gid(), 1000);
         assert_eq!(config_metadata.uid(), 1000);
         assert_eq!(config_metadata.gid(), 1000);
         assert_eq!(copilot_metadata.uid(), 0);
@@ -2355,8 +2415,13 @@ mod tests {
         assert_eq!(gitconfig_metadata.uid(), 0);
         assert_eq!(gitconfig_metadata.gid(), 1000);
         assert_eq!(home_metadata.permissions().mode() & 0o7777, 0o1770);
+        assert_eq!(cargo_config_metadata.permissions().mode() & 0o777, 0o644);
         assert_eq!(copilot_metadata.permissions().mode() & 0o7777, 0o1770);
         assert_eq!(gitconfig_metadata.permissions().mode() & 0o777, 0o640);
+        assert_eq!(
+            fs::read_to_string(&cargo_config_path).unwrap(),
+            render_remote_cargo_config()
+        );
         assert_eq!(
             fs::read_link(&copilot_hooks_path).unwrap(),
             PathBuf::from(CHROOT_COPILOT_HOOKS_DIR)
@@ -2391,7 +2456,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn sync_git_config_replaces_stale_copilot_hooks_directory_with_symlink() {
+    fn sync_remote_home_config_replaces_stale_copilot_hooks_directory_with_symlink() {
         use nix::unistd::Uid;
 
         if !Uid::effective().is_root() {
@@ -2422,11 +2487,15 @@ mod tests {
         fs::create_dir_all(&hooks_dir).unwrap();
         fs::write(hooks_dir.join("stale.txt"), "stale\n").unwrap();
 
-        sync_git_config(&config).unwrap();
+        sync_remote_home_config(&config).unwrap();
 
         assert_eq!(
             fs::read_link(&hooks_dir).unwrap(),
             PathBuf::from(CHROOT_COPILOT_HOOKS_DIR)
+        );
+        assert_eq!(
+            fs::read_to_string(chroot_root.path().join("root/.cargo/config.toml")).unwrap(),
+            render_remote_cargo_config()
         );
     }
 }

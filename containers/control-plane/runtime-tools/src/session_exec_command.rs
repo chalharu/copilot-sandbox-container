@@ -1062,6 +1062,8 @@ fn build_exec_pod(
     let hooks_source = format!("{environment_root}/hooks/git");
     let workspace_mount = nested_mount_path(&chroot_root, &config.workspace_mount_path)?;
     let remote_home_mount = nested_mount_path(&chroot_root, &config.remote_home)?;
+    let tmp_mount = nested_mount_path(&chroot_root, "/tmp")?;
+    let var_tmp_mount = nested_mount_path(&chroot_root, "/var/tmp")?;
     let gh_mount = format!("{remote_home_mount}/.config/gh");
     let ssh_mount = format!("{remote_home_mount}/.ssh");
     let init_command = build_bootstrap_assets_init_command(environment_root, runtime_bin_dir);
@@ -1081,6 +1083,14 @@ fn build_exec_pod(
             "mountPath": workspace_mount,
             "subPath": config.workspace_subpath,
         }),
+        json!({
+            "name": "tmp",
+            "mountPath": tmp_mount,
+        }),
+        json!({
+            "name": "var-tmp",
+            "mountPath": var_tmp_mount,
+        }),
     ];
     let mut volumes = vec![
         json!({
@@ -1091,6 +1101,14 @@ fn build_exec_pod(
         }),
         json!({
             "name": "runtime-bin",
+            "emptyDir": {}
+        }),
+        json!({
+            "name": "tmp",
+            "emptyDir": {}
+        }),
+        json!({
+            "name": "var-tmp",
             "emptyDir": {}
         }),
         json!({
@@ -1627,6 +1645,14 @@ mod tests {
             mounts.iter().any(|mount| mount.name == "workspace"
                 && mount.mount_path == "/environment/root/workspace")
         );
+        assert!(
+            mounts
+                .iter()
+                .any(|mount| mount.name == "tmp" && mount.mount_path == "/environment/root/tmp")
+        );
+        assert!(mounts.iter().any(
+            |mount| mount.name == "var-tmp" && mount.mount_path == "/environment/root/var/tmp"
+        ));
         assert!(mounts.iter().any(|mount| {
             mount.name == "runtime-bin"
                 && mount.mount_path == "/control-plane/bin"
@@ -1734,7 +1760,21 @@ mod tests {
                 )));
         let volumes = spec.volumes.as_ref().unwrap();
         assert!(volumes.iter().any(|volume| volume.name == "environment"));
-        assert!(volumes.iter().any(|volume| volume.name == "runtime-bin"));
+        assert!(
+            volumes
+                .iter()
+                .any(|volume| volume.name == "runtime-bin" && volume.empty_dir.is_some())
+        );
+        assert!(
+            volumes
+                .iter()
+                .any(|volume| volume.name == "tmp" && volume.empty_dir.is_some())
+        );
+        assert!(
+            volumes
+                .iter()
+                .any(|volume| volume.name == "var-tmp" && volume.empty_dir.is_some())
+        );
         assert!(!volumes.iter().any(|volume| volume.name == "bootstrap"));
     }
 
