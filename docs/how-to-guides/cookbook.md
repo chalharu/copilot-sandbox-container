@@ -150,9 +150,12 @@ ConfigMap / Secret / write-back の具体的な path は
    - 通常 sample 側に含まれる RWO の `/workspace` PVC
    - `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS` で作る node-local
      cache PVC
-2. `~/.copilot/tmp` と Podman cache は emptyDir の ephemeral storage に
-   逃がし、再生成可能な container cache が session PVC を食い潰さない
-   ようにする
+2. `~/.copilot/tmp` と Podman cache、fast-exec Execution Pod の `/tmp` と
+   `/var/tmp` は generic ephemeral volume へ逃がし、再生成可能な cache が
+   session PVC を食い潰さないようにする。
+   `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` と
+   `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で storage class と合計サイズを
+   調整する
 3. shared PVC の spec は bound 後に自由に変更できないため、
    `control-plane.example/install/pvc-control-plane-copilot-session.yaml` は
    初回導入前に storage class / サイズを実クラスタ向けへ確定させる。
@@ -167,7 +170,8 @@ ConfigMap / Secret / write-back の具体的な path は
    `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS` も同時に見直す。
 5. Rust Job の `cargo` / `rustup` / `target` などの再生成可能な state は
    `/var/tmp/containerized-rust/...` に寄せ、shared `/workspace` PVC に cache を
-   溜めない
+   溜めない。fast-exec Execution Pod でも `/root/.cargo/config.toml` を自動生成し、
+   `target-dir = "/var/tmp/control-plane/cargo-target"` に固定する
 
 永続 path、Podman graphroot、ConfigMap / Secret の注入先などの具体的な
 path は `docs/reference/control-plane-runtime.md` を参照してください。

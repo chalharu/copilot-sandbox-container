@@ -107,6 +107,12 @@ Rust 製 `control-plane-exec-api` と bundled Git hook を、node-scoped な RWO
 runtime image の rootfs を `/environment/root` へ複製します。そこへ `bash` /
 `git` / `gh` / `kubectl` / `openssh-client` を入れます。以後の session pod は、
 同じ node 上でその chroot を再利用します。毎回の package install を避けられます。
+remote HOME (`/root`) には `.gitconfig` と一緒に `.cargo/config.toml` も毎回生成し、
+Rust の `target-dir` を `/var/tmp/control-plane/cargo-target` へ固定します。
+また chroot 内の `/tmp` と `/var/tmp` は 1 本の generic ephemeral volume を
+共有し、Execution Pod ごとに初期化します。storage class と合計サイズは
+`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` /
+`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で制御します。
 `CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT` を設定すると、各 Execution Pod は
 serve 前にその値を chroot 内で `/bin/sh -lc` として実行します。値は inline
 command でも script path でも構いません。初回 bootstrap は数分かかりうるため、

@@ -38,6 +38,10 @@ sample manifest では Copilot CLI の `bash` tool を session-scoped Execution 
 - Execution Pod が node ごとに使う environment PVC 用の storage class
   - 対応する変数は `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS`
   - sample の既定値は `standard`
+- Execution Pod の `/tmp` と `/var/tmp` に使う generic ephemeral volume 用の
+  storage class
+  - 対応する変数は `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS`
+  - sample の既定値は `standard`
 - SSH 公開鍵
 - `latest` 以外へ pin したい場合だけ published image tag
 
@@ -158,6 +162,12 @@ ServiceAccount で起動します。`copilot-sandbox-jobs` namespace の
 `control-plane-exec-workloads` Role に bind します。Execution Pod 内で
 `kubectl -n copilot-sandbox-jobs ...` を使えば、一時的な Deployment / Service /
 Job / Pod を control-plane 本体とは分離した権限で扱えます。
+Execution Pod の `/tmp` と `/var/tmp` は pod ごとの generic ephemeral volume です。
+storage class / 合計サイズは
+`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` /
+`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で調整できます。
+Rust を使う場合も `/root/.cargo/config.toml` を自動生成し、`target-dir` を
+`/var/tmp/control-plane/cargo-target` へ固定します。
 
 ### current-cluster の smoke を取る
 
