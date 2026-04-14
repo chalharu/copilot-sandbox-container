@@ -1131,13 +1131,13 @@ control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace
 grep -qx 'exec-hooks-readonly-ok' /workspace/fast-exec-hooks-readonly.txt
 ephemeral_session_key=kind-fast-exec-ephemeral
 control-plane-session-exec cleanup --session-key "${ephemeral_session_key}" >/dev/null 2>&1 || true
-cargo_and_tmp_write_command=$'set -euo pipefail\ngrep -Fqx "[build]" /root/.cargo/config.toml\ngrep -Fqx "target-dir = \"/var/tmp/control-plane/cargo-target\"" /root/.cargo/config.toml\ntest "$(stat -c %a /tmp)" = "1777"\ntest "$(stat -c %a /var/tmp)" = "1777"\nprintf "tmp-state\\n" > /tmp/fast-exec-ephemeral.txt\nmkdir -p /var/tmp/control-plane\nprintf "var-tmp-state\\n" > /var/tmp/control-plane/fast-exec-ephemeral.txt\nprintf "fast-exec-cargo-config-ok\\n" > /workspace/fast-exec-cargo-config.txt'
+cargo_and_tmp_write_command=$'set -euo pipefail\ngrep -Fqx "[build]" /root/.cargo/config.toml\ngrep -Fqx \'target-dir = "/var/tmp/control-plane/cargo-target"\' /root/.cargo/config.toml\ntest "$(stat -c %a /tmp)" = "1777"\ntest "$(stat -c %a /var/tmp)" = "1777"\nprintf "tmp-state\\n" > /tmp/fast-exec-ephemeral.txt\nmkdir -p /var/tmp/control-plane\nprintf "var-tmp-state\\n" > /var/tmp/control-plane/fast-exec-ephemeral.txt\nprintf "fast-exec-cargo-config-ok\\n" > /workspace/fast-exec-cargo-config.txt'
 cargo_and_tmp_write_command_base64="$(printf '%s' "${cargo_and_tmp_write_command}" | base64 | tr -d '\n')"
 control-plane-session-exec prepare --session-key "${ephemeral_session_key}" >/dev/null
 control-plane-session-exec proxy --session-key "${ephemeral_session_key}" --cwd /workspace --command-base64 "${cargo_and_tmp_write_command_base64}" >/dev/null
 grep -qx 'fast-exec-cargo-config-ok' /workspace/fast-exec-cargo-config.txt
 control-plane-session-exec cleanup --session-key "${ephemeral_session_key}" >/dev/null
-ephemeral_verify_command=$'set -euo pipefail\ngrep -Fqx "[build]" /root/.cargo/config.toml\ngrep -Fqx "target-dir = \"/var/tmp/control-plane/cargo-target\"" /root/.cargo/config.toml\ntest "$(stat -c %a /tmp)" = "1777"\ntest "$(stat -c %a /var/tmp)" = "1777"\n! test -e /tmp/fast-exec-ephemeral.txt\n! test -e /var/tmp/control-plane/fast-exec-ephemeral.txt\nprintf "fast-exec-ephemeral-ok\\n" > /workspace/fast-exec-ephemeral.txt'
+ephemeral_verify_command=$'set -euo pipefail\ngrep -Fqx "[build]" /root/.cargo/config.toml\ngrep -Fqx \'target-dir = "/var/tmp/control-plane/cargo-target"\' /root/.cargo/config.toml\ntest "$(stat -c %a /tmp)" = "1777"\ntest "$(stat -c %a /var/tmp)" = "1777"\n! test -e /tmp/fast-exec-ephemeral.txt\n! test -e /var/tmp/control-plane/fast-exec-ephemeral.txt\nprintf "fast-exec-ephemeral-ok\\n" > /workspace/fast-exec-ephemeral.txt'
 ephemeral_verify_command_base64="$(printf '%s' "${ephemeral_verify_command}" | base64 | tr -d '\n')"
 control-plane-session-exec prepare --session-key "${ephemeral_session_key}" >/dev/null
 control-plane-session-exec proxy --session-key "${ephemeral_session_key}" --cwd /workspace --command-base64 "${ephemeral_verify_command_base64}" >/dev/null
