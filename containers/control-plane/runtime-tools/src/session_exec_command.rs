@@ -901,7 +901,11 @@ fn pod_name_for_session(owner_pod_name: &str, session_key: &str) -> String {
     hasher.update(owner_pod_name.as_bytes());
     hasher.update(b":");
     hasher.update(session_key.as_bytes());
-    let checksum = format!("{:x}", hasher.finalize());
+    let checksum = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     let mut value = normalized;
     if value.len() > 33 {
         value.truncate(33);
