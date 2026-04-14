@@ -1100,7 +1100,6 @@ test "$(jq -r '.spec.volumes[] | select(.name == "workspace").persistentVolumeCl
 test "$(jq -r '.spec.volumes[] | select(.name == "copilot-session").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "control-plane-copilot-session-pvc"
 test "$(jq -r '.spec.volumes[] | select(.name == "environment").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "${environment_pvc}"
 test "$(jq -r '.spec.volumes[] | select(.name == "runtime-bin").emptyDir | type' /workspace/k8s-fast-exec-pod.json)" = "object"
-test "$(jq -r '.spec.volumes[] | select(.name == "ephemeral-storage").ephemeral.volumeClaimTemplate.spec.storageClassName' /workspace/k8s-fast-exec-pod.json)" = "standard"
 test "$(jq -r '.spec.volumes[] | select(.name == "ephemeral-storage").ephemeral.volumeClaimTemplate.spec.resources.requests.storage' /workspace/k8s-fast-exec-pod.json)" = "10Gi"
 test "$(jq -r '.spec.containers[0].command[0]' /workspace/k8s-fast-exec-pod.json)" = "/control-plane/bin/control-plane-exec-api"
 test "$(jq -r '.spec.containers[0].startupProbe.grpc.port' /workspace/k8s-fast-exec-pod.json)" = "8080"
@@ -1128,6 +1127,8 @@ test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_E
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOME").value' /workspace/k8s-fast-exec-pod.json)" = "/root"
 ephemeral_pvc_name="${pod_name}-ephemeral-storage"
 kubectl get pvc --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${ephemeral_pvc_name}" -o json > /workspace/k8s-fast-exec-ephemeral-pvc.json
+# The apiserver omits storageClassName from the embedded volumeClaimTemplate on the Pod,
+# so verify the generated PVC instead.
 test "$(jq -r '.spec.storageClassName' /workspace/k8s-fast-exec-ephemeral-pvc.json)" = "standard"
 test "$(jq -r '.spec.resources.requests.storage' /workspace/k8s-fast-exec-ephemeral-pvc.json)" = "10Gi"
 git_hook_command=$'rm -rf /workspace/fast-exec-git-hook-test-repo\nmkdir -p /workspace/fast-exec-git-hook-test-repo\ncd /workspace/fast-exec-git-hook-test-repo\ngit init >/dev/null\ngit checkout -b fast-exec-test >/dev/null 2>&1\ngit config user.name "Fast Exec Test"\ngit config user.email "fast-exec-test@example.com"\ngit config core.hooksPath /environment/hooks/git\ntest -x /root/.copilot/hooks/postToolUse/main\ngit commit --allow-empty -m "fast exec hook test" >/dev/null\ngit rev-parse --verify HEAD > /workspace/fast-exec-git-hook-commit.txt'
