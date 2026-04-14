@@ -309,6 +309,8 @@ assert_resource_contains ConfigMap control-plane-config 'copilot-config.json: |'
 assert_resource_present ConfigMap control-plane-env
 assert_resource_present ConfigMap control-plane-instance-env
 assert_resource_present ServiceAccount control-plane-exec
+assert_resource_present ClusterRole control-plane-storage-classes
+assert_resource_present ClusterRoleBinding control-plane-storage-classes.copilot-sandbox
 assert_resource_present Role control-plane-exec-workloads
 assert_resource_present RoleBinding control-plane-exec-workloads
 assert_resource_absent ServiceAccount garage-bootstrap
@@ -348,6 +350,9 @@ assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB
 assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_PORT: "2222"'
 assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: IfNotPresent'
 assert_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_WORKSPACE_PVC: control-plane-workspace-pvc'
+assert_resource_contains ClusterRole control-plane-storage-classes '  - storageclasses'
+assert_resource_contains ClusterRoleBinding control-plane-storage-classes.copilot-sandbox 'name: control-plane'
+assert_resource_contains ClusterRoleBinding control-plane-storage-classes.copilot-sandbox 'namespace: copilot-sandbox'
 assert_resource_contains Role control-plane-exec-workloads '  - deployments'
 assert_resource_contains Role control-plane-exec-workloads '  - services'
 assert_resource_contains Role control-plane-exec-workloads '  - jobs'
@@ -368,6 +373,7 @@ printf '%s\n' 'k8s-sample-storage-layout-test: checking named overlay propagatio
 render_named_overlay_propagation_fixture
 assert_overlay_resource_present ConfigMap control-plane-env
 assert_overlay_resource_present ConfigMap control-plane-instance-env
+assert_overlay_resource_present ClusterRoleBinding control-plane-storage-classes.custom-sandbox
 assert_overlay_resource_present Service my-custom-service
 assert_overlay_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_K8S_NAMESPACE: custom-sandbox'
 assert_overlay_resource_contains ConfigMap control-plane-env 'CONTROL_PLANE_JOB_NAMESPACE: custom-sandbox-jobs'
@@ -377,6 +383,7 @@ assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_P
 assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_TRANSFER_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/control-plane:v1.0.0'
 assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: Always'
 assert_overlay_resource_contains ConfigMap control-plane-instance-env 'CONTROL_PLANE_JOB_IMAGE_PULL_POLICY: Always'
+assert_overlay_resource_contains ClusterRoleBinding control-plane-storage-classes.custom-sandbox 'namespace: custom-sandbox'
 
 printf '%s\n' 'k8s-sample-storage-layout-test: checking services and deployment mounts' >&2
 assert_resource_present Service control-plane

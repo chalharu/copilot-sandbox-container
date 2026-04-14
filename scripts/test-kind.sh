@@ -425,6 +425,37 @@ roleRef:
   kind: Role
   name: control-plane-job-self-read
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: control-plane-storage-classes
+rules:
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: control-plane-storage-classes.${namespace}
+subjects:
+  - kind: ServiceAccount
+    name: control-plane
+    namespace: ${namespace}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: control-plane-storage-classes
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: control-plane-fast-exec-ephemeral-dynamic
+provisioner: rancher.io/local-path
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -604,7 +635,7 @@ data:
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS: control-plane-fast-exec-environment-manual
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE: 10Gi
   CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH: /environment
-  CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS: standard
+  CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS: control-plane-fast-exec-ephemeral-dynamic
   CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE: 10Gi
   CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST: 250m
   CONTROL_PLANE_FAST_EXECUTION_CPU_LIMIT: "1"
@@ -1059,6 +1090,12 @@ if [[ "\${pvcs_status}" -ne 0 ]] || [[ "\${pvcs_access}" != "yes" ]]; then
   kubectl config current-context >&2 || true
   exit 1
 fi
+if ! kubectl auth can-i list storageclasses.storage.k8s.io --quiet; then
+  printf '%s\n' 'Expected control-plane service account to list StorageClasses' >&2
+  kubectl auth can-i list storageclasses.storage.k8s.io >&2 || true
+  kubectl config current-context >&2 || true
+  exit 1
+fi
 EOF
   printf '%s\n' 'kind-test: rbac assertions ok' >&2
 
@@ -1129,7 +1166,7 @@ ephemeral_pvc_name="${pod_name}-ephemeral-storage"
 kubectl get pvc --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${ephemeral_pvc_name}" -o json > /workspace/k8s-fast-exec-ephemeral-pvc.json
 # The apiserver omits storageClassName from the embedded volumeClaimTemplate on the Pod,
 # so verify the generated PVC instead.
-test "$(jq -r '.spec.storageClassName' /workspace/k8s-fast-exec-ephemeral-pvc.json)" = "standard"
+test "$(jq -r '.spec.storageClassName' /workspace/k8s-fast-exec-ephemeral-pvc.json)" = "control-plane-fast-exec-ephemeral-dynamic"
 test "$(jq -r '.spec.resources.requests.storage' /workspace/k8s-fast-exec-ephemeral-pvc.json)" = "10Gi"
 git_hook_command=$'rm -rf /workspace/fast-exec-git-hook-test-repo\nmkdir -p /workspace/fast-exec-git-hook-test-repo\ncd /workspace/fast-exec-git-hook-test-repo\ngit init >/dev/null\ngit checkout -b fast-exec-test >/dev/null 2>&1\ngit config user.name "Fast Exec Test"\ngit config user.email "fast-exec-test@example.com"\ngit config core.hooksPath /environment/hooks/git\ntest -x /root/.copilot/hooks/postToolUse/main\ngit commit --allow-empty -m "fast exec hook test" >/dev/null\ngit rev-parse --verify HEAD > /workspace/fast-exec-git-hook-commit.txt'
 git_hook_command_base64="$(printf '%s' "${git_hook_command}" | base64 | tr -d '\n')"

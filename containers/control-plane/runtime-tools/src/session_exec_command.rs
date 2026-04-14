@@ -9,7 +9,8 @@ use std::time::Duration;
 use base64::Engine as _;
 use control_plane_exec_api::{check_health, execute_remote};
 use k8s_openapi::api::core::v1::{PersistentVolumeClaim, Pod};
-use kube::api::{DeleteParams, PostParams};
+use k8s_openapi::api::storage::v1::StorageClass;
+use kube::api::{DeleteParams, ListParams, PostParams};
 use kube::{Api, Client};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -634,6 +635,7 @@ async fn ensure_pod_ready(
     }
 
     let bootstrap_image = resolve_bootstrap_image(client, config).await?;
+    let ephemeral_storage_class = resolve_exec_ephemeral_storage_class(client, config).await?;
     let auth_token = generate_session_token()?;
     let pod = build_exec_pod(
         config,
@@ -642,6 +644,7 @@ async fn ensure_pod_ready(
         &auth_token,
         &bootstrap_image,
         &environment_pvc_name,
+        &ephemeral_storage_class,
     )?;
     create_pod(&pods, &pod, config.start_timeout).await?;
     let ready_pod = wait_for_pod(client, config, &pod_name).await?;
@@ -712,6 +715,64 @@ async fn ensure_environment_pvc(
             "failed to create execution environment PVC {pvc_name}: {error}"
         )),
     }
+}
+
+async fn resolve_exec_ephemeral_storage_class(
+    client: &Client,
+    config: &SessionExecConfig,
+) -> Result<String, String> {
+    if let Some(storage_class) = config.ephemeral_storage_class.as_ref() {
+        return Ok(storage_class.clone());
+    }
+
+    let storage_classes: Api<StorageClass> = Api::all(client.clone());
+    let storage_classes = storage_classes
+        .list(&ListParams::default())
+        .await
+        .map_err(|error| {
+            format!(
+                "failed to resolve fast execution ephemeral storage class: {error}; \
+                 set CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS or grant access to list StorageClasses"
+            )
+        })?;
+    find_default_storage_class_name(&storage_classes.items).map_err(|error| {
+        format!("{error}; set CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS to override")
+    })
+}
+
+fn find_default_storage_class_name(storage_classes: &[StorageClass]) -> Result<String, String> {
+    let mut defaults = storage_classes
+        .iter()
+        .filter(|storage_class| storage_class_is_default(storage_class))
+        .filter_map(|storage_class| storage_class.metadata.name.clone())
+        .collect::<Vec<_>>();
+    defaults.sort();
+    defaults.dedup();
+
+    match defaults.as_slice() {
+        [storage_class] => Ok(storage_class.clone()),
+        [] => Err("no default StorageClass found for fast execution ephemeral storage".to_string()),
+        _ => Err(format!(
+            "multiple default StorageClasses found for fast execution ephemeral storage: {}",
+            defaults.join(", ")
+        )),
+    }
+}
+
+fn storage_class_is_default(storage_class: &StorageClass) -> bool {
+    storage_class
+        .metadata
+        .annotations
+        .as_ref()
+        .is_some_and(|annotations| {
+            [
+                "storageclass.kubernetes.io/is-default-class",
+                "storageclass.beta.kubernetes.io/is-default-class",
+            ]
+            .into_iter()
+            .filter_map(|key| annotations.get(key))
+            .any(|value| value.trim().eq_ignore_ascii_case("true"))
+        })
 }
 
 async fn resolve_bootstrap_image(
@@ -1058,23 +1119,20 @@ fn build_bootstrap_assets_init_command(
     )
 }
 
-fn build_exec_ephemeral_volume(config: &SessionExecConfig) -> Value {
-    let mut claim_spec = json!({
-        "accessModes": ["ReadWriteOnce"],
-        "resources": {
-            "requests": {
-                "storage": config.ephemeral_size
-            }
-        }
-    });
-    if let Some(storage_class) = &config.ephemeral_storage_class {
-        claim_spec["storageClassName"] = json!(storage_class);
-    }
+fn build_exec_ephemeral_volume(ephemeral_size: &str, storage_class: &str) -> Value {
     json!({
         "name": EXEC_EPHEMERAL_VOLUME_NAME,
         "ephemeral": {
             "volumeClaimTemplate": {
-                "spec": claim_spec
+                "spec": {
+                    "accessModes": ["ReadWriteOnce"],
+                    "storageClassName": storage_class,
+                    "resources": {
+                        "requests": {
+                            "storage": ephemeral_size
+                        }
+                    }
+                }
             }
         }
     })
@@ -1095,6 +1153,7 @@ fn build_exec_pod(
     auth_token: &str,
     bootstrap_image: &str,
     environment_pvc_name: &str,
+    ephemeral_storage_class: &str,
 ) -> Result<Pod, String> {
     let environment_root = config.environment_mount_path.trim_end_matches('/');
     let chroot_root = format!("{environment_root}/root");
@@ -1150,7 +1209,7 @@ fn build_exec_pod(
             "name": "runtime-bin",
             "emptyDir": {}
         }),
-        build_exec_ephemeral_volume(config),
+        build_exec_ephemeral_volume(&config.ephemeral_size, ephemeral_storage_class),
         json!({
             "name": "workspace",
             "persistentVolumeClaim": {
@@ -1472,10 +1531,11 @@ mod tests {
         EXEC_EPHEMERAL_INIT_MOUNT_PATH, EXEC_EPHEMERAL_TMP_SUBPATH, EXEC_EPHEMERAL_VAR_TMP_SUBPATH,
         EXEC_EPHEMERAL_VOLUME_NAME, PreparedPod, SessionEntry, SessionExecConfig,
         build_bootstrap_assets_init_command, build_environment_pvc, build_exec_pod,
-        entry_from_prepared, environment_pvc_name, pod_matches_session_entry, pod_name_for_session,
-        pod_ready,
+        entry_from_prepared, environment_pvc_name, find_default_storage_class_name,
+        pod_matches_session_entry, pod_name_for_session, pod_ready,
     };
     use k8s_openapi::api::core::v1::Pod;
+    use k8s_openapi::api::storage::v1::StorageClass;
 
     fn config() -> SessionExecConfig {
         SessionExecConfig {
@@ -1552,6 +1612,19 @@ mod tests {
         });
         if terminating {
             value["metadata"]["deletionTimestamp"] = serde_json::json!("2026-04-09T00:00:00Z");
+        }
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn test_storage_class(name: &str, annotation_key: Option<&str>) -> StorageClass {
+        let mut value = serde_json::json!({
+            "metadata": {
+                "name": name
+            },
+            "provisioner": "rancher.io/local-path"
+        });
+        if let Some(annotation_key) = annotation_key {
+            value["metadata"]["annotations"] = serde_json::json!({ annotation_key: "true" });
         }
         serde_json::from_value(value).unwrap()
     }
@@ -1633,6 +1706,7 @@ mod tests {
             "session-token",
             "ghcr.io/example/bootstrap:test",
             "node-workspace-kind-control-plane",
+            config.ephemeral_storage_class.as_deref().unwrap(),
         )
         .unwrap();
         let pod_value = serde_json::to_value(&pod).unwrap();
@@ -1905,11 +1979,70 @@ mod tests {
             "session-token",
             "ghcr.io/example/bootstrap:test",
             "node-workspace-kind-control-plane",
+            config.ephemeral_storage_class.as_deref().unwrap(),
         )
         .unwrap();
         let spec = pod.spec.unwrap();
         assert!(spec.service_account_name.is_none());
         assert_eq!(spec.automount_service_account_token, Some(false));
+    }
+
+    #[test]
+    fn default_storage_class_lookup_accepts_stable_annotation() {
+        let storage_classes = vec![
+            test_storage_class(
+                "fast-rwo",
+                Some("storageclass.kubernetes.io/is-default-class"),
+            ),
+            test_storage_class("fast-rwx", None),
+        ];
+
+        assert_eq!(
+            find_default_storage_class_name(&storage_classes).unwrap(),
+            "fast-rwo"
+        );
+    }
+
+    #[test]
+    fn default_storage_class_lookup_accepts_beta_annotation() {
+        let storage_classes = vec![test_storage_class(
+            "legacy-default",
+            Some("storageclass.beta.kubernetes.io/is-default-class"),
+        )];
+
+        assert_eq!(
+            find_default_storage_class_name(&storage_classes).unwrap(),
+            "legacy-default"
+        );
+    }
+
+    #[test]
+    fn default_storage_class_lookup_rejects_missing_default() {
+        let storage_classes = vec![test_storage_class("fast-rwo", None)];
+
+        assert_eq!(
+            find_default_storage_class_name(&storage_classes).unwrap_err(),
+            "no default StorageClass found for fast execution ephemeral storage"
+        );
+    }
+
+    #[test]
+    fn default_storage_class_lookup_rejects_multiple_defaults() {
+        let storage_classes = vec![
+            test_storage_class(
+                "fast-rwo-a",
+                Some("storageclass.kubernetes.io/is-default-class"),
+            ),
+            test_storage_class(
+                "fast-rwo-b",
+                Some("storageclass.kubernetes.io/is-default-class"),
+            ),
+        ];
+
+        assert_eq!(
+            find_default_storage_class_name(&storage_classes).unwrap_err(),
+            "multiple default StorageClasses found for fast execution ephemeral storage: fast-rwo-a, fast-rwo-b"
+        );
     }
 
     #[test]

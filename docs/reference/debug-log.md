@@ -15,7 +15,8 @@ persistent volume から切り離しています。
 fast-exec Execution Pod の `/tmp` と `/var/tmp` も同様に generic ephemeral volume
 で切り離します。storage class と合計サイズは
 `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` /
-`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で制御します。
+`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で制御します。storage class を
+省略した場合は cluster の default StorageClass を使います。
 Rust の `cargo-target` は `/root/.cargo/config.toml` 経由で
 `/var/tmp/control-plane/cargo-target` へ寄せます。
 

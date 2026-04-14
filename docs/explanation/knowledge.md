@@ -96,7 +96,8 @@ fast-exec の Execution Pod でも `/tmp` と `/var/tmp` は
 generic ephemeral volume として pod ごとに作り直します。
 storage class と合計サイズは
 `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` /
-`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で調整します。
+`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で調整します。storage class を
+省略した場合は cluster の default StorageClass を使います。
 `/root/.cargo/config.toml` で `target-dir` を
 `/var/tmp/control-plane/cargo-target` へ固定します。
 再生成できる cache や temp state を persistent volume から分離するためです。

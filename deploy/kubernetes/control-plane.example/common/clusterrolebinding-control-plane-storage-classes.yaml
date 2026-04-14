@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: control-plane-storage-classes.copilot-sandbox
+# Bind only the control-plane ServiceAccount. This read-only grant is used to
+# resolve the cluster default StorageClass for fast-exec ephemeral volumes.
+subjects:
+  - kind: ServiceAccount
+    name: control-plane
+    namespace: copilot-sandbox
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: control-plane-storage-classes
