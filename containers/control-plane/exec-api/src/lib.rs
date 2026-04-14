@@ -608,7 +608,7 @@ where
 
     let local_addr = listener.local_addr()?;
     let service = ExecApiService::new(&config);
-    let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
+    let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
         .set_service_status(HEALTH_SERVICE_NAME, ServingStatus::Serving)
         .await;
