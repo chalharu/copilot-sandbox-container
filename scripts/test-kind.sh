@@ -1090,14 +1090,9 @@ if [[ "\${pvcs_status}" -ne 0 ]] || [[ "\${pvcs_access}" != "yes" ]]; then
   kubectl config current-context >&2 || true
   exit 1
 fi
-set +e
-storageclasses_access="\$(kubectl auth can-i list storageclasses.storage.k8s.io 2>&1)"
-storageclasses_status=\$?
-set -e
-if [[ "\${storageclasses_status}" -ne 0 ]] || [[ "\${storageclasses_access}" != "yes" ]]; then
+if ! kubectl auth can-i list storageclasses.storage.k8s.io --quiet; then
   printf '%s\n' 'Expected control-plane service account to list StorageClasses' >&2
-  printf 'kubectl auth can-i exit status: %s\n' "\${storageclasses_status}" >&2
-  printf '%s\n' "\${storageclasses_access}" >&2
+  kubectl auth can-i list storageclasses.storage.k8s.io >&2 || true
   kubectl config current-context >&2 || true
   exit 1
 fi

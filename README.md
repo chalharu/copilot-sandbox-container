@@ -42,7 +42,7 @@ sample manifest では Copilot CLI の `bash` tool を session-scoped Execution 
   storage class
   - 対応する変数は `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS`
   - sample の既定値は `standard`
-  - 未設定時は cluster の default StorageClass を使います
+  - 未設定時は cluster の default StorageClass を使う
 - SSH 公開鍵
 - `latest` 以外へ pin したい場合だけ published image tag
 

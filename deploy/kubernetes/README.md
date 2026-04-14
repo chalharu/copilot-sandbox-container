@@ -125,9 +125,9 @@ ServiceAccount も含みます。`copilot-sandbox-jobs` 側の
 `control-plane-exec-workloads` Role / RoleBinding も含みます。SSH shell や
 delegated `bash` では `kubectl -n copilot-sandbox-jobs ...` を使えます。
 作業後に削除する前提の Deployment / Service / Job / Pod を扱えます。
-さらに、`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` を省略したときに
-cluster default StorageClass を解決できるよう、`control-plane`
-ServiceAccount には read-only の ClusterRole / ClusterRoleBinding も含みます。
+`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` を省略したときは、
+cluster default StorageClass を解決する。
+そのための read-only な ClusterRole / ClusterRoleBinding も sample に含む。
 
 ## default overlay のカスタマイズ
 
