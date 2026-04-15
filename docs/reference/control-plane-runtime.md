@@ -225,7 +225,14 @@ bundled skill は image に同梱し、起動時に `~/.copilot/skills/` へ cop
 使い、directory / file mode を明示的に整えることで current-cluster smoke でも
 安定して参照できます。
 
-## 7. Kubernetes Job file transfer
+## 7. Bundled agent surface
+
+bundled agent も image に同梱し、起動時に `~/.copilot/agents/` へ copy 同期
+します。現在は generic な implementation agent を同梱し、skill と同じく
+user-owned copy を使って file mode を明示的に整えています。これにより、
+standalone / Kubernetes Job のどちらでも agent file を安定して参照できます。
+
+## 8. Kubernetes Job file transfer
 
 Kubernetes Job path の `--mount-file` は、ConfigMap ではなく SSH/SFTP +
 `rclone` を使います。

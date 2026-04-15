@@ -51,7 +51,7 @@ runtime / cache / hook の具体的な path は
 
 この 2 本で、少なくとも次を確認できます。
 
-- bundled skill の `references/` が読める
+- bundled skill の `references/` と bundled agent file が読める
 - `COPILOT_CONFIG_JSON_FILE` と `GH_HOSTS_YML_FILE` / `GH_GITHUB_TOKEN_FILE` による設定注入が効く
 - `drop: ALL` 系 capability 構成で interactive SSH login が接続維持後も入力を受け付ける
 - bundled toolchain と runtime.env が期待どおり生成される
@@ -244,7 +244,7 @@ command mode を使います。
 
 ## 7. 典型的なデバッグの入口
 
-- `ls: cannot access ... Permission denied`: bundled skill の同期結果と directory execute bit を確認する
+- `ls: cannot access ... Permission denied`: bundled skill / agent の同期結果と directory execute bit を確認する
 - `cannot clone: Operation not permitted`: rootless 前提の説明を見直し、Execution Pod / Job 経路へ寄せる
 - `cgroup.subtree_control: Read-only file system`: nested container 実行を前提にせず Job 経路を優先する
 - `cleanup_exit: kill(`: SSH capability 構成を見直す

@@ -144,14 +144,15 @@ token を平文 ConfigMap へ流さない設計です。mounted Secret は
 direct read は policy で拒否し、startup 後は `ssh`・`gh`・`control-plane-copilot`
 のような surface だけを使わせます。
 
-## 8. bundled skill を `~/.copilot/skills` へ同期する理由
+## 8. bundled skill / agent を `~/.copilot` 配下へ同期する理由
 
-repo change delivery 系の bundled skill は image へ同梱し、起動時に
-`~/.copilot/skills/` へ同期します。これは `/workspace` が別リポジトリを
-指していても、Control Plane 固有の delivery workflow を常に参照可能にするためです。
+repo change delivery 系の bundled skill と generic implementation agent は
+image へ同梱し、起動時に `~/.copilot/skills/` / `~/.copilot/agents/` へ同期します。
+これは `/workspace` が別リポジトリを指していても、Control Plane 固有の
+delivery workflow と implementation surface を常に参照可能にするためです。
 
-今回の修正では、symlink ではなく copy 同期に寄せました。
-`references/` を含む directory / file mode も明示的に整えています。
+今回の修正では、agent surface も skill と同じ user-owned copy 同期に揃えました。
+`references/` や agent file を含む directory / file mode も明示的に整えています。
 これにより、directory traverse 権が壊れて `Permission denied` になる経路を消しています。
 
 ## 9. image 方針

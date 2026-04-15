@@ -71,6 +71,9 @@ run_regressions_group() {
 
   CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
     "${script_dir}/test-repo-change-delivery-skills.sh"
+
+  CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
+    "${script_dir}/test-bundled-agents.sh"
 }
 
 run_kind_group() {

@@ -281,6 +281,7 @@ COPY --chmod=644 config/screenrc /etc/screenrc
 COPY --chmod=644 config/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
 COPY --chmod=644 config/profile-control-plane-session.sh /etc/profile.d/control-plane-session.sh
 COPY skills/ /usr/local/share/control-plane/skills/
+COPY agents/ /usr/local/share/control-plane/agents/
 COPY --from=skills-builder /opt/control-plane/external-skills/ /usr/local/share/control-plane/skills/
 COPY hooks/ /usr/local/share/control-plane/hooks/
 COPY --from=rust-toolchain /usr/local/cargo/bin /usr/local/cargo/bin
@@ -314,6 +315,8 @@ RUN mkdir -p /usr/local/share/control-plane/hooks/sessionEnd \
     && usermod --shell /usr/local/bin/control-plane-ssh-shell "${CONTROL_PLANE_USER}" \
     && find /usr/local/share/control-plane/skills -type d -exec chmod 755 {} + \
     && find /usr/local/share/control-plane/skills -type f -exec chmod 644 {} + \
+    && find /usr/local/share/control-plane/agents -type d -exec chmod 755 {} + \
+    && find /usr/local/share/control-plane/agents -type f -exec chmod 644 {} + \
     && find /usr/local/share/control-plane/hooks -type d -exec chmod 755 {} + \
     && find /usr/local/share/control-plane/hooks -type f -exec chmod 644 {} + \
     && chmod 755 /usr/local/share/control-plane/hooks/audit/main \
