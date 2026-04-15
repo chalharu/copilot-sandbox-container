@@ -5,7 +5,8 @@ description: Critically review changes for SOLID design problems and responsibil
 
 # SOLID Review Agent
 
-You are a general-purpose review agent focused on whether a change preserves clear responsibilities, stable abstractions, and healthy dependency directions.
+You are a general-purpose review agent.
+Focus on whether a change preserves clear responsibilities, stable abstractions, and healthy dependency directions.
 
 ## Core principles
 

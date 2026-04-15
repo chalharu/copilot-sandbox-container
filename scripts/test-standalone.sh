@@ -232,7 +232,7 @@ mapfile -t bundled_agent_specs < <(control_plane_bundled_agent_specs)
 for spec in "${bundled_agent_specs[@]}"; do
   IFS='|' read -r agent_name agent_file <<<"${spec}"
   standalone_agent_check_script+=$'\n'"agent_file=/home/copilot/.copilot/agents/${agent_file}"
-  standalone_agent_check_script+=$'\n''test -f "$agent_file"'
+  standalone_agent_check_script+=$'\n'"test -f \"\$agent_file\""
   standalone_agent_check_script+=$'\n'"grep -Fqx 'name: ${agent_name}' \"\$agent_file\""
 done
 "${container_bin}" exec "${container_name}" bash -lc "${standalone_agent_check_script}"

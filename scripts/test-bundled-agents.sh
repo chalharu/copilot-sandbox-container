@@ -87,12 +87,12 @@ for spec in "${bundled_agent_specs[@]}"; do
   assert_file_contains "${agent_path}" "name: ${agent_name}"
 
   image_check_script+=$'\n'"agent_file=/usr/local/share/control-plane/agents/${agent_file}"
-  image_check_script+=$'\n''test -r "$agent_file"'
+  image_check_script+=$'\n'"test -r \"\$agent_file\""
   image_check_script+=$'\n'"grep -Fqx \"name: ${agent_name}\" \"\$agent_file\""
 
   startup_check_script+=$'\n'"agent_file=\"\$HOME/.copilot/agents/${agent_file}\""
-  startup_check_script+=$'\n''test ! -L "$agent_file"'
-  startup_check_script+=$'\n''test -r "$agent_file"'
+  startup_check_script+=$'\n'"test ! -L \"\$agent_file\""
+  startup_check_script+=$'\n'"test -r \"\$agent_file\""
   startup_check_script+=$'\n'"grep -Fqx \"name: ${agent_name}\" \"\$agent_file\""
 done
 
