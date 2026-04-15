@@ -389,12 +389,30 @@ publish_block="$(job_block publish-architecture-images)"
   exit 1
 }
 
+integration_amd64_block="$(job_block integration-amd64)"
+[[ -n "${integration_amd64_block}" ]] || {
+  printf 'Expected integration-amd64 job in %s\n' "${workflow_path}" >&2
+  exit 1
+}
+
+integration_arm64_block="$(job_block integration-arm64)"
+[[ -n "${integration_arm64_block}" ]] || {
+  printf 'Expected integration-arm64 job in %s\n' "${workflow_path}" >&2
+  exit 1
+}
+
 assert_block_contains "${publish_block}" "CONTROL_PLANE_COMPONENT_TAG: \${{ steps.image_versions.outputs.control_plane_component_tag }}" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" 'Publish GHCR multi-arch manifests' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" 'Delete old GHCR package versions' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" 'publish_architecture_image downloaded-images/amd64/control-plane-images.tar amd64' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" 'publish_architecture_image downloaded-images/arm64/control-plane-images.tar arm64' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" 'GHCR_MIN_UNTAGGED_VERSIONS_TO_KEEP: "30"' 'publish-architecture-images job block'
+assert_block_contains "${integration_amd64_block}" 'name: control-plane-images-amd64' 'integration-amd64 job block'
+assert_block_contains "${integration_amd64_block}" 'path: control-plane-images.tar' 'integration-amd64 job block'
+assert_block_contains "${integration_amd64_block}" 'compression-level: 1' 'integration-amd64 job block'
+assert_block_contains "${integration_arm64_block}" 'name: control-plane-images-arm64' 'integration-arm64 job block'
+assert_block_contains "${integration_arm64_block}" 'path: control-plane-images.tar' 'integration-arm64 job block'
+assert_block_contains "${integration_arm64_block}" 'compression-level: 1' 'integration-arm64 job block'
 assert_file_not_contains "${workflow_path}" '  publish-manifests:'
 assert_file_not_contains "${workflow_path}" '  cleanup-packages:'
 assert_file_contains "${renovate_config_path}" 'enabledManagers: ["cargo", "dockerfile", "github-actions", "custom.regex"],'
