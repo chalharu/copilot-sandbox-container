@@ -179,7 +179,7 @@ ssh -p 2222 copilot@127.0.0.1
 ./scripts/test-k8s-job.sh
 ```
 
-この smoke では、runtime.env、bundled skill、SSH、`control-plane-run` 周辺の
+この smoke では、runtime.env、bundled skill / agent、SSH、`control-plane-run` 周辺の
 基本経路をまとめて確認できます。
 
 ## 次に読む文書

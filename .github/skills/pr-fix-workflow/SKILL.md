@@ -13,7 +13,7 @@ Use this repo-local skill as the repository-specific companion to the bundled `r
 2. Keep repository-specific validation here:
    - baseline build/test commands and the external lint surface
    - Kubernetes and current-cluster verification paths
-   - skill validation for both repo-local and bundled skills
+   - skill validation for repo-local and bundled skills, plus bundled agent exposure
    - authoritative CI workflow names and job expectations
 3. Let the generic `repo-change-delivery` skill handle the reusable delivery loop:
    - planning and progress tracking
@@ -28,6 +28,7 @@ Use this repo-local skill as the repository-specific companion to the bundled `r
 - Use `./scripts/build-test.sh` for the standard repo-managed validation baseline in this repository.
 - Hosted lint comes from the external `linter-service`.
 - When the change touches `.github/skills/` or `containers/control-plane/skills/`, validate every changed skill.
-- Also validate the control-plane runtime surfaces that expose bundled skills.
+- When the change touches `containers/control-plane/agents/` or bundled agent sync wiring, validate the bundled agent surface.
+- Also validate the control-plane runtime surfaces that expose bundled skills and agents.
 - Use `./scripts/test-k8s-job.sh` or the current-cluster checks when runtime or Kubernetes behavior changes.
 - Read `references/validation-and-delivery.md` for the exact commands and CI surfaces in this repository.

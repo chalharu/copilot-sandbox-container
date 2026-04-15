@@ -221,6 +221,8 @@ command -v k8s-job-logs
 command -v k8s-job-run
 printf '%s\n' "${LANG}" | grep -qi 'utf-8'
 test -f /home/copilot/.copilot/skills/repo-change-delivery/SKILL.md
+test -f /home/copilot/.copilot/agents/implementation-agent.agent.md
+grep -Fqx 'name: implementation-agent' /home/copilot/.copilot/agents/implementation-agent.agent.md
 grep -Fqx '[build]' /home/copilot/.cargo/config.toml
 grep -Fqx 'target-dir = "/var/tmp/control-plane/cargo-target"' /home/copilot/.cargo/config.toml
 EOF

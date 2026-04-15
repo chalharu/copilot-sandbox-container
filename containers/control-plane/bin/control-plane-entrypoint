@@ -27,6 +27,7 @@ rustup_home_dir="${RUSTUP_HOME:-/usr/local/rustup}"
 host_key_dir="${CONTROL_PLANE_HOST_KEY_DIR:-/var/lib/control-plane/ssh-host-keys}"
 runtime_host_key_dir="${CONTROL_PLANE_RUNTIME_HOST_KEY_DIR:-/run/control-plane/ssh-host-keys}"
 bundled_skills_dir="/usr/local/share/control-plane/skills"
+bundled_agents_dir="/usr/local/share/control-plane/agents"
 copilot_skills_dir="${copilot_state_dir}/skills"
 bundled_hooks_dir="/usr/local/share/control-plane/hooks"
 bundled_git_hooks_dir="${bundled_hooks_dir}/git"
@@ -468,26 +469,27 @@ remove_ssh_host_key() {
     "${etc_key_path}.pub"
 }
 
-install_bundled_control_plane_skills() {
-  local source_dir
-  local skill_name
+sync_bundled_control_plane_entries() {
+  local source_root="$1"
+  local target_root="$2"
+  local source_path
+  local entry_name
   local target_dir
   local nullglob_was_set=0
 
-  [[ -d "${bundled_skills_dir}" ]] || return 0
+  [[ -d "${source_root}" ]] || return 0
 
-  mkdir -p "${copilot_skills_dir}"
+  mkdir -p "${target_root}"
   if shopt -q nullglob; then
     nullglob_was_set=1
   fi
   shopt -s nullglob
-  for source_dir in "${bundled_skills_dir}"/*; do
-    [[ -d "${source_dir}" ]] || continue
-    skill_name="$(basename "${source_dir}")"
-    target_dir="${copilot_skills_dir}/${skill_name}"
+  for source_path in "${source_root}"/*; do
+    [[ -e "${source_path}" ]] || continue
+    entry_name="$(basename "${source_path}")"
+    target_dir="${target_root}/${entry_name}"
     rm -rf "${target_dir}"
-    mkdir -p "${target_dir}"
-    cp -R "${source_dir}/." "${target_dir}/"
+    cp -R "${source_path}" "${target_dir}"
     find "${target_dir}" -type d -exec chmod 755 {} +
     find "${target_dir}" -type f -exec chmod 644 {} +
     safe_chown_tree "${control_plane_user}:${control_plane_user}" "${target_dir}"
@@ -495,6 +497,14 @@ install_bundled_control_plane_skills() {
   if [[ "${nullglob_was_set}" -eq 0 ]]; then
     shopt -u nullglob
   fi
+}
+
+install_bundled_control_plane_skills() {
+  sync_bundled_control_plane_entries "${bundled_skills_dir}" "${copilot_skills_dir}"
+}
+
+install_bundled_control_plane_agents() {
+  sync_bundled_control_plane_entries "${bundled_agents_dir}" "${copilot_agents_dir}"
 }
 
 configure_managed_copilot_home() {
@@ -994,6 +1004,7 @@ chmod 600 "${runtime_config_path}"
 configure_managed_copilot_home
 install_bundled_control_plane_hooks
 install_bundled_control_plane_skills
+install_bundled_control_plane_agents
 configure_copilot
 configure_gh_hosts
 configure_git

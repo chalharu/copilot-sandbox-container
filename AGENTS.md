@@ -53,7 +53,7 @@ CONTROL_PLANE_TOOLCHAIN=docker ./scripts/build-test.sh
 <!-- Major architecture changes MUST trigger a rewrite of this section -->
 
 ```text
-/containers/control-plane         Control Plane image, entrypoints, bundled skills, fast-exec helpers
+/containers/control-plane         Control Plane image, entrypoints, bundled skills/agents, fast-exec helpers
 /deploy/kubernetes                Sample deployment manifests
 /scripts                          Supported lint/build/test entry points
 ```

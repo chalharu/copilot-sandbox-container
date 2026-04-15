@@ -4,7 +4,7 @@
 
 - [Local validation baseline](#local-validation-baseline)
 - [Kubernetes and current-cluster verification](#kubernetes-and-current-cluster-verification)
-- [Skill-specific validation](#skill-specific-validation)
+- [Skill and agent validation](#skill-and-agent-validation)
 - [CI surfaces](#ci-surfaces)
 
 ## Local validation baseline
@@ -43,25 +43,28 @@ Use `kubectl get`, `kubectl describe`, and `kubectl logs` for extra inspection
 when needed. `scripts/build-test.sh` already assumes `kind`, `kubectl`, `ssh`,
 and `ssh-keygen` are available.
 
-## Skill-specific validation
+## Skill and agent validation
 
 When the change touches repo-local skills under `.github/skills/`, validate
 every changed skill. Do the same for bundled skills under
-`containers/control-plane/skills/`. Treat that validation as part of the
-delivery loop.
+`containers/control-plane/skills/`. When the change touches
+`containers/control-plane/agents/` or bundled agent sync wiring, validate the
+bundled agent surface as part of the same delivery loop.
 
-Start with the repository regression script:
+Start with the repository regression scripts:
 
 - `./scripts/test-repo-change-delivery-skills.sh`
+- `./scripts/test-bundled-agents.sh`
 
-That script:
+Those scripts:
 
 - validates the repo-local `pr-fix-workflow` skill
 - validates the bundled `repo-change-delivery`, `git-commit`, and `pull-request-workflow` skills
+- validates the bundled implementation agent file and its startup sync into `~/.copilot/agents/`
 - packages each skill through the bundled control-plane image without depending on host Python
-- checks that the control-plane image and runtime tests still expose bundled skills correctly
+- checks that the control-plane image and runtime tests still expose bundled skills and agents correctly
 
-`./scripts/build-test.sh` also includes the same regression script in the standard baseline.
+`./scripts/build-test.sh` also includes the same regression scripts in the standard baseline.
 
 ## CI surfaces
 
