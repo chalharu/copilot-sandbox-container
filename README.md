@@ -70,7 +70,7 @@ sample manifest では Copilot CLI の `bash` tool を session-scoped Execution 
   - `CONTROL_PLANE_BIOME_HOOK_IMAGE` は JS/TS 向け Biome hook を別 Job image へ
     逃がす既定値で、sample は Renovate-managed な official Biome image ref を使う
   - `CONTROL_PLANE_RUST_HOOK_IMAGE` は compile-heavy な Rust hook を別
-    toolchain image へ逃がす既定値で、sample は Renovate-managed な official
+    toolchain image へ逃がす既定値。sample は Renovate-managed な official
     Rust image ref を使う
 
 書き換える値の詳細は `deploy/kubernetes/README.md` と

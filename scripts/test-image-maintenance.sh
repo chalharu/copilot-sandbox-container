@@ -458,7 +458,7 @@ assert_line_order "${helm_values_path}" '# renovate: datasource=docker depName=d
 assert_file_contains "${k8s_env_config_path}" '# renovate: datasource=docker depName=docker.io/library/rust versioning=docker'
 assert_line_order "${k8s_env_config_path}" '# renovate: datasource=docker depName=docker.io/library/rust versioning=docker' 'CONTROL_PLANE_RUST_HOOK_IMAGE:'
 assert_file_contains "${kind_test_path}" '# renovate: datasource=docker depName=docker.io/library/rust versioning=docker'
-assert_line_order "${kind_test_path}" '# renovate: datasource=docker depName=docker.io/library/rust versioning=docker' 'rust_hook_image="${CONTROL_PLANE_TEST_RUST_HOOK_IMAGE:-'
+assert_line_order "${kind_test_path}" '# renovate: datasource=docker depName=docker.io/library/rust versioning=docker' "rust_hook_image=\"\${CONTROL_PLANE_TEST_RUST_HOOK_IMAGE:-"
 assert_file_not_contains "${workflow_path}" '- sccache'
 
 printf '%s\n' 'image-maintenance-test: verifying rclone checksum source follows the Renovate-managed version' >&2
