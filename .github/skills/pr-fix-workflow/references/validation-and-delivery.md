@@ -49,9 +49,10 @@ When the change touches repo-local skills under `.github/skills/`, validate
 every changed skill. Do the same for bundled skills under
 `containers/control-plane/skills/`.
 
-When the change touches `containers/control-plane/agents/` or bundled agent
-sync wiring, validate the bundled agent surface as part of the same delivery
-loop.
+When the change touches `containers/control-plane/agents/`, validate the
+bundled agent surface.
+
+Do the same when bundled agent sync wiring changes.
 
 Start with the repository regression scripts:
 
