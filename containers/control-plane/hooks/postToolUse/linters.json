@@ -35,6 +35,9 @@
       "args": [
         "check",
         "--write"
+      ],
+      "runtimeFailureExitCodes": [
+        70
       ]
     },
     {
@@ -52,6 +55,9 @@
       "command": "control-plane-biome",
       "args": [
         "check"
+      ],
+      "runtimeFailureExitCodes": [
+        70
       ]
     },
     {
@@ -217,7 +223,8 @@
           "tools": [
             "biome-check-write",
             "biome-check-write-npx"
-          ]
+          ],
+          "runtimeFailureLabel": "Biome hook runtime failed:"
         },
         {
           "tools": [
@@ -225,13 +232,15 @@
             "eslint-fix",
             "eslint-fix-npx",
             "oxlint-fix-npx"
-          ]
+          ],
+          "runtimeFailureLabel": "JavaScript/TypeScript hook runtime failed:"
         },
         {
           "tools": [
             "biome-check-write",
             "biome-check-write-npx"
-          ]
+          ],
+          "runtimeFailureLabel": "Biome hook runtime failed:"
         },
         {
           "tools": [
@@ -239,7 +248,8 @@
             "biome-check-npx"
           ],
           "reportFailure": true,
-          "failureLabel": "Biome reported unresolved issues:"
+          "failureLabel": "Biome reported unresolved issues:",
+          "runtimeFailureLabel": "Biome hook runtime failed:"
         },
         {
           "tools": [
@@ -249,7 +259,8 @@
             "oxlint-check-npx"
           ],
           "reportFailure": true,
-          "failureLabel": "JavaScript/TypeScript linter reported unresolved issues:"
+          "failureLabel": "JavaScript/TypeScript linter reported unresolved issues:",
+          "runtimeFailureLabel": "JavaScript/TypeScript hook runtime failed:"
         }
       ]
     },
