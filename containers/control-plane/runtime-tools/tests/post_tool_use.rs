@@ -130,6 +130,7 @@ struct HookEnv {
 struct StubOptions {
     markdownlint: bool,
     biome: bool,
+    biome_runtime_failure_mode: Option<&'static str>,
     oxlint: bool,
     eslint: bool,
     ruff: bool,
@@ -143,6 +144,7 @@ impl Default for StubOptions {
         Self {
             markdownlint: true,
             biome: true,
+            biome_runtime_failure_mode: None,
             oxlint: true,
             eslint: false,
             ruff: false,
@@ -191,7 +193,25 @@ fn create_tool_stubs(repo: &Path, options: StubOptions) -> HookEnv {
     if options.biome {
         write_executable(
             &bin_dir.join("control-plane-biome"),
-            "#!/bin/sh\nprintf \"control-plane-biome %s\\n\" \"$*\" >> \"$HOOK_LOG\"\nfile=\"$2\"\nif [ \"$2\" = \"--write\" ]; then\n  file=\"$3\"\n  exit 0\nfi\nprintf \"biome unresolved in %s\\n\" \"$file\" >&2\nexit 1\n",
+            r#"#!/bin/sh
+printf "control-plane-biome %s\n" "$*" >> "$HOOK_LOG"
+mode="${BIOME_RUNTIME_FAILURE_MODE:-}"
+if [ "$1" = "check" ] && [ "${2:-}" = "--write" ]; then
+  file="$3"
+  if [ "$mode" = "write" ] || [ "$mode" = "all" ]; then
+    printf "biome runtime failed in %s\n" "$file" >&2
+    exit 70
+  fi
+  exit 0
+fi
+file="${2:-}"
+if [ "$mode" = "check" ] || [ "$mode" = "all" ]; then
+  printf "biome runtime failed in %s\n" "$file" >&2
+  exit 70
+fi
+printf "biome unresolved in %s\n" "$file" >&2
+exit 1
+"#,
         );
     }
     if options.oxlint {
@@ -235,7 +255,7 @@ fn create_tool_stubs(repo: &Path, options: StubOptions) -> HookEnv {
         );
     }
 
-    let env = BTreeMap::from([
+    let mut env = BTreeMap::from([
         (
             "CONTROL_PLANE_HOOK_TMP_ROOT".to_string(),
             repo.join(".hook-cache").display().to_string(),
@@ -250,6 +270,9 @@ fn create_tool_stubs(repo: &Path, options: StubOptions) -> HookEnv {
         ),
         ("HOOK_LOG".to_string(), log_file.display().to_string()),
     ]);
+    if let Some(mode) = options.biome_runtime_failure_mode {
+        env.insert("BIOME_RUNTIME_FAILURE_MODE".to_string(), mode.to_string());
+    }
     HookEnv { env, log_file }
 }
 
@@ -368,6 +391,10 @@ fn linters_config_defines_language_pipelines() {
         .iter()
         .find(|tool| tool["id"] == "biome-check-write")
         .unwrap();
+    let biome_check = tools
+        .iter()
+        .find(|tool| tool["id"] == "biome-check")
+        .unwrap();
     let control_plane_rust_fmt = tools
         .iter()
         .find(|tool| tool["id"] == "control-plane-rust-fmt")
@@ -399,11 +426,21 @@ fn linters_config_defines_language_pipelines() {
 
     assert_eq!(markdownlint_fix_npx["command"], "npx");
     assert_eq!(biome_check_write["command"], "control-plane-biome");
+    assert_eq!(biome_check_write["runtimeFailureExitCodes"][0], 70);
+    assert_eq!(biome_check["runtimeFailureExitCodes"][0], 70);
     assert_eq!(control_plane_rust_fmt["command"], "bash");
     assert_eq!(control_plane_rust_fmt["appendFiles"], true);
     assert_eq!(yamllint_check["command"], "yamllint");
     assert_eq!(markdown_pipeline["matcher"][0], "\\.(?:md|markdown)$");
+    assert_eq!(
+        scripts_pipeline["steps"][0]["runtimeFailureLabel"],
+        "Biome hook runtime failed:"
+    );
     assert_eq!(scripts_pipeline["steps"][1]["tools"][0], "oxlint-fix");
+    assert_eq!(
+        scripts_pipeline["steps"][4]["runtimeFailureLabel"],
+        "JavaScript/TypeScript hook runtime failed:"
+    );
     assert_eq!(yaml_pipeline["steps"][0]["tools"][0], "yamllint-check");
     assert_eq!(
         rust_pipeline["steps"][0]["tools"][0],
@@ -470,6 +507,41 @@ fn hook_falls_back_from_oxlint_to_eslint() {
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(stderr.contains("JavaScript/TypeScript linter reported unresolved issues:"));
     assert!(stderr.contains("eslint unresolved in index.ts"));
+}
+
+#[test]
+fn hook_stops_after_biome_runtime_failure() {
+    let repo = setup_repo("post-tool-use-biome-runtime-");
+    seed_repo(repo.path());
+    make_files_dirty(repo.path());
+    let hook_env = create_tool_stubs(
+        repo.path(),
+        StubOptions {
+            biome_runtime_failure_mode: Some("check"),
+            eslint: true,
+            ..StubOptions::default()
+        },
+    );
+    let result = run_hook(repo.path(), &hook_env, "success");
+    let hook_log = fs::read_to_string(&hook_env.log_file).unwrap();
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert_eq!(result.status.code(), Some(70));
+    assert_eq!(
+        hook_log
+            .matches("control-plane-biome check --write index.ts")
+            .count(),
+        2
+    );
+    assert!(hook_log.contains("control-plane-biome check index.ts"));
+    assert!(hook_log.contains("oxlint --fix index.ts"));
+    assert!(!hook_log.contains("oxlint index.ts"));
+    assert!(!hook_log.contains("eslint --fix index.ts"));
+    assert!(!hook_log.contains("eslint index.ts"));
+    assert!(stderr.contains("Biome hook runtime failed:"));
+    assert!(stderr.contains("biome runtime failed in index.ts"));
+    assert!(!stderr.contains("Biome reported unresolved issues:"));
+    assert!(!stderr.contains("JavaScript/TypeScript linter reported unresolved issues:"));
 }
 
 #[test]

@@ -16,6 +16,7 @@ pub struct Tool {
     pub command: String,
     pub args: Vec<String>,
     pub append_files: bool,
+    pub runtime_failure_exit_codes: Vec<i32>,
 }
 
 #[derive(Debug, Clone)]
@@ -23,6 +24,7 @@ pub struct Step {
     pub tools: Vec<String>,
     pub report_failure: bool,
     pub failure_label: Option<String>,
+    pub runtime_failure_label: Option<String>,
 }
 
 #[derive(Debug)]
@@ -49,6 +51,9 @@ struct RawTool {
     #[serde(default = "default_append_files")]
     #[serde(rename = "appendFiles")]
     append_files: bool,
+    #[serde(default)]
+    #[serde(rename = "runtimeFailureExitCodes")]
+    runtime_failure_exit_codes: Vec<i32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -60,6 +65,9 @@ struct RawStep {
     #[serde(default)]
     #[serde(rename = "failureLabel")]
     failure_label: Option<String>,
+    #[serde(default)]
+    #[serde(rename = "runtimeFailureLabel")]
+    runtime_failure_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -140,6 +148,7 @@ fn normalize_tools(raw_tools: Vec<RawTool>) -> Result<HashMap<String, Tool>, Str
     let mut tools = HashMap::new();
     for tool in raw_tools {
         validate_id(&tool.id, "tool")?;
+        validate_runtime_failure_exit_codes(&tool)?;
         if tools.contains_key(&tool.id) {
             return Err(format!("Duplicate tool id in config: {}", tool.id));
         }
@@ -149,6 +158,7 @@ fn normalize_tools(raw_tools: Vec<RawTool>) -> Result<HashMap<String, Tool>, Str
                 command: tool.command,
                 args: tool.args,
                 append_files: tool.append_files,
+                runtime_failure_exit_codes: tool.runtime_failure_exit_codes,
             },
         );
     }
@@ -172,11 +182,27 @@ fn normalize_pipelines(
                     tools: step.tools,
                     report_failure: step.report_failure,
                     failure_label: step.failure_label,
+                    runtime_failure_label: step.runtime_failure_label,
                 })
                 .collect(),
         });
     }
     Ok(pipelines)
+}
+
+fn validate_runtime_failure_exit_codes(tool: &RawTool) -> Result<(), String> {
+    if let Some(code) = tool
+        .runtime_failure_exit_codes
+        .iter()
+        .copied()
+        .find(|code| *code <= 0)
+    {
+        return Err(format!(
+            "Tool \"{}\" runtimeFailureExitCodes must contain only positive integers: {}",
+            tool.id, code
+        ));
+    }
+    Ok(())
 }
 
 fn validate_pipeline(pipeline: &RawPipeline, tools: &HashMap<String, Tool>) -> Result<(), String> {
@@ -252,6 +278,7 @@ mod tests {
             command: command.to_string(),
             args: args.iter().map(|value| value.to_string()).collect(),
             append_files,
+            runtime_failure_exit_codes: Vec::new(),
         }
     }
 

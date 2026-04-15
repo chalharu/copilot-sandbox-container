@@ -10,6 +10,9 @@ use kube::{Api, Client};
 
 use crate::error::{ToolError, ToolResult};
 
+const JOB_RUNTIME_FAILURE_EXIT_CODE: i32 = 70;
+const EXECUTION_CONTAINER_NAME: &str = "execution";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum JobWaitStatus {
     Completed,
@@ -40,7 +43,7 @@ pub fn run_wait(args: &[String]) -> ToolResult<i32> {
             let client = kube_client().await?;
             wait_for_job(client, namespace, job_name, timeout).await
         })
-        .map_err(|message| ToolError::new(1, command_name, message))?;
+        .map_err(|message| ToolError::new(JOB_RUNTIME_FAILURE_EXIT_CODE, command_name, message))?;
         match status {
             JobWaitStatus::Completed => Ok(0),
             JobWaitStatus::Failed => {
@@ -66,7 +69,7 @@ pub fn run_pod(args: &[String]) -> ToolResult<i32> {
             let client = kube_client().await?;
             resolve_job_pod(client, namespace, job_name).await
         })
-        .map_err(|message| ToolError::new(1, command_name, message))?;
+        .map_err(|message| ToolError::new(JOB_RUNTIME_FAILURE_EXIT_CODE, command_name, message))?;
         println!("{pod_name}");
         Ok(0)
     })
@@ -80,7 +83,7 @@ pub fn run_logs(args: &[String]) -> ToolResult<i32> {
             let client = kube_client().await?;
             stream_job_logs(client, namespace, job_name).await
         })
-        .map_err(|message| ToolError::new(1, command_name, message))
+        .map_err(|message| ToolError::new(JOB_RUNTIME_FAILURE_EXIT_CODE, command_name, message))
     })
 }
 
@@ -389,8 +392,20 @@ async fn stream_job_logs(
 ) -> Result<i32, String> {
     let pod_name = resolve_job_pod(client.clone(), namespace.clone(), job_name).await?;
     let pods: Api<Pod> = Api::namespaced(client, &namespace);
+    let pod = pods
+        .get(&pod_name)
+        .await
+        .map_err(|error| format!("failed to read pod {pod_name}: {error}"))?;
+    let container_name = preferred_log_container_name(&pod)
+        .map_err(|message| format!("failed to resolve log container for {pod_name}: {message}"))?;
     let mut logs = pods
-        .log_stream(&pod_name, &LogParams::default())
+        .log_stream(
+            &pod_name,
+            &LogParams {
+                container: Some(container_name),
+                ..Default::default()
+            },
+        )
         .await
         .map_err(|error| format!("failed to open log stream for {pod_name}: {error}"))?;
     let mut buffer = Vec::new();
@@ -413,14 +428,44 @@ async fn stream_job_logs(
     Ok(0)
 }
 
+fn preferred_log_container_name(pod: &Pod) -> Result<String, String> {
+    let pod_name = pod.metadata.name.as_deref().unwrap_or("<unknown>");
+    let spec = pod
+        .spec
+        .as_ref()
+        .ok_or_else(|| format!("pod {pod_name} is missing spec"))?;
+
+    if let Some(container) = spec
+        .containers
+        .iter()
+        .find(|container| container.name == EXECUTION_CONTAINER_NAME)
+    {
+        return Ok(container.name.clone());
+    }
+
+    match spec.containers.as_slice() {
+        [container] => Ok(container.name.clone()),
+        [] => Err(format!("pod {pod_name} has no regular containers")),
+        containers => Err(format!(
+            "pod {pod_name} has multiple regular containers and no \"{EXECUTION_CONTAINER_NAME}\" container: [{}]",
+            containers
+                .iter()
+                .map(|container| container.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use k8s_openapi::api::batch::v1::{Job, JobCondition, JobStatus};
-    use k8s_openapi::api::core::v1::Pod;
+    use k8s_openapi::api::core::v1::{Container, Pod, PodSpec};
     use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, OwnerReference};
 
     use super::{
         JobWaitStatus, evaluate_job_wait_status, first_controlled_pod_name, parse_job_command_args,
+        preferred_log_container_name,
     };
 
     #[test]
@@ -521,5 +566,84 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.message, "invalid Kubernetes namespace: default.ops");
+    }
+
+    #[test]
+    fn prefers_execution_container_logs() {
+        let container_name = preferred_log_container_name(&Pod {
+            metadata: ObjectMeta {
+                name: Some("demo-pod".to_string()),
+                ..Default::default()
+            },
+            spec: Some(PodSpec {
+                containers: vec![
+                    Container {
+                        name: "sidecar".to_string(),
+                        ..Default::default()
+                    },
+                    Container {
+                        name: "execution".to_string(),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(container_name, "execution");
+    }
+
+    #[test]
+    fn falls_back_to_only_regular_container_logs() {
+        let container_name = preferred_log_container_name(&Pod {
+            metadata: ObjectMeta {
+                name: Some("demo-pod".to_string()),
+                ..Default::default()
+            },
+            spec: Some(PodSpec {
+                containers: vec![Container {
+                    name: "main".to_string(),
+                    ..Default::default()
+                }],
+                init_containers: Some(vec![Container {
+                    name: "setup".to_string(),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(container_name, "main");
+    }
+
+    #[test]
+    fn rejects_multi_container_logs_without_execution() {
+        let error = preferred_log_container_name(&Pod {
+            metadata: ObjectMeta {
+                name: Some("demo-pod".to_string()),
+                ..Default::default()
+            },
+            spec: Some(PodSpec {
+                containers: vec![
+                    Container {
+                        name: "main".to_string(),
+                        ..Default::default()
+                    },
+                    Container {
+                        name: "sidecar".to_string(),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "pod demo-pod has multiple regular containers and no \"execution\" container: [main, sidecar]"
+        );
     }
 }
