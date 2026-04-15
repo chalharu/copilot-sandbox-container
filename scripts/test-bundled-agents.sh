@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
-agent_file="${repo_root}/containers/control-plane/agents/implementation-agent.agent.md"
+agents_dir="${repo_root}/containers/control-plane/agents"
 dockerfile_path="${repo_root}/containers/control-plane/Dockerfile"
 entrypoint_path="${repo_root}/containers/control-plane/bin/control-plane-entrypoint"
 control_plane_image="${CONTROL_PLANE_IMAGE_TAG:-localhost/control-plane:test}"
@@ -23,6 +23,8 @@ startup_caps=(
 
 # shellcheck source=scripts/lib-container-toolchain.sh
 source "${script_dir}/lib-container-toolchain.sh"
+# shellcheck source=scripts/lib-bundled-agents.sh
+source "${script_dir}/lib-bundled-agents.sh"
 
 cleanup() {
   if [[ -n "${container_bin}" ]]; then
@@ -65,23 +67,47 @@ container_bin="$(container_runtime_for_toolchain "${toolchain}")"
 require_command "${container_bin}"
 build_image_for_toolchain "${toolchain}" "${control_plane_image}" containers/control-plane
 
+mapfile -t bundled_agent_specs < <(control_plane_bundled_agent_specs)
+image_check_script='set -euo pipefail'
+startup_check_script=''
+
 printf '%s\n' 'bundled-agents-test: checking agent wiring' >&2
-assert_file_present "${agent_file}"
 assert_file_present "${dockerfile_path}"
 assert_file_present "${entrypoint_path}"
-assert_file_contains "${agent_file}" 'name: implementation-agent'
-assert_file_contains "${agent_file}" 'KISS, DRY, SOLID, security, and architecture-first reasoning'
 assert_file_contains "${dockerfile_path}" 'COPY agents/ /usr/local/share/control-plane/agents/'
 assert_file_contains "${entrypoint_path}" 'bundled_agents_dir="/usr/local/share/control-plane/agents"'
 assert_file_contains "${entrypoint_path}" 'sync_bundled_control_plane_entries'
 assert_file_contains "${entrypoint_path}" 'install_bundled_control_plane_agents'
 
+for spec in "${bundled_agent_specs[@]}"; do
+  IFS='|' read -r agent_name agent_file <<<"${spec}"
+  agent_path="${agents_dir}/${agent_file}"
+
+  assert_file_present "${agent_path}"
+  assert_file_contains "${agent_path}" "name: ${agent_name}"
+
+  image_check_script+=$'\n'"agent_file=/usr/local/share/control-plane/agents/${agent_file}"
+  image_check_script+=$'\n''test -r "$agent_file"'
+  image_check_script+=$'\n'"grep -Fqx \"name: ${agent_name}\" \"\$agent_file\""
+
+  startup_check_script+=$'\n'"agent_file=\"\$HOME/.copilot/agents/${agent_file}\""
+  startup_check_script+=$'\n''test ! -L "$agent_file"'
+  startup_check_script+=$'\n''test -r "$agent_file"'
+  startup_check_script+=$'\n'"grep -Fqx \"name: ${agent_name}\" \"\$agent_file\""
+done
+
+assert_file_contains "${agents_dir}/implementation-agent.agent.md" 'KISS, DRY, SOLID, security, and architecture-first reasoning'
+assert_file_contains "${agents_dir}/kiss-dry-review-agent.agent.md" 'KISS and DRY issues'
+assert_file_contains "${agents_dir}/solid-review-agent.agent.md" 'SOLID design issues'
+assert_file_contains "${agents_dir}/security-review-agent.agent.md" 'security weaknesses, trust boundary issues'
+assert_file_contains "${agents_dir}/architecture-review-agent.agent.md" 'architecture drift, layering issues'
+assert_file_contains "${agents_dir}/review-coordinator-agent.agent.md" 'high-performance model such as claude-opus-4.6'
+assert_file_contains "${agents_dir}/review-coordinator-agent.agent.md" 'batches of at most 4 concurrent review sub-agents'
+assert_file_contains "${agents_dir}/review-coordinator-agent.agent.md" 'Aggregate the results into one critical review'
+
 printf '%s\n' 'bundled-agents-test: verifying bundled agents in image' >&2
 "${container_bin}" run --rm \
-  --entrypoint bash "${control_plane_image}" -lc "set -euo pipefail
-agent_file=/usr/local/share/control-plane/agents/implementation-agent.agent.md
-test -r \"\$agent_file\"
-grep -Fqx \"name: implementation-agent\" \"\$agent_file\""
+  --entrypoint bash "${control_plane_image}" -lc "${image_check_script}"
 
 printf '%s\n' 'bundled-agents-test: verifying startup sync keeps bundled agents readable' >&2
 mkdir -p \
@@ -105,11 +131,7 @@ agent_output="$("${container_bin}" run --rm \
   "${control_plane_image}" \
   bash -lc "set -euo pipefail
 test -L /var/lib/control-plane/managed-runtime/copilot-home/agents
-su -s /bin/bash copilot -c 'set -euo pipefail
-agent_file=\"\$HOME/.copilot/agents/implementation-agent.agent.md\"
-test ! -L \"\$agent_file\"
-test -r \"\$agent_file\"
-grep -Fqx \"name: implementation-agent\" \"\$agent_file\"
+su -s /bin/bash copilot -c 'set -euo pipefail${startup_check_script}
 printf \"%s\n\" bundled-agents-ok'" 2>&1)"
 agent_status=$?
 set -e

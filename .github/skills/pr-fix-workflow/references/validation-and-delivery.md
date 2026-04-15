@@ -63,7 +63,7 @@ Those scripts:
 
 - validates the repo-local `pr-fix-workflow` skill
 - validates the bundled `repo-change-delivery`, `git-commit`, and `pull-request-workflow` skills
-- validates the bundled implementation agent file and its startup sync into `~/.copilot/agents/`
+- validates the bundled implementation and review agent files plus their startup sync into `~/.copilot/agents/`
 - packages each skill through the bundled control-plane image without depending on host Python
 - checks that the control-plane image and runtime tests still expose bundled skills and agents correctly
 

@@ -3,6 +3,8 @@ set -euo pipefail
 
 control_plane_image="${1:?usage: scripts/test-standalone.sh <control-plane-image>}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib-bundled-agents.sh
+source "${script_dir}/lib-bundled-agents.sh"
 ssh_port="${CONTROL_PLANE_TEST_SSH_PORT:-2222}"
 container_bin="${CONTROL_PLANE_CONTAINER_BIN:-docker}"
 container_name="control-plane-standalone-test"
@@ -221,11 +223,19 @@ command -v k8s-job-logs
 command -v k8s-job-run
 printf '%s\n' "${LANG}" | grep -qi 'utf-8'
 test -f /home/copilot/.copilot/skills/repo-change-delivery/SKILL.md
-test -f /home/copilot/.copilot/agents/implementation-agent.agent.md
-grep -Fqx 'name: implementation-agent' /home/copilot/.copilot/agents/implementation-agent.agent.md
 grep -Fqx '[build]' /home/copilot/.cargo/config.toml
 grep -Fqx 'target-dir = "/var/tmp/control-plane/cargo-target"' /home/copilot/.cargo/config.toml
 EOF
+
+standalone_agent_check_script='set -euo pipefail'
+mapfile -t bundled_agent_specs < <(control_plane_bundled_agent_specs)
+for spec in "${bundled_agent_specs[@]}"; do
+  IFS='|' read -r agent_name agent_file <<<"${spec}"
+  standalone_agent_check_script+=$'\n'"agent_file=/home/copilot/.copilot/agents/${agent_file}"
+  standalone_agent_check_script+=$'\n''test -f "$agent_file"'
+  standalone_agent_check_script+=$'\n'"grep -Fqx 'name: ${agent_name}' \"\$agent_file\""
+done
+"${container_bin}" exec "${container_name}" bash -lc "${standalone_agent_check_script}"
 
 ssh_bash <<'EOF'
 set -euo pipefail

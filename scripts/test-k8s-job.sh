@@ -4,6 +4,8 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 control_plane_root="${repo_root}/containers/control-plane"
+# shellcheck source=scripts/lib-bundled-agents.sh
+source "${script_dir}/lib-bundled-agents.sh"
 current_namespace_file="/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 control_plane_namespace="${CONTROL_PLANE_K8S_NAMESPACE:-}"
 job_namespace="${2:-${CONTROL_PLANE_JOB_NAMESPACE:-${control_plane_namespace}}}"
@@ -104,6 +106,17 @@ configmap_name="${job_name}-files"
 configmap_name="${configmap_name:0:63}"
 configmap_name="${configmap_name%-}"
 
+mapfile -t bundled_agent_specs < <(control_plane_bundled_agent_specs)
+bundled_agent_configmap_args=()
+bundled_agent_install_script=''
+bundled_agent_read_script=''
+for spec in "${bundled_agent_specs[@]}"; do
+  IFS='|' read -r agent_name agent_file <<<"${spec}"
+  bundled_agent_configmap_args+=(--from-file="${agent_file}=${control_plane_root}/agents/${agent_file}")
+  bundled_agent_install_script+=$'                install -m 0644 /var/run/control-plane-test/'"${agent_file}"$' /usr/local/share/control-plane/agents/'"${agent_file}"$'\n'
+  bundled_agent_read_script+="agent_file=\"\$HOME/.copilot/agents/${agent_file}\"; test ! -L \"\$agent_file\"; test -r \"\$agent_file\"; grep -Fqx \"name: ${agent_name}\" \"\$agent_file\"; "
+done
+
 ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}" >/dev/null
 
 trap cleanup EXIT
@@ -121,7 +134,7 @@ kubectl create configmap "${configmap_name}" \
   --from-file=job-ssh-public-key="${ssh_key}.pub" \
   --from-file=profile-control-plane-env.sh="${control_plane_root}/config/profile-control-plane-env.sh" \
   --from-file=profile-control-plane-session.sh="${control_plane_root}/config/profile-control-plane-session.sh" \
-  --from-file=implementation-agent.agent.md="${control_plane_root}/agents/implementation-agent.agent.md" \
+  "${bundled_agent_configmap_args[@]}" \
   --from-file=repo-change-delivery-skill.md="${control_plane_root}/skills/repo-change-delivery/SKILL.md" \
   --from-file=git-commit-skill.md="${control_plane_root}/skills/git-commit/SKILL.md" \
   --from-file=pull-request-workflow-skill.md="${control_plane_root}/skills/pull-request-workflow/SKILL.md"
@@ -166,14 +179,13 @@ ${service_account_yaml}
                 install -m 0755 /var/run/control-plane-test/control-plane-ssh-shell /usr/local/bin/control-plane-ssh-shell
                  install -m 0644 /var/run/control-plane-test/profile-control-plane-env.sh /etc/profile.d/control-plane-env.sh
                  install -m 0644 /var/run/control-plane-test/profile-control-plane-session.sh /etc/profile.d/control-plane-session.sh
-                install -d -m 0755 /usr/local/share/control-plane/skills/repo-change-delivery
-                install -d -m 0755 /usr/local/share/control-plane/skills/git-commit
-                install -d -m 0755 /usr/local/share/control-plane/skills/pull-request-workflow
-                install -d -m 0755 /usr/local/share/control-plane/agents
-                install -m 0644 /var/run/control-plane-test/implementation-agent.agent.md /usr/local/share/control-plane/agents/implementation-agent.agent.md
-                 install -m 0644 /var/run/control-plane-test/repo-change-delivery-skill.md /usr/local/share/control-plane/skills/repo-change-delivery/SKILL.md
-                 install -m 0644 /var/run/control-plane-test/git-commit-skill.md /usr/local/share/control-plane/skills/git-commit/SKILL.md
-                 install -m 0644 /var/run/control-plane-test/pull-request-workflow-skill.md /usr/local/share/control-plane/skills/pull-request-workflow/SKILL.md
+                 install -d -m 0755 /usr/local/share/control-plane/skills/repo-change-delivery
+                 install -d -m 0755 /usr/local/share/control-plane/skills/git-commit
+                 install -d -m 0755 /usr/local/share/control-plane/skills/pull-request-workflow
+                 install -d -m 0755 /usr/local/share/control-plane/agents
+${bundled_agent_install_script}                 install -m 0644 /var/run/control-plane-test/repo-change-delivery-skill.md /usr/local/share/control-plane/skills/repo-change-delivery/SKILL.md
+                  install -m 0644 /var/run/control-plane-test/git-commit-skill.md /usr/local/share/control-plane/skills/git-commit/SKILL.md
+                  install -m 0644 /var/run/control-plane-test/pull-request-workflow-skill.md /usr/local/share/control-plane/skills/pull-request-workflow/SKILL.md
                  ln -sf /usr/local/bin/control-plane-screen /usr/local/bin/screen
                  usermod --shell /usr/local/bin/control-plane-ssh-shell copilot
                 exec /usr/local/bin/control-plane-entrypoint /bin/bash -lc '
@@ -188,10 +200,10 @@ ${service_account_yaml}
                  [[ "\${runtime_line}" == *"CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target"* ]]
                  [[ "\${runtime_line}" == *"RUSTUP_HOME=/usr/local/rustup"* ]]
 
-                  su -s /bin/bash copilot -c '"'"'set -euo pipefail; doc_coauthor_skill_root="\$HOME/.copilot/skills/doc-coauthoring"; delivery_skill_root="\$HOME/.copilot/skills/repo-change-delivery"; commit_skill_root="\$HOME/.copilot/skills/git-commit"; pull_request_skill_root="\$HOME/.copilot/skills/pull-request-workflow"; skill_creator_skill_root="\$HOME/.copilot/skills/skill-creator"; test ! -L "\$doc_coauthor_skill_root"; test -r "\$doc_coauthor_skill_root/SKILL.md"; grep -Fqx "name: doc-coauthoring" "\$doc_coauthor_skill_root/SKILL.md"; test ! -L "\$delivery_skill_root"; test -r "\$delivery_skill_root/SKILL.md"; grep -Fqx "name: repo-change-delivery" "\$delivery_skill_root/SKILL.md"; test ! -L "\$commit_skill_root"; test -r "\$commit_skill_root/SKILL.md"; grep -Fqx "name: git-commit" "\$commit_skill_root/SKILL.md"; test ! -L "\$pull_request_skill_root"; test -r "\$pull_request_skill_root/SKILL.md"; grep -Fqx "name: pull-request-workflow" "\$pull_request_skill_root/SKILL.md"; test ! -L "\$skill_creator_skill_root"; test -r "\$skill_creator_skill_root/SKILL.md"; test -r "\$skill_creator_skill_root/LICENSE.txt"; grep -Fqx "name: skill-creator" "\$skill_creator_skill_root/SKILL.md"'"'"'
-                  printf "%s\n" "job-check: skill-read=ok"
-                  su -s /bin/bash copilot -c '"'"'set -euo pipefail; implementation_agent_file="\$HOME/.copilot/agents/implementation-agent.agent.md"; test ! -L "\$implementation_agent_file"; test -r "\$implementation_agent_file"; grep -Fqx "name: implementation-agent" "\$implementation_agent_file"'"'"'
-                  printf "%s\n" "job-check: agent-read=ok"
+                   su -s /bin/bash copilot -c '"'"'set -euo pipefail; doc_coauthor_skill_root="\$HOME/.copilot/skills/doc-coauthoring"; delivery_skill_root="\$HOME/.copilot/skills/repo-change-delivery"; commit_skill_root="\$HOME/.copilot/skills/git-commit"; pull_request_skill_root="\$HOME/.copilot/skills/pull-request-workflow"; skill_creator_skill_root="\$HOME/.copilot/skills/skill-creator"; test ! -L "\$doc_coauthor_skill_root"; test -r "\$doc_coauthor_skill_root/SKILL.md"; grep -Fqx "name: doc-coauthoring" "\$doc_coauthor_skill_root/SKILL.md"; test ! -L "\$delivery_skill_root"; test -r "\$delivery_skill_root/SKILL.md"; grep -Fqx "name: repo-change-delivery" "\$delivery_skill_root/SKILL.md"; test ! -L "\$commit_skill_root"; test -r "\$commit_skill_root/SKILL.md"; grep -Fqx "name: git-commit" "\$commit_skill_root/SKILL.md"; test ! -L "\$pull_request_skill_root"; test -r "\$pull_request_skill_root/SKILL.md"; grep -Fqx "name: pull-request-workflow" "\$pull_request_skill_root/SKILL.md"; test ! -L "\$skill_creator_skill_root"; test -r "\$skill_creator_skill_root/SKILL.md"; test -r "\$skill_creator_skill_root/LICENSE.txt"; grep -Fqx "name: skill-creator" "\$skill_creator_skill_root/SKILL.md"'"'"'
+                   printf "%s\n" "job-check: skill-read=ok"
+                   su -s /bin/bash copilot -c '"'"'set -euo pipefail; ${bundled_agent_read_script}'"'"'
+                   printf "%s\n" "job-check: agent-read=ok"
 
                  lang_report="\$(bash -lc '"'"'printf "%s" "\${LANG:-}"'"'"')"
                  printf "job-check: lang=%s\n" "\${lang_report}"
