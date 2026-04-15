@@ -17,7 +17,8 @@ Execute repository changes through a full delivery loop instead of stopping at a
 
 2. Delegate with sub-agents when they help.
    - Use exploration agents to map files, prior art, and constraints.
-   - Use implementation or task agents for command-heavy edits and validation loops.
+   - Choose an appropriate implementation sub-agent from the available agents.
+   - If one is available and relevant, prefer an implementation-focused agent and use task agents for command-heavy edits and validation loops.
    - Use a critical review agent after local validation.
    - Ask agents to do the work, not only to advise, and batch related questions into one prompt.
 
@@ -33,7 +34,7 @@ Execute repository changes through a full delivery loop instead of stopping at a
    - When repo-local supplemental skills exist, read them before choosing exact commands.
 
 5. Treat review as a blocking loop.
-   - Run a critical review after local validation.
+   - Run a critical review after local validation, using `review-coordinator-agent` when it is available.
    - Fix every actionable issue, including small but real ones.
    - After fixes, rerun the affected validation and fall back to the full baseline when the blast radius is unclear.
 
