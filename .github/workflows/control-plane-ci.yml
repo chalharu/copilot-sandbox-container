@@ -50,7 +50,7 @@ jobs:
           name: control-plane-images-amd64
           path: control-plane-images.tar
           retention-days: 1
-          compression-level: 0
+          compression-level: 1
   integration-arm64:
     name: Integration Images (aarch64)
     runs-on: ubuntu-24.04-arm
@@ -80,7 +80,7 @@ jobs:
           name: control-plane-images-arm64
           path: control-plane-images.tar
           retention-days: 1
-          compression-level: 0
+          compression-level: 1
   integration-smoke-amd64:
     name: Integration Smoke (x64)
     runs-on: ubuntu-24.04
