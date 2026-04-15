@@ -146,10 +146,11 @@ direct read は policy で拒否し、startup 後は `ssh`・`gh`・`control-pla
 
 ## 8. bundled skill / agent を `~/.copilot` 配下へ同期する理由
 
-repo change delivery 系の bundled skill と generic implementation agent は
-image へ同梱し、起動時に `~/.copilot/skills/` / `~/.copilot/agents/` へ同期します。
+repo change delivery 系の bundled skill と implementation / review agent suite は
+image へ同梱します。起動時は `~/.copilot/skills/` / `~/.copilot/agents/` へ
+同期します。
 これは `/workspace` が別リポジトリを指していても、Control Plane 固有の
-delivery workflow と implementation surface を常に参照可能にするためです。
+delivery workflow と implementation / review surface を常に参照可能にするためです。
 
 今回の修正では、agent surface も skill と同じ user-owned copy 同期に揃えました。
 `references/` や agent file を含む directory / file mode も明示的に整えています。
