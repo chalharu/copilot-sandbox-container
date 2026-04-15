@@ -72,14 +72,16 @@ fn handle_local(input: &HookInput) -> Result<i32, String> {
     }
 
     let changed_files = pipeline::classify_files_by_pipeline(&config, &repo_root, &changed_files);
-    let exit_code = executor::run_pipelines(&config, &repo_root, &changed_files.files_by_pipeline)?;
-    let current_relevant_files = pipeline::current_relevant_files(&config, &repo_root)?;
-    state::save_state(
-        &state_path,
-        &repo_root,
-        &current_relevant_files.matched_files,
-    )?;
-    Ok(exit_code)
+    let outcome = executor::run_pipelines(&config, &repo_root, &changed_files.files_by_pipeline)?;
+    if !outcome.runtime_failure {
+        let current_relevant_files = pipeline::current_relevant_files(&config, &repo_root)?;
+        state::save_state(
+            &state_path,
+            &repo_root,
+            &current_relevant_files.matched_files,
+        )?;
+    }
+    Ok(outcome.exit_code)
 }
 
 fn maybe_forward(raw_input: &str, input: &HookInput) -> Result<Option<i32>, String> {

@@ -202,12 +202,18 @@ if [ "$1" = "check" ] && [ "${2:-}" = "--write" ]; then
     printf "biome runtime failed in %s\n" "$file" >&2
     exit 70
   fi
+  if [ "$mode" = "signal-write" ] || [ "$mode" = "signal-all" ]; then
+    kill -TERM "$$"
+  fi
   exit 0
 fi
 file="${2:-}"
 if [ "$mode" = "check" ] || [ "$mode" = "all" ]; then
   printf "biome runtime failed in %s\n" "$file" >&2
   exit 70
+fi
+if [ "$mode" = "signal-check" ] || [ "$mode" = "signal-all" ]; then
+  kill -TERM "$$"
 fi
 printf "biome unresolved in %s\n" "$file" >&2
 exit 1
@@ -522,26 +528,60 @@ fn hook_stops_after_biome_runtime_failure() {
             ..StubOptions::default()
         },
     );
+    let first_result = run_hook(repo.path(), &hook_env, "success");
+    let first_log = fs::read_to_string(&hook_env.log_file).unwrap();
+    let first_stderr = String::from_utf8_lossy(&first_result.stderr);
+    let second_result = run_hook(repo.path(), &hook_env, "success");
+    let second_log = fs::read_to_string(&hook_env.log_file).unwrap();
+    let second_stderr = String::from_utf8_lossy(&second_result.stderr);
+
+    assert_eq!(first_result.status.code(), Some(70));
+    assert_eq!(second_result.status.code(), Some(70));
+    assert_eq!(
+        first_log
+            .matches("control-plane-biome check --write index.ts")
+            .count(),
+        2
+    );
+    assert_eq!(
+        second_log.trim().lines().count(),
+        first_log.trim().lines().count() * 2
+    );
+    assert!(first_log.contains("control-plane-biome check index.ts"));
+    assert!(first_log.contains("oxlint --fix index.ts"));
+    assert!(!first_log.contains("oxlint index.ts"));
+    assert!(!first_log.contains("eslint --fix index.ts"));
+    assert!(!first_log.contains("eslint index.ts"));
+    assert!(first_stderr.contains("Biome hook runtime failed:"));
+    assert!(first_stderr.contains("biome runtime failed in index.ts"));
+    assert!(!first_stderr.contains("Biome reported unresolved issues:"));
+    assert!(!first_stderr.contains("JavaScript/TypeScript linter reported unresolved issues:"));
+    assert!(second_stderr.contains("Biome hook runtime failed:"));
+}
+
+#[test]
+fn hook_treats_signal_terminated_biome_as_runtime_failure() {
+    let repo = setup_repo("post-tool-use-biome-signal-");
+    seed_repo(repo.path());
+    make_files_dirty(repo.path());
+    let hook_env = create_tool_stubs(
+        repo.path(),
+        StubOptions {
+            biome_runtime_failure_mode: Some("signal-check"),
+            eslint: true,
+            ..StubOptions::default()
+        },
+    );
     let result = run_hook(repo.path(), &hook_env, "success");
     let hook_log = fs::read_to_string(&hook_env.log_file).unwrap();
     let stderr = String::from_utf8_lossy(&result.stderr);
 
     assert_eq!(result.status.code(), Some(70));
-    assert_eq!(
-        hook_log
-            .matches("control-plane-biome check --write index.ts")
-            .count(),
-        2
-    );
-    assert!(hook_log.contains("control-plane-biome check index.ts"));
-    assert!(hook_log.contains("oxlint --fix index.ts"));
-    assert!(!hook_log.contains("oxlint index.ts"));
-    assert!(!hook_log.contains("eslint --fix index.ts"));
-    assert!(!hook_log.contains("eslint index.ts"));
     assert!(stderr.contains("Biome hook runtime failed:"));
-    assert!(stderr.contains("biome runtime failed in index.ts"));
+    assert!(stderr.contains("control-plane-biome terminated without an exit code"));
     assert!(!stderr.contains("Biome reported unresolved issues:"));
     assert!(!stderr.contains("JavaScript/TypeScript linter reported unresolved issues:"));
+    assert!(!hook_log.contains("oxlint index.ts"));
 }
 
 #[test]

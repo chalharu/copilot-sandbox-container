@@ -10,11 +10,16 @@ use super::config::{Config, Tool};
 const DEFAULT_RUNTIME_FAILURE_LABEL: &str = "Hook runtime reported tool execution failure:";
 const HOOK_RUNTIME_FAILURE_EXIT_CODE: i32 = 70;
 
+pub struct PipelineRunOutcome {
+    pub exit_code: i32,
+    pub runtime_failure: bool,
+}
+
 pub fn run_pipelines(
     config: &Config,
     repo_root: &Path,
     files_by_pipeline: &HashMap<String, Vec<String>>,
-) -> Result<i32, String> {
+) -> Result<PipelineRunOutcome, String> {
     let mut exit_code = 0;
     let mut has_reported_failure = false;
 
@@ -44,7 +49,10 @@ pub fn run_pipelines(
                         .unwrap_or(DEFAULT_RUNTIME_FAILURE_LABEL)
                 );
                 write_result_output(&result);
-                return Ok(exit_code.max(result.status));
+                return Ok(PipelineRunOutcome {
+                    exit_code: exit_code.max(result.status),
+                    runtime_failure: true,
+                });
             }
 
             if !step.report_failure {
@@ -63,7 +71,10 @@ pub fn run_pipelines(
         }
     }
 
-    Ok(exit_code)
+    Ok(PipelineRunOutcome {
+        exit_code,
+        runtime_failure: false,
+    })
 }
 
 fn run_step_with_fallback(
@@ -177,12 +188,20 @@ fn execute_tool(
         .stderr(Stdio::piped())
         .output()
         .map_err(|error| classify_spawn_error(&tool.command, error))?;
+    let terminated_without_exit_code = output.status.code().is_none();
+    let mut stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    if terminated_without_exit_code && stderr.is_empty() {
+        stderr = format!("{} terminated without an exit code\n", tool.command);
+    }
 
     Ok(CommandResult {
-        status: output.status.code().unwrap_or(1),
+        status: output
+            .status
+            .code()
+            .unwrap_or(HOOK_RUNTIME_FAILURE_EXIT_CODE),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        runtime_failure: false,
+        stderr,
+        runtime_failure: terminated_without_exit_code,
     })
 }
 
