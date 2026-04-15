@@ -78,12 +78,10 @@ assert_file_contains "${entrypoint_path}" 'install_bundled_control_plane_agents'
 
 printf '%s\n' 'bundled-agents-test: verifying bundled agents in image' >&2
 "${container_bin}" run --rm \
-  --entrypoint bash "${control_plane_image}" -lc '
-set -euo pipefail
+  --entrypoint bash "${control_plane_image}" -lc "set -euo pipefail
 agent_file=/usr/local/share/control-plane/agents/implementation-agent.agent.md
-test -r "$agent_file"
-grep -Fqx "name: implementation-agent" "$agent_file"
-'
+test -r \"\$agent_file\"
+grep -Fqx \"name: implementation-agent\" \"\$agent_file\""
 
 printf '%s\n' 'bundled-agents-test: verifying startup sync keeps bundled agents readable' >&2
 mkdir -p \
