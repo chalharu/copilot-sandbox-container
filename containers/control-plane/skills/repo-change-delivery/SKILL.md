@@ -18,7 +18,7 @@ Execute repository changes through a full delivery loop instead of stopping at a
 2. Delegate with sub-agents when they help.
    - Use exploration agents to map files, prior art, and constraints.
    - Choose an appropriate implementation sub-agent from the available agents.
-   - Prefer an implementation-focused agent when one is available and relevant, and use task agents for command-heavy edits and validation loops.
+   - If one is available and relevant, prefer an implementation-focused agent and use task agents for command-heavy edits and validation loops.
    - Use a critical review agent after local validation.
    - Ask agents to do the work, not only to advise, and batch related questions into one prompt.
 
