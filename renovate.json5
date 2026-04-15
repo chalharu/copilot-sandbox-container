@@ -12,6 +12,7 @@
 
   labels: ["dependencies", "renovate"],
   dependencyDashboard: true,
+  configMigration: true,
   prCreation: "immediate",
   rebaseWhen: "behind-base-branch",
   timezone: "Asia/Tokyo",
@@ -80,11 +81,11 @@
     {
       customType: "regex",
       managerFilePatterns: [
-        "/^scripts\\/(lint|test-github-hooks|lib-biome-hook-image)\\.sh$/",
+        "/^scripts\\/(lint|test-github-hooks|test-kind|lib-biome-hook-image)\\.sh$/",
       ],
       matchStrings: [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s+[a-z_]+=\"\\$\\{[A-Z0-9_]+:-[^:@\"}]+:(?<currentValue>[^@\"}]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?\\}\"",
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s+[a-z_]+=\"\\$\\{[A-Z0-9_]+:-(?<currentValue>[A-Za-z0-9._-]+)\\}\"",
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s+(?:export\\s+)?[a-z_]+=\"\\$\\{[A-Z0-9_]+:-[^:@\"}]+:(?<currentValue>[^@\"}]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?\\}\"",
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s+(?:export\\s+)?[a-z_]+=\"\\$\\{[A-Z0-9_]+:-(?<currentValue>[A-Za-z0-9._-]+)\\}\"",
       ],
     },
     {
@@ -102,7 +103,7 @@
         "/^(deploy\\/helm\\/control-plane\\/values\\.yaml|deploy\\/kubernetes\\/control-plane\\.example\\/common\\/configmap-control-plane-env\\.yaml)$/",
       ],
       matchStrings: [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s+CONTROL_PLANE_BIOME_HOOK_IMAGE:\\s+\"?[^:@\\s\"]+:(?<currentValue>[^@\\s\"]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?\"?",
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s+CONTROL_PLANE_(?:BIOME|RUST)_HOOK_IMAGE:\\s+\"?[^:@\\s\"]+:(?<currentValue>[^@\\s\"]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?\"?",
       ],
     },
     {

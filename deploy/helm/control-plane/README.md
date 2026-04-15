@@ -96,7 +96,8 @@ global:
     CONTROL_PLANE_GIT_USER_NAME: Copilot Workspace Bot
     CONTROL_PLANE_GIT_USER_EMAIL: copilot@example.com
     TZ: Asia/Tokyo
-    CONTROL_PLANE_BIOME_HOOK_IMAGE: ghcr.io/biomejs/biome:2.4.11
+    # Optional: override the chart's default Renovate-managed Biome hook image.
+    CONTROL_PLANE_BIOME_HOOK_IMAGE: ghcr.io/biomejs/biome:custom-tag
     CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: apt-get update && apt-get install -y ripgrep
 
 instances:
@@ -119,6 +120,8 @@ instances:
 - `TZ` は login shell と job tooling に渡される。
 - `CONTROL_PLANE_BIOME_HOOK_IMAGE` は JS/TS 向け bundled Biome hook を
   Kubernetes Job の official Biome image へ逃がす。
+- `CONTROL_PLANE_RUST_HOOK_IMAGE` も同じ `controlPlaneEnv` で上書きでき、
+  既定では chart 同梱の Renovate-managed ref を使う。
 
 - `CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT` は各 Execution Pod の chroot 内で
   `/bin/sh -lc` として実行される。

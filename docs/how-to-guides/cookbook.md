@@ -124,7 +124,11 @@ ConfigMap / Secret / write-back の具体的な path は
     `/bin/sh` と `apt-get` または `apk` を必ず含め、本番では digest-pinned ref
     を使う。
     `CONTROL_PLANE_BIOME_HOOK_IMAGE` は bundled JS/TS Biome hook を別 Job image
-    へ逃がす設定で、sample 既定は `ghcr.io/biomejs/biome:2.4.11`。
+    へ逃がす設定で、shipped sample 既定は Renovate-managed な official Biome
+    image ref。
+    `CONTROL_PLANE_RUST_HOOK_IMAGE` は compile-heavy な Rust hook を別
+    toolchain image へ逃がす設定で、shipped sample 既定は Renovate-managed な
+    official Rust image ref。
     `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` には Rust 製 exec-plane
     binary と bundled Git hook を持つ control-plane image を置く。sample
     既定では bootstrap 時に `bash` / `git` / `gh` / `kubectl` /

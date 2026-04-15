@@ -126,6 +126,9 @@ workflow_path="${repo_root}/.github/workflows/control-plane-ci.yml"
 renovate_config_path="${repo_root}/renovate.json5"
 validate_renovate_script_path="${repo_root}/scripts/validate-renovate-config.sh"
 biome_image_helper_path="${repo_root}/scripts/lib-biome-hook-image.sh"
+helm_values_path="${repo_root}/deploy/helm/control-plane/values.yaml"
+k8s_env_config_path="${repo_root}/deploy/kubernetes/control-plane.example/common/configmap-control-plane-env.yaml"
+kind_test_path="${repo_root}/scripts/test-kind.sh"
 git_skills_manifest_installer_path="${repo_root}/scripts/install-git-skills-from-manifest.sh"
 github_hooks_test_path="${repo_root}/scripts/test-github-hooks.sh"
 session_exec_test_path="${repo_root}/scripts/test-session-exec.sh"
@@ -395,10 +398,12 @@ assert_block_contains "${publish_block}" 'GHCR_MIN_UNTAGGED_VERSIONS_TO_KEEP: "3
 assert_file_not_contains "${workflow_path}" '  publish-manifests:'
 assert_file_not_contains "${workflow_path}" '  cleanup-packages:'
 assert_file_contains "${renovate_config_path}" 'enabledManagers: ["cargo", "dockerfile", "github-actions", "custom.regex"],'
+assert_file_contains "${renovate_config_path}" 'configMigration: true,'
 assert_file_contains "${renovate_config_path}" '/^containers\\/control-plane\\/Dockerfile$/'
-assert_file_contains "${renovate_config_path}" '/^scripts\\/(lint|test-github-hooks|lib-biome-hook-image)\\.sh$/'
+assert_file_contains "${renovate_config_path}" '/^scripts\\/(lint|test-github-hooks|test-kind|lib-biome-hook-image)\\.sh$/'
 assert_file_contains "${renovate_config_path}" '/^(deploy\\/helm\\/control-plane\\/values\\.yaml|deploy\\/kubernetes\\/control-plane\\.example\\/common\\/configmap-control-plane-env\\.yaml)$/'
-assert_file_contains "${renovate_config_path}" 'CONTROL_PLANE_BIOME_HOOK_IMAGE'
+assert_file_contains "${renovate_config_path}" 'CONTROL_PLANE_(?:BIOME|RUST)_HOOK_IMAGE'
+assert_file_contains "${renovate_config_path}" '(?:export\\s+)?[a-z_]+=\"\\$\\{[A-Z0-9_]+:-[^:@\"}]+:(?<currentValue>'
 assert_file_contains "${renovate_config_path}" 'separateMultipleMajor: true'
 assert_file_contains "${renovate_config_path}" 'separateMultipleMinor: true'
 assert_file_contains "${renovate_config_path}" '"{{{depNameSanitized}}}{{#if newVersion}}__v{{{newVersion}}}{{/if}}{{#if newDigestShort}}__d{{{newDigestShort}}}{{/if}}",'
@@ -448,6 +453,12 @@ assert_file_not_contains "${workflow_path}" 'yamllint_changed'
 assert_file_not_contains "${workflow_path}" 'GHCR_YAMLLINT_IMAGE'
 assert_file_not_contains "${workflow_path}" 'localhost/yamllint:test'
 assert_file_not_contains "${renovate_config_path}" 'yamllint'
+assert_file_contains "${helm_values_path}" '# renovate: datasource=docker depName=docker.io/library/rust versioning=docker'
+assert_line_order "${helm_values_path}" '# renovate: datasource=docker depName=docker.io/library/rust versioning=docker' 'CONTROL_PLANE_RUST_HOOK_IMAGE:'
+assert_file_contains "${k8s_env_config_path}" '# renovate: datasource=docker depName=docker.io/library/rust versioning=docker'
+assert_line_order "${k8s_env_config_path}" '# renovate: datasource=docker depName=docker.io/library/rust versioning=docker' 'CONTROL_PLANE_RUST_HOOK_IMAGE:'
+assert_file_contains "${kind_test_path}" '# renovate: datasource=docker depName=docker.io/library/rust versioning=docker'
+assert_line_order "${kind_test_path}" '# renovate: datasource=docker depName=docker.io/library/rust versioning=docker' 'rust_hook_image="${CONTROL_PLANE_TEST_RUST_HOOK_IMAGE:-'
 assert_file_not_contains "${workflow_path}" '- sccache'
 
 printf '%s\n' 'image-maintenance-test: verifying rclone checksum source follows the Renovate-managed version' >&2

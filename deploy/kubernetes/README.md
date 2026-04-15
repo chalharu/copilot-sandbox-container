@@ -63,14 +63,17 @@ kubectl apply -k deploy/kubernetes/control-plane.example
    - `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` を、dynamic
       provisioning 可能な storage class へ置き換える
    - この変数を省略する場合は、cluster に default StorageClass を必ず用意する
-   - `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で `/tmp` と `/var/tmp` の
-      合計上限を調整する
-   - `CONTROL_PLANE_FAST_EXECUTION_IMAGE` を変える場合は `/bin/sh` と
-     `apt-get` または `apk` を持つ image を使う
-   - `CONTROL_PLANE_BIOME_HOOK_IMAGE` は bundled Biome hook を別 Job image
-     へ逃がす。sample 既定は `ghcr.io/biomejs/biome:2.4.11`
-   - namespace / session PVC / helper image の追従は shipped sample の
-     replacements が持つので、名前変更のたびにここを書き換える必要はない
+    - `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で `/tmp` と `/var/tmp` の
+       合計上限を調整する
+    - `CONTROL_PLANE_FAST_EXECUTION_IMAGE` を変える場合は `/bin/sh` と
+      `apt-get` または `apk` を持つ image を使う
+    - `CONTROL_PLANE_BIOME_HOOK_IMAGE` は bundled Biome hook を別 Job image
+      へ逃がす。sample 既定は official Biome image の Renovate-managed ref
+    - `CONTROL_PLANE_RUST_HOOK_IMAGE` は compile-heavy な Rust hook を別
+      toolchain image へ逃がす。sample 既定は official Rust image の
+      Renovate-managed ref
+    - namespace / session PVC / helper image の追従は shipped sample の
+      replacements が持つので、名前変更のたびにここを書き換える必要はない
 5. `control-plane.example/base/deployment-control-plane.yaml` または
     `control-plane.example/overlays/default/kustomization.yaml`
    - sample 既定は

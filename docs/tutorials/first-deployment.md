@@ -96,6 +96,7 @@ cluster に合わせます。まず確認するのは次です。
 - `CONTROL_PLANE_FAST_EXECUTION_IMAGE`
 - `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS`
 - `CONTROL_PLANE_BIOME_HOOK_IMAGE`
+- `CONTROL_PLANE_RUST_HOOK_IMAGE`
 
 `CONTROL_PLANE_FAST_EXECUTION_IMAGE` には、delegated `bash` を実行したい
 runtime image を入れます。別の image に変える場合は、bootstrap が使えるように
@@ -109,7 +110,11 @@ shipped kustomization は `CONTROL_PLANE_K8S_NAMESPACE`、
 合わせ直す必要はありません。
 
 `CONTROL_PLANE_BIOME_HOOK_IMAGE` は bundled JS/TS Biome hook を Kubernetes Job
-へ逃がす image です。sample 既定の `ghcr.io/biomejs/biome:2.4.11` のままで
+へ逃がす image です。shipped sample の Renovate-managed ref のままでよければ
+変更不要です。
+
+`CONTROL_PLANE_RUST_HOOK_IMAGE` は compile-heavy な Rust hook を別 toolchain
+image へ逃がす設定です。shipped sample の Renovate-managed ref のままで
 よければ変更不要です。
 
 `base/deployment-control-plane.yaml` または named overlay の `images:` で
