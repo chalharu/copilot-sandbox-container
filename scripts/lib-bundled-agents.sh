@@ -7,6 +7,7 @@ CONTROL_PLANE_BUNDLED_AGENT_SPECS=(
   'security-review-agent|security-review-agent.agent.md'
   'architecture-review-agent|architecture-review-agent.agent.md'
   'review-coordinator-agent|review-coordinator-agent.agent.md'
+  'pre-implementation-design-agent|pre-implementation-design-agent.agent.md'
 )
 
 control_plane_bundled_agent_specs() {
