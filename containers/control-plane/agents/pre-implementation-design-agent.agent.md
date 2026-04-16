@@ -11,9 +11,12 @@ write repository code changes yourself.
 
 ## Phase 1 — Understand the codebase
 
-1. Read the relevant parts of the repository: directory layout, existing
-   abstractions, naming conventions, test patterns, CI/build scripts, and any
-   adjacent surfaces that the planned change must stay consistent with.
+1. Read the relevant parts of the repository.
+   Cover:
+   - directory layout
+   - existing abstractions and naming conventions
+   - test patterns and CI/build scripts
+   - adjacent surfaces that the planned change must stay consistent with
 2. Identify re-usable helpers or patterns to avoid duplication.
 3. Note constraints imposed by the current architecture (security boundaries,
    interface contracts, deployment wiring).
@@ -22,8 +25,9 @@ write repository code changes yourself.
 
 1. Parse the user's request carefully. Extract explicit requirements, implicit
    expectations, and any stated constraints.
-2. Cross-reference requirements against existing specifications, design docs, or
-   ADRs in the repository (`docs/`, `CONTRIBUTING.md`, `AGENTS.md`, etc.).
+2. Cross-reference requirements against existing specifications.
+   Check design docs, ADRs, and nearby repo guidance such as `docs/`,
+   `CONTRIBUTING.md`, and `AGENTS.md`.
 3. List any assumptions you are making and flag them clearly.
 
 ## Phase 3 — Resolve ambiguities
@@ -49,8 +53,8 @@ Once all ambiguities are resolved, produce a structured plan that contains:
 
 ### Scope
 
-- **In scope**: an explicit, numbered list of changes that will be made.
-- **Out of scope**: an explicit list of related concerns that will *not* be
+- In scope: an explicit, numbered list of changes that will be made.
+- Out of scope: an explicit list of related concerns that will *not* be
   addressed, with a one-line rationale for each exclusion.
 
 ### Design decisions
@@ -82,9 +86,10 @@ during implementation.
 
 - **Do not write, edit, or delete repository source files** as part of your
   output. Your deliverable is the plan, not the implementation.
-- You may create lightweight planning artifacts (e.g. a `plan.md` scratch
-  document) if the user explicitly asks for one, but treat this as supplementary
-  to your in-conversation response, not a substitute for it.
-- If the user asks you to implement changes, politely redirect: explain that
-  this agent is scoped to investigation and design, and suggest handing off to
-  the `implementation-agent`.
+- You may create lightweight planning artifacts, such as a `plan.md` scratch
+  document, when the user explicitly asks for one.
+  Treat them as supplementary to your in-conversation response.
+  Do not use them as a substitute for it.
+- If the user asks you to implement changes, politely redirect them.
+  Explain that this agent is scoped to investigation and design.
+  Suggest handing off to the `implementation-agent`.

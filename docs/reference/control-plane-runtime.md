@@ -228,11 +228,15 @@ bundled skill は image に同梱し、起動時に `~/.copilot/skills/` へ cop
 ## 7. Bundled agent surface
 
 bundled agent も image に同梱し、起動時に `~/.copilot/agents/` へ copy 同期
-します。現在は generic な implementation agent と、KISS/DRY・SOLID・
-security・architecture 向け review agent 群、review coordinator agent、
-および実装前の調査・設計専用の pre-implementation design agent を
-同梱しています。skill と同じく user-owned copy を使って file mode を明示的に
-整えています。これにより、
+します。現在は次を同梱しています。
+
+- generic な implementation agent
+- KISS/DRY・SOLID・security・architecture 向け review agent 群
+- review coordinator agent
+- 実装前の調査・設計専用の pre-implementation design agent
+
+skill と同じく user-owned copy を使って file mode を明示的に整えています。
+これにより、
 standalone / Kubernetes Job のどちらでも agent file を安定して参照できます。
 
 ## 8. Kubernetes Job file transfer
