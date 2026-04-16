@@ -793,6 +793,8 @@ fn reset_incomplete_bootstrap_root(
 fn preserved_bootstrap_subtrees(config: &ServerConfig) -> Vec<PathBuf> {
     vec![
         config.logical_workspace_root.clone(),
+        config.remote_home.join(".config/gh"),
+        config.remote_home.join(".ssh"),
         PathBuf::from(CHROOT_KUBECTL_PATH),
         PathBuf::from(CHROOT_RUNTIME_TOOL_PATH),
         PathBuf::from(CHROOT_EXEC_POLICY_LIBRARY_PATH),
@@ -2226,6 +2228,18 @@ mod tests {
         fs::write(chroot_root.path().join("bin/bash"), "").unwrap();
         fs::create_dir_all(chroot_root.path().join("etc")).unwrap();
         fs::write(chroot_root.path().join("etc/os-release"), "").unwrap();
+        fs::create_dir_all(chroot_root.path().join("root/.config/gh")).unwrap();
+        fs::write(chroot_root.path().join("root/.config/gh/hosts.yml"), "gh").unwrap();
+        fs::create_dir_all(chroot_root.path().join("root/.config/control-plane")).unwrap();
+        fs::write(
+            chroot_root
+                .path()
+                .join("root/.config/control-plane/stale.txt"),
+            "stale",
+        )
+        .unwrap();
+        fs::create_dir_all(chroot_root.path().join("root/.ssh")).unwrap();
+        fs::write(chroot_root.path().join("root/.ssh/config"), "ssh").unwrap();
         write_stub_command(chroot_root.path(), CHROOT_KUBECTL_PATH);
         write_stub_command(chroot_root.path(), CHROOT_RUNTIME_TOOL_PATH);
         write_stub_command(chroot_root.path(), CHROOT_EXEC_POLICY_LIBRARY_PATH);
@@ -2284,8 +2298,21 @@ mod tests {
                 .join("usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml")
                 .is_file()
         );
+        assert!(
+            chroot_root
+                .path()
+                .join("root/.config/gh/hosts.yml")
+                .is_file()
+        );
+        assert!(chroot_root.path().join("root/.ssh/config").is_file());
         assert!(!chroot_root.path().join("bin").exists());
         assert!(!chroot_root.path().join("etc").exists());
+        assert!(
+            !chroot_root
+                .path()
+                .join("root/.config/control-plane")
+                .exists()
+        );
         assert!(
             !chroot_root
                 .path()
