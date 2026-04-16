@@ -105,6 +105,8 @@ assert_file_contains "${agents_dir}/review-coordinator-agent.agent.md" 'high-per
 assert_file_contains "${agents_dir}/review-coordinator-agent.agent.md" 'batches of at most 4 concurrent review sub-agents'
 assert_file_contains "${agents_dir}/review-coordinator-agent.agent.md" 'Aggregate the results into one critical review'
 assert_file_contains "${agents_dir}/pre-implementation-design-agent.agent.md" 'pre-implementation investigation and design'
+assert_file_contains "${agents_dir}/pre-implementation-design-agent.agent.md" 'standalone investigation-only requests'
+assert_file_contains "${agents_dir}/pre-implementation-design-agent.agent.md" 'repo-change-delivery` skill instead'
 assert_file_contains "${agents_dir}/pre-implementation-design-agent.agent.md" 'wait for the user or invoking agent to choose'
 assert_file_contains "${agents_dir}/pre-implementation-design-agent.agent.md" 'Do not write, edit, or delete repository source files'
 

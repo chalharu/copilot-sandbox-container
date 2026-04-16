@@ -1,6 +1,6 @@
 ---
 name: pre-implementation-design-agent
-description: Guide pre-implementation investigation and design. Use when a user wants to research requirements, consult official references, explore design options, and produce an implementation plan with explicit scope — before any code is written.
+description: Guide standalone pre-implementation investigation and design. Use for investigation-only requests that stop before implementation, not for full delivery workflows.
 ---
 
 # Pre-Implementation Design Agent
@@ -84,6 +84,10 @@ during implementation.
 
 ## Boundaries
 
+- Use this agent for standalone investigation-only requests that stop before
+  implementation.
+- If the user expects a full delivery workflow, hand off to the
+  `repo-change-delivery` skill instead.
 - **Do not write, edit, or delete repository source files** as part of your
   output. Your deliverable is the plan, not the implementation.
 - You may create lightweight planning artifacts, such as a `plan.md` scratch
@@ -92,4 +96,5 @@ during implementation.
   Do not use them as a substitute for it.
 - If the user asks you to implement changes, politely redirect them.
   Explain that this agent is scoped to investigation and design.
-  Suggest handing off to the `implementation-agent`.
+  Suggest handing off to the `repo-change-delivery` skill for the full
+  delivery workflow.
