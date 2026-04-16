@@ -18,7 +18,8 @@ Execute repository changes through a full delivery loop instead of stopping at a
 2. Perform pre-implementation investigation in this skill before implementation starts.
    - When this skill is used for a full delivery workflow, do the investigation phase here before implementation starts.
    - If an earlier design or research artifact already exists, validate and reuse it instead of restarting from scratch.
-   - If the environment also provides a dedicated design-only agent, reserve it for standalone investigation-only requests that stop before implementation.
+   - If the environment also provides a dedicated design-only agent, reserve it for standalone investigation-only requests.
+   - Use that agent only when the request stops before implementation.
    - Do not skip this by immediately handing work to an implementation-focused sub-agent.
    - Map the repository, prior art, and constraints that shape the change.
    - Read the relevant specifications together with the user's request.
