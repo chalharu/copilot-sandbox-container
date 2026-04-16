@@ -31,7 +31,7 @@ jobs:
         with:
           driver: docker-container
       - name: Restore buildx cache (amd64)
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/control-plane-buildx-cache-amd64
           key: ${{ runner.os }}-amd64-control-plane-buildx-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
@@ -61,7 +61,7 @@ jobs:
       - *checkout-repo
       - *setup-buildx
       - name: Restore buildx cache (arm64)
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/control-plane-buildx-cache-arm64
           key: ${{ runner.os }}-arm64-control-plane-buildx-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
@@ -135,14 +135,14 @@ jobs:
         with:
           driver: docker-container
       - name: Restore buildx cache (amd64)
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/control-plane-buildx-cache-amd64
           key: ${{ runner.os }}-amd64-control-plane-buildx-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
           restore-keys: |
             ${{ runner.os }}-amd64-control-plane-buildx-
       - name: Restore regression Rust cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/control-plane-rust-regression-cache
           key: ${{ runner.os }}-control-plane-rust-regressions-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/exec-api/Cargo.toml', 'containers/control-plane/exec-api/build.rs', 'containers/control-plane/exec-api/src/**', 'containers/control-plane/exec-api/tests/**', 'containers/control-plane/exec-api/proto/**', 'scripts/test-session-exec.sh') }}
