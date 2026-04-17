@@ -351,7 +351,9 @@ fn find_repository_license_file(source_skill_dir: &Path, checkout_dir: &Path) ->
         if directory == checkout_dir {
             break;
         }
-        current_dir = directory.parent().filter(|parent| parent.starts_with(checkout_dir));
+        current_dir = directory
+            .parent()
+            .filter(|parent| parent.starts_with(checkout_dir));
     }
 
     None
@@ -612,7 +614,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            fs::read_to_string(destination_root.path().join("frontend-design/LICENSE.txt")).unwrap(),
+            fs::read_to_string(destination_root.path().join("frontend-design/LICENSE.txt"))
+                .unwrap(),
             "upstream terms\n"
         );
     }
