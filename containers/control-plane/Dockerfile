@@ -97,7 +97,7 @@ ARG KIND_VERSION=v0.31.0
 # renovate: datasource=github-releases depName=jqlang/jq
 ARG JQ_VERSION=jq-1.8.1
 # renovate: datasource=github-releases depName=kubernetes/kubernetes
-ARG KUBECTL_VERSION=v1.35.3
+ARG KUBECTL_VERSION=v1.35.4
 # renovate: datasource=github-releases depName=rclone/rclone
 ARG RCLONE_VERSION=v1.73.4
 # renovate: datasource=github-releases depName=astral-sh/ruff
@@ -162,7 +162,6 @@ RUN apt-get update -o Acquire::Retries=3 \
             jq_asset=jq-linux-amd64; \
             jq_sha256=020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d; \
             kubectl_arch=amd64; \
-            kubectl_sha256=fd31c7d7129260e608f6faf92d5984c3267ad0b5ead3bced2fe125686e286ad6; \
             rclone_arch=amd64; \
             ruff_arch=x86_64; \
             ruff_sha256=${RUFF_SHA256_AMD64}; \
@@ -175,7 +174,6 @@ RUN apt-get update -o Acquire::Retries=3 \
             jq_asset=jq-linux-arm64; \
             jq_sha256=6bc62f25981328edd3cfcfe6fe51b073f2d7e7710d7ef7fcdac28d4e384fc3d4; \
             kubectl_arch=arm64; \
-            kubectl_sha256=6f0cd088a82dde5d5807122056069e2fac4ed447cc518efc055547ae46525f14; \
             rclone_arch=arm64; \
             ruff_arch=aarch64; \
             ruff_sha256=${RUFF_SHA256_AARCH64}; \
@@ -190,8 +188,10 @@ RUN apt-get update -o Acquire::Retries=3 \
     && curl -fsSLo "/tmp/${jq_asset}" "https://github.com/jqlang/jq/releases/download/${JQ_VERSION}/${jq_asset}" \
     && printf '%s  %s\n' "${jq_sha256}" "/tmp/${jq_asset}" | sha256sum -c - \
     && install -m 0755 "/tmp/${jq_asset}" /usr/local/bin/jq \
-    && curl -fsSLo /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${kubectl_arch}/kubectl" \
-    && printf '%s  %s\n' "${kubectl_sha256}" /tmp/kubectl | sha256sum -c - \
+    && kubectl_download_root="https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${kubectl_arch}" \
+    && curl -fsSLo /tmp/kubectl "${kubectl_download_root}/kubectl" \
+    && curl -fsSLo /tmp/kubectl.sha256 "${kubectl_download_root}/kubectl.sha256" \
+    && awk '{ print $1 "  /tmp/kubectl"; found=1 } END { exit(found ? 0 : 1) }' /tmp/kubectl.sha256 | sha256sum -c - \
     && install -m 0755 /tmp/kubectl /usr/local/bin/kubectl \
     && rclone_asset="rclone-${RCLONE_VERSION}-linux-${rclone_arch}.zip" \
     && rclone_download_root="https://downloads.rclone.org/${RCLONE_VERSION}" \
