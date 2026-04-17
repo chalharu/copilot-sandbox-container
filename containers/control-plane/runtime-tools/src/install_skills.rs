@@ -15,6 +15,16 @@ use crate::error::{ToolError, ToolResult};
 use crate::support::set_mode;
 
 const USAGE: &str = "usage: install-git-skills-from-manifest <manifest-path> <destination-root>";
+const LICENSE_REFERENCE_MARKER: &str = "license: Complete terms in LICENSE.txt";
+const LICENSE_DESTINATION_NAME: &str = "LICENSE.txt";
+const REPOSITORY_LICENSE_CANDIDATES: &[&str] = &[
+    "LICENSE.txt",
+    "LICENSE",
+    "LICENSE.md",
+    "COPYING.txt",
+    "COPYING",
+    "COPYING.md",
+];
 
 #[derive(Debug, Deserialize)]
 struct ExternalSkillManifestEntry {
@@ -159,6 +169,14 @@ impl SkillInstaller {
         )?;
         let destination_dir = self.destination_root.join(&skill_name);
         replace_skill_dir(&source_skill_dir, &destination_dir)?;
+        ensure_referenced_license_file(
+            &source_skill_dir,
+            checkout_dir,
+            &destination_dir,
+            repository,
+            git_ref,
+            normalized_skill_path,
+        )?;
 
         self.installed_skills.insert(skill_name, installed_from);
         self.installed_count += 1;
@@ -287,6 +305,58 @@ fn require_skill_manifest(
     }
 }
 
+fn ensure_referenced_license_file(
+    source_skill_dir: &Path,
+    checkout_dir: &Path,
+    destination_dir: &Path,
+    repository: &str,
+    git_ref: &str,
+    normalized_skill_path: &str,
+) -> Result<(), String> {
+    let skill_manifest_path = destination_dir.join("SKILL.md");
+    let skill_manifest = fs::read_to_string(&skill_manifest_path).map_err(|error| {
+        format!(
+            "failed to read skill manifest {}: {error}",
+            skill_manifest_path.display()
+        )
+    })?;
+    if !skill_manifest.contains(LICENSE_REFERENCE_MARKER) {
+        return Ok(());
+    }
+
+    let destination_license_path = destination_dir.join(LICENSE_DESTINATION_NAME);
+    if destination_license_path.is_file() {
+        return Ok(());
+    }
+
+    let source_license_path =
+        find_repository_license_file(source_skill_dir, checkout_dir).ok_or_else(|| {
+            format!(
+                "skill manifest references {LICENSE_DESTINATION_NAME} but no repository license file was found for manifest entry: {repository}@{git_ref}:{normalized_skill_path}"
+            )
+        })?;
+    copy_file_with_mode(&source_license_path, &destination_license_path)
+}
+
+fn find_repository_license_file(source_skill_dir: &Path, checkout_dir: &Path) -> Option<PathBuf> {
+    let mut current_dir = Some(source_skill_dir);
+
+    while let Some(directory) = current_dir {
+        for candidate in REPOSITORY_LICENSE_CANDIDATES {
+            let candidate_path = directory.join(candidate);
+            if candidate_path.is_file() {
+                return Some(candidate_path);
+            }
+        }
+        if directory == checkout_dir {
+            break;
+        }
+        current_dir = directory.parent().filter(|parent| parent.starts_with(checkout_dir));
+    }
+
+    None
+}
+
 fn replace_skill_dir(source_skill_dir: &Path, destination_dir: &Path) -> Result<(), String> {
     if destination_dir.exists() {
         fs::remove_dir_all(destination_dir).map_err(|error| {
@@ -399,6 +469,26 @@ fn copy_dir_entry(source_path: &Path, destination_path: &Path) -> Result<(), Str
     set_mode(destination_path, entry_metadata.permissions().mode())
 }
 
+fn copy_file_with_mode(source_path: &Path, destination_path: &Path) -> Result<(), String> {
+    let source_metadata = fs::symlink_metadata(source_path)
+        .map_err(|error| format!("failed to inspect path {}: {error}", source_path.display()))?;
+    if !source_metadata.is_file() {
+        return Err(format!(
+            "unsupported file type for copied license: {}",
+            source_path.display()
+        ));
+    }
+
+    fs::copy(source_path, destination_path).map_err(|error| {
+        format!(
+            "failed to copy {} to {}: {error}",
+            source_path.display(),
+            destination_path.display()
+        )
+    })?;
+    set_mode(destination_path, source_metadata.permissions().mode())
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -493,5 +583,65 @@ mod tests {
             )
             .unwrap_err();
         assert!(error.contains("must stay within repository checkout"));
+    }
+
+    #[test]
+    fn copies_repository_license_when_skill_references_license_txt() {
+        let _env_lock = lock_env();
+        let destination_root = TempDir::new().unwrap();
+        let checkout_root = TempDir::new().unwrap();
+        let skill_dir = checkout_root
+            .path()
+            .join("plugins/frontend-design/skills/frontend-design");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(checkout_root.path().join("LICENSE.md"), "upstream terms\n").unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: frontend-design\nlicense: Complete terms in LICENSE.txt\n---\n",
+        )
+        .unwrap();
+
+        let mut installer = SkillInstaller::new(destination_root.path()).unwrap();
+        installer
+            .install_skill(
+                checkout_root.path(),
+                "https://example.com/frontend.git",
+                "main",
+                "plugins/frontend-design/skills/frontend-design",
+            )
+            .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(destination_root.path().join("frontend-design/LICENSE.txt")).unwrap(),
+            "upstream terms\n"
+        );
+    }
+
+    #[test]
+    fn rejects_skill_with_dangling_license_reference() {
+        let _env_lock = lock_env();
+        let destination_root = TempDir::new().unwrap();
+        let checkout_root = TempDir::new().unwrap();
+        let skill_dir = checkout_root
+            .path()
+            .join("plugins/frontend-design/skills/frontend-design");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: frontend-design\nlicense: Complete terms in LICENSE.txt\n---\n",
+        )
+        .unwrap();
+
+        let mut installer = SkillInstaller::new(destination_root.path()).unwrap();
+        let error = installer
+            .install_skill(
+                checkout_root.path(),
+                "https://example.com/frontend.git",
+                "main",
+                "plugins/frontend-design/skills/frontend-design",
+            )
+            .unwrap_err();
+
+        assert!(error.contains("references LICENSE.txt"));
     }
 }

@@ -32,10 +32,14 @@ package_dir="$(mktemp -d)"
 external_skill_dir="${package_dir}/external-skills"
 doc_coauthor_skill_dir="${external_skill_dir}/doc-coauthoring"
 doc_coauthor_skill_file="${doc_coauthor_skill_dir}/SKILL.md"
+frontend_design_skill_dir="${external_skill_dir}/frontend-design"
+frontend_design_skill_file="${frontend_design_skill_dir}/SKILL.md"
+frontend_design_license_file="${frontend_design_skill_dir}/LICENSE.txt"
 skill_creator_dir="${external_skill_dir}/skill-creator"
 skill_creator_skill_file="${skill_creator_dir}/SKILL.md"
 skill_creator_license_file="${skill_creator_dir}/LICENSE.txt"
 doc_coauthor_package_file="${package_dir}/doc-coauthoring.skill"
+frontend_design_package_file="${package_dir}/frontend-design.skill"
 repo_package_file="${package_dir}/pr-fix-workflow.skill"
 skill_creator_package_file="${package_dir}/skill-creator.skill"
 generic_package_file="${package_dir}/repo-change-delivery.skill"
@@ -140,6 +144,8 @@ assert_file_present "${git_skills_runtime_manifest}"
 assert_file_present "${git_skills_runtime_dispatch}"
 assert_file_present "${git_skills_manifest_installer}"
 assert_file_present "${doc_coauthor_skill_file}"
+assert_file_present "${frontend_design_skill_file}"
+assert_file_present "${frontend_design_license_file}"
 assert_file_present "${repo_skill_file}"
 assert_file_present "${repo_reference_file}"
 assert_file_present "${skill_creator_skill_file}"
@@ -165,7 +171,9 @@ assert_path_absent "${repo_root}/containers/control-plane/bin/external-skills-ma
 
 assert_file_contains "${doc_coauthor_skill_file}" 'name: doc-coauthoring'
 assert_file_contains "${external_skills_manifest}" 'repository: https://github.com/anthropics/skills'
+assert_file_contains "${external_skills_manifest}" 'repository: https://github.com/anthropics/claude-code'
 assert_file_contains "${external_skills_manifest}" 'skills/doc-coauthoring'
+assert_file_contains "${external_skills_manifest}" 'plugins/frontend-design/skills/frontend-design'
 assert_file_contains "${external_skills_manifest}" 'skills/skill-creator'
 assert_file_contains "${external_skills_manifest}" 'currentValue=main'
 assert_file_contains "${git_skills_manifest_installer}" '/usr/local/bin/control-plane-runtime-tool'
@@ -173,6 +181,7 @@ assert_file_not_contains "${git_skills_manifest_installer}" 'cargo build --relea
 assert_file_not_contains "${git_skills_manifest_installer}" 'CONTROL_PLANE_RUST_BUILD_IMAGE_TAG'
 assert_file_contains "${git_skills_runtime_dispatch}" '"install-git-skills-from-manifest"'
 assert_file_not_contains "${git_skills_runtime_dispatch}" 'js-yaml'
+assert_file_contains "${frontend_design_skill_file}" 'name: frontend-design'
 assert_file_contains "${skill_creator_skill_file}" 'name: skill-creator'
 assert_file_contains "${generic_skill_file}" 'name: repo-change-delivery'
 assert_file_contains "${generic_skill_file}" 'full implementation loop'
@@ -206,6 +215,7 @@ assert_file_contains "${entrypoint_path}" 'install_bundled_control_plane_skills'
 
 printf '%s\n' 'repo-change-delivery-skills-test: validating and packaging skills' >&2
 run_skill_creator_python scripts.quick_validate /opt/external-skills/doc-coauthoring
+run_skill_creator_python scripts.quick_validate /opt/external-skills/frontend-design
 run_skill_creator_python scripts.quick_validate /workspace/containers/control-plane/skills/repo-change-delivery
 run_skill_creator_python scripts.quick_validate /workspace/containers/control-plane/skills/git-commit
 run_skill_creator_python scripts.quick_validate /workspace/containers/control-plane/skills/pull-request-workflow
@@ -213,6 +223,7 @@ run_skill_creator_python scripts.quick_validate /workspace/.github/skills/pr-fix
 run_skill_creator_python scripts.quick_validate /opt/external-skills/skill-creator
 
 package_skill_to_host /opt/external-skills/doc-coauthoring "${doc_coauthor_package_file}"
+package_skill_to_host /opt/external-skills/frontend-design "${frontend_design_package_file}"
 package_skill_to_host /workspace/.github/skills/pr-fix-workflow "${repo_package_file}"
 package_skill_to_host /opt/external-skills/skill-creator "${skill_creator_package_file}"
 package_skill_to_host /workspace/containers/control-plane/skills/repo-change-delivery "${generic_package_file}"
@@ -220,6 +231,7 @@ package_skill_to_host /workspace/containers/control-plane/skills/git-commit "${c
 package_skill_to_host /workspace/containers/control-plane/skills/pull-request-workflow "${pull_request_package_file}"
 
 assert_file_present "${doc_coauthor_package_file}"
+assert_file_present "${frontend_design_package_file}"
 assert_file_present "${generic_package_file}"
 assert_file_present "${commit_package_file}"
 assert_file_present "${pull_request_package_file}"
@@ -232,12 +244,16 @@ printf '%s\n' 'repo-change-delivery-skills-test: verifying bundled skills in ima
   --entrypoint bash "${control_plane_image}" -lc '
 set -euo pipefail
 doc_root=/usr/local/share/control-plane/skills/doc-coauthoring
+frontend_design_root=/usr/local/share/control-plane/skills/frontend-design
 skill_creator_root=/usr/local/share/control-plane/skills/skill-creator
 generic_root=/usr/local/share/control-plane/skills/repo-change-delivery
 commit_root=/usr/local/share/control-plane/skills/git-commit
 pull_request_root=/usr/local/share/control-plane/skills/pull-request-workflow
 test -r "$doc_root/SKILL.md"
 grep -Fqx "name: doc-coauthoring" "$doc_root/SKILL.md"
+test -r "$frontend_design_root/SKILL.md"
+test -r "$frontend_design_root/LICENSE.txt"
+grep -Fqx "name: frontend-design" "$frontend_design_root/SKILL.md"
 test -r "$skill_creator_root/SKILL.md"
 test -r "$skill_creator_root/LICENSE.txt"
 grep -Fqx "name: skill-creator" "$skill_creator_root/SKILL.md"

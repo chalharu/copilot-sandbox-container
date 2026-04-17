@@ -135,6 +135,7 @@ skill_output="$("${container_bin}" run --rm \
   bash -lc "set -euo pipefail
 su -s /bin/bash copilot -c 'set -euo pipefail
 doc_coauthor_skill_root=\"\$HOME/.copilot/skills/doc-coauthoring\"
+frontend_design_skill_root=\"\$HOME/.copilot/skills/frontend-design\"
 delivery_skill_root=\"\$HOME/.copilot/skills/repo-change-delivery\"
 commit_skill_root=\"\$HOME/.copilot/skills/git-commit\"
 pull_request_skill_root=\"\$HOME/.copilot/skills/pull-request-workflow\"
@@ -142,6 +143,10 @@ skill_creator_skill_root=\"\$HOME/.copilot/skills/skill-creator\"
 test ! -L \"\$doc_coauthor_skill_root\"
 test -r \"\$doc_coauthor_skill_root/SKILL.md\"
 grep -Fqx \"name: doc-coauthoring\" \"\$doc_coauthor_skill_root/SKILL.md\"
+test ! -L \"\$frontend_design_skill_root\"
+test -r \"\$frontend_design_skill_root/SKILL.md\"
+test -r \"\$frontend_design_skill_root/LICENSE.txt\"
+grep -Fqx \"name: frontend-design\" \"\$frontend_design_skill_root/SKILL.md\"
 test ! -L \"\$delivery_skill_root\"
 test -r \"\$delivery_skill_root/SKILL.md\"
 grep -Fqx \"name: repo-change-delivery\" \"\$delivery_skill_root/SKILL.md\"
