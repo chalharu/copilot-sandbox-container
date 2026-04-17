@@ -484,6 +484,12 @@ assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "rclone_
 assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "curl -fsSLo /tmp/rclone-SHA256SUMS \"\${rclone_download_root}/SHA256SUMS\""
 assert_file_not_contains "${repo_root}/containers/control-plane/Dockerfile" 'rclone_sha256='
 
+printf '%s\n' 'image-maintenance-test: verifying kubectl checksum source follows the Renovate-managed version' >&2
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "kubectl_download_root=\"https://dl.k8s.io/release/\${KUBECTL_VERSION}/bin/linux/\${kubectl_arch}\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "curl -fsSLo /tmp/kubectl.sha256 \"\${kubectl_download_root}/kubectl.sha256\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "awk '{ print \$1 \"  /tmp/kubectl\"; found=1 } END { exit(found ? 0 : 1) }' /tmp/kubectl.sha256 | sha256sum -c -"
+assert_file_not_contains "${repo_root}/containers/control-plane/Dockerfile" 'kubectl_sha256='
+
 printf '%s\n' 'image-maintenance-test: verifying GHCR cleanup keeps tagged images' >&2
 assert_file_contains "${workflow_path}" 'delete-only-untagged-versions: '\''true'\'''
 
