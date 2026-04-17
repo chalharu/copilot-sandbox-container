@@ -104,6 +104,7 @@ assert_file_contains "${build_test_path}" 'run_kind_group jobs-core'
 assert_file_contains "${build_test_path}" 'run_kind_group jobs-transfer'
 assert_file_contains "${kind_test_path}" "if [[ \"\${kind_test_group}\" == \"all\" ]] || [[ \"\${kind_test_group}\" == \"session\" ]]; then"
 assert_file_contains "${kind_test_path}" '  all|session|jobs|jobs-core|jobs-transfer)'
+assert_file_contains "${kind_test_path}" 'fast_execution_image="${CONTROL_PLANE_TEST_FAST_EXECUTION_IMAGE:-${control_plane_image}}"'
 
 printf '%s\n' 'ci-workflow-test: verifying workflow fan-out wiring' >&2
 integration_amd64_block="$(job_block integration-amd64)"
