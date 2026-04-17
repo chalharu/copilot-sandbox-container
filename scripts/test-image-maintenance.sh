@@ -129,6 +129,7 @@ biome_image_helper_path="${repo_root}/scripts/lib-biome-hook-image.sh"
 helm_values_path="${repo_root}/deploy/helm/control-plane/values.yaml"
 k8s_env_config_path="${repo_root}/deploy/kubernetes/control-plane.example/common/configmap-control-plane-env.yaml"
 kind_test_path="${repo_root}/scripts/test-kind.sh"
+sample_storage_layout_test_path="${repo_root}/scripts/test-k8s-sample-storage-layout.sh"
 git_skills_manifest_installer_path="${repo_root}/scripts/install-git-skills-from-manifest.sh"
 github_hooks_test_path="${repo_root}/scripts/test-github-hooks.sh"
 session_exec_test_path="${repo_root}/scripts/test-session-exec.sh"
@@ -418,7 +419,7 @@ assert_file_not_contains "${workflow_path}" '  cleanup-packages:'
 assert_file_contains "${renovate_config_path}" 'enabledManagers: ["cargo", "dockerfile", "github-actions", "custom.regex"],'
 assert_file_contains "${renovate_config_path}" 'configMigration: true,'
 assert_file_contains "${renovate_config_path}" '/^containers\\/control-plane\\/Dockerfile$/'
-assert_file_contains "${renovate_config_path}" '/^scripts\\/(lint|test-github-hooks|test-kind|lib-biome-hook-image)\\.sh$/'
+assert_file_contains "${renovate_config_path}" '/^scripts\\/(lint|test-github-hooks|test-kind|test-k8s-sample-storage-layout|lib-biome-hook-image)\\.sh$/'
 assert_file_contains "${renovate_config_path}" '/^(deploy\\/helm\\/control-plane\\/values\\.yaml|deploy\\/kubernetes\\/control-plane\\.example\\/common\\/configmap-control-plane-env\\.yaml)$/'
 assert_file_contains "${renovate_config_path}" 'CONTROL_PLANE_(?:BIOME|RUST)_HOOK_IMAGE'
 assert_file_contains "${renovate_config_path}" '(?:export\\s+)?[a-z_]+=\"\\$\\{[A-Z0-9_]+:-[^:@\"}]+:(?<currentValue>'
@@ -477,6 +478,9 @@ assert_file_contains "${k8s_env_config_path}" '# renovate: datasource=docker dep
 assert_line_order "${k8s_env_config_path}" '# renovate: datasource=docker depName=docker.io/library/rust versioning=docker' 'CONTROL_PLANE_RUST_HOOK_IMAGE:'
 assert_file_contains "${kind_test_path}" '# renovate: datasource=docker depName=docker.io/library/rust versioning=docker'
 assert_line_order "${kind_test_path}" '# renovate: datasource=docker depName=docker.io/library/rust versioning=docker' "rust_hook_image=\"\${CONTROL_PLANE_TEST_RUST_HOOK_IMAGE:-"
+assert_file_contains "${renovate_config_path}" 'test-k8s-sample-storage-layout'
+assert_file_contains "${sample_storage_layout_test_path}" '# renovate: datasource=docker depName=docker.io/library/rust versioning=docker'
+assert_line_order "${sample_storage_layout_test_path}" '# renovate: datasource=docker depName=docker.io/library/rust versioning=docker' "rust_hook_image=\"\${CONTROL_PLANE_TEST_RUST_HOOK_IMAGE:-"
 assert_file_not_contains "${workflow_path}" '- sccache'
 
 printf '%s\n' 'image-maintenance-test: verifying rclone checksum source follows the Renovate-managed version' >&2
