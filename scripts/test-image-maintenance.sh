@@ -483,6 +483,16 @@ assert_file_contains "${sample_storage_layout_test_path}" '# renovate: datasourc
 assert_line_order "${sample_storage_layout_test_path}" '# renovate: datasource=docker depName=docker.io/library/rust versioning=docker' "rust_hook_image=\"\${CONTROL_PLANE_TEST_RUST_HOOK_IMAGE:-"
 assert_file_not_contains "${workflow_path}" '- sccache'
 
+printf '%s\n' 'image-maintenance-test: verifying kind checksum source follows the Renovate-managed version' >&2
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "kind_download_root=\"https://github.com/kubernetes-sigs/kind/releases/download/\${KIND_VERSION}\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "curl -fsSLo \"/tmp/kind-linux-\${kind_arch}.sha256sum\" \"\${kind_download_root}/kind-linux-\${kind_arch}.sha256sum\""
+assert_file_not_contains "${repo_root}/containers/control-plane/Dockerfile" 'kind_sha256='
+
+printf '%s\n' 'image-maintenance-test: verifying jq checksum source follows the Renovate-managed version' >&2
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "jq_download_root=\"https://github.com/jqlang/jq/releases/download/\${JQ_VERSION}\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "curl -fsSLo /tmp/jq-sha256sum.txt \"\${jq_download_root}/sha256sum.txt\""
+assert_file_not_contains "${repo_root}/containers/control-plane/Dockerfile" 'jq_sha256='
+
 printf '%s\n' 'image-maintenance-test: verifying rclone checksum source follows the Renovate-managed version' >&2
 assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "rclone_download_root=\"https://downloads.rclone.org/\${RCLONE_VERSION}\""
 assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "curl -fsSLo /tmp/rclone-SHA256SUMS \"\${rclone_download_root}/SHA256SUMS\""
@@ -493,6 +503,26 @@ assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "kubectl
 assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "curl -fsSLo /tmp/kubectl.sha256 \"\${kubectl_download_root}/kubectl.sha256\""
 assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "awk '{ print \$1 \"  /tmp/kubectl\"; found=1 } END { exit(found ? 0 : 1) }' /tmp/kubectl.sha256 | sha256sum -c -"
 assert_file_not_contains "${repo_root}/containers/control-plane/Dockerfile" 'kubectl_sha256='
+
+printf '%s\n' 'image-maintenance-test: verifying ruff and hadolint checksum sources follow Renovate-managed versions' >&2
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "ruff_download_root=\"https://github.com/astral-sh/ruff/releases/download/\${RUFF_VERSION}\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "curl -fsSLo \"/tmp/\${ruff_asset}.sha256\" \"\${ruff_download_root}/\${ruff_asset}.sha256\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "hadolint_download_root=\"https://github.com/hadolint/hadolint/releases/download/\${HADOLINT_VERSION}\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "curl -fsSLo \"/tmp/\${hadolint_asset}.sha256\" \"\${hadolint_download_root}/\${hadolint_asset}.sha256\""
+assert_file_not_matches "${repo_root}/containers/control-plane/Dockerfile" '^ARG (RUFF|HADOLINT)_SHA256'
+assert_file_not_contains "${repo_root}/containers/control-plane/Dockerfile" 'ruff_sha256='
+assert_file_not_contains "${repo_root}/containers/control-plane/Dockerfile" 'hadolint_sha256='
+
+printf '%s\n' 'image-maintenance-test: verifying yamllint dependency hashes come from PyPI metadata' >&2
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "curl -fsSLo /tmp/pathspec-pypi.json \"https://pypi.org/pypi/pathspec/\${PATHSPEC_VERSION}/json\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "curl -fsSLo /tmp/pyyaml-pypi.json \"https://pypi.org/pypi/PyYAML/\${PYYAML_VERSION}/json\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "curl -fsSLo /tmp/yamllint-pypi.json \"https://pypi.org/pypi/yamllint/\${YAMLLINT_VERSION}/json\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "pathspec_sha256=\"\$(jq -er --arg filename \"\${pathspec_wheel}\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "pyyaml_wheel=\"\$(jq -er --arg python_tag \"\${python_tag}\" --arg pyyaml_arch \"\${pyyaml_arch}\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "contains(\"manylinux\") and contains(\$pyyaml_arch) and endswith(\".whl\")"
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "pyyaml_sha256=\"\$(jq -er --arg filename \"\${pyyaml_wheel}\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "yamllint_sha256=\"\$(jq -er --arg filename \"\${yamllint_wheel}\""
+assert_file_not_matches "${repo_root}/containers/control-plane/Dockerfile" '^ARG (PATHSPEC|PYYAML|YAMLLINT)_SHA256'
 
 printf '%s\n' 'image-maintenance-test: verifying GHCR cleanup keeps tagged images' >&2
 assert_file_contains "${workflow_path}" 'delete-only-untagged-versions: '\''true'\'''
