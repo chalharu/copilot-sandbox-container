@@ -102,22 +102,14 @@ ARG KUBECTL_VERSION=v1.35.4
 ARG RCLONE_VERSION=v1.73.4
 # renovate: datasource=github-releases depName=astral-sh/ruff
 ARG RUFF_VERSION=0.15.10
-ARG RUFF_SHA256_AARCH64=b775a5a09484549ac3fd377b5ce34955cf633165169671d1c4a215c113ce15df
-ARG RUFF_SHA256_AMD64=e3e9e5c791542f00d95edc74a506e1ac24efc0af9574de01ab338187bf1ff9f6
 # renovate: datasource=github-releases depName=hadolint/hadolint
 ARG HADOLINT_VERSION=v2.14.0
-ARG HADOLINT_SHA256_AARCH64=331f1d3511b84a4f1e3d18d52fec284723e4019552f4f47b19322a53ce9a40ed
-ARG HADOLINT_SHA256_AMD64=6bf226944684f56c84dd014e8b979d27425c0148f61b3bd99bcc6f39e9dc5a47
 # renovate: datasource=pypi depName=yamllint
 ARG YAMLLINT_VERSION=1.38.0
-ARG YAMLLINT_SHA256=fc394a5b3be980a4062607b8fdddc0843f4fa394152b6da21722f5d59013c220
 # renovate: datasource=pypi depName=pathspec
 ARG PATHSPEC_VERSION=1.0.4
-ARG PATHSPEC_SHA256=fb6ae2fd4e7c921a165808a552060e722767cfa526f99ca5156ed2ce45a5c723
 # renovate: datasource=pypi depName=PyYAML
 ARG PYYAML_VERSION=6.0.3
-ARG PYYAML_SHA256_AARCH64=10892704fc220243f5305762e276552a0395f7beb4dbf9b14ec8fd43b57f126c
-ARG PYYAML_SHA256_AMD64=b8bb0864c5a28024fac8a632c443c87c5aa6f215c0b126c449ae1a150412f31d
 ARG CONTROL_PLANE_UID=1000
 ARG CONTROL_PLANE_GID=1000
 ARG CONTROL_PLANE_USER=copilot
@@ -158,35 +150,33 @@ RUN apt-get update -o Acquire::Retries=3 \
     && case "${arch}" in \
         amd64) \
             kind_arch=amd64; \
-            kind_sha256=eb244cbafcc157dff60cf68693c14c9a75c4e6e6fedaf9cd71c58117cb93e3fa; \
             jq_asset=jq-linux-amd64; \
-            jq_sha256=020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d; \
             kubectl_arch=amd64; \
             rclone_arch=amd64; \
             ruff_arch=x86_64; \
-            ruff_sha256=${RUFF_SHA256_AMD64}; \
             hadolint_asset=hadolint-linux-x86_64; \
-            hadolint_sha256=${HADOLINT_SHA256_AMD64}; \
+            pyyaml_arch=x86_64; \
             ;; \
         arm64) \
             kind_arch=arm64; \
-            kind_sha256=8e1014e87c34901cc422a1445866835d1e666f2a61301c27e722bdeab5a1f7e4; \
             jq_asset=jq-linux-arm64; \
-            jq_sha256=6bc62f25981328edd3cfcfe6fe51b073f2d7e7710d7ef7fcdac28d4e384fc3d4; \
             kubectl_arch=arm64; \
             rclone_arch=arm64; \
             ruff_arch=aarch64; \
-            ruff_sha256=${RUFF_SHA256_AARCH64}; \
             hadolint_asset=hadolint-linux-arm64; \
-            hadolint_sha256=${HADOLINT_SHA256_AARCH64}; \
+            pyyaml_arch=aarch64; \
             ;; \
         *) printf 'Unsupported architecture for control-plane tools: %s\n' "${arch}" >&2; exit 1 ;; \
     esac \
-      && curl -fsSLo "/tmp/kind-linux-${kind_arch}" "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-${kind_arch}" \
-      && printf '%s  %s\n' "${kind_sha256}" "/tmp/kind-linux-${kind_arch}" | sha256sum -c - \
+    && kind_download_root="https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}" \
+    && curl -fsSLo "/tmp/kind-linux-${kind_arch}" "${kind_download_root}/kind-linux-${kind_arch}" \
+    && curl -fsSLo "/tmp/kind-linux-${kind_arch}.sha256sum" "${kind_download_root}/kind-linux-${kind_arch}.sha256sum" \
+    && awk -v asset="kind-linux-${kind_arch}" '$2 == asset { print $1 "  /tmp/" asset; found=1 } END { exit(found ? 0 : 1) }' "/tmp/kind-linux-${kind_arch}.sha256sum" | sha256sum -c - \
     && install -m 0755 "/tmp/kind-linux-${kind_arch}" /usr/local/bin/kind \
-    && curl -fsSLo "/tmp/${jq_asset}" "https://github.com/jqlang/jq/releases/download/${JQ_VERSION}/${jq_asset}" \
-    && printf '%s  %s\n' "${jq_sha256}" "/tmp/${jq_asset}" | sha256sum -c - \
+    && jq_download_root="https://github.com/jqlang/jq/releases/download/${JQ_VERSION}" \
+    && curl -fsSLo "/tmp/${jq_asset}" "${jq_download_root}/${jq_asset}" \
+    && curl -fsSLo /tmp/jq-sha256sum.txt "${jq_download_root}/sha256sum.txt" \
+    && awk -v asset="${jq_asset}" '$2 == asset { print $1 "  /tmp/" asset; found=1 } END { exit(found ? 0 : 1) }' /tmp/jq-sha256sum.txt | sha256sum -c - \
     && install -m 0755 "/tmp/${jq_asset}" /usr/local/bin/jq \
     && kubectl_download_root="https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${kubectl_arch}" \
     && curl -fsSLo /tmp/kubectl "${kubectl_download_root}/kubectl" \
@@ -201,17 +191,31 @@ RUN apt-get update -o Acquire::Retries=3 \
     && unzip -q "/tmp/${rclone_asset}" -d /tmp \
     && install -m 0755 "/tmp/rclone-${RCLONE_VERSION}-linux-${rclone_arch}/rclone" /usr/local/bin/rclone \
     && ruff_asset="ruff-${ruff_arch}-unknown-linux-gnu.tar.gz" \
-    && curl -fsSLo "/tmp/${ruff_asset}" "https://github.com/astral-sh/ruff/releases/download/${RUFF_VERSION}/${ruff_asset}" \
-    && printf '%s  %s\n' "${ruff_sha256}" "/tmp/${ruff_asset}" | sha256sum -c - \
+    && ruff_download_root="https://github.com/astral-sh/ruff/releases/download/${RUFF_VERSION}" \
+    && curl -fsSLo "/tmp/${ruff_asset}" "${ruff_download_root}/${ruff_asset}" \
+    && curl -fsSLo "/tmp/${ruff_asset}.sha256" "${ruff_download_root}/${ruff_asset}.sha256" \
+    && awk -v asset="${ruff_asset}" '$2 == asset { print $1 "  /tmp/" asset; found=1 } END { exit(found ? 0 : 1) }' "/tmp/${ruff_asset}.sha256" | sha256sum -c - \
     && tar -xzf "/tmp/${ruff_asset}" -C /tmp \
     && install -m 0755 "/tmp/ruff-${ruff_arch}-unknown-linux-gnu/ruff" /usr/local/bin/ruff \
-    && curl -fsSLo "/tmp/${hadolint_asset}" "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/${hadolint_asset}" \
-    && printf '%s  %s\n' "${hadolint_sha256}" "/tmp/${hadolint_asset}" | sha256sum -c - \
+    && hadolint_download_root="https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}" \
+    && curl -fsSLo "/tmp/${hadolint_asset}" "${hadolint_download_root}/${hadolint_asset}" \
+    && curl -fsSLo "/tmp/${hadolint_asset}.sha256" "${hadolint_download_root}/${hadolint_asset}.sha256" \
+    && awk -v asset="${hadolint_asset}" '{ gsub(/^[*]/, "", $2); if ($2 == asset) { print $1 "  /tmp/" asset; found=1 } } END { exit(found ? 0 : 1) }' "/tmp/${hadolint_asset}.sha256" | sha256sum -c - \
     && install -m 0755 "/tmp/${hadolint_asset}" /usr/local/bin/hadolint \
+    && pathspec_wheel="pathspec-${PATHSPEC_VERSION}-py3-none-any.whl" \
+    && yamllint_wheel="yamllint-${YAMLLINT_VERSION}-py3-none-any.whl" \
+    && python_tag="$(python3 -c 'import sys; print(f"cp{sys.version_info[0]}{sys.version_info[1]}")')" \
+    && curl -fsSLo /tmp/pathspec-pypi.json "https://pypi.org/pypi/pathspec/${PATHSPEC_VERSION}/json" \
+    && curl -fsSLo /tmp/pyyaml-pypi.json "https://pypi.org/pypi/PyYAML/${PYYAML_VERSION}/json" \
+    && curl -fsSLo /tmp/yamllint-pypi.json "https://pypi.org/pypi/yamllint/${YAMLLINT_VERSION}/json" \
+    && pathspec_sha256="$(jq -er --arg filename "${pathspec_wheel}" 'first(.urls[] | select(.filename == $filename) | .digests.sha256)' /tmp/pathspec-pypi.json)" \
+    && pyyaml_wheel="$(jq -er --arg python_tag "${python_tag}" --arg pyyaml_arch "${pyyaml_arch}" 'first(.urls[] | select(.packagetype == "bdist_wheel" and (.filename | ascii_downcase | startswith("pyyaml-") and contains("-" + $python_tag + "-" + $python_tag + "-") and contains("manylinux") and contains($pyyaml_arch) and endswith(".whl"))) | .filename)' /tmp/pyyaml-pypi.json)" \
+    && pyyaml_sha256="$(jq -er --arg filename "${pyyaml_wheel}" 'first(.urls[] | select(.filename == $filename) | .digests.sha256)' /tmp/pyyaml-pypi.json)" \
+    && yamllint_sha256="$(jq -er --arg filename "${yamllint_wheel}" 'first(.urls[] | select(.filename == $filename) | .digests.sha256)' /tmp/yamllint-pypi.json)" \
     && printf '%s\n' \
-        "pathspec==${PATHSPEC_VERSION} --hash=sha256:${PATHSPEC_SHA256}" \
-        "PyYAML==${PYYAML_VERSION} --hash=sha256:${PYYAML_SHA256_AARCH64} --hash=sha256:${PYYAML_SHA256_AMD64}" \
-        "yamllint==${YAMLLINT_VERSION} --hash=sha256:${YAMLLINT_SHA256}" \
+        "pathspec==${PATHSPEC_VERSION} --hash=sha256:${pathspec_sha256}" \
+        "PyYAML==${PYYAML_VERSION} --hash=sha256:${pyyaml_sha256}" \
+        "yamllint==${YAMLLINT_VERSION} --hash=sha256:${yamllint_sha256}" \
         > /tmp/yamllint-requirements.txt \
     && python3 -m venv "${YAMLLINT_VIRTUAL_ENV}" \
     && "${YAMLLINT_VIRTUAL_ENV}/bin/pip" install --no-cache-dir --only-binary=:all: --require-hashes -r /tmp/yamllint-requirements.txt \
