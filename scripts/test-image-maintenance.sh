@@ -514,14 +514,14 @@ assert_file_not_contains "${repo_root}/containers/control-plane/Dockerfile" 'ruf
 assert_file_not_contains "${repo_root}/containers/control-plane/Dockerfile" 'hadolint_sha256='
 
 printf '%s\n' 'image-maintenance-test: verifying yamllint dependency hashes come from PyPI metadata' >&2
-assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" 'curl -fsSLo /tmp/pathspec-pypi.json "https://pypi.org/pypi/pathspec/${PATHSPEC_VERSION}/json"'
-assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" 'curl -fsSLo /tmp/pyyaml-pypi.json "https://pypi.org/pypi/PyYAML/${PYYAML_VERSION}/json"'
-assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" 'curl -fsSLo /tmp/yamllint-pypi.json "https://pypi.org/pypi/yamllint/${YAMLLINT_VERSION}/json"'
-assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" 'pathspec_sha256="$(jq -er --arg filename "${pathspec_wheel}"'
-assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" 'pyyaml_wheel="$(jq -er --arg python_tag "${python_tag}" --arg pyyaml_arch "${pyyaml_arch}"'
-assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" 'contains("manylinux") and contains($pyyaml_arch) and endswith(".whl")'
-assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" 'pyyaml_sha256="$(jq -er --arg filename "${pyyaml_wheel}"'
-assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" 'yamllint_sha256="$(jq -er --arg filename "${yamllint_wheel}"'
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "curl -fsSLo /tmp/pathspec-pypi.json \"https://pypi.org/pypi/pathspec/\${PATHSPEC_VERSION}/json\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "curl -fsSLo /tmp/pyyaml-pypi.json \"https://pypi.org/pypi/PyYAML/\${PYYAML_VERSION}/json\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "curl -fsSLo /tmp/yamllint-pypi.json \"https://pypi.org/pypi/yamllint/\${YAMLLINT_VERSION}/json\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "pathspec_sha256=\"\$(jq -er --arg filename \"\${pathspec_wheel}\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "pyyaml_wheel=\"\$(jq -er --arg python_tag \"\${python_tag}\" --arg pyyaml_arch \"\${pyyaml_arch}\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "contains(\"manylinux\") and contains(\$pyyaml_arch) and endswith(\".whl\")"
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "pyyaml_sha256=\"\$(jq -er --arg filename \"\${pyyaml_wheel}\""
+assert_file_contains "${repo_root}/containers/control-plane/Dockerfile" "yamllint_sha256=\"\$(jq -er --arg filename \"\${yamllint_wheel}\""
 assert_file_not_matches "${repo_root}/containers/control-plane/Dockerfile" '^ARG (PATHSPEC|PYYAML|YAMLLINT)_SHA256'
 
 printf '%s\n' 'image-maintenance-test: verifying GHCR cleanup keeps tagged images' >&2
