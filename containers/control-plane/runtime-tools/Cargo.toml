@@ -27,4 +27,4 @@ sha2 = "=0.11.0"
 tempfile = "=3.27.0"
 tokio = { version = "=1.51.1", features = ["net", "rt", "sync", "time"] }
 url = "=2.5.8"
-uuid = { version = "=1.23.0", features = ["v4"] }
+uuid = { version = "=1.23.1", features = ["v4"] }
