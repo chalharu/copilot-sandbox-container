@@ -11,7 +11,7 @@ control_plane_run_user=(--user 0:0)
 host_uid="$(id -u)"
 host_gid="$(id -g)"
 # renovate: datasource=docker depName=docker.io/library/rust versioning=docker
-rust_test_image="${CONTROL_PLANE_RUST_TEST_IMAGE:-docker.io/library/rust:1.94.1-bookworm@sha256:6ae102bdbf528294bc79ad6e1fae682f6f7c2a6e6621506ba959f9685b308a55}"
+rust_test_image="${CONTROL_PLANE_RUST_TEST_IMAGE:-docker.io/library/rust:1.95.0-bookworm@sha256:225aa827d55fae9816a0492284592827e794a5247c6c6a961c3b471b344295ec}"
 
 cleanup_runtime_tool_target_dir() {
   [[ -n "${runtime_tool_target_dir:-}" ]] || return 0
