@@ -1746,9 +1746,16 @@ fn resolve_shell(chroot_root: Option<&Path>) -> Option<PathBuf> {
     })
 }
 
+fn managed_exec_path(runtime_path: Option<OsString>) -> OsString {
+    match runtime_path {
+        Some(path) if !path.is_empty() => path,
+        _ => OsString::from(DEFAULT_EXEC_PATH),
+    }
+}
+
 fn managed_shell_environment(remote_home: &Path, chrooted: bool) -> Vec<(&'static str, OsString)> {
     let mut env = vec![
-        ("PATH", OsString::from(DEFAULT_EXEC_PATH)),
+        ("PATH", managed_exec_path(env::var_os("PATH"))),
         ("HOME", remote_home.as_os_str().to_os_string()),
         (
             "GIT_CONFIG_GLOBAL",
@@ -1977,18 +1984,20 @@ mod tests {
         CHROOT_POST_TOOL_USE_HOOKS_PATH, CHROOT_RUNTIME_TOOL_PATH, DEFAULT_EXEC_PATH,
         EXEC_API_TOKEN_METADATA_KEY, ExecApiService, ServerConfig, ServerMode, TrafficLogger,
         apt_required_packages, build_rootfs_extract_command, build_server_config,
-        ensure_runtime_dirs, managed_shell_environment, normalize_path, render_remote_cargo_config,
-        render_remote_git_config, required_commands_present, reset_incomplete_bootstrap_root,
-        resolve_cwd, stdout_with_command_line, sync_remote_home_config,
+        ensure_runtime_dirs, managed_exec_path, managed_shell_environment, normalize_path,
+        render_remote_cargo_config, render_remote_git_config, required_commands_present,
+        reset_incomplete_bootstrap_root, resolve_cwd, stdout_with_command_line,
+        sync_remote_home_config,
     };
     use crate::RawServerConfig;
     use crate::proto;
     use crate::proto::exec_service_server::ExecService;
     use serde_json::json;
+    use std::env;
     use std::ffi::OsString;
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, OnceLock};
     use std::time::Duration;
     use tempfile::TempDir;
     use tonic::Request;
@@ -2009,6 +2018,36 @@ mod tests {
         fn log_line(&self, line: &str) -> Result<(), String> {
             self.lines.lock().unwrap().push(line.to_owned());
             Ok(())
+        }
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct ScopedEnvVar {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl ScopedEnvVar {
+        fn set(key: &'static str, value: Option<&str>) -> Self {
+            let previous = env::var_os(key);
+            match value {
+                Some(value) => unsafe { env::set_var(key, value) },
+                None => unsafe { env::remove_var(key) },
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for ScopedEnvVar {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => unsafe { env::set_var(self.key, value) },
+                None => unsafe { env::remove_var(self.key) },
+            }
         }
     }
 
@@ -2162,8 +2201,10 @@ mod tests {
 
     #[test]
     fn managed_shell_environment_enables_exec_policy_for_chroot() {
+        let _env_lock = env_lock().lock().unwrap();
+        let _path = ScopedEnvVar::set("PATH", Some("/runtime/bin:/usr/bin"));
         let env = managed_shell_environment(Path::new("/root"), true);
-        assert!(env.contains(&("PATH", OsString::from(DEFAULT_EXEC_PATH))));
+        assert!(env.contains(&("PATH", OsString::from("/runtime/bin:/usr/bin"))));
         assert!(env.contains(&("HOME", OsString::from("/root"))));
         assert!(env.contains(&("GIT_CONFIG_GLOBAL", OsString::from("/root/.gitconfig"))));
         assert!(env.contains(&(
@@ -2178,8 +2219,10 @@ mod tests {
 
     #[test]
     fn managed_shell_environment_skips_exec_policy_without_chroot() {
+        let _env_lock = env_lock().lock().unwrap();
+        let _path = ScopedEnvVar::set("PATH", Some("/tooling/bin:/usr/bin"));
         let env = managed_shell_environment(Path::new("/root"), false);
-        assert!(env.contains(&("PATH", OsString::from(DEFAULT_EXEC_PATH))));
+        assert!(env.contains(&("PATH", OsString::from("/tooling/bin:/usr/bin"))));
         assert!(env.contains(&("HOME", OsString::from("/root"))));
         assert!(env.contains(&("GIT_CONFIG_GLOBAL", OsString::from("/root/.gitconfig"))));
         assert!(!env.iter().any(|(key, _)| *key == "LD_PRELOAD"));
@@ -2187,6 +2230,31 @@ mod tests {
             !env.iter()
                 .any(|(key, _)| *key == "CONTROL_PLANE_EXEC_POLICY_RULES_FILE")
         );
+    }
+
+    #[test]
+    fn managed_exec_path_preserves_runtime_path() {
+        assert_eq!(
+            managed_exec_path(Some(OsString::from("/venv/bin:/usr/bin"))),
+            OsString::from("/venv/bin:/usr/bin")
+        );
+    }
+
+    #[test]
+    fn managed_exec_path_falls_back_without_runtime_path() {
+        assert_eq!(managed_exec_path(None), OsString::from(DEFAULT_EXEC_PATH));
+        assert_eq!(
+            managed_exec_path(Some(OsString::new())),
+            OsString::from(DEFAULT_EXEC_PATH)
+        );
+    }
+
+    #[test]
+    fn managed_shell_environment_falls_back_to_default_path_without_runtime_path() {
+        let _env_lock = env_lock().lock().unwrap();
+        let _path = ScopedEnvVar::set("PATH", None);
+        let env = managed_shell_environment(Path::new("/root"), false);
+        assert!(env.contains(&("PATH", OsString::from(DEFAULT_EXEC_PATH))));
     }
 
     fn write_stub_command(chroot_root: &Path, relative_path: &str) {
