@@ -33,6 +33,7 @@ copilot session PVC へまとめるものは次のとおりです。
 - `~/.copilot/config.json`
 - `~/.copilot/command-history-state.json`
 - `~/.copilot/session-state`
+- `~/.copilot/restart`
 - `~/.copilot/session-state/session-exec.json`
 - `~/.copilot/session-state/audit/audit-log.db`
 - `~/.config/gh`
@@ -135,6 +136,8 @@ namespace は owner Pod 側のままです。別 namespace のリソースは
 
 entrypoint は bundled Copilot hook を root-owned な `COPILOT_HOME` 配下へ
 配置し、互換用に `~/.copilot/hooks` からも参照できるようにします。
+同様に `/restart` が使う state も、managed `COPILOT_HOME` から
+user-owned な `~/.copilot/restart` へ symlink で公開します。
 `~/.copilot/` は sticky directory として管理するため、Copilot user は他の
 state を更新できても `hooks` symlink 自体は差し替えられません。
 
