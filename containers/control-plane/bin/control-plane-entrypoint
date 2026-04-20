@@ -35,6 +35,7 @@ exec_policy_library_path="${CONTROL_PLANE_EXEC_POLICY_LIBRARY:-/usr/local/lib/li
 exec_policy_rules_path="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE:-${bundled_hooks_dir}/preToolUse/deny-rules.yaml}"
 effective_ld_preload="${LD_PRELOAD:-}"
 copilot_hooks_dir="${copilot_state_dir}/hooks"
+copilot_restart_dir="${copilot_state_dir}/restart"
 copilot_logs_dir="${copilot_state_dir}/logs"
 copilot_agents_dir="${copilot_state_dir}/agents"
 copilot_mcp_config_path="${copilot_state_dir}/mcp-config.json"
@@ -511,16 +512,21 @@ configure_managed_copilot_home() {
   require_regular_file_or_absent "${copilot_command_history_state_path}" "Copilot command history path"
 
   mkdir -p "${managed_runtime_dir}" "${managed_copilot_home}" "${copilot_logs_dir}" "${copilot_agents_dir}"
+  mkdir -p "${copilot_restart_dir}"
   touch "${copilot_command_history_state_path}"
   chown "${control_plane_user}:${control_plane_user}" "${copilot_command_history_state_path}"
   chmod 600 "${copilot_command_history_state_path}"
-  chown "${control_plane_user}:${control_plane_user}" "${copilot_logs_dir}" "${copilot_agents_dir}"
+  chown "${control_plane_user}:${control_plane_user}" \
+    "${copilot_restart_dir}" \
+    "${copilot_logs_dir}" \
+    "${copilot_agents_dir}"
   chown root:root "${managed_runtime_dir}" "${managed_copilot_home}"
   chmod 755 "${managed_runtime_dir}" "${managed_copilot_home}"
 
   ensure_symlink_path "${managed_copilot_home}/config.json" "${copilot_config_path}"
   ensure_symlink_path "${managed_copilot_home}/command-history-state.json" "${copilot_command_history_state_path}"
   ensure_symlink_path "${managed_copilot_home}/session-state" "${copilot_session_state_dir}"
+  ensure_symlink_path "${managed_copilot_home}/restart" "${copilot_restart_dir}"
   ensure_symlink_path "${managed_copilot_home}/logs" "${copilot_logs_dir}"
   ensure_symlink_path "${managed_copilot_home}/skills" "${copilot_skills_dir}"
   ensure_symlink_path "${managed_copilot_home}/agents" "${copilot_agents_dir}"
@@ -530,6 +536,7 @@ configure_managed_copilot_home() {
     "${managed_copilot_home}/config.json" \
     "${managed_copilot_home}/command-history-state.json" \
     "${managed_copilot_home}/session-state" \
+    "${managed_copilot_home}/restart" \
     "${managed_copilot_home}/logs" \
     "${managed_copilot_home}/skills" \
     "${managed_copilot_home}/agents" \
@@ -629,6 +636,7 @@ mkdir -p \
   "${kube_dir}" \
   "${control_plane_home}/.ssh" \
   "${copilot_skills_dir}" \
+  "${copilot_restart_dir}" \
   "${copilot_logs_dir}" \
   "${copilot_agents_dir}" \
   "${control_plane_workspace}" \
@@ -672,6 +680,7 @@ ensure_path_ownership "${control_plane_user}:${control_plane_user}" \
   "${copilot_mcp_config_path}" \
   "${copilot_session_state_dir}" \
   "${copilot_skills_dir}" \
+  "${copilot_restart_dir}" \
   "${copilot_logs_dir}" \
   "${copilot_agents_dir}" \
   "${audit_log_db_dir}" \

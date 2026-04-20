@@ -130,10 +130,13 @@ test "${GIT_CONFIG_GLOBAL}" = '/var/lib/control-plane/managed-runtime/gitconfig'
 test "$(stat -c '%a %U %G' /home/copilot)" = '1770 root copilot'
 test "$(stat -c '%a %U %G' /home/copilot/.copilot)" = '1770 root copilot'
 test "$(stat -c '%a %U %G' /home/copilot/.copilot/config.json)" = '600 copilot copilot'
+test "$(stat -c '%a %U %G' /home/copilot/.copilot/restart)" = '755 copilot copilot'
 test "$(stat -c '%a %U %G' /home/copilot/.config/gh/hosts.yml)" = '600 copilot copilot'
 test "$(stat -c '%a %U %G' "${COPILOT_HOME}")" = '755 root root'
 test "$(stat -c '%a %U %G' "${COPILOT_HOME}/hooks/hooks.json")" = '644 root root'
 test "$(stat -c '%a %U %G' "${GIT_CONFIG_GLOBAL}")" = '644 root root'
+test -L "${COPILOT_HOME}/restart"
+test "$(readlink "${COPILOT_HOME}/restart")" = '/home/copilot/.copilot/restart'
 test -L /home/copilot/.copilot/hooks
 test "$(readlink /home/copilot/.copilot/hooks)" = '/usr/local/share/control-plane/hooks'
 test -L /home/copilot/.gitconfig
@@ -181,6 +184,9 @@ if su -s /bin/bash copilot -lc 'ln -sfn /tmp/evil-hooks ~/.copilot/hooks' 2>/dev
   exit 1
 fi
 test "$(readlink /home/copilot/.copilot/hooks)" = '/usr/local/share/control-plane/hooks'
+su -s /bin/bash copilot -lc 'printf restart-state > "${COPILOT_HOME}/restart/state.json"'
+grep -Fqx 'restart-state' /home/copilot/.copilot/restart/state.json
+rm -f /home/copilot/.copilot/restart/state.json
 su -s /bin/bash copilot -lc 'touch ~/.copilot/user-owned-state && rm ~/.copilot/user-owned-state'
 su -s /bin/bash copilot -lc 'test -r /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key.pub'
 if su -s /bin/bash copilot -lc 'test -r /var/lib/control-plane/ssh-host-keys/ssh_host_ed25519_key'; then
