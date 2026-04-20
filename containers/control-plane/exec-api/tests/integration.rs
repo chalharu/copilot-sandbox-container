@@ -1,12 +1,16 @@
 use control_plane_exec_api::{
     ServerConfig, ServerMode, check_health, execute_remote, serve_with_listener,
 };
+use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
+use std::sync::OnceLock;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
-use tokio::sync::oneshot;
+use tokio::sync::{Mutex, oneshot};
 
 async fn start_server(
     temp_dir: &TempDir,
@@ -52,8 +56,48 @@ async fn start_server(
     (addr, shutdown_tx)
 }
 
+fn env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+struct ScopedEnvVar {
+    key: &'static str,
+    previous: Option<OsString>,
+}
+
+impl ScopedEnvVar {
+    fn set(key: &'static str, value: Option<&str>) -> Self {
+        let previous = env::var_os(key);
+        match value {
+            Some(value) => unsafe { env::set_var(key, value) },
+            None => unsafe { env::remove_var(key) },
+        }
+        Self { key, previous }
+    }
+}
+
+impl Drop for ScopedEnvVar {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => unsafe { env::set_var(self.key, value) },
+            None => unsafe { env::remove_var(self.key) },
+        }
+    }
+}
+
+fn write_executable(file_path: &Path, content: &str) {
+    fs::write(file_path, content).expect("executable content");
+    let mut permissions = fs::metadata(file_path)
+        .expect("executable metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(file_path, permissions).expect("executable permissions");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn exec_api_rejects_requests_without_the_session_token_and_runs_authorized_commands() {
+    let _env_lock = env_lock().lock().await;
     let workspace_dir = TempDir::new().expect("workspace directory");
     let exec_token = "test-exec-token";
     let (addr, shutdown_tx) = start_server(&workspace_dir, exec_token, ServerMode::Exec).await;
@@ -103,6 +147,7 @@ async fn exec_api_rejects_requests_without_the_session_token_and_runs_authorized
 
 #[tokio::test(flavor = "multi_thread")]
 async fn post_tool_use_mode_runs_bundled_hook_from_remote_home() {
+    let _env_lock = env_lock().lock().await;
     let workspace_dir = TempDir::new().expect("workspace directory");
     let exec_token = "post-tool-use-token";
     let hook_dir = workspace_dir.path().join("home/.copilot/hooks/postToolUse");
@@ -150,6 +195,63 @@ async fn post_tool_use_mode_runs_bundled_hook_from_remote_home() {
     assert_eq!(
         fs::read_to_string(&hook_input_path).expect("hook input"),
         raw_input
+    );
+
+    shutdown_tx.send(()).expect("shutdown should succeed");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn post_tool_use_mode_preserves_runtime_path_for_hook_commands() {
+    let _env_lock = env_lock().lock().await;
+    let workspace_dir = TempDir::new().expect("workspace directory");
+    let exec_token = "post-tool-use-path-token";
+    let hook_dir = workspace_dir.path().join("home/.copilot/hooks/postToolUse");
+    let runtime_bin_dir = workspace_dir.path().join("runtime-bin");
+    let tool_output_path = workspace_dir.path().join("tool-output.txt");
+    fs::create_dir_all(&hook_dir).expect("hook directory");
+    fs::create_dir_all(&runtime_bin_dir).expect("runtime bin directory");
+    write_executable(
+        &runtime_bin_dir.join("runtime-path-tool"),
+        "#!/bin/sh\nset -eu\nprintf 'runtime-path-ok\\n'\n",
+    );
+    let hook_script = hook_dir.join("main");
+    write_executable(
+        &hook_script,
+        &format!(
+            "#!/bin/sh\nset -eu\nruntime-path-tool > {}\n",
+            tool_output_path.display()
+        ),
+    );
+    let runtime_path = format!("{}:/usr/bin:/bin", runtime_bin_dir.display());
+    let _path = ScopedEnvVar::set("PATH", Some(&runtime_path));
+
+    let (addr, shutdown_tx) =
+        start_server(&workspace_dir, exec_token, ServerMode::PostToolUse).await;
+
+    check_health(&addr, Duration::from_secs(5))
+        .await
+        .expect("health check should pass");
+
+    let raw_input = format!(
+        r#"{{"cwd":"{}","toolResult":{{"resultType":"success"}}}}"#,
+        workspace_dir.path().display()
+    );
+    let result = execute_remote(
+        &addr,
+        Duration::from_secs(5),
+        exec_token,
+        workspace_dir.path().to_str().expect("workspace path"),
+        &raw_input,
+    )
+    .await
+    .expect("postToolUse request should succeed");
+
+    assert_eq!(result.stdout, "");
+    assert_eq!(result.stderr, "");
+    assert_eq!(result.exit_code, 0);
+    assert_eq!(
+        fs::read_to_string(&tool_output_path).expect("tool output"),
+        "runtime-path-ok\n"
     );
 
     shutdown_tx.send(()).expect("shutdown should succeed");
