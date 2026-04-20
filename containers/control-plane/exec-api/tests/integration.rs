@@ -6,11 +6,11 @@ use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
-use tokio::sync::oneshot;
+use tokio::sync::{Mutex, oneshot};
 
 async fn start_server(
     temp_dir: &TempDir,
@@ -97,7 +97,7 @@ fn write_executable(file_path: &Path, content: &str) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn exec_api_rejects_requests_without_the_session_token_and_runs_authorized_commands() {
-    let _env_lock = env_lock().lock().unwrap();
+    let _env_lock = env_lock().lock().await;
     let workspace_dir = TempDir::new().expect("workspace directory");
     let exec_token = "test-exec-token";
     let (addr, shutdown_tx) = start_server(&workspace_dir, exec_token, ServerMode::Exec).await;
@@ -147,7 +147,7 @@ async fn exec_api_rejects_requests_without_the_session_token_and_runs_authorized
 
 #[tokio::test(flavor = "multi_thread")]
 async fn post_tool_use_mode_runs_bundled_hook_from_remote_home() {
-    let _env_lock = env_lock().lock().unwrap();
+    let _env_lock = env_lock().lock().await;
     let workspace_dir = TempDir::new().expect("workspace directory");
     let exec_token = "post-tool-use-token";
     let hook_dir = workspace_dir.path().join("home/.copilot/hooks/postToolUse");
@@ -202,7 +202,7 @@ async fn post_tool_use_mode_runs_bundled_hook_from_remote_home() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn post_tool_use_mode_preserves_runtime_path_for_hook_commands() {
-    let _env_lock = env_lock().lock().unwrap();
+    let _env_lock = env_lock().lock().await;
     let workspace_dir = TempDir::new().expect("workspace directory");
     let exec_token = "post-tool-use-path-token";
     let hook_dir = workspace_dir.path().join("home/.copilot/hooks/postToolUse");
