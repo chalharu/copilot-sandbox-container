@@ -88,7 +88,7 @@ COPY --chmod=644 config/external-skills.yaml /tmp/external-skills.yaml
 
 RUN /usr/local/bin/install-git-skills-from-manifest /tmp/external-skills.yaml /opt/control-plane/external-skills
 
-FROM node:24.15.0-bookworm-slim@sha256:879b21aec4a1ad820c27ccd565e7c7ed955f24b92e6694556154f251e4bdb240
+FROM node:24.15.0-bookworm-slim@sha256:03eae3ef7e88a9de535496fb488d67e02b9d96a063a8967bae657744ecd513f2
 
 # renovate: datasource=npm depName=@github/copilot
 ARG COPILOT_CLI_VERSION=1.0.35
