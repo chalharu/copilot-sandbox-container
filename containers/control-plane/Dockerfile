@@ -107,7 +107,7 @@ ARG HADOLINT_VERSION=v2.14.0
 # renovate: datasource=pypi depName=yamllint
 ARG YAMLLINT_VERSION=1.38.0
 # renovate: datasource=pypi depName=pathspec
-ARG PATHSPEC_VERSION=1.0.4
+ARG PATHSPEC_VERSION=1.1.0
 # renovate: datasource=pypi depName=PyYAML
 ARG PYYAML_VERSION=6.0.3
 ARG CONTROL_PLANE_UID=1000
