@@ -417,6 +417,10 @@ fn linters_config_defines_language_pipelines() {
         .iter()
         .find(|pipeline| pipeline["id"] == "scripts")
         .unwrap();
+    let json_pipeline = pipelines
+        .iter()
+        .find(|pipeline| pipeline["id"] == "json")
+        .unwrap();
     let yaml_pipeline = pipelines
         .iter()
         .find(|pipeline| pipeline["id"] == "yaml")
@@ -438,6 +442,12 @@ fn linters_config_defines_language_pipelines() {
     assert_eq!(control_plane_rust_fmt["appendFiles"], true);
     assert_eq!(yamllint_check["command"], "yamllint");
     assert_eq!(markdown_pipeline["matcher"][0], "\\.(?:md|markdown)$");
+    assert_eq!(json_pipeline["matcher"][0], "\\.(?:jsonc?)$");
+    assert_eq!(
+        json_pipeline["steps"][0]["runtimeFailureLabel"],
+        "Biome hook runtime failed:"
+    );
+    assert_eq!(json_pipeline["steps"][1]["tools"][0], "biome-check");
     assert_eq!(
         scripts_pipeline["steps"][0]["runtimeFailureLabel"],
         "Biome hook runtime failed:"
@@ -453,7 +463,7 @@ fn linters_config_defines_language_pipelines() {
         "control-plane-rust-fmt"
     );
     assert_eq!(docker_pipeline["matcher"][1], "(?:^|/)[^/]+\\.Dockerfile$");
-    assert_eq!(pipelines.len(), 6);
+    assert_eq!(pipelines.len(), 7);
 }
 
 #[test]
