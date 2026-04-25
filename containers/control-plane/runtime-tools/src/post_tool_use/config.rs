@@ -146,19 +146,26 @@ fn merge_pipelines(mut base: Vec<RawPipeline>, overrides: Vec<RawPipeline>) -> V
 
 fn normalize_tools(raw_tools: Vec<RawTool>) -> Result<HashMap<String, Tool>, String> {
     let mut tools = HashMap::new();
-    for tool in raw_tools {
-        validate_id(&tool.id, "tool")?;
-        validate_runtime_failure_exit_codes(&tool)?;
-        if tools.contains_key(&tool.id) {
-            return Err(format!("Duplicate tool id in config: {}", tool.id));
+    for raw_tool in raw_tools {
+        let RawTool {
+            id,
+            command,
+            args,
+            append_files,
+            runtime_failure_exit_codes,
+        } = raw_tool;
+        validate_id(&id, "tool")?;
+        validate_runtime_failure_exit_codes(&id, &runtime_failure_exit_codes)?;
+        if tools.contains_key(&id) {
+            return Err(format!("Duplicate tool id in config: {id}"));
         }
         tools.insert(
-            tool.id,
+            id,
             Tool {
-                command: tool.command,
-                args: tool.args,
-                append_files: tool.append_files,
-                runtime_failure_exit_codes: tool.runtime_failure_exit_codes,
+                command,
+                args,
+                append_files,
+                runtime_failure_exit_codes,
             },
         );
     }
@@ -190,16 +197,11 @@ fn normalize_pipelines(
     Ok(pipelines)
 }
 
-fn validate_runtime_failure_exit_codes(tool: &RawTool) -> Result<(), String> {
-    if let Some(code) = tool
-        .runtime_failure_exit_codes
-        .iter()
-        .copied()
-        .find(|code| *code <= 0)
-    {
+fn validate_runtime_failure_exit_codes(tool_id: &str, codes: &[i32]) -> Result<(), String> {
+    if let Some(code) = codes.iter().copied().find(|code| *code <= 0) {
         return Err(format!(
             "Tool \"{}\" runtimeFailureExitCodes must contain only positive integers: {}",
-            tool.id, code
+            tool_id, code
         ));
     }
     Ok(())

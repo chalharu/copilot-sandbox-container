@@ -214,6 +214,30 @@
       ]
     },
     {
+      "id": "json",
+      "matcher": [
+        "\\.(?:jsonc?)$"
+      ],
+      "steps": [
+        {
+          "tools": [
+            "biome-check-write",
+            "biome-check-write-npx"
+          ],
+          "runtimeFailureLabel": "Biome hook runtime failed:"
+        },
+        {
+          "tools": [
+            "biome-check",
+            "biome-check-npx"
+          ],
+          "reportFailure": true,
+          "failureLabel": "Biome reported unresolved issues:",
+          "runtimeFailureLabel": "Biome hook runtime failed:"
+        }
+      ]
+    },
+    {
       "id": "scripts",
       "matcher": [
         "\\.(?:[cm]?[jt]s|[jt]sx)$"

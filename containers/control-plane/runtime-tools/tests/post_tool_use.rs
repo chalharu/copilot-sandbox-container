@@ -133,6 +133,7 @@ struct StubOptions {
     biome_runtime_failure_mode: Option<&'static str>,
     oxlint: bool,
     eslint: bool,
+    npx: bool,
     ruff: bool,
     containerized_bash: bool,
     hadolint: bool,
@@ -147,6 +148,7 @@ impl Default for StubOptions {
             biome_runtime_failure_mode: None,
             oxlint: true,
             eslint: false,
+            npx: false,
             ruff: false,
             containerized_bash: false,
             hadolint: false,
@@ -230,6 +232,51 @@ exit 1
         write_executable(
             &bin_dir.join("eslint"),
             "#!/bin/sh\nprintf \"eslint %s\\n\" \"$*\" >> \"$HOOK_LOG\"\nif [ \"$1\" = \"--fix\" ]; then\n  exit 0\nfi\nprintf \"eslint unresolved in %s\\n\" \"$1\" >&2\nexit 1\n",
+        );
+    }
+    if options.npx {
+        write_executable(
+            &bin_dir.join("npx"),
+            r#"#!/bin/sh
+printf "npx %s\n" "$*" >> "$HOOK_LOG"
+package="${2:-}"
+case "${package}" in
+  markdownlint-cli2)
+    if [ "${3:-}" = "--fix" ]; then
+      exit 0
+    fi
+    printf "remaining markdown issue in %s\n" "${3:-}" >&2
+    exit 1
+    ;;
+  @biomejs/biome)
+    if [ "${3:-}" = "check" ] && [ "${4:-}" = "--write" ]; then
+      exit 0
+    fi
+    file="${4:-}"
+    if [ "${3:-}" = "check" ] && [ -n "${5:-}" ]; then
+      file="$5"
+    fi
+    printf "biome unresolved in %s\n" "${file}" >&2
+    exit 1
+    ;;
+  oxlint)
+    if [ "${3:-}" = "--fix" ]; then
+      exit 0
+    fi
+    printf "oxlint unresolved in %s\n" "${3:-}" >&2
+    exit 1
+    ;;
+  eslint)
+    if [ "${3:-}" = "--fix" ]; then
+      exit 0
+    fi
+    printf "eslint unresolved in %s\n" "${3:-}" >&2
+    exit 1
+    ;;
+esac
+printf "unexpected npx invocation: %s\n" "$*" >&2
+exit 1
+"#,
         );
     }
     if options.ruff {
@@ -417,6 +464,10 @@ fn linters_config_defines_language_pipelines() {
         .iter()
         .find(|pipeline| pipeline["id"] == "scripts")
         .unwrap();
+    let json_pipeline = pipelines
+        .iter()
+        .find(|pipeline| pipeline["id"] == "json")
+        .unwrap();
     let yaml_pipeline = pipelines
         .iter()
         .find(|pipeline| pipeline["id"] == "yaml")
@@ -438,6 +489,12 @@ fn linters_config_defines_language_pipelines() {
     assert_eq!(control_plane_rust_fmt["appendFiles"], true);
     assert_eq!(yamllint_check["command"], "yamllint");
     assert_eq!(markdown_pipeline["matcher"][0], "\\.(?:md|markdown)$");
+    assert_eq!(json_pipeline["matcher"][0], "\\.(?:jsonc?)$");
+    assert_eq!(
+        json_pipeline["steps"][0]["runtimeFailureLabel"],
+        "Biome hook runtime failed:"
+    );
+    assert_eq!(json_pipeline["steps"][1]["tools"][0], "biome-check");
     assert_eq!(
         scripts_pipeline["steps"][0]["runtimeFailureLabel"],
         "Biome hook runtime failed:"
@@ -453,7 +510,7 @@ fn linters_config_defines_language_pipelines() {
         "control-plane-rust-fmt"
     );
     assert_eq!(docker_pipeline["matcher"][1], "(?:^|/)[^/]+\\.Dockerfile$");
-    assert_eq!(pipelines.len(), 6);
+    assert_eq!(pipelines.len(), 7);
 }
 
 #[test]
@@ -511,6 +568,61 @@ fn hook_falls_back_from_oxlint_to_eslint() {
     assert!(!hook_log.contains("oxlint --fix index.ts"));
     assert!(hook_log.contains("eslint --fix index.ts"));
     let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("JavaScript/TypeScript linter reported unresolved issues:"));
+    assert!(stderr.contains("eslint unresolved in index.ts"));
+}
+
+#[test]
+fn hook_falls_back_to_markdownlint_npx_when_local_cli_is_missing() {
+    let repo = setup_repo("post-tool-use-markdown-npx-");
+    seed_repo(repo.path());
+    fs::write(repo.path().join("README.md"), "# Title\n\nchanged\n").unwrap();
+    let hook_env = create_tool_stubs(
+        repo.path(),
+        StubOptions {
+            markdownlint: false,
+            biome: false,
+            oxlint: false,
+            eslint: false,
+            npx: true,
+            ..StubOptions::default()
+        },
+    );
+    let result = run_hook(repo.path(), &hook_env, "success");
+    let hook_log = fs::read_to_string(&hook_env.log_file).unwrap();
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert_eq!(result.status.code(), Some(1));
+    assert!(hook_log.contains("npx --yes markdownlint-cli2 --fix README.md"));
+    assert!(hook_log.contains("npx --yes markdownlint-cli2 README.md"));
+    assert!(stderr.contains("Markdown linter reported unresolved issues:"));
+    assert!(stderr.contains("remaining markdown issue in README.md"));
+}
+
+#[test]
+fn hook_falls_back_to_eslint_npx_when_local_script_linters_are_missing() {
+    let repo = setup_repo("post-tool-use-eslint-npx-");
+    seed_repo(repo.path());
+    fs::write(repo.path().join("index.ts"), "export const value=1\n").unwrap();
+    let hook_env = create_tool_stubs(
+        repo.path(),
+        StubOptions {
+            oxlint: false,
+            eslint: false,
+            npx: true,
+            ..StubOptions::default()
+        },
+    );
+    let result = run_hook(repo.path(), &hook_env, "success");
+    let hook_log = fs::read_to_string(&hook_env.log_file).unwrap();
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert_eq!(result.status.code(), Some(1));
+    assert!(hook_log.contains("control-plane-biome check --write index.ts"));
+    assert!(hook_log.contains("npx --yes eslint --fix index.ts"));
+    assert!(hook_log.contains("npx --yes eslint index.ts"));
+    assert!(!hook_log.contains("oxlint --fix index.ts"));
+    assert!(!hook_log.contains("npx --yes oxlint"));
     assert!(stderr.contains("JavaScript/TypeScript linter reported unresolved issues:"));
     assert!(stderr.contains("eslint unresolved in index.ts"));
 }
