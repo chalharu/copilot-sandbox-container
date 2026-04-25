@@ -177,11 +177,16 @@ function stageFeatureFiles(repo) {
 		"utf8",
 	);
 	fs.writeFileSync(
+		path.join(repo, "biome.jsonc"),
+		'{\n  "formatter": { "enabled": true }\n}\n',
+		"utf8",
+	);
+	fs.writeFileSync(
 		path.join(repo, "index.ts"),
 		"export const value = 1;\n",
 		"utf8",
 	);
-	run("git", ["add", "README.md", "index.ts"], { cwd: repo });
+	run("git", ["add", "README.md", "biome.jsonc", "index.ts"], { cwd: repo });
 }
 
 for (const branchName of ["main", "master"]) {
@@ -231,6 +236,10 @@ test("global pre-commit runs bundled linter and repository hook on feature branc
 	});
 
 	assert.equal(result.status, 0);
+	assert.match(
+		fs.readFileSync(toolEnv.HOOK_LOG, "utf8"),
+		/control-plane-biome check --write biome\.jsonc/,
+	);
 	assert.match(
 		fs.readFileSync(toolEnv.HOOK_LOG, "utf8"),
 		/control-plane-biome check --write index\.ts/,

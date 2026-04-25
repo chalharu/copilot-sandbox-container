@@ -413,6 +413,10 @@ fn linters_config_defines_language_pipelines() {
         .iter()
         .find(|pipeline| pipeline["id"] == "markdown")
         .unwrap();
+    let json_pipeline = pipelines
+        .iter()
+        .find(|pipeline| pipeline["id"] == "json")
+        .unwrap();
     let scripts_pipeline = pipelines
         .iter()
         .find(|pipeline| pipeline["id"] == "scripts")
@@ -438,6 +442,11 @@ fn linters_config_defines_language_pipelines() {
     assert_eq!(control_plane_rust_fmt["appendFiles"], true);
     assert_eq!(yamllint_check["command"], "yamllint");
     assert_eq!(markdown_pipeline["matcher"][0], "\\.(?:md|markdown)$");
+    assert_eq!(json_pipeline["matcher"][0], "\\.(?:jsonc?)$");
+    assert_eq!(
+        json_pipeline["steps"][1]["runtimeFailureLabel"],
+        "Biome hook runtime failed:"
+    );
     assert_eq!(
         scripts_pipeline["steps"][0]["runtimeFailureLabel"],
         "Biome hook runtime failed:"
@@ -453,7 +462,7 @@ fn linters_config_defines_language_pipelines() {
         "control-plane-rust-fmt"
     );
     assert_eq!(docker_pipeline["matcher"][1], "(?:^|/)[^/]+\\.Dockerfile$");
-    assert_eq!(pipelines.len(), 6);
+    assert_eq!(pipelines.len(), 7);
 }
 
 #[test]
@@ -513,6 +522,44 @@ fn hook_falls_back_from_oxlint_to_eslint() {
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(stderr.contains("JavaScript/TypeScript linter reported unresolved issues:"));
     assert!(stderr.contains("eslint unresolved in index.ts"));
+}
+
+#[test]
+fn hook_runs_biome_for_json_family_files() {
+    let repo = setup_repo("post-tool-use-json-");
+    seed_repo(repo.path());
+    fs::write(
+        repo.path().join("biome.jsonc"),
+        "{\n  \"formatter\": { \"enabled\": true }\n}\n",
+    )
+    .unwrap();
+    run_checked("git", &["add", "biome.jsonc"], repo.path());
+    run_checked("git", &["commit", "-m", "add biome config"], repo.path());
+    fs::write(
+        repo.path().join("biome.jsonc"),
+        "{\n\"formatter\":{\"enabled\":true}\n}\n",
+    )
+    .unwrap();
+
+    let hook_env = create_tool_stubs(
+        repo.path(),
+        StubOptions {
+            oxlint: false,
+            eslint: false,
+            ..StubOptions::default()
+        },
+    );
+    let result = run_hook(repo.path(), &hook_env, "success");
+    let hook_log = fs::read_to_string(&hook_env.log_file).unwrap();
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert_eq!(result.status.code(), Some(1));
+    assert!(hook_log.contains("control-plane-biome check --write biome.jsonc"));
+    assert!(hook_log.contains("control-plane-biome check biome.jsonc"));
+    assert!(!hook_log.contains("oxlint"));
+    assert!(!hook_log.contains("eslint"));
+    assert!(stderr.contains("Biome reported unresolved issues:"));
+    assert!(stderr.contains("biome unresolved in biome.jsonc"));
 }
 
 #[test]
