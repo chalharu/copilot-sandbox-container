@@ -84,7 +84,7 @@ data:
   # so large scans do not grow the long-lived control-plane container. The
   # shipped sample default below tracks a Renovate-managed ref.
   # renovate: datasource=docker depName=ghcr.io/biomejs/biome versioning=docker
-  CONTROL_PLANE_BIOME_HOOK_IMAGE: ghcr.io/biomejs/biome:2.4.12
+  CONTROL_PLANE_BIOME_HOOK_IMAGE: ghcr.io/biomejs/biome:2.4.13
   # Compile-heavy Rust hooks should run through a dedicated toolchain image
   # instead of the slim control-plane image. The shipped sample default below
   # also tracks a Renovate-managed ref.
