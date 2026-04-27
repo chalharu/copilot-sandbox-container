@@ -17,7 +17,7 @@ k8s-openapi = { version = "=0.27.1", default-features = false, features = [
   "latest",
 ] }
 kube = "=3.1.0"
-libc = "=0.2.185"
+libc = "=0.2.186"
 regex = "=1.12.3"
 rusqlite = { version = "=0.39.0", features = ["bundled"] }
 serde = { version = "=1.0.228", features = ["derive"] }
