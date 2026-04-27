@@ -168,6 +168,10 @@ fn write_executable(file_path: &Path, content: &str) {
     fs::set_permissions(file_path, permissions).unwrap();
 }
 
+fn log_contains_line(log: &str, expected: &str) -> bool {
+    log.lines().any(|line| line == expected)
+}
+
 fn install_runtime_hook(repo: &Path) {
     let hook_dir = repo.join(".copilot/hooks/postToolUse");
     let hook_path = hook_dir.join("main");
@@ -336,6 +340,12 @@ fn seed_repo(repo: &Path) {
     run_checked("git", &["commit", "-m", "init"], repo);
 }
 
+fn add_eslint_flat_config(repo: &Path) {
+    fs::write(repo.join("eslint.config.js"), "export default [];\n").unwrap();
+    run_checked("git", &["add", "eslint.config.js"], repo);
+    run_checked("git", &["commit", "-m", "add eslint config"], repo);
+}
+
 fn make_files_dirty(repo: &Path) {
     fs::write(repo.join("README.md"), "# Title\n\nchanged\n").unwrap();
     fs::write(repo.join("index.ts"), "export const value=1\n").unwrap();
@@ -448,6 +458,10 @@ fn linters_config_defines_language_pipelines() {
         .iter()
         .find(|tool| tool["id"] == "biome-check")
         .unwrap();
+    let eslint_fix = tools
+        .iter()
+        .find(|tool| tool["id"] == "eslint-fix")
+        .unwrap();
     let control_plane_rust_fmt = tools
         .iter()
         .find(|tool| tool["id"] == "control-plane-rust-fmt")
@@ -485,6 +499,9 @@ fn linters_config_defines_language_pipelines() {
     assert_eq!(biome_check_write["command"], "control-plane-biome");
     assert_eq!(biome_check_write["runtimeFailureExitCodes"][0], 70);
     assert_eq!(biome_check["runtimeFailureExitCodes"][0], 70);
+    assert_eq!(eslint_fix["requiredRepoFiles"].as_array().unwrap().len(), 6);
+    assert_eq!(eslint_fix["requiredRepoFiles"][0], "eslint.config.js");
+    assert_eq!(eslint_fix["requiredRepoFiles"][5], "eslint.config.cts");
     assert_eq!(control_plane_rust_fmt["command"], "bash");
     assert_eq!(control_plane_rust_fmt["appendFiles"], true);
     assert_eq!(yamllint_check["command"], "yamllint");
@@ -552,6 +569,7 @@ fn hook_runs_incrementally() {
 fn hook_falls_back_from_oxlint_to_eslint() {
     let repo = setup_repo("post-tool-use-eslint-");
     seed_repo(repo.path());
+    add_eslint_flat_config(repo.path());
     fs::write(repo.path().join("index.ts"), "export const value=1\n").unwrap();
     let hook_env = create_tool_stubs(
         repo.path(),
@@ -565,8 +583,8 @@ fn hook_falls_back_from_oxlint_to_eslint() {
     let hook_log = fs::read_to_string(&hook_env.log_file).unwrap();
 
     assert_eq!(result.status.code(), Some(1));
-    assert!(!hook_log.contains("oxlint --fix index.ts"));
-    assert!(hook_log.contains("eslint --fix index.ts"));
+    assert!(!log_contains_line(&hook_log, "oxlint --fix index.ts"));
+    assert!(log_contains_line(&hook_log, "eslint --fix index.ts"));
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(stderr.contains("JavaScript/TypeScript linter reported unresolved issues:"));
     assert!(stderr.contains("eslint unresolved in index.ts"));
@@ -600,8 +618,8 @@ fn hook_falls_back_to_markdownlint_npx_when_local_cli_is_missing() {
 }
 
 #[test]
-fn hook_falls_back_to_eslint_npx_when_local_script_linters_are_missing() {
-    let repo = setup_repo("post-tool-use-eslint-npx-");
+fn hook_falls_back_to_oxlint_npx_when_eslint_is_not_applicable() {
+    let repo = setup_repo("post-tool-use-oxlint-npx-");
     seed_repo(repo.path());
     fs::write(repo.path().join("index.ts"), "export const value=1\n").unwrap();
     let hook_env = create_tool_stubs(
@@ -618,10 +636,50 @@ fn hook_falls_back_to_eslint_npx_when_local_script_linters_are_missing() {
     let stderr = String::from_utf8_lossy(&result.stderr);
 
     assert_eq!(result.status.code(), Some(1));
-    assert!(hook_log.contains("control-plane-biome check --write index.ts"));
-    assert!(hook_log.contains("npx --yes eslint --fix index.ts"));
-    assert!(hook_log.contains("npx --yes eslint index.ts"));
-    assert!(!hook_log.contains("oxlint --fix index.ts"));
+    assert!(log_contains_line(
+        &hook_log,
+        "control-plane-biome check --write index.ts"
+    ));
+    assert!(log_contains_line(
+        &hook_log,
+        "npx --yes oxlint --fix index.ts"
+    ));
+    assert!(log_contains_line(&hook_log, "npx --yes oxlint index.ts"));
+    assert!(!log_contains_line(&hook_log, "oxlint --fix index.ts"));
+    assert!(!hook_log.contains("npx --yes eslint"));
+    assert!(stderr.contains("JavaScript/TypeScript linter reported unresolved issues:"));
+    assert!(stderr.contains("oxlint unresolved in index.ts"));
+}
+
+#[test]
+fn hook_falls_back_to_eslint_npx_when_flat_config_exists() {
+    let repo = setup_repo("post-tool-use-eslint-npx-");
+    seed_repo(repo.path());
+    add_eslint_flat_config(repo.path());
+    fs::write(repo.path().join("index.ts"), "export const value=1\n").unwrap();
+    let hook_env = create_tool_stubs(
+        repo.path(),
+        StubOptions {
+            oxlint: false,
+            eslint: false,
+            npx: true,
+            ..StubOptions::default()
+        },
+    );
+    let result = run_hook(repo.path(), &hook_env, "success");
+    let hook_log = fs::read_to_string(&hook_env.log_file).unwrap();
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert_eq!(result.status.code(), Some(1));
+    assert!(log_contains_line(
+        &hook_log,
+        "control-plane-biome check --write index.ts"
+    ));
+    assert!(log_contains_line(
+        &hook_log,
+        "npx --yes eslint --fix index.ts"
+    ));
+    assert!(log_contains_line(&hook_log, "npx --yes eslint index.ts"));
     assert!(!hook_log.contains("npx --yes oxlint"));
     assert!(stderr.contains("JavaScript/TypeScript linter reported unresolved issues:"));
     assert!(stderr.contains("eslint unresolved in index.ts"));
@@ -784,6 +842,53 @@ fn hook_uses_repo_pipeline_overrides_with_bundled_tools() {
     assert!(!hook_log.contains("oxlint --fix index.ts"));
     assert!(stderr.contains("remaining markdown issue in README.md"));
     assert!(!stderr.contains("JavaScript/TypeScript linter reported unresolved issues:"));
+}
+
+#[test]
+fn hook_skips_repo_overridden_step_when_all_tools_are_not_applicable() {
+    let repo = setup_repo("post-tool-use-optional-step-");
+    seed_repo(repo.path());
+    fs::write(
+        repo.path().join(".github/linters.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "pipelines": [{
+                "id": "scripts",
+                "matcher": ["\\.(?:[cm]?[jt]s|[jt]sx)$"],
+                "steps": [{
+                    "tools": ["eslint-check"],
+                    "reportFailure": true,
+                    "failureLabel": "JavaScript/TypeScript linter reported unresolved issues:"
+                }]
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    run_checked("git", &["add", ".github/linters.json"], repo.path());
+    run_checked(
+        "git",
+        &["commit", "-m", "override scripts pipeline"],
+        repo.path(),
+    );
+    fs::write(repo.path().join("index.ts"), "export const value=1\n").unwrap();
+
+    let hook_env = create_tool_stubs(
+        repo.path(),
+        StubOptions {
+            biome: false,
+            oxlint: false,
+            eslint: false,
+            npx: false,
+            ..StubOptions::default()
+        },
+    );
+    let result = run_hook(repo.path(), &hook_env, "success");
+    let hook_log = fs::read_to_string(&hook_env.log_file).unwrap();
+
+    assert_eq!(result.status.code(), Some(0));
+    assert!(hook_log.is_empty());
+    assert!(result.stdout.is_empty());
+    assert!(result.stderr.is_empty());
 }
 
 #[test]

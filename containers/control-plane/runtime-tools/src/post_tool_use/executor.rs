@@ -5,7 +5,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use super::config::{Config, Tool};
+use super::config::{Config, Tool, ToolApplicability};
 
 const DEFAULT_RUNTIME_FAILURE_LABEL: &str = "Hook runtime reported tool execution failure:";
 const HOOK_RUNTIME_FAILURE_EXIT_CODE: i32 = 70;
@@ -85,12 +85,17 @@ fn run_step_with_fallback(
 ) -> Result<CommandResult, String> {
     let tool_env = build_tool_env()?;
     let mut attempted = Vec::new();
+    let mut saw_applicable_tool = false;
 
     for tool_id in tool_ids {
         let tool = config
             .tools
             .get(tool_id)
             .ok_or_else(|| format!("unknown tool id in runtime config: {tool_id}"))?;
+        if !tool_is_applicable(tool, repo_root) {
+            continue;
+        }
+        saw_applicable_tool = true;
         let args = command_args(tool, files);
 
         match execute_tool(tool, &args, repo_root, &tool_env) {
@@ -114,12 +119,30 @@ fn run_step_with_fallback(
         }
     }
 
+    if !saw_applicable_tool {
+        return Ok(CommandResult {
+            status: 0,
+            stdout: String::new(),
+            stderr: String::new(),
+            runtime_failure: false,
+        });
+    }
+
     Ok(CommandResult {
         status: HOOK_RUNTIME_FAILURE_EXIT_CODE,
         stdout: String::new(),
         stderr: format!("No available tool found. Tried: {}\n", attempted.join(", ")),
         runtime_failure: true,
     })
+}
+
+fn tool_is_applicable(tool: &Tool, repo_root: &Path) -> bool {
+    match &tool.applicability {
+        ToolApplicability::Always => true,
+        ToolApplicability::RequiresRepoFiles(files) => {
+            files.iter().any(|file| repo_root.join(file).is_file())
+        }
+    }
 }
 
 fn command_args(tool: &Tool, files: &[String]) -> Vec<String> {
