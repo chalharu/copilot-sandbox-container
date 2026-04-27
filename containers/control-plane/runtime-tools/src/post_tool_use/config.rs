@@ -387,7 +387,10 @@ mod tests {
         let merged = merge_tools(vec![bundled], vec![override_tool]).unwrap();
         assert_eq!(
             merged[0].required_repo_files.as_ref().unwrap(),
-            vec!["eslint.config.mjs", "eslint.config.cjs"]
+            &vec![
+                "eslint.config.mjs".to_string(),
+                "eslint.config.cjs".to_string(),
+            ]
         );
     }
 
