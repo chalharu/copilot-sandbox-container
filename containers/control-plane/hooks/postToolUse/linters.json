@@ -1,385 +1,309 @@
 {
-  "tools": [
-    {
-      "id": "markdownlint-fix",
-      "command": "markdownlint-cli2",
-      "args": [
-        "--fix"
-      ]
-    },
-    {
-      "id": "markdownlint-fix-npx",
-      "command": "npx",
-      "args": [
-        "--yes",
-        "markdownlint-cli2",
-        "--fix"
-      ]
-    },
-    {
-      "id": "markdownlint-check",
-      "command": "markdownlint-cli2",
-      "args": []
-    },
-    {
-      "id": "markdownlint-check-npx",
-      "command": "npx",
-      "args": [
-        "--yes",
-        "markdownlint-cli2"
-      ]
-    },
-    {
-      "id": "biome-check-write",
-      "command": "control-plane-biome",
-      "args": [
-        "check",
-        "--write"
-      ],
-      "runtimeFailureExitCodes": [
-        70
-      ]
-    },
-    {
-      "id": "biome-check-write-npx",
-      "command": "npx",
-      "args": [
-        "--yes",
-        "@biomejs/biome",
-        "check",
-        "--write"
-      ]
-    },
-    {
-      "id": "biome-check",
-      "command": "control-plane-biome",
-      "args": [
-        "check"
-      ],
-      "runtimeFailureExitCodes": [
-        70
-      ]
-    },
-    {
-      "id": "biome-check-npx",
-      "command": "npx",
-      "args": [
-        "--yes",
-        "@biomejs/biome",
-        "check"
-      ]
-    },
-    {
-      "id": "oxlint-fix",
-      "command": "oxlint",
-      "args": [
-        "--fix"
-      ]
-    },
-    {
-      "id": "oxlint-fix-npx",
-      "command": "npx",
-      "args": [
-        "--yes",
-        "oxlint",
-        "--fix"
-      ]
-    },
-    {
-      "id": "oxlint-check",
-      "command": "oxlint",
-      "args": []
-    },
-    {
-      "id": "oxlint-check-npx",
-      "command": "npx",
-      "args": [
-        "--yes",
-        "oxlint"
-      ]
-    },
-    {
-      "id": "eslint-fix",
-      "command": "eslint",
-      "args": [
-        "--fix"
-      ]
-    },
-    {
-      "id": "eslint-fix-npx",
-      "command": "npx",
-      "args": [
-        "--yes",
-        "eslint",
-        "--fix"
-      ]
-    },
-    {
-      "id": "eslint-check",
-      "command": "eslint",
-      "args": []
-    },
-    {
-      "id": "eslint-check-npx",
-      "command": "npx",
-      "args": [
-        "--yes",
-        "eslint"
-      ]
-    },
-    {
-      "id": "ruff-format",
-      "command": "ruff",
-      "args": [
-        "format"
-      ]
-    },
-    {
-      "id": "ruff-check-fix",
-      "command": "ruff",
-      "args": [
-        "check",
-        "--fix"
-      ]
-    },
-    {
-      "id": "ruff-check",
-      "command": "ruff",
-      "args": [
-        "check"
-      ]
-    },
-    {
-      "id": "control-plane-rust-fmt",
-      "command": "bash",
-      "args": [
-        "/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh",
-        "fmt"
-      ],
-      "appendFiles": true
-    },
-    {
-      "id": "control-plane-rust-clippy-fix",
-      "command": "bash",
-      "args": [
-        "/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh",
-        "clippy-fix"
-      ],
-      "appendFiles": true
-    },
-    {
-      "id": "control-plane-rust-clippy-check",
-      "command": "bash",
-      "args": [
-        "/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh",
-        "clippy"
-      ],
-      "appendFiles": true
-    },
-    {
-      "id": "yamllint-check",
-      "command": "yamllint",
-      "args": [
-        "-c",
-        ".yamllint"
-      ]
-    },
-    {
-      "id": "hadolint-check",
-      "command": "hadolint",
-      "args": []
-    }
-  ],
-  "pipelines": [
-    {
-      "id": "markdown",
-      "matcher": [
-        "\\.(?:md|markdown)$"
-      ],
-      "steps": [
-        {
-          "tools": [
-            "markdownlint-fix",
-            "markdownlint-fix-npx"
-          ]
-        },
-        {
-          "tools": [
-            "markdownlint-check",
-            "markdownlint-check-npx"
-          ],
-          "reportFailure": true,
-          "failureLabel": "Markdown linter reported unresolved issues:"
-        }
-      ]
-    },
-    {
-      "id": "json",
-      "matcher": [
-        "\\.(?:jsonc?)$"
-      ],
-      "steps": [
-        {
-          "tools": [
-            "biome-check-write",
-            "biome-check-write-npx"
-          ],
-          "runtimeFailureLabel": "Biome hook runtime failed:"
-        },
-        {
-          "tools": [
-            "biome-check",
-            "biome-check-npx"
-          ],
-          "reportFailure": true,
-          "failureLabel": "Biome reported unresolved issues:",
-          "runtimeFailureLabel": "Biome hook runtime failed:"
-        }
-      ]
-    },
-    {
-      "id": "scripts",
-      "matcher": [
-        "\\.(?:[cm]?[jt]s|[jt]sx)$"
-      ],
-      "steps": [
-        {
-          "tools": [
-            "biome-check-write",
-            "biome-check-write-npx"
-          ],
-          "runtimeFailureLabel": "Biome hook runtime failed:"
-        },
-        {
-          "tools": [
-            "oxlint-fix",
-            "eslint-fix",
-            "eslint-fix-npx",
-            "oxlint-fix-npx"
-          ],
-          "runtimeFailureLabel": "JavaScript/TypeScript hook runtime failed:"
-        },
-        {
-          "tools": [
-            "biome-check-write",
-            "biome-check-write-npx"
-          ],
-          "runtimeFailureLabel": "Biome hook runtime failed:"
-        },
-        {
-          "tools": [
-            "biome-check",
-            "biome-check-npx"
-          ],
-          "reportFailure": true,
-          "failureLabel": "Biome reported unresolved issues:",
-          "runtimeFailureLabel": "Biome hook runtime failed:"
-        },
-        {
-          "tools": [
-            "oxlint-check",
-            "eslint-check",
-            "eslint-check-npx",
-            "oxlint-check-npx"
-          ],
-          "reportFailure": true,
-          "failureLabel": "JavaScript/TypeScript linter reported unresolved issues:",
-          "runtimeFailureLabel": "JavaScript/TypeScript hook runtime failed:"
-        }
-      ]
-    },
-    {
-      "id": "yaml",
-      "matcher": [
-        "\\.(?:ya?ml)$"
-      ],
-      "steps": [
-        {
-          "tools": [
-            "yamllint-check"
-          ],
-          "reportFailure": true,
-          "failureLabel": "Yamllint reported unresolved issues:"
-        }
-      ]
-    },
-    {
-      "id": "python",
-      "matcher": [
-        "\\.(?:py|pyi|pyw)$"
-      ],
-      "steps": [
-        {
-          "tools": [
-            "ruff-format"
-          ]
-        },
-        {
-          "tools": [
-            "ruff-check-fix"
-          ]
-        },
-        {
-          "tools": [
-            "ruff-format"
-          ]
-        },
-        {
-          "tools": [
-            "ruff-check"
-          ],
-          "reportFailure": true,
-          "failureLabel": "Ruff reported unresolved issues:"
-        }
-      ]
-    },
-    {
-      "id": "rust",
-      "matcher": [
-        "\\.rs$"
-      ],
-      "steps": [
-        {
-          "tools": [
-            "control-plane-rust-fmt"
-          ],
-          "reportFailure": true,
-          "failureLabel": "Rust formatter reported unresolved issues:"
-        },
-        {
-          "tools": [
-            "control-plane-rust-clippy-fix"
-          ]
-        },
-        {
-          "tools": [
-            "control-plane-rust-fmt"
-          ]
-        },
-        {
-          "tools": [
-            "control-plane-rust-clippy-check"
-          ],
-          "reportFailure": true,
-          "failureLabel": "Rust linter reported unresolved issues:"
-        }
-      ]
-    },
-    {
-      "id": "dockerfile",
-      "matcher": [
-        "(?:^|/)Dockerfile(?:\\.[^/]+)?$",
-        "(?:^|/)[^/]+\\.Dockerfile$"
-      ],
-      "steps": [
-        {
-          "tools": [
-            "hadolint-check"
-          ],
-          "reportFailure": true,
-          "failureLabel": "Hadolint reported unresolved issues:"
-        }
-      ]
-    }
-  ]
+	"tools": [
+		{
+			"id": "markdownlint-fix",
+			"command": "markdownlint-cli2",
+			"args": ["--fix"]
+		},
+		{
+			"id": "markdownlint-fix-npx",
+			"command": "npx",
+			"args": ["--yes", "markdownlint-cli2", "--fix"]
+		},
+		{
+			"id": "markdownlint-check",
+			"command": "markdownlint-cli2",
+			"args": []
+		},
+		{
+			"id": "markdownlint-check-npx",
+			"command": "npx",
+			"args": ["--yes", "markdownlint-cli2"]
+		},
+		{
+			"id": "biome-check-write",
+			"command": "control-plane-biome",
+			"args": ["check", "--write"],
+			"runtimeFailureExitCodes": [70]
+		},
+		{
+			"id": "biome-check-write-npx",
+			"command": "npx",
+			"args": ["--yes", "@biomejs/biome", "check", "--write"]
+		},
+		{
+			"id": "biome-check",
+			"command": "control-plane-biome",
+			"args": ["check"],
+			"runtimeFailureExitCodes": [70]
+		},
+		{
+			"id": "biome-check-npx",
+			"command": "npx",
+			"args": ["--yes", "@biomejs/biome", "check"]
+		},
+		{
+			"id": "oxlint-fix",
+			"command": "oxlint",
+			"args": ["--fix"]
+		},
+		{
+			"id": "oxlint-fix-npx",
+			"command": "npx",
+			"args": ["--yes", "oxlint", "--fix"]
+		},
+		{
+			"id": "oxlint-check",
+			"command": "oxlint",
+			"args": []
+		},
+		{
+			"id": "oxlint-check-npx",
+			"command": "npx",
+			"args": ["--yes", "oxlint"]
+		},
+		{
+			"id": "eslint-fix",
+			"command": "eslint",
+			"args": ["--fix"],
+			"requiredRepoFiles": [
+				"eslint.config.js",
+				"eslint.config.mjs",
+				"eslint.config.cjs",
+				"eslint.config.ts",
+				"eslint.config.mts",
+				"eslint.config.cts"
+			]
+		},
+		{
+			"id": "eslint-fix-npx",
+			"command": "npx",
+			"args": ["--yes", "eslint", "--fix"],
+			"requiredRepoFiles": [
+				"eslint.config.js",
+				"eslint.config.mjs",
+				"eslint.config.cjs",
+				"eslint.config.ts",
+				"eslint.config.mts",
+				"eslint.config.cts"
+			]
+		},
+		{
+			"id": "eslint-check",
+			"command": "eslint",
+			"args": [],
+			"requiredRepoFiles": [
+				"eslint.config.js",
+				"eslint.config.mjs",
+				"eslint.config.cjs",
+				"eslint.config.ts",
+				"eslint.config.mts",
+				"eslint.config.cts"
+			]
+		},
+		{
+			"id": "eslint-check-npx",
+			"command": "npx",
+			"args": ["--yes", "eslint"],
+			"requiredRepoFiles": [
+				"eslint.config.js",
+				"eslint.config.mjs",
+				"eslint.config.cjs",
+				"eslint.config.ts",
+				"eslint.config.mts",
+				"eslint.config.cts"
+			]
+		},
+		{
+			"id": "ruff-format",
+			"command": "ruff",
+			"args": ["format"]
+		},
+		{
+			"id": "ruff-check-fix",
+			"command": "ruff",
+			"args": ["check", "--fix"]
+		},
+		{
+			"id": "ruff-check",
+			"command": "ruff",
+			"args": ["check"]
+		},
+		{
+			"id": "control-plane-rust-fmt",
+			"command": "bash",
+			"args": [
+				"/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh",
+				"fmt"
+			],
+			"appendFiles": true
+		},
+		{
+			"id": "control-plane-rust-clippy-fix",
+			"command": "bash",
+			"args": [
+				"/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh",
+				"clippy-fix"
+			],
+			"appendFiles": true
+		},
+		{
+			"id": "control-plane-rust-clippy-check",
+			"command": "bash",
+			"args": [
+				"/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh",
+				"clippy"
+			],
+			"appendFiles": true
+		},
+		{
+			"id": "yamllint-check",
+			"command": "yamllint",
+			"args": ["-c", ".yamllint"]
+		},
+		{
+			"id": "hadolint-check",
+			"command": "hadolint",
+			"args": []
+		}
+	],
+	"pipelines": [
+		{
+			"id": "markdown",
+			"matcher": ["\\.(?:md|markdown)$"],
+			"steps": [
+				{
+					"tools": ["markdownlint-fix", "markdownlint-fix-npx"]
+				},
+				{
+					"tools": ["markdownlint-check", "markdownlint-check-npx"],
+					"reportFailure": true,
+					"failureLabel": "Markdown linter reported unresolved issues:"
+				}
+			]
+		},
+		{
+			"id": "json",
+			"matcher": ["\\.(?:jsonc?)$"],
+			"steps": [
+				{
+					"tools": ["biome-check-write", "biome-check-write-npx"],
+					"runtimeFailureLabel": "Biome hook runtime failed:"
+				},
+				{
+					"tools": ["biome-check", "biome-check-npx"],
+					"reportFailure": true,
+					"failureLabel": "Biome reported unresolved issues:",
+					"runtimeFailureLabel": "Biome hook runtime failed:"
+				}
+			]
+		},
+		{
+			"id": "scripts",
+			"matcher": ["\\.(?:[cm]?[jt]s|[jt]sx)$"],
+			"steps": [
+				{
+					"tools": ["biome-check-write", "biome-check-write-npx"],
+					"runtimeFailureLabel": "Biome hook runtime failed:"
+				},
+				{
+					"tools": [
+						"oxlint-fix",
+						"eslint-fix",
+						"eslint-fix-npx",
+						"oxlint-fix-npx"
+					],
+					"runtimeFailureLabel": "JavaScript/TypeScript hook runtime failed:"
+				},
+				{
+					"tools": ["biome-check-write", "biome-check-write-npx"],
+					"runtimeFailureLabel": "Biome hook runtime failed:"
+				},
+				{
+					"tools": ["biome-check", "biome-check-npx"],
+					"reportFailure": true,
+					"failureLabel": "Biome reported unresolved issues:",
+					"runtimeFailureLabel": "Biome hook runtime failed:"
+				},
+				{
+					"tools": [
+						"oxlint-check",
+						"eslint-check",
+						"eslint-check-npx",
+						"oxlint-check-npx"
+					],
+					"reportFailure": true,
+					"failureLabel": "JavaScript/TypeScript linter reported unresolved issues:",
+					"runtimeFailureLabel": "JavaScript/TypeScript hook runtime failed:"
+				}
+			]
+		},
+		{
+			"id": "yaml",
+			"matcher": ["\\.(?:ya?ml)$"],
+			"steps": [
+				{
+					"tools": ["yamllint-check"],
+					"reportFailure": true,
+					"failureLabel": "Yamllint reported unresolved issues:"
+				}
+			]
+		},
+		{
+			"id": "python",
+			"matcher": ["\\.(?:py|pyi|pyw)$"],
+			"steps": [
+				{
+					"tools": ["ruff-format"]
+				},
+				{
+					"tools": ["ruff-check-fix"]
+				},
+				{
+					"tools": ["ruff-format"]
+				},
+				{
+					"tools": ["ruff-check"],
+					"reportFailure": true,
+					"failureLabel": "Ruff reported unresolved issues:"
+				}
+			]
+		},
+		{
+			"id": "rust",
+			"matcher": ["\\.rs$"],
+			"steps": [
+				{
+					"tools": ["control-plane-rust-fmt"],
+					"reportFailure": true,
+					"failureLabel": "Rust formatter reported unresolved issues:"
+				},
+				{
+					"tools": ["control-plane-rust-clippy-fix"]
+				},
+				{
+					"tools": ["control-plane-rust-fmt"]
+				},
+				{
+					"tools": ["control-plane-rust-clippy-check"],
+					"reportFailure": true,
+					"failureLabel": "Rust linter reported unresolved issues:"
+				}
+			]
+		},
+		{
+			"id": "dockerfile",
+			"matcher": [
+				"(?:^|/)Dockerfile(?:\\.[^/]+)?$",
+				"(?:^|/)[^/]+\\.Dockerfile$"
+			],
+			"steps": [
+				{
+					"tools": ["hadolint-check"],
+					"reportFailure": true,
+					"failureLabel": "Hadolint reported unresolved issues:"
+				}
+			]
+		}
+	]
 }

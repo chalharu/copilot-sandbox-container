@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Component, Path};
 
 use regex::Regex;
 use serde::Deserialize;
@@ -17,6 +17,13 @@ pub struct Tool {
     pub args: Vec<String>,
     pub append_files: bool,
     pub runtime_failure_exit_codes: Vec<i32>,
+    pub applicability: ToolApplicability,
+}
+
+#[derive(Debug, Clone)]
+pub enum ToolApplicability {
+    Always,
+    RequiresRepoFiles(Vec<String>),
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +61,8 @@ struct RawTool {
     #[serde(default)]
     #[serde(rename = "runtimeFailureExitCodes")]
     runtime_failure_exit_codes: Vec<i32>,
+    #[serde(rename = "requiredRepoFiles")]
+    required_repo_files: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -126,6 +135,9 @@ fn merge_tools(mut base: Vec<RawTool>, overrides: Vec<RawTool>) -> Result<Vec<Ra
         }
         base[index].args = override_tool.args;
         base[index].append_files = override_tool.append_files;
+        if override_tool.required_repo_files.is_some() {
+            base[index].required_repo_files = override_tool.required_repo_files;
+        }
     }
     Ok(base)
 }
@@ -153,9 +165,12 @@ fn normalize_tools(raw_tools: Vec<RawTool>) -> Result<HashMap<String, Tool>, Str
             args,
             append_files,
             runtime_failure_exit_codes,
+            required_repo_files,
         } = raw_tool;
+        let required_repo_files = required_repo_files.unwrap_or_default();
         validate_id(&id, "tool")?;
         validate_runtime_failure_exit_codes(&id, &runtime_failure_exit_codes)?;
+        validate_required_repo_files(&id, &required_repo_files)?;
         if tools.contains_key(&id) {
             return Err(format!("Duplicate tool id in config: {id}"));
         }
@@ -166,6 +181,7 @@ fn normalize_tools(raw_tools: Vec<RawTool>) -> Result<HashMap<String, Tool>, Str
                 args,
                 append_files,
                 runtime_failure_exit_codes,
+                applicability: normalize_tool_applicability(required_repo_files),
             },
         );
     }
@@ -205,6 +221,40 @@ fn validate_runtime_failure_exit_codes(tool_id: &str, codes: &[i32]) -> Result<(
         ));
     }
     Ok(())
+}
+
+fn validate_required_repo_files(tool_id: &str, files: &[String]) -> Result<(), String> {
+    if let Some(file) = files.iter().find(|file| file.is_empty()) {
+        return Err(format!(
+            "Tool \"{}\" requiredRepoFiles entries must be non-empty strings: {:?}",
+            tool_id, file
+        ));
+    }
+    if let Some(file) = files.iter().find(|file| {
+        Path::new(file)
+            .components()
+            .any(|component| matches!(component, Component::ParentDir))
+    }) {
+        return Err(format!(
+            "Tool \"{}\" requiredRepoFiles entries must stay within the repo root: {}",
+            tool_id, file
+        ));
+    }
+    if let Some(file) = files.iter().find(|file| Path::new(file).is_absolute()) {
+        return Err(format!(
+            "Tool \"{}\" requiredRepoFiles entries must be repo-relative paths: {}",
+            tool_id, file
+        ));
+    }
+    Ok(())
+}
+
+fn normalize_tool_applicability(required_repo_files: Vec<String>) -> ToolApplicability {
+    if required_repo_files.is_empty() {
+        ToolApplicability::Always
+    } else {
+        ToolApplicability::RequiresRepoFiles(required_repo_files)
+    }
 }
 
 fn validate_pipeline(pipeline: &RawPipeline, tools: &HashMap<String, Tool>) -> Result<(), String> {
@@ -272,7 +322,7 @@ fn default_append_files() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{RawTool, merge_tools};
+    use super::{RawTool, merge_tools, validate_required_repo_files};
 
     fn raw_tool(id: &str, command: &str, args: &[&str], append_files: bool) -> RawTool {
         RawTool {
@@ -281,6 +331,7 @@ mod tests {
             args: args.iter().map(|value| value.to_string()).collect(),
             append_files,
             runtime_failure_exit_codes: Vec::new(),
+            required_repo_files: None,
         }
     }
 
@@ -320,5 +371,49 @@ mod tests {
         assert_eq!(merged[0].command, "biome");
         assert_eq!(merged[0].args, vec!["check", "--write"]);
         assert!(!merged[0].append_files);
+    }
+
+    #[test]
+    fn allows_repo_to_override_required_repo_files_for_bundled_tools() {
+        let mut bundled = raw_tool("bundled", "eslint", &["--fix"], true);
+        bundled.required_repo_files = Some(vec!["eslint.config.js".to_string()]);
+
+        let mut override_tool = raw_tool("bundled", "eslint", &["--fix"], true);
+        override_tool.required_repo_files = Some(vec![
+            "eslint.config.mjs".to_string(),
+            "eslint.config.cjs".to_string(),
+        ]);
+
+        let merged = merge_tools(vec![bundled], vec![override_tool]).unwrap();
+        assert_eq!(
+            merged[0].required_repo_files.as_ref().unwrap(),
+            vec!["eslint.config.mjs", "eslint.config.cjs"]
+        );
+    }
+
+    #[test]
+    fn preserves_required_repo_files_when_repo_override_omits_them() {
+        let mut bundled = raw_tool("bundled", "eslint", &["--fix"], true);
+        bundled.required_repo_files = Some(vec!["eslint.config.js".to_string()]);
+
+        let merged = merge_tools(
+            vec![bundled],
+            vec![raw_tool("bundled", "eslint", &["--fix", "--cache"], true)],
+        )
+        .unwrap();
+        assert_eq!(
+            merged[0].required_repo_files.as_ref().unwrap(),
+            &vec!["eslint.config.js".to_string()]
+        );
+    }
+
+    #[test]
+    fn rejects_required_repo_files_that_escape_repo_root() {
+        let error =
+            validate_required_repo_files("bundled", &[String::from("../outside")]).unwrap_err();
+        assert_eq!(
+            error,
+            "Tool \"bundled\" requiredRepoFiles entries must stay within the repo root: ../outside"
+        );
     }
 }
