@@ -6,6 +6,13 @@ license = "AGPL-3.0-only"
 
 [dependencies]
 base64 = "=0.22.1"
+http = "=1.4.0"
+hyper = { version = "=1.9.0", features = ["http2", "server"] }
+hyper-util = { version = "=0.1.20", features = [
+  "server-auto",
+  "service",
+  "tokio",
+] }
 libc = "=0.2.185"
 nix = { version = "=0.31.2", features = ["fs", "mount", "process", "user"] }
 serde = { version = "=1.0.228", features = ["derive"] }
@@ -17,13 +24,14 @@ tokio = { version = "=1.52.1", features = [
   "process",
   "rt-multi-thread",
   "signal",
+  "sync",
   "time",
 ] }
-tokio-stream = { version = "=0.1.18", features = ["net"] }
 tonic = { version = "=0.14.5", features = ["transport"] }
 tonic-health = "=0.14.5"
 tonic-prost = "=0.14.5"
 prost = "=0.14.3"
+tower = "=0.5.3"
 
 [build-dependencies]
 protoc-bin-vendored = "=3.2.0"

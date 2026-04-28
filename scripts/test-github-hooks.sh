@@ -150,6 +150,53 @@ EOF
   grep -Fqx 'npx --yes @biomejs/biome check --write src/index.ts' "${npx_log}"
 )
 
+printf '%s\n' 'test-github-hooks.sh: verifying Rust hook Cargo.lock routing' >&2
+(
+  set -euo pipefail
+
+  workdir="$(mktemp -d)"
+  trap 'rm -rf "${workdir}"' EXIT
+
+  repo_dir="${workdir}/repo"
+  bin_dir="${workdir}/bin"
+  cargo_log="${workdir}/cargo.log"
+  mkdir -p "${repo_dir}/containers/control-plane/exec-api" "${bin_dir}"
+  git -C "${repo_dir}" init -q
+
+  cat > "${repo_dir}/containers/control-plane/Cargo.toml" <<'EOF'
+[workspace]
+members = ["exec-api"]
+resolver = "3"
+EOF
+  cat > "${repo_dir}/containers/control-plane/exec-api/Cargo.toml" <<'EOF'
+[package]
+name = "test-exec-api"
+version = "0.1.0"
+edition = "2024"
+EOF
+  touch "${repo_dir}/containers/control-plane/Cargo.lock"
+
+  cat > "${bin_dir}/cargo" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s|%s\n' "${PWD}" "$*" >> "${TEST_CARGO_LOG}"
+EOF
+  chmod 755 "${bin_dir}/cargo"
+
+  (
+    cd "${repo_dir}"
+    TEST_CARGO_LOG="${cargo_log}" \
+      PATH="${bin_dir}:/usr/bin:/bin" \
+      CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+      CONTROL_PLANE_RUST_HOOK_IMAGE='' \
+      CONTROL_PLANE_JOB_TRANSFER_IMAGE='' \
+      bash "${repo_root}/containers/control-plane/hooks/postToolUse/control-plane-rust.sh" \
+        fmt containers/control-plane/Cargo.lock
+  )
+
+  grep -Fqx "${repo_dir}/containers/control-plane|fmt --all" "${cargo_log}"
+)
+
 if [[ -z "${control_plane_image}" ]]; then
   exit 0
 fi
