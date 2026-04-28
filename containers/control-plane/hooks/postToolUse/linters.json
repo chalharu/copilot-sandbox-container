@@ -159,7 +159,7 @@
 		{
 			"id": "yamllint-check",
 			"command": "yamllint",
-			"args": ["-c", ".yamllint"]
+			"args": []
 		},
 		{
 			"id": "hadolint-check",

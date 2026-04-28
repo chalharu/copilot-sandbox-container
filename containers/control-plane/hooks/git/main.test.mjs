@@ -155,6 +155,12 @@ function createSuccessToolStubs(repo) {
 			"\n",
 		),
 	);
+	writeExecutable(
+		path.join(binDir, "yamllint"),
+		["#!/bin/sh", 'printf "yamllint %s\\n" "$*" >> "$HOOK_LOG"', "exit 0"].join(
+			"\n",
+		),
+	);
 
 	return {
 		PATH: `${binDir}:${process.env.PATH}`,
@@ -186,7 +192,10 @@ function stageFeatureFiles(repo) {
 		"export const value = 1;\n",
 		"utf8",
 	);
-	run("git", ["add", "README.md", "biome.jsonc", "index.ts"], { cwd: repo });
+	fs.writeFileSync(path.join(repo, "sample.yaml"), "name: demo\n", "utf8");
+	run("git", ["add", "README.md", "biome.jsonc", "index.ts", "sample.yaml"], {
+		cwd: repo,
+	});
 }
 
 for (const branchName of ["main", "master"]) {
@@ -220,6 +229,7 @@ test("global pre-commit runs bundled linter and repository hook on feature branc
 		env: hookEnv,
 	});
 	stageFeatureFiles(repo);
+	assert.equal(fs.existsSync(path.join(repo, ".yamllint")), false);
 	writeRepoHook(repo, "pre-commit", [
 		"#!/bin/sh",
 		'printf "repo-pre-commit\\n" >> "$REPO_HOOK_LOG"',
@@ -248,6 +258,11 @@ test("global pre-commit runs bundled linter and repository hook on feature branc
 		fs.readFileSync(toolEnv.HOOK_LOG, "utf8"),
 		/markdownlint-cli2 --fix README\.md/,
 	);
+	assert.match(
+		fs.readFileSync(toolEnv.HOOK_LOG, "utf8"),
+		/yamllint sample\.yaml/,
+	);
+	assert.doesNotMatch(fs.readFileSync(toolEnv.HOOK_LOG, "utf8"), /yamllint -c/);
 	assert.match(fs.readFileSync(repoHookLog, "utf8"), /repo-pre-commit/);
 });
 
