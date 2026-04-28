@@ -13,7 +13,7 @@ hyper-util = { version = "=0.1.20", features = [
   "service",
   "tokio",
 ] }
-libc = "=0.2.185"
+libc = "=0.2.186"
 nix = { version = "=0.31.2", features = ["fs", "mount", "process", "user"] }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"
