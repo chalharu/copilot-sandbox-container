@@ -1,4 +1,6 @@
 linters:
+  cargo-symbol-length:
+    max_symbol_length: 2048
   textlint:
     disabled: false
     preset_packages:
