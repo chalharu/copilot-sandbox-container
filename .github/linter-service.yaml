@@ -1,4 +1,8 @@
 linters:
+  cargo-coupling:
+    min_grade: C
+  cargo-symbol-length:
+    max_symbol_length: 4096
   textlint:
     disabled: false
     preset_packages:
