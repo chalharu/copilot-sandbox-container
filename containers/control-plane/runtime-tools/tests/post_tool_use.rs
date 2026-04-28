@@ -296,7 +296,7 @@ exit 1
         );
         write_executable(
             &bin_dir.join("yamllint"),
-            "#!/bin/sh\nprintf \"yamllint %s\\n\" \"$*\" >> \"$HOOK_LOG\"\nprintf \"yamllint unresolved in %s\\n\" \"$3\" >&2\nexit 1\n",
+            "#!/bin/sh\nprintf \"yamllint %s\\n\" \"$*\" >> \"$HOOK_LOG\"\nprintf \"yamllint unresolved in %s\\n\" \"$1\" >&2\nexit 1\n",
         );
     }
     if options.hadolint {
@@ -505,6 +505,7 @@ fn linters_config_defines_language_pipelines() {
     assert_eq!(control_plane_rust_fmt["command"], "bash");
     assert_eq!(control_plane_rust_fmt["appendFiles"], true);
     assert_eq!(yamllint_check["command"], "yamllint");
+    assert_eq!(yamllint_check["args"].as_array().unwrap().len(), 0);
     assert_eq!(markdown_pipeline["matcher"][0], "\\.(?:md|markdown)$");
     assert_eq!(json_pipeline["matcher"][0], "\\.(?:jsonc?)$");
     assert_eq!(
@@ -791,7 +792,8 @@ fn hook_runs_python_rust_yaml_and_dockerfile_pipelines() {
             "/usr/local/share/control-plane/hooks/postToolUse/control-plane-rust.sh clippy"
         )
     );
-    assert!(hook_log.contains("yamllint -c .yamllint sample.yaml"));
+    assert!(hook_log.contains("yamllint sample.yaml"));
+    assert!(!hook_log.contains("yamllint -c .yamllint"));
     assert!(hook_log.contains("hadolint Dockerfile"));
     assert!(hook_log.contains("NODE_COMPILE_CACHE="));
     assert!(hook_log.contains("NPM_CONFIG_CACHE="));
