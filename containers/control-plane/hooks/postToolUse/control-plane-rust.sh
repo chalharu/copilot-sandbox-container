@@ -256,9 +256,9 @@ for manifest in "${manifests[@]}"; do
   crate_dir="$(dirname "${manifest}")"
   printf 'control-plane-rust: %s\n' "${crate_dir#"${repo_root}/"}" >&2
   if [[ "${use_remote}" -eq 1 ]]; then
-    run_remote_cargo "${crate_dir}"
+    run_remote_cargo "${manifest}"
   else
     require_local_build_toolchain
-    run_local_cargo "${crate_dir}"
+    run_local_cargo "${manifest}"
   fi
 done

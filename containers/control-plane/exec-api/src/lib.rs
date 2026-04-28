@@ -1,6 +1,10 @@
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto::Builder as HyperServerBuilder;
+use hyper_util::service::TowerToHyperService;
 use nix::mount::{MsFlags, mount};
 use nix::unistd::{Gid, Uid, chdir, chown, chroot, setgid, setuid};
 use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
 use std::env;
 use std::ffi::{CString, OsString};
 use std::fs;
@@ -10,23 +14,35 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Component, Path, PathBuf};
+use std::pin::Pin;
 use std::process::{Command as StdCommand, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command as TokioCommand;
-use tokio_stream::wrappers::TcpListenerStream;
+use tokio::sync::watch;
+use tokio::task::JoinSet;
 use tonic::metadata::{Ascii, MetadataValue};
-use tonic::transport::{Channel, Endpoint, Server};
+use tonic::transport::{Channel, Endpoint};
 use tonic::{Code, Request, Response, Status};
 use tonic_health::ServingStatus;
 use tonic_health::pb::health_client::HealthClient;
+use tower::Service;
 
 pub mod proto {
     tonic::include_proto!("controlplane.exec.v1");
 }
+
+type ExecGrpcService = proto::exec_service_server::ExecServiceServer<ExecApiService>;
+type HealthGrpcService =
+    tonic_health::pb::health_server::HealthServer<tonic_health::server::HealthService>;
+type GrpcRequest = http::Request<hyper::body::Incoming>;
+type TonicGrpcRequest = http::Request<tonic::body::Body>;
+type GrpcResponse = http::Response<tonic::body::Body>;
+type GrpcFuture = Pin<Box<dyn Future<Output = Result<GrpcResponse, Infallible>> + Send>>;
 
 const HEALTH_SERVICE_NAME: &str = "";
 const EXEC_API_TOKEN_METADATA_KEY: &str = "x-control-plane-exec-token";
@@ -398,6 +414,48 @@ impl proto::exec_service_server::ExecService for ExecApiService {
     }
 }
 
+#[derive(Clone)]
+struct GrpcRouter {
+    exec_service: ExecGrpcService,
+    health_service: HealthGrpcService,
+}
+
+impl GrpcRouter {
+    fn new(exec_service: ExecGrpcService, health_service: HealthGrpcService) -> Self {
+        Self {
+            exec_service,
+            health_service,
+        }
+    }
+
+    fn route_to_health(path: &str) -> bool {
+        path.starts_with("/grpc.health.v1.Health/")
+    }
+}
+
+impl Service<GrpcRequest> for GrpcRouter {
+    type Response = GrpcResponse;
+    type Error = Infallible;
+    type Future = GrpcFuture;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: GrpcRequest) -> Self::Future {
+        let path = request.uri().path().to_owned();
+        let request: TonicGrpcRequest = request.map(tonic::body::Body::new);
+
+        if Self::route_to_health(&path) {
+            let mut service = self.health_service.clone();
+            Box::pin(async move { service.call(request).await })
+        } else {
+            let mut service = self.exec_service.clone();
+            Box::pin(async move { service.call(request).await })
+        }
+    }
+}
+
 fn validate_token(
     metadata: &tonic::metadata::MetadataMap,
     expected_exec_api_token: &MetadataValue<Ascii>,
@@ -614,7 +672,10 @@ where
 
     let local_addr = listener.local_addr()?;
     let service = ExecApiService::new(&config);
-    let (health_reporter, health_service) = tonic_health::server::health_reporter();
+    let health_reporter = tonic_health::server::HealthReporter::new();
+    let health_service = tonic_health::pb::health_server::HealthServer::new(
+        tonic_health::server::HealthService::from_health_reporter(health_reporter.clone()),
+    );
     health_reporter
         .set_service_status(HEALTH_SERVICE_NAME, ServingStatus::Serving)
         .await;
@@ -628,13 +689,97 @@ where
         config.logical_workspace_root.display()
     ));
 
-    Server::builder()
-        .add_service(health_service)
-        .add_service(proto::exec_service_server::ExecServiceServer::new(service))
-        .serve_with_incoming_shutdown(TcpListenerStream::new(listener), shutdown)
-        .await?;
+    serve_grpc_connections(
+        listener,
+        GrpcRouter::new(
+            proto::exec_service_server::ExecServiceServer::new(service),
+            health_service,
+        ),
+        shutdown,
+    )
+    .await?;
 
     Ok(())
+}
+
+async fn serve_grpc_connections<F>(
+    listener: TcpListener,
+    service: GrpcRouter,
+    shutdown: F,
+) -> Result<(), DynError>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    tokio::pin!(shutdown);
+    let (connection_shutdown_tx, _) = watch::channel(());
+    let mut connections = JoinSet::new();
+
+    loop {
+        tokio::select! {
+            _ = shutdown.as_mut() => {
+                let _ = connection_shutdown_tx.send(());
+                break;
+            }
+            result = connections.join_next(), if !connections.is_empty() => {
+                if let Some(result) = result {
+                    log_grpc_connection_task_result(result);
+                }
+            }
+            accepted = listener.accept() => {
+                match accepted {
+                    Ok((stream, _)) => spawn_grpc_connection(
+                        &mut connections,
+                        stream,
+                        service.clone(),
+                        connection_shutdown_tx.subscribe(),
+                    ),
+                    Err(error) => log_message(&format!("gRPC accept failed: {error}")),
+                }
+            }
+        }
+    }
+
+    while let Some(result) = connections.join_next().await {
+        log_grpc_connection_task_result(result);
+    }
+
+    Ok(())
+}
+
+fn log_grpc_connection_task_result(result: Result<(), tokio::task::JoinError>) {
+    if let Err(error) = result {
+        log_message(&format!("gRPC connection task failed: {error}"));
+    }
+}
+
+fn spawn_grpc_connection(
+    connections: &mut JoinSet<()>,
+    stream: TcpStream,
+    service: GrpcRouter,
+    mut shutdown: watch::Receiver<()>,
+) {
+    connections.spawn(async move {
+        let builder = HyperServerBuilder::new(TokioExecutor::new());
+        let mut connection = Box::pin(
+            builder.serve_connection(TokioIo::new(stream), TowerToHyperService::new(service)),
+        );
+
+        tokio::select! {
+            result = connection.as_mut() => {
+                if let Err(error) = result {
+                    log_message(&format!("gRPC connection failed: {error}"));
+                }
+            }
+            changed = shutdown.changed() => {
+                if changed.is_ok() {
+                    connection.as_mut().graceful_shutdown();
+                }
+                if let Err(error) = connection.await {
+                    log_message(&format!("gRPC connection failed: {error}"));
+                }
+            }
+        }
+    });
 }
 
 pub async fn serve(config: ServerConfig) -> Result<(), DynError> {

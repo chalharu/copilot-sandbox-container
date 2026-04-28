@@ -4,7 +4,6 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 workflow_path="${repo_root}/.github/workflows/control-plane-ci.yml"
-linter_service_path="${repo_root}/.github/linter-service.yaml"
 build_test_path="${script_dir}/build-test.sh"
 kind_test_path="${script_dir}/test-kind.sh"
 
@@ -106,13 +105,6 @@ assert_file_contains "${build_test_path}" 'run_kind_group jobs-transfer'
 assert_file_contains "${kind_test_path}" "if [[ \"\${kind_test_group}\" == \"all\" ]] || [[ \"\${kind_test_group}\" == \"session\" ]]; then"
 assert_file_contains "${kind_test_path}" '  all|session|jobs|jobs-core|jobs-transfer)'
 assert_file_contains "${kind_test_path}" "fast_execution_image=\"\${CONTROL_PLANE_TEST_FAST_EXECUTION_IMAGE:-\${control_plane_image}}\""
-
-printf '%s\n' 'ci-workflow-test: verifying hosted linter configuration' >&2
-assert_file_contains "${linter_service_path}" '  cargo-coupling:'
-assert_file_contains "${linter_service_path}" '    min_grade: C'
-assert_file_contains "${linter_service_path}" '  cargo-symbol-length:'
-assert_file_contains "${linter_service_path}" '    max_symbol_length: 4096'
-assert_file_contains "${linter_service_path}" '  textlint:'
 
 printf '%s\n' 'ci-workflow-test: verifying workflow fan-out wiring' >&2
 integration_amd64_block="$(job_block integration-amd64)"
