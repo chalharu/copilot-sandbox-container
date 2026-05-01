@@ -16,6 +16,18 @@ use crate::{
 
 pub(crate) fn prepare_server_environment(config: &ServerConfig) -> Result<(), DynError> {
     let Some(chroot_root) = config.chroot_root.as_deref() else {
+        if can_prepare_direct_remote_home() {
+            sync_remote_home_config(config).map_err(|error| {
+                format!(
+                    "failed to prepare remote home config at {}: {error}",
+                    config.remote_home.display()
+                )
+            })?;
+        }
+        if let Some(startup_script) = config.startup_script.as_deref() {
+            run_startup_script(None, startup_script)
+                .map_err(|error| format!("failed to run startup script: {error}"))?;
+        }
         return Ok(());
     };
 
@@ -59,7 +71,7 @@ pub(crate) fn prepare_server_environment(config: &ServerConfig) -> Result<(), Dy
         )
     })?;
     if let Some(startup_script) = config.startup_script.as_deref() {
-        run_startup_script(chroot_root, startup_script).map_err(|error| {
+        run_startup_script(Some(chroot_root), startup_script).map_err(|error| {
             format!(
                 "failed to run startup script in {}: {error}",
                 chroot_root.display()
@@ -73,6 +85,16 @@ pub(crate) fn prepare_server_environment(config: &ServerConfig) -> Result<(), Dy
         })?;
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn can_prepare_direct_remote_home() -> bool {
+    unsafe { libc::geteuid() == 0 }
+}
+
+#[cfg(not(unix))]
+fn can_prepare_direct_remote_home() -> bool {
+    false
 }
 
 fn bootstrap_marker_path(chroot_root: &Path) -> PathBuf {

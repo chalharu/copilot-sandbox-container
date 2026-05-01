@@ -44,8 +44,6 @@ data:
 {{- $_ := set $instanceEnv "CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT" (include "control-plane.execServiceAccountName" $ctx) -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_SERVICE_ACCOUNT" (include "control-plane.jobServiceAccountName" $ctx) -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_WORKSPACE_PVC" (include "control-plane.workspaceClaimName" $ctx) -}}
-{{- $_ := set $instanceEnv "CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE" (include "control-plane.imageRef" (dict "image" $image)) -}}
-{{- $_ := set $instanceEnv "CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY" ($image.pullPolicy | toString) -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_TRANSFER_IMAGE" (include "control-plane.imageRef" (dict "image" $image)) -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_TRANSFER_HOST" (printf "%s.%s.svc.%s" (include "control-plane.serviceName" $ctx) $mainNamespace $.Values.global.clusterDomain) -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_TRANSFER_PORT" ($service.port | toString) -}}

@@ -185,8 +185,6 @@ mkdir -p "${state_root}/copilot" "${state_root}/gh" "${state_root}/ssh-auth" "${
 ssh-keygen -q -t ed25519 -N '' -f "${ssh_key}"
 set_ssh_opts
 container_env=(
-  -e CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS=standalone-fast-exec-ephemeral
-  -e CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE=11Gi
   -e CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID=1234
   -e CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID=1235
 )
@@ -240,8 +238,6 @@ done
 ssh_bash <<'EOF'
 set -euo pipefail
 printf '%s\n' "${LANG}" | grep -qi 'utf-8'
-test "${CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS}" = 'standalone-fast-exec-ephemeral'
-test "${CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE}" = '11Gi'
 test "${CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID}" = '1234'
 test "${CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID}" = '1235'
 mkdir -p ~/.copilot ~/.config/gh /workspace

@@ -98,7 +98,7 @@ global:
     TZ: Asia/Tokyo
     # Optional: override the chart's default Renovate-managed Biome hook image.
     CONTROL_PLANE_BIOME_HOOK_IMAGE: ghcr.io/biomejs/biome:custom-tag
-    CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: apt-get update && apt-get install -y ripgrep
+    CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: sudo apt-get update && sudo apt-get install -y ripgrep
 
 instances:
   - name: repo-a

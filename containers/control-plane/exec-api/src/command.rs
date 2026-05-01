@@ -90,6 +90,35 @@ pub(crate) fn managed_exec_path(runtime_path: Option<OsString>) -> OsString {
     }
 }
 
+fn direct_exec_policy_environment() -> Option<(OsString, OsString)> {
+    let library = non_empty_env("CONTROL_PLANE_EXEC_POLICY_LIBRARY").or_else(|| {
+        Path::new(CHROOT_EXEC_POLICY_LIBRARY_PATH)
+            .is_file()
+            .then(|| OsString::from(CHROOT_EXEC_POLICY_LIBRARY_PATH))
+    })?;
+    let rules = non_empty_env("CONTROL_PLANE_EXEC_POLICY_RULES_FILE").or_else(|| {
+        Path::new(CHROOT_EXEC_POLICY_RULES_PATH)
+            .is_file()
+            .then(|| OsString::from(CHROOT_EXEC_POLICY_RULES_PATH))
+    })?;
+    Some((library, rules))
+}
+
+fn exec_policy_environment(chrooted: bool) -> Option<(OsString, OsString)> {
+    if chrooted {
+        Some((
+            OsString::from(CHROOT_EXEC_POLICY_LIBRARY_PATH),
+            OsString::from(CHROOT_EXEC_POLICY_RULES_PATH),
+        ))
+    } else {
+        direct_exec_policy_environment()
+    }
+}
+
+fn non_empty_env(key: &str) -> Option<OsString> {
+    env::var_os(key).filter(|value| !value.is_empty())
+}
+
 pub(crate) fn managed_shell_environment(
     remote_home: &Path,
     chrooted: bool,
@@ -107,15 +136,9 @@ pub(crate) fn managed_shell_environment(
             env.push((key, value));
         }
     }
-    if chrooted {
-        env.push((
-            "LD_PRELOAD",
-            OsString::from(CHROOT_EXEC_POLICY_LIBRARY_PATH),
-        ));
-        env.push((
-            "CONTROL_PLANE_EXEC_POLICY_RULES_FILE",
-            OsString::from(CHROOT_EXEC_POLICY_RULES_PATH),
-        ));
+    if let Some((library, rules)) = exec_policy_environment(chrooted) {
+        env.push(("LD_PRELOAD", library));
+        env.push(("CONTROL_PLANE_EXEC_POLICY_RULES_FILE", rules));
     }
     env
 }
@@ -345,18 +368,26 @@ mod tests {
     }
 
     #[test]
-    fn managed_shell_environment_skips_exec_policy_without_chroot() {
+    fn managed_shell_environment_enables_exec_policy_without_chroot_from_runtime_env() {
         let _env_lock = env_lock().lock().unwrap();
         let _path = ScopedEnvVar::set("PATH", Some("/tooling/bin:/usr/bin"));
+        let _library = ScopedEnvVar::set(
+            "CONTROL_PLANE_EXEC_POLICY_LIBRARY",
+            Some("/runtime/libexec-policy.so"),
+        );
+        let _rules = ScopedEnvVar::set(
+            "CONTROL_PLANE_EXEC_POLICY_RULES_FILE",
+            Some("/runtime/deny-rules.yaml"),
+        );
         let env = managed_shell_environment(Path::new("/root"), false);
         assert!(env.contains(&("PATH", OsString::from("/tooling/bin:/usr/bin"))));
         assert!(env.contains(&("HOME", OsString::from("/root"))));
         assert!(env.contains(&("GIT_CONFIG_GLOBAL", OsString::from("/root/.gitconfig"))));
-        assert!(!env.iter().any(|(key, _)| *key == "LD_PRELOAD"));
-        assert!(
-            !env.iter()
-                .any(|(key, _)| *key == "CONTROL_PLANE_EXEC_POLICY_RULES_FILE")
-        );
+        assert!(env.contains(&("LD_PRELOAD", OsString::from("/runtime/libexec-policy.so"))));
+        assert!(env.contains(&(
+            "CONTROL_PLANE_EXEC_POLICY_RULES_FILE",
+            OsString::from("/runtime/deny-rules.yaml"),
+        )));
     }
 
     #[test]

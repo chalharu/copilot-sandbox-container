@@ -59,24 +59,20 @@ global:
     # CONTROL_PLANE_GIT_USER_NAME: Your Name
     # CONTROL_PLANE_GIT_USER_EMAIL: you@example.com
     # TZ: Asia/Tokyo
-    # CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: apt-get update && apt-get install -y ripgrep
+    # CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: sudo apt-get update && sudo apt-get install -y ripgrep
     SSH_PUBLIC_KEY_FILE: /var/run/control-plane-auth/ssh-public-key
     COPILOT_CONFIG_JSON_FILE: /var/run/control-plane-config/copilot-config.json
     COPILOT_GITHUB_TOKEN_FILE: /var/run/control-plane-auth/copilot-github-token
     CONTROL_PLANE_FAST_EXECUTION_ENABLED: "1"
-    CONTROL_PLANE_FAST_EXECUTION_IMAGE: docker.io/library/ubuntu:24.04
-    CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: IfNotPresent
+    CONTROL_PLANE_FAST_EXECUTION_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/exec-pod:latest
+    CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: Always
     CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 300s
     CONTROL_PLANE_FAST_EXECUTION_PORT: "8080"
     CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID: "1000"
     CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID: "1000"
     CONTROL_PLANE_FAST_EXECUTION_HOME: /root
-    CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX: node-workspace
-    CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS: standard
-    CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE: 10Gi
-    CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH: /environment
-    CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS: standard
-    CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE: 10Gi
+    CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON: '[{"name":"ephemeral-storage","ephemeral":{"volumeClaimTemplate":{"spec":{"accessModes":["ReadWriteOnce"],"storageClassName":"standard","resources":{"requests":{"storage":"10Gi"}}}}}}]'
+    CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUME_MOUNTS_JSON: '[{"name":"ephemeral-storage","mountPath":"/var/tmp/control-plane"}]'
     CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST: 250m
     CONTROL_PLANE_FAST_EXECUTION_CPU_LIMIT: "2"
     CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST: 256Mi

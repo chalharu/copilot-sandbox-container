@@ -15,12 +15,10 @@ use crate::error::{ToolError, ToolResult};
 use self::args::{CommandArgs, parse_args, print_usage};
 use self::config::{SessionExecConfig, load_config};
 use self::kube::{
-    create_pod, delete_pod, ensure_environment_pvc, get_existing_pod, kube_client,
-    pod_ip as ready_pod_ip, pod_matches_session_entry, pod_uid as ready_pod_uid,
-    resolve_bootstrap_image, resolve_exec_ephemeral_storage_class, wait_for_healthcheck,
-    wait_for_pod,
+    create_pod, delete_pod, get_existing_pod, kube_client, pod_ip as ready_pod_ip,
+    pod_matches_session_entry, pod_uid as ready_pod_uid, wait_for_healthcheck, wait_for_pod,
 };
-use self::manifest::{build_exec_pod, environment_pvc_name, pod_name_for_session};
+use self::manifest::{build_exec_pod, pod_name_for_session};
 use self::state::{
     PreparedPod, StateLock, ensure_state_parent, entry_from_prepared, generate_session_token,
     read_prepared_pod, read_state, write_state,
@@ -152,8 +150,6 @@ async fn ensure_pod_ready(
     refresh: bool,
 ) -> Result<PreparedPod, String> {
     let pods: Api<Pod> = Api::namespaced(client.clone(), &config.namespace);
-    let environment_pvc_name = environment_pvc_name(config);
-    ensure_environment_pvc(client, config, &environment_pvc_name).await?;
     let mut state = read_state(&config.state_file)?;
     let pod_name = pod_name_for_session(&config.owner_pod_name, session_key);
     let existing_pod = get_existing_pod(&pods, &pod_name).await?;
@@ -171,7 +167,6 @@ async fn ensure_pod_ready(
             pod_uid: pod_uid.to_string(),
             pod_ip,
             auth_token: entry.auth_token.clone(),
-            environment_pvc_name: entry.environment_pvc_name.clone(),
         };
         state
             .sessions
@@ -184,18 +179,8 @@ async fn ensure_pod_ready(
         delete_pod(client, &config.namespace, &pod_name).await?;
     }
 
-    let bootstrap_image = resolve_bootstrap_image(client, config).await?;
-    let ephemeral_storage_class = resolve_exec_ephemeral_storage_class(client, config).await?;
     let auth_token = generate_session_token()?;
-    let pod = build_exec_pod(
-        config,
-        session_key,
-        &pod_name,
-        &auth_token,
-        &bootstrap_image,
-        &environment_pvc_name,
-        &ephemeral_storage_class,
-    )?;
+    let pod = build_exec_pod(config, session_key, &pod_name, &auth_token)?;
     create_pod(&pods, &pod, config.start_timeout).await?;
     let ready_pod = wait_for_pod(client, config, &pod_name).await?;
     let prepared = PreparedPod {
@@ -203,7 +188,6 @@ async fn ensure_pod_ready(
         pod_uid: ready_pod.pod_uid,
         pod_ip: ready_pod.pod_ip,
         auth_token,
-        environment_pvc_name,
     };
     state
         .sessions
@@ -214,16 +198,11 @@ async fn ensure_pod_ready(
 
 #[cfg(test)]
 mod tests {
-    use k8s_openapi::api::core::v1::Pod;
-    use k8s_openapi::api::storage::v1::StorageClass;
+    use k8s_openapi::api::core::v1::{Pod, Volume, VolumeMount};
 
     use super::config::SessionExecConfig;
-    use super::kube::{find_default_storage_class_name, pod_matches_session_entry, pod_ready};
-    use super::manifest::{
-        EXEC_EPHEMERAL_INIT_MOUNT_PATH, EXEC_EPHEMERAL_TMP_SUBPATH, EXEC_EPHEMERAL_VAR_TMP_SUBPATH,
-        EXEC_EPHEMERAL_VOLUME_NAME, build_bootstrap_assets_init_command, build_environment_pvc,
-        build_exec_pod, environment_pvc_name, pod_name_for_session,
-    };
+    use super::kube::{pod_matches_session_entry, pod_ready};
+    use super::manifest::{build_exec_pod, pod_name_for_session};
     use super::state::{PreparedPod, SessionEntry, entry_from_prepared};
 
     fn config() -> SessionExecConfig {
@@ -243,8 +222,6 @@ mod tests {
             node_name: "kind-control-plane".to_string(),
             image: "ghcr.io/example/control-plane:test".to_string(),
             image_pull_policy: "Never".to_string(),
-            bootstrap_image: Some("ghcr.io/example/bootstrap:test".to_string()),
-            bootstrap_image_pull_policy: "IfNotPresent".to_string(),
             start_timeout: std::time::Duration::from_secs(120),
             port: 8080,
             cpu_request: "250m".to_string(),
@@ -265,12 +242,32 @@ mod tests {
                 "printf \"fast-exec-startup\\n\" > /workspace/fast-exec-startup-marker.txt"
                     .to_string(),
             ),
-            environment_pvc_prefix: "node-workspace".to_string(),
-            environment_storage_class: Some("standard".to_string()),
-            environment_size: "10Gi".to_string(),
-            environment_mount_path: "/environment".to_string(),
-            ephemeral_storage_class: Some("standard".to_string()),
-            ephemeral_size: "10Gi".to_string(),
+            extra_volumes: vec![
+                serde_json::from_value::<Volume>(serde_json::json!({
+                    "name": "ephemeral-storage",
+                    "ephemeral": {
+                        "volumeClaimTemplate": {
+                            "spec": {
+                                "accessModes": ["ReadWriteOnce"],
+                                "storageClassName": "standard",
+                                "resources": {
+                                    "requests": {
+                                        "storage": "10Gi"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }))
+                .unwrap(),
+            ],
+            extra_volume_mounts: vec![
+                serde_json::from_value::<VolumeMount>(serde_json::json!({
+                    "name": "ephemeral-storage",
+                    "mountPath": "/var/tmp/control-plane"
+                }))
+                .unwrap(),
+            ],
         }
     }
 
@@ -305,28 +302,6 @@ mod tests {
         serde_json::from_value(value).unwrap()
     }
 
-    fn test_storage_class(name: &str, annotation_key: Option<&str>) -> StorageClass {
-        let mut value = serde_json::json!({
-            "metadata": {
-                "name": name
-            },
-            "provisioner": "rancher.io/local-path"
-        });
-        if let Some(annotation_key) = annotation_key {
-            value["metadata"]["annotations"] = serde_json::json!({ annotation_key: "true" });
-        }
-        serde_json::from_value(value).unwrap()
-    }
-
-    #[test]
-    fn pvc_name_tracks_node_name() {
-        let config = config();
-        assert_eq!(
-            environment_pvc_name(&config),
-            "node-workspace-kind-control-plane"
-        );
-    }
-
     #[test]
     fn pod_name_stays_stable_for_session() {
         assert_eq!(
@@ -348,7 +323,6 @@ mod tests {
             pod_uid: "pod-uid-1".to_string(),
             pod_ip: "10.0.0.42".to_string(),
             auth_token: "session-token".to_string(),
-            environment_pvc_name: "node-workspace-kind-control-plane".to_string(),
         };
 
         assert!(pod_matches_session_entry(
@@ -366,36 +340,13 @@ mod tests {
     }
 
     #[test]
-    fn pvc_manifest_uses_rwo_storage() {
-        let config = config();
-        let pvc = build_environment_pvc(&config, "node-workspace-kind-control-plane").unwrap();
-        assert_eq!(
-            pvc.spec
-                .as_ref()
-                .and_then(|spec| spec.access_modes.as_ref())
-                .unwrap(),
-            &vec!["ReadWriteOnce".to_string()]
-        );
-        assert_eq!(
-            pvc.spec
-                .as_ref()
-                .and_then(|spec| spec.storage_class_name.as_ref())
-                .unwrap(),
-            "standard"
-        );
-    }
-
-    #[test]
-    fn pod_manifest_mounts_environment_cache_and_chroot_workspace() {
+    fn pod_manifest_mounts_workspace_copilot_session_and_extra_volumes_directly() {
         let config = config();
         let pod = build_exec_pod(
             &config,
             "session-42",
             "control-plane-exec-test",
             "session-token",
-            "ghcr.io/example/bootstrap:test",
-            "node-workspace-kind-control-plane",
-            config.ephemeral_storage_class.as_deref().unwrap(),
         )
         .unwrap();
         let pod_value = serde_json::to_value(&pod).unwrap();
@@ -439,10 +390,19 @@ mod tests {
             entry.name == "CONTROL_PLANE_JOB_NAMESPACE"
                 && entry.value.as_deref() == Some("copilot-sandbox-jobs")
         }));
+        assert!(env.iter().any(|entry| {
+            entry.name == "CONTROL_PLANE_EXEC_POLICY_LIBRARY"
+                && entry.value.as_deref() == Some("/usr/local/lib/libcontrol_plane_exec_policy.so")
+        }));
+        assert!(env.iter().any(|entry| {
+            entry.name == "CONTROL_PLANE_EXEC_POLICY_RULES_FILE"
+                && entry.value.as_deref()
+                    == Some("/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml")
+        }));
         assert_eq!(
             execution.command.as_ref().unwrap(),
             &vec![
-                "/control-plane/bin/control-plane-exec-api".to_string(),
+                "/usr/local/bin/control-plane-exec-api".to_string(),
                 "serve".to_string()
             ]
         );
@@ -450,31 +410,10 @@ mod tests {
         assert!(
             mounts
                 .iter()
-                .any(|mount| mount.name == "environment" && mount.mount_path == "/environment")
+                .any(|mount| mount.name == "workspace" && mount.mount_path == "/workspace")
         );
-        assert!(
-            mounts.iter().any(|mount| mount.name == "workspace"
-                && mount.mount_path == "/environment/root/workspace")
-        );
-        assert!(
-            mounts
-                .iter()
-                .any(|mount| mount.name == EXEC_EPHEMERAL_VOLUME_NAME
-                    && mount.mount_path == "/environment/root/tmp"
-                    && mount.sub_path.as_deref() == Some(EXEC_EPHEMERAL_TMP_SUBPATH))
-        );
-        assert!(
-            mounts
-                .iter()
-                .any(|mount| mount.name == EXEC_EPHEMERAL_VOLUME_NAME
-                    && mount.mount_path == "/environment/root/var/tmp"
-                    && mount.sub_path.as_deref() == Some(EXEC_EPHEMERAL_VAR_TMP_SUBPATH))
-        );
-        assert!(mounts.iter().any(|mount| {
-            mount.name == "runtime-bin"
-                && mount.mount_path == "/control-plane/bin"
-                && mount.read_only == Some(true)
-        }));
+        assert!(mounts.iter().any(|mount| mount.name == "ephemeral-storage"
+            && mount.mount_path == "/var/tmp/control-plane"));
         let execution_capabilities = execution
             .security_context
             .as_ref()
@@ -487,86 +426,46 @@ mod tests {
             .and_then(|context| context.seccomp_profile.as_ref())
             .map(|profile| profile.type_.as_str())
             .unwrap();
-        let execution_apparmor_annotation = pod
-            .metadata
-            .annotations
-            .as_ref()
-            .and_then(|annotations| {
-                annotations.get("container.apparmor.security.beta.kubernetes.io/execution")
-            })
-            .map(String::as_str)
-            .unwrap();
-        let execution_apparmor = execution
+        let allow_privilege_escalation = execution
             .security_context
             .as_ref()
-            .and_then(|context| context.app_armor_profile.as_ref())
-            .map(|profile| profile.type_.as_str())
+            .and_then(|context| context.allow_privilege_escalation)
             .unwrap();
         assert!(execution_capabilities.contains(&"CHOWN".to_string()));
         assert!(execution_capabilities.contains(&"DAC_OVERRIDE".to_string()));
         assert!(execution_capabilities.contains(&"SETGID".to_string()));
         assert!(execution_capabilities.contains(&"SETUID".to_string()));
-        assert!(execution_capabilities.contains(&"SYS_ADMIN".to_string()));
-        assert!(execution_capabilities.contains(&"SYS_CHROOT".to_string()));
-        assert_eq!(execution_seccomp, "Unconfined");
-        assert_eq!(execution_apparmor, "Unconfined");
-        assert_eq!(execution_apparmor_annotation, "unconfined");
+        assert!(!execution_capabilities.contains(&"SYS_CHROOT".to_string()));
+        assert_eq!(execution_seccomp, "RuntimeDefault");
+        assert!(allow_privilege_escalation);
         let gh_mount = mounts
             .iter()
-            .find(|mount| {
-                mount.name == "copilot-session"
-                    && mount.mount_path == "/environment/root/root/.config/gh"
-            })
+            .find(|mount| mount.name == "copilot-session" && mount.mount_path == "/root/.config/gh")
             .unwrap();
         assert_eq!(gh_mount.read_only, Some(false));
         let ssh_mount = mounts
             .iter()
-            .find(|mount| {
-                mount.name == "copilot-session" && mount.mount_path == "/environment/root/root/.ssh"
-            })
+            .find(|mount| mount.name == "copilot-session" && mount.mount_path == "/root/.ssh")
             .unwrap();
         assert_eq!(ssh_mount.read_only, Some(true));
-        let init_container = spec
-            .init_containers
-            .as_ref()
-            .unwrap()
-            .iter()
-            .find(|container| container.name == "bootstrap-assets")
-            .unwrap();
-        assert!(
-            init_container
-                .volume_mounts
-                .as_ref()
-                .unwrap()
-                .iter()
-                .any(
-                    |mount| mount.name == "runtime-bin" && mount.mount_path == "/control-plane/bin"
-                )
-        );
-        assert!(
-            init_container
-                .volume_mounts
-                .as_ref()
-                .unwrap()
-                .iter()
-                .any(|mount| mount.name == EXEC_EPHEMERAL_VOLUME_NAME
-                    && mount.mount_path == EXEC_EPHEMERAL_INIT_MOUNT_PATH)
-        );
+        assert!(spec.init_containers.is_none());
         let env = execution.env.as_ref().unwrap();
-        assert!(env.iter().any(
-            |value| value.name == "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT"
-                && value.value.as_deref() == Some("/environment/root")
-        ));
+        assert!(
+            !env.iter()
+                .any(|value| value.name == "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT")
+        );
         let startup_probe = execution.startup_probe.as_ref().unwrap();
         assert_eq!(startup_probe.grpc.as_ref().unwrap().port, 8080);
         assert_eq!(startup_probe.period_seconds, Some(5));
         assert_eq!(startup_probe.failure_threshold, Some(26));
-        assert!(env.iter().any(|value| value.name
-            == "CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH"
-            && value.value.as_deref() == Some("/environment")));
-        assert!(env.iter().any(|value| value.name
-            == "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE"
-            && value.value.as_deref() == Some("/environment/hooks/git")));
+        assert!(
+            !env.iter()
+                .any(|value| value.name == "CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH")
+        );
+        assert!(
+            !env.iter()
+                .any(|value| value.name == "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE")
+        );
         assert!(env.iter().any(
             |value| value.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR"
                 && value.value.as_deref() == Some("http://10.0.0.10:8081")
@@ -585,19 +484,13 @@ mod tests {
                     "printf \"fast-exec-startup\\n\" > /workspace/fast-exec-startup-marker.txt"
                 )));
         let volumes = spec.volumes.as_ref().unwrap();
-        assert!(volumes.iter().any(|volume| volume.name == "environment"));
-        assert!(
-            volumes
-                .iter()
-                .any(|volume| volume.name == "runtime-bin" && volume.empty_dir.is_some())
-        );
         assert!(
             pod_value["spec"]["volumes"]
                 .as_array()
                 .unwrap()
                 .iter()
                 .any(|volume| {
-                    volume["name"].as_str() == Some(EXEC_EPHEMERAL_VOLUME_NAME)
+                    volume["name"].as_str() == Some("ephemeral-storage")
                         && volume["ephemeral"]["volumeClaimTemplate"]["spec"]["storageClassName"]
                             .as_str()
                             == Some("standard")
@@ -607,54 +500,8 @@ mod tests {
                             == Some("10Gi")
                 })
         );
-        assert!(
-            !pod_value["spec"]["volumes"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|volume| volume["name"].as_str() == Some("tmp")
-                    || volume["name"].as_str() == Some("var-tmp"))
-        );
-        assert!(!volumes.iter().any(|volume| volume.name == "bootstrap"));
-    }
-
-    #[test]
-    fn bootstrap_assets_refresh_exec_policy_files() {
-        let command = build_bootstrap_assets_init_command(
-            "/environment",
-            "/control-plane/bin",
-            EXEC_EPHEMERAL_INIT_MOUNT_PATH,
-        );
-        assert!(
-            command.contains(
-                "install -m 0755 /usr/local/bin/control-plane-exec-api \"$runtime_bin_dir/control-plane-exec-api\""
-            )
-        );
-        assert!(
-            command.contains("install -m 0755 /usr/local/bin/kubectl \"$chroot_kubectl_path\"")
-        );
-        assert!(command.contains(
-            "install -m 0755 /usr/local/bin/control-plane-runtime-tool \"$chroot_runtime_tool_path\""
-        ));
-        assert!(!command.contains("/environment/control-plane-exec-api"));
-        assert!(command.contains("rm -rf \"$environment_root/hooks/git\""));
-        assert!(command.contains("rm -rf \"$post_tool_use_dir\""));
-        assert!(command.contains("install -d -m 0755 \"$ephemeral_storage_dir/var\""));
-        assert!(command.contains(
-            "install -d -m 1777 \"$ephemeral_storage_dir/tmp\" \"$ephemeral_storage_dir/var/tmp\""
-        ));
-        assert!(command.contains(
-            "cp -R /usr/local/share/control-plane/hooks/postToolUse/. \"$post_tool_use_dir/\""
-        ));
-        assert!(command.contains(
-            "ln -sf \"/usr/local/bin/control-plane-runtime-tool\" \"$post_tool_use_dir/main\""
-        ));
-        assert!(command.contains(
-            "install -m 0644 \"/usr/local/lib/libcontrol_plane_exec_policy.so\" \"$policy_library_path\""
-        ));
-        assert!(command.contains(
-            "install -m 0644 \"/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml\" \"$policy_rules_path\""
-        ));
+        assert!(!volumes.iter().any(|volume| volume.name == "environment"));
+        assert!(!volumes.iter().any(|volume| volume.name == "runtime-bin"));
     }
 
     #[test]
@@ -666,72 +513,11 @@ mod tests {
             "session-42",
             "control-plane-exec-test",
             "session-token",
-            "ghcr.io/example/bootstrap:test",
-            "node-workspace-kind-control-plane",
-            config.ephemeral_storage_class.as_deref().unwrap(),
         )
         .unwrap();
         let spec = pod.spec.unwrap();
         assert!(spec.service_account_name.is_none());
         assert_eq!(spec.automount_service_account_token, Some(false));
-    }
-
-    #[test]
-    fn default_storage_class_lookup_accepts_stable_annotation() {
-        let storage_classes = vec![
-            test_storage_class(
-                "fast-rwo",
-                Some("storageclass.kubernetes.io/is-default-class"),
-            ),
-            test_storage_class("fast-rwx", None),
-        ];
-
-        assert_eq!(
-            find_default_storage_class_name(&storage_classes).unwrap(),
-            "fast-rwo"
-        );
-    }
-
-    #[test]
-    fn default_storage_class_lookup_accepts_beta_annotation() {
-        let storage_classes = vec![test_storage_class(
-            "legacy-default",
-            Some("storageclass.beta.kubernetes.io/is-default-class"),
-        )];
-
-        assert_eq!(
-            find_default_storage_class_name(&storage_classes).unwrap(),
-            "legacy-default"
-        );
-    }
-
-    #[test]
-    fn default_storage_class_lookup_rejects_missing_default() {
-        let storage_classes = vec![test_storage_class("fast-rwo", None)];
-
-        assert_eq!(
-            find_default_storage_class_name(&storage_classes).unwrap_err(),
-            "no default StorageClass found for fast execution ephemeral storage"
-        );
-    }
-
-    #[test]
-    fn default_storage_class_lookup_rejects_multiple_defaults() {
-        let storage_classes = vec![
-            test_storage_class(
-                "fast-rwo-a",
-                Some("storageclass.kubernetes.io/is-default-class"),
-            ),
-            test_storage_class(
-                "fast-rwo-b",
-                Some("storageclass.kubernetes.io/is-default-class"),
-            ),
-        ];
-
-        assert_eq!(
-            find_default_storage_class_name(&storage_classes).unwrap_err(),
-            "multiple default StorageClasses found for fast execution ephemeral storage: fast-rwo-a, fast-rwo-b"
-        );
     }
 
     #[test]
@@ -741,7 +527,6 @@ mod tests {
             pod_uid: "pod-uid-1".to_string(),
             pod_ip: "10.0.0.42".to_string(),
             auth_token: "session-token".to_string(),
-            environment_pvc_name: "node-workspace-kind-control-plane".to_string(),
         });
         let value = serde_json::to_value(entry).unwrap();
 
@@ -751,8 +536,7 @@ mod tests {
                 "podName": "control-plane-exec-test",
                 "podUid": "pod-uid-1",
                 "podIp": "10.0.0.42",
-                "authToken": "session-token",
-                "environmentPvcName": "node-workspace-kind-control-plane"
+                "authToken": "session-token"
             })
         );
     }

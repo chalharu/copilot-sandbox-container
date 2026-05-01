@@ -1,6 +1,7 @@
 use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::{Command as StdCommand, Stdio};
 
 use crate::DynError;
 use crate::command::{resolve_shell, run_in_chroot};
@@ -64,19 +65,32 @@ pub(crate) fn apt_required_packages() -> Vec<OsString> {
     ]
 }
 
-pub(crate) fn run_startup_script(chroot_root: &Path, startup_script: &str) -> Result<(), DynError> {
+pub(crate) fn run_startup_script(
+    chroot_root: Option<&Path>,
+    startup_script: &str,
+) -> Result<(), DynError> {
     if startup_script.trim().is_empty() {
         return Ok(());
     }
 
-    let shell = resolve_shell(Some(chroot_root))
+    let shell = resolve_shell(chroot_root)
         .ok_or_else(|| io::Error::other("no supported shell found for startup script"))?;
-    run_in_chroot(
-        chroot_root,
-        &shell,
-        &[OsString::from("-lc"), OsString::from(startup_script)],
-        &[],
-    )
+    let args = [OsString::from("-lc"), OsString::from(startup_script)];
+    if let Some(chroot_root) = chroot_root {
+        run_in_chroot(chroot_root, &shell, &args, &[])
+    } else {
+        let status = StdCommand::new(&shell)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("startup script failed with status {status}").into())
+        }
+    }
 }
 
 pub(crate) fn required_commands_present(chroot_root: &Path) -> bool {

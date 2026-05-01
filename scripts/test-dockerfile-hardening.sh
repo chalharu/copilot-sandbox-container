@@ -51,6 +51,7 @@ assert_healthcheck_cmd() {
 printf '%s\n' 'dockerfile-hardening-test: verifying non-root defaults and healthchecks' >&2
 
 control_plane_dockerfile="${repo_root}/containers/control-plane/Dockerfile"
+exec_pod_dockerfile="${repo_root}/containers/exec-pod/Dockerfile"
 execution_plane_smoke_dir="${repo_root}/containers/execution-plane-smoke"
 legacy_yamllint_installer="${repo_root}/containers/control-plane/build/install-yamllint-wheel.py"
 legacy_execution_plane_go_dockerfile="${repo_root}/containers/execution-plane-go/Dockerfile"
@@ -76,6 +77,25 @@ assert_file_contains "${control_plane_dockerfile}" 'locale-gen'
 assert_file_contains "${control_plane_dockerfile}" 'localedef -i ja_JP -f UTF-8 ja_JP.UTF8'
 assert_file_not_matches "${control_plane_dockerfile}" 'install-yamllint-wheel\.py|python3-pathspec|python3-yaml|YAMLLINT_WHEEL_SHA256'
 assert_file_not_matches "${control_plane_dockerfile}" 'cpulimit|gcc|libc6-dev|libssl-dev|ncurses-term|pkg-config'
+assert_file_contains "${exec_pod_dockerfile}" 'FROM ${RUST_BASE_IMAGE}'
+assert_file_contains "${exec_pod_dockerfile}" "        build-essential \\"
+assert_file_contains "${exec_pod_dockerfile}" "        cmake \\"
+assert_file_contains "${exec_pod_dockerfile}" "        docker.io \\"
+assert_file_contains "${exec_pod_dockerfile}" "        jq \\"
+assert_file_contains "${exec_pod_dockerfile}" "        libssl-dev \\"
+assert_file_contains "${exec_pod_dockerfile}" "        pkg-config \\"
+assert_file_contains "${exec_pod_dockerfile}" "        pkgconf \\"
+assert_file_contains "${exec_pod_dockerfile}" "        python3 \\"
+assert_file_contains "${exec_pod_dockerfile}" "        ripgrep \\"
+assert_file_contains "${exec_pod_dockerfile}" "        sccache \\"
+assert_file_contains "${exec_pod_dockerfile}" "        sudo \\"
+assert_file_contains "${exec_pod_dockerfile}" "        yamllint \\"
+assert_file_contains "${exec_pod_dockerfile}" '/usr/libexec/docker/cli-plugins/docker-buildx'
+assert_file_contains "${exec_pod_dockerfile}" 'chmod 1770 /root'
+assert_file_contains "${exec_pod_dockerfile}" 'COPY containers/control-plane/hooks/ /usr/local/share/control-plane/hooks/'
+assert_file_contains "${exec_pod_dockerfile}" 'COPY --from=exec-api-builder /var/tmp/control-plane/cargo-target/release/control-plane-exec-api /usr/local/bin/control-plane-exec-api'
+assert_healthcheck_cmd "${exec_pod_dockerfile}" '    CMD ["bash", "-lc", "control-plane-exec-api --help >/dev/null && bash --version >/dev/null && sh -c true && rg --version >/dev/null && python3 --version >/dev/null && curl --version >/dev/null && docker --version >/dev/null && docker buildx version >/dev/null && cc --version >/dev/null && git --version >/dev/null && jq --version >/dev/null && cmake --version >/dev/null && pkgconf --version >/dev/null && pkg-config --version >/dev/null && test -e /usr/include/openssl/ssl.h && yamllint --version >/dev/null && kubectl version --client=true >/dev/null && rustup --version >/dev/null && rustc --version >/dev/null && cargo --version >/dev/null && sccache --version >/dev/null && sudo -V >/dev/null && test -x /usr/local/bin/control-plane-runtime-tool && test -r /usr/local/lib/libcontrol_plane_exec_policy.so"]'
+assert_file_contains "${exec_pod_dockerfile}" 'CMD ["/usr/local/bin/control-plane-exec-api", "serve"]'
 
 assert_path_absent "${execution_plane_smoke_dir}"
 assert_path_absent "${legacy_yamllint_installer}"

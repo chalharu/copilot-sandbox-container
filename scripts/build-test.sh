@@ -81,6 +81,7 @@ run_kind_group() {
 
   KIND_EXPERIMENTAL_PROVIDER="${kind_provider}" \
     CONTROL_PLANE_CONTAINER_BIN="${container_bin}" \
+    CONTROL_PLANE_TEST_FAST_EXECUTION_IMAGE="${exec_pod_image}" \
     CONTROL_PLANE_KIND_TEST_GROUP="${kind_test_group}" \
     "${script_dir}/test-kind.sh" "${control_plane_image}" "${cluster_name}"
 }
@@ -135,6 +136,7 @@ if toolchain_supports_container_runtime "${toolchain}"; then
   container_bin="$(container_runtime_for_toolchain "${toolchain}")"
 fi
 control_plane_image="${CONTROL_PLANE_IMAGE_TAG:-localhost/control-plane:test}"
+exec_pod_image="${CONTROL_PLANE_EXEC_POD_IMAGE_TAG:-localhost/control-plane-exec-pod:test}"
 cluster_name="${CONTROL_PLANE_KIND_CLUSTER_NAME:-control-plane-ci}"
 kind_provider="${KIND_EXPERIMENTAL_PROVIDER:-${container_bin:-docker}}"
 
@@ -173,6 +175,7 @@ fi
 printf 'Using %s toolchain for build/test\n' "${toolchain}"
 if [[ "${skip_image_build}" -eq 0 ]]; then
   build_image_for_toolchain "${toolchain}" "${control_plane_image}" containers/control-plane
+  build_image_for_toolchain "${toolchain}" "${exec_pod_image}" . containers/exec-pod/Dockerfile
 fi
 
 if [[ "${build_only}" -eq 1 ]]; then

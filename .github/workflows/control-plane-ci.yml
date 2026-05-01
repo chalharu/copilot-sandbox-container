@@ -34,7 +34,7 @@ jobs:
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/control-plane-buildx-cache-amd64
-          key: ${{ runner.os }}-amd64-control-plane-buildx-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
+          key: ${{ runner.os }}-amd64-control-plane-buildx-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/exec-pod/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
           restore-keys: |
             ${{ runner.os }}-amd64-control-plane-buildx-
       - name: Build integration images
@@ -43,7 +43,7 @@ jobs:
           CONTROL_PLANE_TOOLCHAIN: docker
         run: ./scripts/build-test.sh --build-only
       - name: Save integration images
-        run: docker save -o control-plane-images.tar localhost/control-plane:test
+        run: docker save -o control-plane-images.tar localhost/control-plane:test localhost/control-plane-exec-pod:test
       - name: Upload integration images
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -64,7 +64,7 @@ jobs:
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/control-plane-buildx-cache-arm64
-          key: ${{ runner.os }}-arm64-control-plane-buildx-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
+          key: ${{ runner.os }}-arm64-control-plane-buildx-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/exec-pod/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
           restore-keys: |
             ${{ runner.os }}-arm64-control-plane-buildx-
       - name: Build integration images
@@ -73,7 +73,7 @@ jobs:
           CONTROL_PLANE_TOOLCHAIN: docker
         run: ./scripts/build-test.sh --build-only
       - name: Save integration images
-        run: docker save -o control-plane-images.tar localhost/control-plane:test
+        run: docker save -o control-plane-images.tar localhost/control-plane:test localhost/control-plane-exec-pod:test
       - name: Upload integration images
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -138,7 +138,7 @@ jobs:
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/control-plane-buildx-cache-amd64
-          key: ${{ runner.os }}-amd64-control-plane-buildx-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
+          key: ${{ runner.os }}-amd64-control-plane-buildx-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/exec-pod/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
           restore-keys: |
             ${{ runner.os }}-amd64-control-plane-buildx-
       - name: Restore regression Rust cache
@@ -263,6 +263,7 @@ jobs:
       - name: Publish architecture image tags
         env:
           GHCR_CONTROL_PLANE_IMAGE: ghcr.io/${{ github.repository }}/control-plane
+          GHCR_EXEC_POD_IMAGE: ghcr.io/${{ github.repository }}/exec-pod
           CONTROL_PLANE_COMPONENT_TAG: ${{ steps.image_versions.outputs.control_plane_component_tag }}
           GITHUB_SHA: ${{ github.sha }}
         run: |
@@ -273,8 +274,12 @@ jobs:
             docker load -i "${archive_path}"
             docker tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-${image_arch}"
             docker tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${CONTROL_PLANE_COMPONENT_TAG}-${image_arch}"
+            docker tag localhost/control-plane-exec-pod:test "${GHCR_EXEC_POD_IMAGE}:${GITHUB_SHA}-${image_arch}"
+            docker tag localhost/control-plane-exec-pod:test "${GHCR_EXEC_POD_IMAGE}:${CONTROL_PLANE_COMPONENT_TAG}-${image_arch}"
             docker push "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-${image_arch}"
             docker push "${GHCR_CONTROL_PLANE_IMAGE}:${CONTROL_PLANE_COMPONENT_TAG}-${image_arch}"
+            docker push "${GHCR_EXEC_POD_IMAGE}:${GITHUB_SHA}-${image_arch}"
+            docker push "${GHCR_EXEC_POD_IMAGE}:${CONTROL_PLANE_COMPONENT_TAG}-${image_arch}"
           }
 
           publish_architecture_image downloaded-images/amd64/control-plane-images.tar amd64
@@ -282,6 +287,7 @@ jobs:
       - name: Publish GHCR multi-arch manifests
         env:
           GHCR_CONTROL_PLANE_IMAGE: ghcr.io/${{ github.repository }}/control-plane
+          GHCR_EXEC_POD_IMAGE: ghcr.io/${{ github.repository }}/exec-pod
           CONTROL_PLANE_COMPONENT_TAG: ${{ steps.image_versions.outputs.control_plane_component_tag }}
           GITHUB_SHA: ${{ github.sha }}
         run: |
@@ -300,11 +306,29 @@ jobs:
           create_manifest "${GHCR_CONTROL_PLANE_IMAGE}:${CONTROL_PLANE_COMPONENT_TAG}" \
             "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-amd64" \
             "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-arm64"
+          create_manifest "${GHCR_EXEC_POD_IMAGE}:${GITHUB_SHA}" \
+            "${GHCR_EXEC_POD_IMAGE}:${GITHUB_SHA}-amd64" \
+            "${GHCR_EXEC_POD_IMAGE}:${GITHUB_SHA}-arm64"
+          create_manifest "${GHCR_EXEC_POD_IMAGE}:latest" \
+            "${GHCR_EXEC_POD_IMAGE}:${GITHUB_SHA}-amd64" \
+            "${GHCR_EXEC_POD_IMAGE}:${GITHUB_SHA}-arm64"
+          create_manifest "${GHCR_EXEC_POD_IMAGE}:${CONTROL_PLANE_COMPONENT_TAG}" \
+            "${GHCR_EXEC_POD_IMAGE}:${GITHUB_SHA}-amd64" \
+            "${GHCR_EXEC_POD_IMAGE}:${GITHUB_SHA}-arm64"
       - name: Delete old GHCR package versions
         uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
         with:
           owner: ${{ github.repository_owner }}
           package-name: ${{ format('{0}/{1}', github.event.repository.name, 'control-plane') }}
+          package-type: container
+          min-versions-to-keep: ${{ env.GHCR_MIN_UNTAGGED_VERSIONS_TO_KEEP }}
+          delete-only-untagged-versions: 'true'
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Delete old exec-pod GHCR package versions
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          owner: ${{ github.repository_owner }}
+          package-name: ${{ format('{0}/{1}', github.event.repository.name, 'exec-pod') }}
           package-type: container
           min-versions-to-keep: ${{ env.GHCR_MIN_UNTAGGED_VERSIONS_TO_KEEP }}
           delete-only-untagged-versions: 'true'

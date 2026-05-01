@@ -21,26 +21,26 @@ pub(crate) struct RemoteHomePaths {
     gitconfig_path: PathBuf,
 }
 pub(crate) fn sync_remote_home_config(config: &ServerConfig) -> Result<(), DynError> {
-    let Some(chroot_root) = config.chroot_root.as_deref() else {
-        return Ok(());
-    };
-
-    let paths = resolve_remote_home_paths(chroot_root, &config.remote_home)?;
+    let paths = resolve_remote_home_paths(config.chroot_root.as_deref(), &config.remote_home)?;
+    let write_cargo_config = should_write_remote_cargo_config(config, &paths.cargo_config_path);
+    let manage_cargo_config = config.chroot_root.is_some() || write_cargo_config;
     ensure_remote_home_dirs(&paths)?;
-    prepare_remote_home_for_update(&paths)?;
+    prepare_remote_home_for_update(&paths, manage_cargo_config)?;
     ensure_symlink_path(
         &paths.copilot_hooks_path,
         Path::new(CHROOT_COPILOT_HOOKS_DIR),
     )?;
-    with_context(
-        fs::write(&paths.cargo_config_path, render_remote_cargo_config()),
-        || {
-            format!(
-                "failed to write remote cargo config {}",
-                paths.cargo_config_path.display()
-            )
-        },
-    )?;
+    if write_cargo_config {
+        with_context(
+            fs::write(&paths.cargo_config_path, render_remote_cargo_config()),
+            || {
+                format!(
+                    "failed to write remote cargo config {}",
+                    paths.cargo_config_path.display()
+                )
+            },
+        )?;
+    }
     with_context(
         fs::write(
             &paths.gitconfig_path,
@@ -53,17 +53,28 @@ pub(crate) fn sync_remote_home_config(config: &ServerConfig) -> Result<(), DynEr
             )
         },
     )?;
-    set_path_mode(&paths.cargo_config_path, 0o644, "remote cargo config")?;
+    if manage_cargo_config && paths.cargo_config_path.is_file() {
+        set_path_mode(&paths.cargo_config_path, 0o644, "remote cargo config")?;
+    }
     set_path_mode(&paths.gitconfig_path, 0o640, "remote git config")?;
-    finalize_remote_home_permissions(&paths, config.run_as_uid, config.run_as_gid)?;
+    finalize_remote_home_permissions(
+        &paths,
+        config.run_as_uid,
+        config.run_as_gid,
+        manage_cargo_config,
+    )?;
     Ok(())
 }
 
 pub(crate) fn resolve_remote_home_paths(
-    chroot_root: &Path,
+    chroot_root: Option<&Path>,
     remote_home: &Path,
 ) -> Result<RemoteHomePaths, DynError> {
-    let home_dir = nested_absolute_path(chroot_root, remote_home)?;
+    let home_dir = if let Some(chroot_root) = chroot_root {
+        nested_absolute_path(chroot_root, remote_home)?
+    } else {
+        remote_home.to_path_buf()
+    };
     let cargo_home_dir = home_dir.join(".cargo");
     let cargo_config_path = cargo_home_dir.join("config.toml");
     let config_dir = home_dir.join(".config");
@@ -103,7 +114,10 @@ pub(crate) fn ensure_remote_home_dirs(paths: &RemoteHomePaths) -> Result<(), Dyn
     Ok(())
 }
 
-fn prepare_remote_home_for_update(paths: &RemoteHomePaths) -> Result<(), DynError> {
+fn prepare_remote_home_for_update(
+    paths: &RemoteHomePaths,
+    manage_cargo_config: bool,
+) -> Result<(), DynError> {
     for path in [
         &paths.home_dir,
         &paths.cargo_home_dir,
@@ -112,7 +126,7 @@ fn prepare_remote_home_for_update(paths: &RemoteHomePaths) -> Result<(), DynErro
     ] {
         set_path_owner(path, 0, 0, "remote home path")?;
     }
-    if paths.cargo_config_path.exists() {
+    if manage_cargo_config && paths.cargo_config_path.exists() {
         set_path_owner(&paths.cargo_config_path, 0, 0, "remote cargo config")?;
     }
     if paths.gitconfig_path.exists() {
@@ -125,16 +139,19 @@ fn finalize_remote_home_permissions(
     paths: &RemoteHomePaths,
     uid: u32,
     gid: u32,
+    manage_cargo_config: bool,
 ) -> Result<(), DynError> {
     for (path, owner_uid, description) in [
         (&paths.home_dir, 0, "remote home"),
         (&paths.cargo_home_dir, uid, "remote cargo directory"),
         (&paths.config_dir, uid, "remote config directory"),
         (&paths.copilot_dir, 0, "remote Copilot directory"),
-        (&paths.cargo_config_path, uid, "remote cargo config"),
         (&paths.gitconfig_path, 0, "remote git config"),
     ] {
         set_path_owner(path, owner_uid, gid, description)?;
+    }
+    if manage_cargo_config && paths.cargo_config_path.is_file() {
+        set_path_owner(&paths.cargo_config_path, uid, gid, "remote cargo config")?;
     }
     for (path, mode, description) in [
         (&paths.home_dir, 0o1770, "remote home"),
@@ -236,6 +253,10 @@ pub(crate) fn render_remote_git_config(
 
 pub(crate) fn render_remote_cargo_config() -> String {
     format!("[build]\ntarget-dir = \"{REMOTE_CARGO_TARGET_DIR}\"\n")
+}
+
+fn should_write_remote_cargo_config(config: &ServerConfig, cargo_config_path: &Path) -> bool {
+    config.chroot_root.is_some() || !cargo_config_path.exists()
 }
 
 #[cfg(test)]

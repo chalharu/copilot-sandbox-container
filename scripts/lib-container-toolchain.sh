@@ -538,6 +538,7 @@ build_image_for_toolchain() {
   local toolchain="$1"
   local image_tag="$2"
   local context_dir="$3"
+  local dockerfile_path="${4:-}"
   local build_bin
   local context_hash
   local context_hash_label_key
@@ -550,6 +551,9 @@ build_image_for_toolchain() {
   context_hash="$(build_context_hash "${context_dir}")"
   context_hash_label_key="$(build_context_hash_label_key)"
   existing_context_hash="$(image_context_hash_for_toolchain "${toolchain}" "${image_tag}" "${context_hash_label_key}" || true)"
+  if [[ -n "${dockerfile_path}" ]]; then
+    buildx_args+=(--file "${dockerfile_path}")
+  fi
 
   if [[ -n "${existing_context_hash}" ]] && [[ "${existing_context_hash}" == "${context_hash}" ]]; then
     printf 'Reusing %s; build context unchanged\n' "${image_tag}" >&2
@@ -582,6 +586,7 @@ build_image_for_toolchain() {
       "${build_bin}" buildx build \
         --builder "${builder_name}" \
         --output "type=image,name=${image_tag},push=false" \
+        "${buildx_args[@]}" \
         --label "${context_hash_label_key}=${context_hash}" \
         "${context_dir}"
       build_rc=$?

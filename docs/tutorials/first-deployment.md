@@ -24,8 +24,9 @@ Kubernetes Job 経路まで確認します。
 - deploy 先 cluster への `kubectl` 権限
 - session 用の `ReadWriteMany` storage class
 - workspace PVC 用の storage class（sample の既定は `standard`）
-- Execution Pod が node ごとに使う environment PVC 用の storage class
-  - 対応する変数は `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS`
+- Execution Pod が generic ephemeral volume で使う storage class
+  - 対応する設定は `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON` 内の
+    `storageClassName`
   - sample の既定値は `standard`
 - SSH 公開鍵
 - `latest` 以外へ pin したい場合だけ published control-plane image tag
@@ -94,14 +95,13 @@ stringData:
 cluster に合わせます。まず確認するのは次です。
 
 - `CONTROL_PLANE_FAST_EXECUTION_IMAGE`
-- `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS`
+- `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON`
 - `CONTROL_PLANE_BIOME_HOOK_IMAGE`
 - `CONTROL_PLANE_RUST_HOOK_IMAGE`
 
-`CONTROL_PLANE_FAST_EXECUTION_IMAGE` には、delegated `bash` を実行したい
-runtime image を入れます。別の image に変える場合は、bootstrap が使えるように
-`/bin/sh` と `apt-get` または `apk` を含む image を使ってください。shared
-cluster では digest pin を推奨します。
+`CONTROL_PLANE_FAST_EXECUTION_IMAGE` には、dedicated exec-pod image を入れます。
+sample 既定は `ghcr.io/chalharu/copilot-sandbox-container/exec-pod:latest` です。
+shared cluster では digest pin を推奨します。
 
 shipped kustomization は `CONTROL_PLANE_K8S_NAMESPACE`、
 `CONTROL_PLANE_JOB_NAMESPACE`、`CONTROL_PLANE_COPILOT_SESSION_PVC` を自動で
@@ -125,8 +125,7 @@ control-plane image を決めます。sample の既定は
 （<https://github.com/chalharu/copilot-sandbox-container/pkgs/container/copilot-sandbox-container%2Fcontrol-plane>）
 から full commit SHA tag を選んでここを pin します。sample 付属の
 `control-plane-instance-env` ConfigMap には同じ tag が自動反映されます。
-そのため `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` と
-`CONTROL_PLANE_JOB_TRANSFER_IMAGE` を別途合わせる必要はありません。
+そのため `CONTROL_PLANE_JOB_TRANSFER_IMAGE` を別途合わせる必要はありません。
 
 ## 6. 初回導入を apply する
 

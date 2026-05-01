@@ -31,20 +31,16 @@ data:
   CONTROL_PLANE_WORKSPACE_SUBPATH: workspace
   # Enable session-scoped execution pods for Copilot CLI bash commands.
   CONTROL_PLANE_FAST_EXECUTION_ENABLED: "1"
-  # Choose the runtime image that should actually execute delegated bash
-  # commands. The sample starts with Ubuntu 24.04 because it already provides
-  # /bin/sh and apt-get. Use digest-pinned images in shared clusters. Any
-  # replacement image must still provide /bin/sh and either apk or apt-get so
-  # the startup step can install bash, git, gh, and kubectl before serving
-  # requests.
-  CONTROL_PLANE_FAST_EXECUTION_IMAGE: docker.io/library/ubuntu:24.04
-  CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: IfNotPresent
-  # Fresh-node bootstrap can take a few minutes while the cached chroot installs
-  # the initial runtime packages.
+  # Choose the dedicated image that serves delegated bash commands.
+  # Use digest-pinned images in shared clusters.
+  CONTROL_PLANE_FAST_EXECUTION_IMAGE: ghcr.io/chalharu/copilot-sandbox-container/exec-pod:latest
+  CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: Always
+  # Fresh-node startup can take a few minutes while the dedicated exec-pod image
+  # is pulled and the API becomes ready.
   CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 300s
   CONTROL_PLANE_FAST_EXECUTION_PORT: "8080"
-  # Delegated commands run as this unprivileged UID/GID even though the startup
-  # step may briefly need root to install packages in the cached chroot.
+  # Delegated commands run as this unprivileged UID/GID while the exec-api
+  # server itself starts as root to prepare HOME metadata.
   CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID: "1000"
   CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID: "1000"
   CONTROL_PLANE_FAST_EXECUTION_HOME: /root
@@ -52,21 +48,17 @@ data:
   # in-cluster kubectl access. The sample binds this account only to a limited
   # workload Role in CONTROL_PLANE_JOB_NAMESPACE.
   CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT: control-plane-exec
-  # Optional: run extra setup inside the chroot on every exec-pod start before
-  # delegated commands execute. This can be an inline shell snippet or a script
-  # path that /bin/sh -lc can execute inside the chroot.
-  # CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: apt-get update && apt-get install -y ripgrep
-  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX: node-workspace
-  # This node-local cache PVC is separate from the shared /workspace PVC.
-  # Change the storage class before first deploy if your cluster does not expose
-  # the sample default `standard`.
-  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS: standard
-  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE: 10Gi
-  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH: /environment
-  # /tmp と /var/tmp を共有する generic ephemeral volume。storage class は動的
-  # provisioning に対応したものを指定する。未設定時は cluster default を使う。
-  CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS: standard
-  CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE: 10Gi
+  # Optional: run extra setup on every exec-pod start before delegated commands
+  # execute. This can be an inline shell snippet or a script path that
+  # /bin/sh -lc can execute.
+  # CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: sudo apt-get update && sudo apt-get install -y ripgrep
+  # Generic extra volumes/mounts appended to the execution Pod. The sample
+  # uses a generic ephemeral volume for rebuildable cache under
+  # /var/tmp/control-plane.
+  CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON: |
+    [{"name":"ephemeral-storage","ephemeral":{"volumeClaimTemplate":{"spec":{"accessModes":["ReadWriteOnce"],"storageClassName":"standard","resources":{"requests":{"storage":"10Gi"}}}}}}]
+  CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUME_MOUNTS_JSON: |
+    [{"name":"ephemeral-storage","mountPath":"/var/tmp/control-plane"}]
   CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST: 250m
   CONTROL_PLANE_FAST_EXECUTION_CPU_LIMIT: "2"
   CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST: 256Mi

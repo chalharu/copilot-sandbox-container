@@ -149,10 +149,6 @@ control-plane-job
 control-plane-exec-pods
 {{- end -}}
 
-{{- define "control-plane.storageClassesClusterRoleName" -}}
-{{- printf "%s-control-plane-storage-classes" .root.Release.Name | trunc 63 | trimSuffix "-" -}}
-{{- end -}}
-
 {{- define "control-plane.jobsRoleName" -}}
 control-plane-jobs
 {{- end -}}
@@ -171,10 +167,6 @@ control-plane-exec-workloads
 
 {{- define "control-plane.execWorkloadsRoleBindingName" -}}
 {{- printf "%s-%s" (include "control-plane.execWorkloadsRoleName" .) (include "control-plane.instanceMainNamespace" .) | trunc 63 | trimSuffix "-" -}}
-{{- end -}}
-
-{{- define "control-plane.storageClassesClusterRoleBindingName" -}}
-{{- printf "%s-%s" (include "control-plane.storageClassesClusterRoleName" .) (include "control-plane.instanceMainNamespace" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{- define "control-plane.imageRef" -}}
