@@ -38,7 +38,7 @@ sample manifest では Copilot CLI の `bash` tool を session-scoped Execution 
 - Execution Pod の rebuildable cache に使う generic ephemeral volume 用の
   storage class。
   対応する変数は `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON`（Volume 定義）と
-  `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUME_MOUNTS_JSON`（VolumeMount 定義）です。
+  `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUME_MOUNTS_JSON`（VolumeMount 定義）。
   - sample の既定値は `standard`
 - SSH 公開鍵
 - `latest` 以外へ pin したい場合だけ published image tag
@@ -55,7 +55,7 @@ sample manifest では Copilot CLI の `bash` tool を session-scoped Execution 
     の storage class / size
   - `deploy/kubernetes/control-plane.example/common/configmap-control-plane-env.yaml`
     の `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON`。
-    generic ephemeral volume の storage class / size を設定します。
+    generic ephemeral volume の storage class / size の設定対象。
   - `deploy/kubernetes/control-plane.example/common/configmap-control-plane-env.yaml`
     の `CONTROL_PLANE_BIOME_HOOK_IMAGE`
   - `deploy/kubernetes/control-plane.example/common/configmap-control-plane-env.yaml`
@@ -168,9 +168,9 @@ ServiceAccount で起動します。`copilot-sandbox-jobs` namespace の
 `control-plane-exec-workloads` Role に bind します。Execution Pod 内で
 `kubectl -n copilot-sandbox-jobs ...` を使えば、一時的な Deployment / Service /
 Job / Pod を control-plane 本体とは分離した権限で扱えます。
-Execution Pod の rebuildable cache は、sample manifest では pod ごとの
-generic ephemeral volume `ephemeral-storage` を `/var/tmp/control-plane` に
-mount します。storage class / size は
+Execution Pod の rebuildable cache は、sample manifest では pod ごとの generic
+ephemeral volume `ephemeral-storage` を `/var/tmp/control-plane` に mount します。
+storage class / size は
 `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON` 内の Kubernetes Volume 定義で
 調整できます。追加の ConfigMap / Secret / PVC も JSON で指定できます。
 指定先は `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON` と
