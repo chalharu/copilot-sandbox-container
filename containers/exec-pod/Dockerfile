@@ -128,7 +128,7 @@ RUN apt-get update -o Acquire::Retries=3 \
     && buildx_asset="buildx-${DOCKER_BUILDX_VERSION}.linux-${buildx_arch}" \
     && curl -fsSLo "/tmp/${buildx_asset}" "${buildx_download_root}/${buildx_asset}" \
     && curl -fsSLo /tmp/buildx-checksums.txt "${buildx_download_root}/checksums.txt" \
-    && awk -v asset="${buildx_asset}" '$2 == asset { print $1 "  /tmp/" asset; found=1 } END { exit(found ? 0 : 1) }' /tmp/buildx-checksums.txt | sha256sum -c - \
+    && awk -v asset="${buildx_asset}" '$2 == asset || $2 == "*" asset { print $1 "  /tmp/" asset; found=1 } END { exit(found ? 0 : 1) }' /tmp/buildx-checksums.txt | sha256sum -c - \
     && install -D -m 0755 "/tmp/${buildx_asset}" /usr/libexec/docker/cli-plugins/docker-buildx \
     && groupadd --gid "${CONTROL_PLANE_GID}" "${CONTROL_PLANE_USER}" \
     && useradd --uid "${CONTROL_PLANE_UID}" \
