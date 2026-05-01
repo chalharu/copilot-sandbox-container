@@ -86,6 +86,8 @@ ARG CONTROL_PLANE_USER=copilot
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     LC_CTYPE=C.UTF-8 \
+    HOME=/home/${CONTROL_PLANE_USER} \
+    CONTROL_PLANE_FAST_EXECUTION_HOME=/home/${CONTROL_PLANE_USER} \
     CARGO_TARGET_DIR=/var/tmp/control-plane/cargo-target \
     SCCACHE_DIR=/var/tmp/control-plane/sccache \
     RUSTC_WRAPPER=/usr/bin/sccache
@@ -140,11 +142,12 @@ RUN apt-get update -o Acquire::Retries=3 \
     && passwd -d "${CONTROL_PLANE_USER}" \
     && printf '%s ALL=(ALL) NOPASSWD:ALL\n' "${CONTROL_PLANE_USER}" > "/etc/sudoers.d/${CONTROL_PLANE_USER}" \
     && chmod 0440 "/etc/sudoers.d/${CONTROL_PLANE_USER}" \
-    && mkdir -p /root/.cargo /root/.config /root/.copilot /var/tmp/control-plane/cargo-target /var/tmp/control-plane/sccache /workspace \
+    && mkdir -p /root/.cargo "/home/${CONTROL_PLANE_USER}/.cargo" /root/.config /root/.copilot /var/tmp/control-plane/cargo-target /var/tmp/control-plane/sccache /workspace \
     && printf '[build]\ntarget-dir = "/var/tmp/control-plane/cargo-target"\nrustc-wrapper = "/usr/bin/sccache"\n' > /root/.cargo/config.toml \
+    && cp /root/.cargo/config.toml "/home/${CONTROL_PLANE_USER}/.cargo/config.toml" \
     && chgrp -R "${CONTROL_PLANE_GID}" /root \
     && chmod 1770 /root \
-    && chown -R "${CONTROL_PLANE_UID}:${CONTROL_PLANE_GID}" /var/tmp/control-plane /workspace \
+    && chown -R "${CONTROL_PLANE_UID}:${CONTROL_PLANE_GID}" "/home/${CONTROL_PLANE_USER}" /var/tmp/control-plane /workspace \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
 COPY containers/control-plane/hooks/ /usr/local/share/control-plane/hooks/
@@ -164,7 +167,7 @@ RUN ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/share/control-pl
     && chmod 644 /usr/local/lib/libcontrol_plane_exec_policy.so
 
 WORKDIR /workspace
-USER root
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["bash", "-lc", "control-plane-exec-api --help >/dev/null && bash --version >/dev/null && sh -c true && rg --version >/dev/null && python3 --version >/dev/null && curl --version >/dev/null && docker --version >/dev/null && docker buildx version >/dev/null && cc --version >/dev/null && git --version >/dev/null && jq --version >/dev/null && cmake --version >/dev/null && pkgconf --version >/dev/null && pkg-config --version >/dev/null && test -e /usr/include/openssl/ssl.h && yamllint --version >/dev/null && kubectl version --client=true >/dev/null && rustup --version >/dev/null && rustc --version >/dev/null && cargo --version >/dev/null && sccache --version >/dev/null && sudo -V >/dev/null && test -x /usr/local/bin/control-plane-runtime-tool && test -r /usr/local/lib/libcontrol_plane_exec_policy.so"]
+USER ${CONTROL_PLANE_USER}
 CMD ["/usr/local/bin/control-plane-exec-api", "serve"]

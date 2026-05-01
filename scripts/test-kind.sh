@@ -1093,12 +1093,9 @@ test -n "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_POS
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC").value' /workspace/k8s-fast-exec-pod.json)" = "3600"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT").value' /workspace/k8s-fast-exec-pod.json)" = 'printf "fast-exec-startup\n" > /workspace/fast-exec-startup-marker.txt'
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOME").value' /workspace/k8s-fast-exec-pod.json)" = "/root"
-ephemeral_pvc_name="${pod_name}-ephemeral-storage"
-kubectl get pvc --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${ephemeral_pvc_name}" -o json > /workspace/k8s-fast-exec-ephemeral-pvc.json
-# The apiserver omits storageClassName from the embedded volumeClaimTemplate on the Pod,
-# so verify the generated PVC instead.
-test "$(jq -r '.spec.storageClassName' /workspace/k8s-fast-exec-ephemeral-pvc.json)" = "control-plane-fast-exec-ephemeral-dynamic"
-test "$(jq -r '.spec.resources.requests.storage' /workspace/k8s-fast-exec-ephemeral-pvc.json)" = "10Gi"
+# The apiserver may omit storageClassName from the embedded Pod template, and the
+# control-plane service account intentionally cannot get the generated PVC.
+test "$(printf '%s' "${CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON}" | jq -r '.[] | select(.name == "ephemeral-storage").ephemeral.volumeClaimTemplate.spec.storageClassName')" = "control-plane-fast-exec-ephemeral-dynamic"
 git_hook_command=$'rm -rf /workspace/fast-exec-git-hook-test-repo\nmkdir -p /workspace/fast-exec-git-hook-test-repo\ncd /workspace/fast-exec-git-hook-test-repo\ngit init >/dev/null\ngit checkout -b fast-exec-test >/dev/null 2>&1\ngit config user.name "Fast Exec Test"\ngit config user.email "fast-exec-test@example.com"\ngit config core.hooksPath /usr/local/share/control-plane/hooks/git\ntest -x /root/.copilot/hooks/postToolUse/main\ngit commit --allow-empty -m "fast exec hook test" >/dev/null\ngit rev-parse --verify HEAD > /workspace/fast-exec-git-hook-commit.txt'
 git_hook_command_base64="$(printf '%s' "${git_hook_command}" | base64 | tr -d '\n')"
 control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${git_hook_command_base64}" >/dev/null

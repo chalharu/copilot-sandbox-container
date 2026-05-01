@@ -56,9 +56,9 @@ kubectl apply -k deploy/kubernetes/control-plane.example
       control-plane Pod と同じ node に pin されるため共有できる
 4. `control-plane.example/common/configmap-control-plane-env.yaml`
    - cluster 固有の runtime 設定だけを調整する
-    - `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON` 内の
-      `storageClassName` を、cluster に `standard` が無い場合は導入前に置き換える
-    - `CONTROL_PLANE_FAST_EXECUTION_IMAGE` は dedicated exec-pod image を使う
+   - `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON` 内の
+     `storageClassName` を、cluster に `standard` が無い場合は導入前に置き換える
+   - `CONTROL_PLANE_FAST_EXECUTION_IMAGE` は dedicated exec-pod image を使う
    - `CONTROL_PLANE_BIOME_HOOK_IMAGE` は bundled Biome hook を別 Job image
      へ逃がす。sample 既定は official Biome image の Renovate-managed ref
    - `CONTROL_PLANE_RUST_HOOK_IMAGE` は compile-heavy な Rust hook を別
@@ -70,8 +70,8 @@ kubectl apply -k deploy/kubernetes/control-plane.example
     `control-plane.example/overlays/default/kustomization.yaml`
    - sample 既定は
      `ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest`
-    - image を差し替えると `control-plane/control-plane-instance-env` 側の
-      `CONTROL_PLANE_JOB_TRANSFER_IMAGE` も自動で追従する
+   - image を差し替えると `control-plane/control-plane-instance-env` 側の
+     `CONTROL_PLANE_JOB_TRANSFER_IMAGE` も自動で追従する
    - 再現性が必要なら GitHub Packages の
      `copilot-sandbox-container/control-plane`
      （<https://github.com/chalharu/copilot-sandbox-container/pkgs/container/copilot-sandbox-container%2Fcontrol-plane>）

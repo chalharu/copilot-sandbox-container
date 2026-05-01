@@ -298,7 +298,7 @@ fn parse_extra_volumes() -> ToolResult<Vec<Volume>> {
 }
 
 fn parse_extra_volumes_json(name: &str, value: &str) -> ToolResult<Vec<Volume>> {
-    let parsed: serde_json::Value = serde_json::from_str(&value).map_err(|error| {
+    let parsed: serde_json::Value = serde_json::from_str(value).map_err(|error| {
         ToolError::new(
             64,
             COMMAND_NAME,
@@ -330,7 +330,7 @@ fn parse_extra_volume_mounts() -> ToolResult<Vec<VolumeMount>> {
 }
 
 fn parse_extra_volume_mounts_json(name: &str, value: &str) -> ToolResult<Vec<VolumeMount>> {
-    let parsed: serde_json::Value = serde_json::from_str(&value).map_err(|error| {
+    let parsed: serde_json::Value = serde_json::from_str(value).map_err(|error| {
         ToolError::new(
             64,
             COMMAND_NAME,

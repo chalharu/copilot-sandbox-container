@@ -403,14 +403,16 @@ integration_arm64_block="$(job_block integration-arm64)"
 }
 
 assert_block_contains "${publish_block}" "CONTROL_PLANE_COMPONENT_TAG: \${{ steps.image_versions.outputs.control_plane_component_tag }}" 'publish-architecture-images job block'
+# shellcheck disable=SC2016
 assert_block_contains "${publish_block}" 'GHCR_EXEC_POD_IMAGE: ghcr.io/${{ github.repository }}/exec-pod' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" 'Publish GHCR multi-arch manifests' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" 'Delete old GHCR package versions' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" 'Delete old exec-pod GHCR package versions' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" 'publish_architecture_image downloaded-images/amd64/control-plane-images.tar amd64' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" 'publish_architecture_image downloaded-images/arm64/control-plane-images.tar arm64' 'publish-architecture-images job block'
+# shellcheck disable=SC2016
 assert_block_contains "${publish_block}" 'docker tag localhost/control-plane-exec-pod:test "${GHCR_EXEC_POD_IMAGE}:${GITHUB_SHA}-${image_arch}"' 'publish-architecture-images job block'
-assert_block_contains "${publish_block}" 'create_manifest "${GHCR_EXEC_POD_IMAGE}:latest" \' 'publish-architecture-images job block'
+assert_block_contains "${publish_block}" "create_manifest \"\${GHCR_EXEC_POD_IMAGE}:latest\" \\" 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" 'GHCR_MIN_UNTAGGED_VERSIONS_TO_KEEP: "30"' 'publish-architecture-images job block'
 assert_block_contains "${integration_amd64_block}" 'name: control-plane-images-amd64' 'integration-amd64 job block'
 assert_block_contains "${integration_amd64_block}" 'path: control-plane-images.tar' 'integration-amd64 job block'

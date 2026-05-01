@@ -34,7 +34,7 @@ Rust の `cargo-target` は `/root/.cargo/config.toml` 経由で
 | Service の `EXTERNAL-IP` が `pending` | [§9](#9-service-の-external-ip-が未割当て) |
 | injected Copilot config が壊れている | [§10](#10-injected-copilot-config-が壊れている) |
 | gh Secret の指定が足りない | [§11](#11-gh-secret-の指定が足りない) |
-| execution image の bootstrap に失敗する | [§12](#12-execution-image-の-bootstrap-に失敗する) |
+| exec-pod の追加 volume 設定が壊れている | [§12](#12-exec-pod-の追加-volume-設定が壊れている) |
 
 ## 1. bundled skill が読めない
 
@@ -246,14 +246,16 @@ CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUME_MOUNTS_JSON mountPath must be absolute
 ### 意味
 
 `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON` または
-`CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUME_MOUNTS_JSON` が壊れています。runtime は
-JSON array であること、volume name が一意で built-in と衝突しないこと、mount が
-既知 volume を参照すること、`mountPath` が絶対 path であること、`hostPath` を
-使っていないこと、予約済み mount path と重ならないことを検証します。
+`CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUME_MOUNTS_JSON` が壊れています。
+runtime は JSON array であることを検証します。さらに、volume name が一意で
+built-in と衝突しないことも確認します。mount は既知 volume を参照し、
+`mountPath` は絶対 path にしてください。`hostPath` と予約済み mount path との
+重なりは拒否します。
 
 ### 期待する確認結果
 
 - `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON` が `Volume` object の JSON array
 - `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUME_MOUNTS_JSON` が `VolumeMount` object の JSON array
 - 追加 mount の `mountPath` が `/` から始まる
-- 追加 mount が `/workspace`、shared `gh` / SSH、service account token の mount path と重ならない
+- 追加 mount が `/workspace`、shared `gh` / SSH、service account token の
+  mount path と重ならない

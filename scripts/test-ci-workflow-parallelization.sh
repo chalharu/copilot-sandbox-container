@@ -104,8 +104,11 @@ assert_file_contains "${build_test_path}" 'run_kind_group jobs-core'
 assert_file_contains "${build_test_path}" 'run_kind_group jobs-transfer'
 assert_file_contains "${kind_test_path}" "if [[ \"\${kind_test_group}\" == \"all\" ]] || [[ \"\${kind_test_group}\" == \"session\" ]]; then"
 assert_file_contains "${kind_test_path}" '  all|session|jobs|jobs-core|jobs-transfer)'
+# shellcheck disable=SC2016
 assert_file_contains "${build_test_path}" 'exec_pod_image="${CONTROL_PLANE_EXEC_POD_IMAGE_TAG:-localhost/control-plane-exec-pod:test}"'
+# shellcheck disable=SC2016
 assert_file_contains "${build_test_path}" 'build_image_for_toolchain "${toolchain}" "${exec_pod_image}" . containers/exec-pod/Dockerfile'
+# shellcheck disable=SC2016
 assert_file_contains "${build_test_path}" 'CONTROL_PLANE_TEST_FAST_EXECUTION_IMAGE="${exec_pod_image}"'
 assert_file_contains "${kind_test_path}" "fast_execution_image=\"\${CONTROL_PLANE_TEST_FAST_EXECUTION_IMAGE:-\${control_plane_image}}\""
 
