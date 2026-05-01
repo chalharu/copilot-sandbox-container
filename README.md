@@ -169,7 +169,8 @@ ServiceAccount で起動します。`copilot-sandbox-jobs` namespace の
 `kubectl -n copilot-sandbox-jobs ...` を使えば、一時的な Deployment / Service /
 Job / Pod を control-plane 本体とは分離した権限で扱えます。
 Execution Pod の rebuildable cache は、sample manifest では pod ごとの generic
-ephemeral volume `ephemeral-storage` を `/var/tmp/control-plane` に mount します。
+ephemeral volume です。`ephemeral-storage` を `/var/tmp/control-plane` に
+mount します。
 storage class / size は
 `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON` 内の Kubernetes Volume 定義で
 調整できます。追加の ConfigMap / Secret / PVC も JSON で指定できます。
