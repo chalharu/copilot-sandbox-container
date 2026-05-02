@@ -888,8 +888,8 @@ test -f ~/.copilot/config.json
 test -f ~/.copilot/command-history-state.json
 test -d ~/.copilot/session-state
 test -f ~/.config/gh/hosts.yml
-test -L "${COPILOT_HOME}"
-test "$(readlink "${COPILOT_HOME}")" = '/home/copilot/.copilot'
+test -L "\${COPILOT_HOME}"
+test "\$(readlink "\${COPILOT_HOME}")" = '/home/copilot/.copilot'
 test "\$(stat -c '%a %U %G' ~/.copilot/config.json)" = '600 copilot copilot'
 test "\$(stat -c '%a %U %G' ~/.copilot/command-history-state.json)" = '600 copilot copilot'
 test "\$(stat -c '%a %U %G' ~/.config/gh/hosts.yml)" = '600 copilot copilot'
