@@ -118,7 +118,7 @@ Helm chart へ切り出しました。
 
 ## フェーズ 9: Copilot config を ephemeral 化した段階
 
-`~/.copilot/config.json` を session PVC に置いたままにすると、古い commented JSON や
+`~/.copilot/config.json` を session PVC に残すと、古い commented JSON や
 single-file mount の更新不能状態が startup と runtime の両方を壊しやすくなりました。
 特に `COPILOT_HOME` を root-owned な managed dir + per-file symlink で見せていた構成は、
 Copilot 側の model 変更のような rewrite と相性が悪くなっていました。

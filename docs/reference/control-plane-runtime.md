@@ -145,7 +145,7 @@ namespace は owner Pod 側のままです。別 namespace のリソースは
 
 entrypoint は `COPILOT_HOME=/var/lib/control-plane/managed-runtime/copilot-home` を保ちつつ、
 その path 自体を `~/.copilot` への root-owned symlink にします。Copilot 側は writable な
-`~/.copilot/config.json` を直接更新でき、bundled hook は root-owned な
+`~/.copilot/config.json` を直接更新できます。bundled hook は root-owned な
 `~/.copilot/hooks -> /usr/local/share/control-plane/hooks` で固定します。
 `~/.copilot/` は sticky directory として管理するため、Copilot user は他の
 state を更新できても `hooks` symlink 自体は差し替えられません。
