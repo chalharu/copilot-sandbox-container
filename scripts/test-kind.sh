@@ -19,8 +19,8 @@ ssh_key="${workdir}/id_ed25519"
 kubeconfig_path="${workdir}/kubeconfig"
 # renovate: datasource=docker depName=docker.io/library/rust versioning=docker
 rust_hook_image="${CONTROL_PLANE_TEST_RUST_HOOK_IMAGE:-docker.io/library/rust:1.95.0-bookworm@sha256:adab7941580c74513aa3347f2d2a1f975498280743d29ec62978ba12e3540d3a}"
-# Keep the Kind integration path self-contained by default. Sample manifests still
-# cover ubuntu:24.04, and callers can override this to exercise generic images.
+# Keep the Kind integration path self-contained by default. The exec-pod image is
+# built and loaded alongside the control-plane image by build-test.sh.
 fast_execution_image="${CONTROL_PLANE_TEST_FAST_EXECUTION_IMAGE:-${control_plane_image}}"
 fast_execution_image_pull_policy="${CONTROL_PLANE_TEST_FAST_EXECUTION_IMAGE_PULL_POLICY:-IfNotPresent}"
 port_forward_pid=""
@@ -227,7 +227,6 @@ dump_control_plane_diagnostics() {
   while read -r exec_pod; do
     [[ -n "${exec_pod}" ]] || continue
     kubectl describe "${exec_pod}" --namespace "${namespace}" >&2 || true
-    kubectl logs --namespace "${namespace}" "${exec_pod}" -c bootstrap-assets >&2 || true
     kubectl logs --namespace "${namespace}" "${exec_pod}" -c execution >&2 || true
     kubectl logs --namespace "${namespace}" "${exec_pod}" -c execution --previous >&2 || true
   done < <(
@@ -263,7 +262,7 @@ load_kind_images() {
   if [[ -n "${kind_image_archive}" ]]; then
     helper_args+=(--image-archive "${kind_image_archive}")
   else
-    helper_args+=(--container-bin "${container_bin}" --image "${control_plane_image}")
+    helper_args+=(--container-bin "${container_bin}" --image "${control_plane_image}" --image "${fast_execution_image}")
   fi
 
   CONTROL_PLANE_KIND_USE_SUDO="${kind_uses_sudo}" \
@@ -273,9 +272,7 @@ load_kind_images() {
 
 apply_resources() {
   local public_key
-  local environment_pvc_name
   public_key="$(cat "${ssh_key}.pub")"
-  environment_pvc_name="node-workspace-${cluster_name}-control-plane"
   cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: Namespace
@@ -314,9 +311,6 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["create", "delete", "get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["persistentvolumeclaims"]
-    verbs: ["create", "get", "list", "watch"]
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
@@ -428,28 +422,6 @@ roleRef:
   kind: Role
   name: control-plane-job-self-read
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: control-plane-storage-classes
-rules:
-  - apiGroups: ["storage.k8s.io"]
-    resources: ["storageclasses"]
-    verbs: ["list"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: control-plane-storage-classes.${namespace}
-subjects:
-  - kind: ServiceAccount
-    name: control-plane
-    namespace: ${namespace}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: control-plane-storage-classes
----
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -537,24 +509,6 @@ spec:
     type: DirectoryOrCreate
 ---
 apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: control-plane-fast-exec-environment-pv
-spec:
-  capacity:
-    storage: 10Gi
-  accessModes:
-    - ReadWriteOnce
-  persistentVolumeReclaimPolicy: Delete
-  storageClassName: control-plane-fast-exec-environment-manual
-  claimRef:
-    name: ${environment_pvc_name}
-    namespace: ${namespace}
-  hostPath:
-    path: /var/lib/control-plane-fast-exec-environment
-    type: DirectoryOrCreate
----
-apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: control-plane-workspace-pvc
@@ -627,19 +581,13 @@ data:
   CONTROL_PLANE_FAST_EXECUTION_ENABLED: "1"
   CONTROL_PLANE_FAST_EXECUTION_IMAGE: ${fast_execution_image}
   CONTROL_PLANE_FAST_EXECUTION_IMAGE_PULL_POLICY: ${fast_execution_image_pull_policy}
-  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE: ${control_plane_image}
-  CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE_PULL_POLICY: Never
   CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT: 300s
   CONTROL_PLANE_FAST_EXECUTION_PORT: "8080"
   CONTROL_PLANE_FAST_EXECUTION_HOME: /root
   CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT: control-plane-exec
   CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: 'printf "fast-exec-startup\n" > /workspace/fast-exec-startup-marker.txt'
-  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX: node-workspace
-  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS: control-plane-fast-exec-environment-manual
-  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_SIZE: 10Gi
-  CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_MOUNT_PATH: /environment
-  CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS: control-plane-fast-exec-ephemeral-dynamic
-  CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE: 10Gi
+  CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON: '[{"name":"ephemeral-storage","ephemeral":{"volumeClaimTemplate":{"spec":{"accessModes":["ReadWriteOnce"],"storageClassName":"control-plane-fast-exec-ephemeral-dynamic","resources":{"requests":{"storage":"10Gi"}}}}}}]'
+  CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUME_MOUNTS_JSON: '[{"name":"ephemeral-storage","mountPath":"/var/tmp/control-plane"}]'
   CONTROL_PLANE_FAST_EXECUTION_CPU_REQUEST: 250m
   CONTROL_PLANE_FAST_EXECUTION_CPU_LIMIT: "1"
   CONTROL_PLANE_FAST_EXECUTION_MEMORY_REQUEST: 256Mi
@@ -997,7 +945,6 @@ test "\${CONTROL_PLANE_JOB_NAMESPACE}" = "${job_namespace}"
 test -n "\${CONTROL_PLANE_POD_IP}"
 test "\${CONTROL_PLANE_FAST_EXECUTION_ENABLED}" = "1"
 test "\${CONTROL_PLANE_FAST_EXECUTION_IMAGE}" = "${fast_execution_image}"
-test "\${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE}" = "${control_plane_image}"
 test "\${CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT}" = 'printf "fast-exec-startup\n" > /workspace/fast-exec-startup-marker.txt'
 test "\${CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR}" = "http://\${CONTROL_PLANE_POD_IP}:8081"
 test -n "\${CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN}"
@@ -1026,7 +973,6 @@ printf '%s\n' '--- runtime env ---'
 printf 'CONTROL_PLANE_JOB_NAMESPACE=%s\n' "${CONTROL_PLANE_JOB_NAMESPACE:-}" || true
 printf 'CONTROL_PLANE_FAST_EXECUTION_ENABLED=%s\n' "${CONTROL_PLANE_FAST_EXECUTION_ENABLED:-}" || true
 printf 'CONTROL_PLANE_FAST_EXECUTION_IMAGE=%s\n' "${CONTROL_PLANE_FAST_EXECUTION_IMAGE:-}" || true
-printf 'CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE=%s\n' "${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE:-}" || true
 printf 'CONTROL_PLANE_COPILOT_SESSION_PVC=%s\n' "${CONTROL_PLANE_COPILOT_SESSION_PVC:-}" || true
 printf 'CONTROL_PLANE_RUST_HOOK_IMAGE=%s\n' "${CONTROL_PLANE_RUST_HOOK_IMAGE:-}" || true
 cat /proc/self/uid_map || true
@@ -1082,21 +1028,12 @@ if [[ "\${pods_status}" -ne 0 ]] || [[ "\${pods_access}" != "yes" ]]; then
   kubectl config current-context >&2 || true
   exit 1
 fi
-set +e
-pvcs_access="\$(kubectl auth can-i create persistentvolumeclaims --namespace ${namespace} 2>&1)"
-pvcs_status=\$?
-set -e
-if [[ "\${pvcs_status}" -ne 0 ]] || [[ "\${pvcs_access}" != "yes" ]]; then
-  printf 'Expected control-plane service account to create persistentvolumeclaims in namespace %s\n' "${namespace}" >&2
-  printf 'kubectl auth can-i exit status: %s\n' "\${pvcs_status}" >&2
-  printf '%s\n' "\${pvcs_access}" >&2
-  kubectl config current-context >&2 || true
+if kubectl auth can-i create persistentvolumeclaims --namespace ${namespace} --quiet; then
+  printf 'Did not expect control-plane service account to create persistentvolumeclaims in namespace %s\n' "${namespace}" >&2
   exit 1
 fi
-if ! kubectl auth can-i list storageclasses.storage.k8s.io --quiet; then
-  printf '%s\n' 'Expected control-plane service account to list StorageClasses' >&2
-  kubectl auth can-i list storageclasses.storage.k8s.io >&2 || true
-  kubectl config current-context >&2 || true
+if kubectl auth can-i list storageclasses.storage.k8s.io --quiet; then
+  printf '%s\n' 'Did not expect control-plane service account to list StorageClasses' >&2
   exit 1
 fi
 EOF
@@ -1124,10 +1061,8 @@ jq -e --arg key "${session_key}" '.sessions[$key].podName != null and .sessions[
   ~/.copilot/session-state/session-exec.json >/dev/null
 pod_name="$(jq -r --arg key "${session_key}" '.sessions[$key].podName' ~/.copilot/session-state/session-exec.json)"
 pod_ip="$(jq -r --arg key "${session_key}" '.sessions[$key].podIp' ~/.copilot/session-state/session-exec.json)"
-environment_pvc="$(jq -r --arg key "${session_key}" '.sessions[$key].environmentPvcName' ~/.copilot/session-state/session-exec.json)"
 test -n "${pod_name}"
 test -n "${pod_ip}"
-test -n "${environment_pvc}"
 test "$(cat /workspace/fast-exec-startup-marker.txt)" = "fast-exec-startup"
 kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${pod_name}" -o json > /workspace/k8s-fast-exec-pod.json
 test "$(jq -r '.metadata.ownerReferences[0].kind' /workspace/k8s-fast-exec-pod.json)" = "Pod"
@@ -1135,43 +1070,33 @@ test "$(jq -r '.metadata.ownerReferences[0].name' /workspace/k8s-fast-exec-pod.j
 test "$(jq -r '.metadata.ownerReferences[0].uid' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_POD_UID}"
 test "$(jq -r '.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchFields[] | select(.key == "metadata.name").values[0]' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_NODE_NAME}"
 test "$(jq -r '.spec.containers[0].image' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_FAST_EXECUTION_IMAGE}"
-test "$(jq -r '.spec.initContainers[0].image' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE}"
+test "$(jq -r '.spec.initContainers // [] | length' /workspace/k8s-fast-exec-pod.json)" = "0"
 test "$(jq -r '.spec.volumes[] | select(.name == "workspace").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "control-plane-workspace-pvc"
 test "$(jq -r '.spec.volumes[] | select(.name == "copilot-session").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "control-plane-copilot-session-pvc"
-test "$(jq -r '.spec.volumes[] | select(.name == "environment").persistentVolumeClaim.claimName' /workspace/k8s-fast-exec-pod.json)" = "${environment_pvc}"
-test "$(jq -r '.spec.volumes[] | select(.name == "runtime-bin").emptyDir | type' /workspace/k8s-fast-exec-pod.json)" = "object"
+test "$(jq -r '[.spec.volumes[] | select(.name == "environment" or .name == "runtime-bin")] | length' /workspace/k8s-fast-exec-pod.json)" = "0"
 test "$(jq -r '.spec.volumes[] | select(.name == "ephemeral-storage").ephemeral.volumeClaimTemplate.spec.resources.requests.storage' /workspace/k8s-fast-exec-pod.json)" = "10Gi"
-test "$(jq -r '.spec.containers[0].command[0]' /workspace/k8s-fast-exec-pod.json)" = "/control-plane/bin/control-plane-exec-api"
+test "$(jq -r '.spec.containers[0].command[0]' /workspace/k8s-fast-exec-pod.json)" = "/usr/local/bin/control-plane-exec-api"
 test "$(jq -r '.spec.containers[0].startupProbe.grpc.port' /workspace/k8s-fast-exec-pod.json)" = "8080"
 test "$(jq -r '.spec.containers[0].startupProbe.periodSeconds' /workspace/k8s-fast-exec-pod.json)" = "5"
 test "$(jq -r '.spec.containers[0].startupProbe.failureThreshold' /workspace/k8s-fast-exec-pod.json)" = "62"
 test "$(jq -r '.spec.serviceAccountName' /workspace/k8s-fast-exec-pod.json)" = "control-plane-exec"
 test "$(jq -r '.spec.automountServiceAccountToken' /workspace/k8s-fast-exec-pod.json)" = "true"
-test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "environment").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/environment"
-test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "runtime-bin").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/control-plane/bin"
-test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "workspace").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/environment/root/workspace"
-test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/environment/root/tmp").name' /workspace/k8s-fast-exec-pod.json)" = "ephemeral-storage"
-test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/environment/root/tmp").subPath' /workspace/k8s-fast-exec-pod.json)" = "tmp"
-test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/environment/root/var/tmp").name' /workspace/k8s-fast-exec-pod.json)" = "ephemeral-storage"
-test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/environment/root/var/tmp").subPath' /workspace/k8s-fast-exec-pod.json)" = "var/tmp"
-test "$(jq -r '.spec.initContainers[0].volumeMounts[] | select(.name == "ephemeral-storage").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/control-plane/ephemeral-storage"
-test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/environment/root/root/.config/gh") | (.readOnly // false)' /workspace/k8s-fast-exec-pod.json)" = "false"
-test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/environment/root/root/.ssh") | (.readOnly // false)' /workspace/k8s-fast-exec-pod.json)" = "true"
-test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/root"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.name == "workspace").mountPath' /workspace/k8s-fast-exec-pod.json)" = "/workspace"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/var/tmp/control-plane").name' /workspace/k8s-fast-exec-pod.json)" = "ephemeral-storage"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/root/.config/gh") | (.readOnly // false)' /workspace/k8s-fast-exec-pod.json)" = "false"
+test "$(jq -r '.spec.containers[0].volumeMounts[] | select(.mountPath == "/root/.ssh") | (.readOnly // false)' /workspace/k8s-fast-exec-pod.json)" = "true"
+test "$(jq -r '[.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_CHROOT_ROOT")] | length' /workspace/k8s-fast-exec-pod.json)" = "0"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_JOB_NAMESPACE").value' /workspace/k8s-fast-exec-pod.json)" = "${CONTROL_PLANE_JOB_NAMESPACE}"
-test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE").value' /workspace/k8s-fast-exec-pod.json)" = "/environment/hooks/git"
+test "$(jq -r '[.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_GIT_HOOKS_SOURCE")] | length' /workspace/k8s-fast-exec-pod.json)" = "0"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR").value' /workspace/k8s-fast-exec-pod.json)" = "http://${CONTROL_PLANE_POD_IP}:8081"
 test -n "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN").value' /workspace/k8s-fast-exec-pod.json)"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC").value' /workspace/k8s-fast-exec-pod.json)" = "3600"
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT").value' /workspace/k8s-fast-exec-pod.json)" = 'printf "fast-exec-startup\n" > /workspace/fast-exec-startup-marker.txt'
 test "$(jq -r '.spec.containers[0].env[] | select(.name == "HOME").value' /workspace/k8s-fast-exec-pod.json)" = "/root"
-ephemeral_pvc_name="${pod_name}-ephemeral-storage"
-kubectl get pvc --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${ephemeral_pvc_name}" -o json > /workspace/k8s-fast-exec-ephemeral-pvc.json
-# The apiserver omits storageClassName from the embedded volumeClaimTemplate on the Pod,
-# so verify the generated PVC instead.
-test "$(jq -r '.spec.storageClassName' /workspace/k8s-fast-exec-ephemeral-pvc.json)" = "control-plane-fast-exec-ephemeral-dynamic"
-test "$(jq -r '.spec.resources.requests.storage' /workspace/k8s-fast-exec-ephemeral-pvc.json)" = "10Gi"
-git_hook_command=$'rm -rf /workspace/fast-exec-git-hook-test-repo\nmkdir -p /workspace/fast-exec-git-hook-test-repo\ncd /workspace/fast-exec-git-hook-test-repo\ngit init >/dev/null\ngit checkout -b fast-exec-test >/dev/null 2>&1\ngit config user.name "Fast Exec Test"\ngit config user.email "fast-exec-test@example.com"\ngit config core.hooksPath /environment/hooks/git\ntest -x /root/.copilot/hooks/postToolUse/main\ngit commit --allow-empty -m "fast exec hook test" >/dev/null\ngit rev-parse --verify HEAD > /workspace/fast-exec-git-hook-commit.txt'
+# The apiserver may omit storageClassName from the embedded Pod template, and the
+# control-plane service account intentionally cannot get the generated PVC.
+test "$(printf '%s' "${CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON}" | jq -r '.[] | select(.name == "ephemeral-storage").ephemeral.volumeClaimTemplate.spec.storageClassName')" = "control-plane-fast-exec-ephemeral-dynamic"
+git_hook_command=$'rm -rf /workspace/fast-exec-git-hook-test-repo\nmkdir -p /workspace/fast-exec-git-hook-test-repo\ncd /workspace/fast-exec-git-hook-test-repo\ngit init >/dev/null\ngit checkout -b fast-exec-test >/dev/null 2>&1\ngit config user.name "Fast Exec Test"\ngit config user.email "fast-exec-test@example.com"\ngit config core.hooksPath /usr/local/share/control-plane/hooks/git\ntest -x /root/.copilot/hooks/postToolUse/main\ngit commit --allow-empty -m "fast exec hook test" >/dev/null\ngit rev-parse --verify HEAD > /workspace/fast-exec-git-hook-commit.txt'
 git_hook_command_base64="$(printf '%s' "${git_hook_command}" | base64 | tr -d '\n')"
 control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${git_hook_command_base64}" >/dev/null
 grep -Eq '^[0-9a-f]{40}$' /workspace/fast-exec-git-hook-commit.txt
@@ -1181,13 +1106,13 @@ control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace
 grep -qx 'exec-hooks-readonly-ok' /workspace/fast-exec-hooks-readonly.txt
 ephemeral_session_key=kind-fast-exec-ephemeral
 control-plane-session-exec cleanup --session-key "${ephemeral_session_key}" >/dev/null 2>&1 || true
-cargo_and_tmp_write_command=$'set -euo pipefail\ngrep -Fqx "[build]" /root/.cargo/config.toml\ngrep -Fqx \'target-dir = "/var/tmp/control-plane/cargo-target"\' /root/.cargo/config.toml\ntest "$(stat -c %a /tmp)" = "1777"\ntest "$(stat -c %a /var/tmp)" = "1777"\nprintf "tmp-state\\n" > /tmp/fast-exec-ephemeral.txt\nmkdir -p /var/tmp/control-plane\nprintf "var-tmp-state\\n" > /var/tmp/control-plane/fast-exec-ephemeral.txt\nprintf "fast-exec-cargo-config-ok\\n" > /workspace/fast-exec-cargo-config.txt'
+cargo_and_tmp_write_command=$'set -euo pipefail\ngrep -Fqx "[build]" /root/.cargo/config.toml\ngrep -Fqx \'target-dir = "/var/tmp/control-plane/cargo-target"\' /root/.cargo/config.toml\nmkdir -p /var/tmp/control-plane\nprintf "var-tmp-state\\n" > /var/tmp/control-plane/fast-exec-ephemeral.txt\nprintf "fast-exec-cargo-config-ok\\n" > /workspace/fast-exec-cargo-config.txt'
 cargo_and_tmp_write_command_base64="$(printf '%s' "${cargo_and_tmp_write_command}" | base64 | tr -d '\n')"
 control-plane-session-exec prepare --session-key "${ephemeral_session_key}" >/dev/null
 control-plane-session-exec proxy --session-key "${ephemeral_session_key}" --cwd /workspace --command-base64 "${cargo_and_tmp_write_command_base64}" >/dev/null
 grep -qx 'fast-exec-cargo-config-ok' /workspace/fast-exec-cargo-config.txt
 control-plane-session-exec cleanup --session-key "${ephemeral_session_key}" >/dev/null
-ephemeral_verify_command=$'set -euo pipefail\ngrep -Fqx "[build]" /root/.cargo/config.toml\ngrep -Fqx \'target-dir = "/var/tmp/control-plane/cargo-target"\' /root/.cargo/config.toml\ntest "$(stat -c %a /tmp)" = "1777"\ntest "$(stat -c %a /var/tmp)" = "1777"\n! test -e /tmp/fast-exec-ephemeral.txt\n! test -e /var/tmp/control-plane/fast-exec-ephemeral.txt\nprintf "fast-exec-ephemeral-ok\\n" > /workspace/fast-exec-ephemeral.txt'
+ephemeral_verify_command=$'set -euo pipefail\ngrep -Fqx "[build]" /root/.cargo/config.toml\ngrep -Fqx \'target-dir = "/var/tmp/control-plane/cargo-target"\' /root/.cargo/config.toml\n! test -e /var/tmp/control-plane/fast-exec-ephemeral.txt\nprintf "fast-exec-ephemeral-ok\\n" > /workspace/fast-exec-ephemeral.txt'
 ephemeral_verify_command_base64="$(printf '%s' "${ephemeral_verify_command}" | base64 | tr -d '\n')"
 control-plane-session-exec prepare --session-key "${ephemeral_session_key}" >/dev/null
 control-plane-session-exec proxy --session-key "${ephemeral_session_key}" --cwd /workspace --command-base64 "${ephemeral_verify_command_base64}" >/dev/null

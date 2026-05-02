@@ -25,7 +25,7 @@ pub(crate) fn ensure_runtime_dirs(chroot_root: &Path, remote_home: &Path) -> Res
         )?;
     }
 
-    ensure_remote_home_dirs(&resolve_remote_home_paths(chroot_root, remote_home)?)?;
+    ensure_remote_home_dirs(&resolve_remote_home_paths(Some(chroot_root), remote_home)?)?;
     Ok(())
 }
 

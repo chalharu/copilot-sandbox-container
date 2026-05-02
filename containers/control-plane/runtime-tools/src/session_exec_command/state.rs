@@ -22,7 +22,6 @@ pub(super) struct SessionEntry {
     pub(super) pod_uid: String,
     pub(super) pod_ip: String,
     pub(super) auth_token: String,
-    pub(super) environment_pvc_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,7 +30,6 @@ pub(super) struct PreparedPod {
     pub(super) pod_uid: String,
     pub(super) pod_ip: String,
     pub(super) auth_token: String,
-    pub(super) environment_pvc_name: String,
 }
 
 pub(super) fn read_prepared_pod(
@@ -52,7 +50,6 @@ fn prepared_from_entry(entry: &SessionEntry) -> PreparedPod {
         pod_uid: entry.pod_uid.clone(),
         pod_ip: entry.pod_ip.clone(),
         auth_token: entry.auth_token.clone(),
-        environment_pvc_name: entry.environment_pvc_name.clone(),
     }
 }
 
@@ -62,7 +59,6 @@ pub(super) fn entry_from_prepared(prepared: &PreparedPod) -> SessionEntry {
         pod_uid: prepared.pod_uid.clone(),
         pod_ip: prepared.pod_ip.clone(),
         auth_token: prepared.auth_token.clone(),
-        environment_pvc_name: prepared.environment_pvc_name.clone(),
     }
 }
 

@@ -12,11 +12,10 @@ runtime dir は `/var/tmp/control-plane/rootful-overlay` へ寄せます。graph
 背後は disposable な `emptyDir` cache です。runtime dir も disk-backed
 `emptyDir` を想定します。Pod 再作成時に再生成できる local image store を
 persistent volume から切り離しています。
-fast-exec Execution Pod の `/tmp` と `/var/tmp` も同様に generic ephemeral volume
-で切り離します。storage class と合計サイズは
-`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` /
-`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で制御します。storage class を
-省略した場合は cluster の default StorageClass を使います。
+fast-exec Execution Pod の `/var/tmp/control-plane` も同様に generic ephemeral
+volume で切り離します。storage class と合計サイズは
+`CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON` 内の
+`volumeClaimTemplate.spec` で制御します。
 Rust の `cargo-target` は `/root/.cargo/config.toml` 経由で
 `/var/tmp/control-plane/cargo-target` へ寄せます。
 
@@ -35,7 +34,7 @@ Rust の `cargo-target` は `/root/.cargo/config.toml` 経由で
 | Service の `EXTERNAL-IP` が `pending` | [§9](#9-service-の-external-ip-が未割当て) |
 | injected Copilot config が壊れている | [§10](#10-injected-copilot-config-が壊れている) |
 | gh Secret の指定が足りない | [§11](#11-gh-secret-の指定が足りない) |
-| execution image の bootstrap に失敗する | [§12](#12-execution-image-の-bootstrap-に失敗する) |
+| exec-pod の追加 volume 設定が壊れている | [§12](#12-exec-pod-の追加-volume-設定が壊れている) |
 
 ## 1. bundled skill が読めない
 
@@ -179,7 +178,6 @@ Kubernetes 側の image pull 認証が足りていません。
 次のような Job / exec 用 image に private registry を使う場合があります。
 
 - `CONTROL_PLANE_FAST_EXECUTION_IMAGE`
-- `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE`
 - `CONTROL_PLANE_BIOME_HOOK_IMAGE`
 
 そのときは Deployment / ServiceAccount に `imagePullSecrets` を
@@ -237,23 +235,27 @@ Refusing to install an empty gh hosts source from /var/run/control-plane-auth/gh
 優先されます。無ければ `gh-github-token` から最小
 `~/.config/gh/hosts.yml` を生成する順序で動きます。
 
-## 12. execution image の bootstrap に失敗する
+## 12. exec-pod の追加 volume 設定が壊れている
 
 ### 代表ログ
 
 ```text
-unsupported execution image package manager: need apk or apt-get
+CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUME_MOUNTS_JSON mountPath must be absolute for volume cargo-config: root/.cargo/config.toml
 ```
 
 ### 意味
 
-Execution Pod の base image が `/bin/sh` を持たないか、bootstrap 時に `apk` / `apt-get`
-のどちらも使えません。現行の session-exec bootstrap は、まず staged Rust gRPC binary
-を起動し、その後 gRPC 経由で `bash` / `git` / `gh` / `kubectl` / `openssh-client`
-を導入する前提です。
+`CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON` または
+`CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUME_MOUNTS_JSON` が壊れています。
+runtime は JSON array であることを検証します。さらに、volume name が一意で
+built-in と衝突しないことも確認します。mount は既知 volume を参照し、
+`mountPath` は絶対 path にしてください。`hostPath` と予約済み mount path との
+重なりは拒否します。
 
 ### 期待する確認結果
 
-- `CONTROL_PLANE_FAST_EXECUTION_IMAGE` が Linux base image を指す
-- image 内に `/bin/sh` がある
-- image 内で `apk` か `apt-get` のどちらかが使える
+- `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON` が `Volume` object の JSON array
+- `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUME_MOUNTS_JSON` が `VolumeMount` object の JSON array
+- 追加 mount の `mountPath` が `/` から始まる
+- 追加 mount が `/workspace`、shared `gh` / SSH、service account token の
+  mount path と重ならない

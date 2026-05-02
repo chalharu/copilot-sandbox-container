@@ -33,15 +33,13 @@ kubectl apply -k deploy/kubernetes/control-plane.example
 
 1. session 用 shared PVC に使う RWX storage class
 2. workspace PVC の storage class とサイズ
-3. Execution Pod が node ごとに使う environment PVC の storage class
-   （`CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS`）
-4. Execution Pod の `/tmp` と `/var/tmp` に使う generic ephemeral volume の設定
-   - storage class: `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS`
-   - 合計サイズ: `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE`
-   - 未設定時は cluster の default StorageClass を使う
-5. `control-plane-auth` Secret に入れる SSH 公開鍵
-6. namespace や PVC 名を既定値のまま使うかどうか
-7. `latest` のまま試すか、published image を full commit SHA tag へ pin するか
+3. Execution Pod の `/var/tmp/control-plane` に使う generic ephemeral volume の設定
+   - storage class と合計サイズ:
+     `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON` 内の
+     `volumeClaimTemplate.spec`
+4. `control-plane-auth` Secret に入れる SSH 公開鍵
+5. namespace や PVC 名を既定値のまま使うかどうか
+6. `latest` のまま試すか、published image を full commit SHA tag へ pin するか
 
 ## 最初に書き換える場所
 
@@ -58,15 +56,9 @@ kubectl apply -k deploy/kubernetes/control-plane.example
       control-plane Pod と同じ node に pin されるため共有できる
 4. `control-plane.example/common/configmap-control-plane-env.yaml`
    - cluster 固有の runtime 設定だけを調整する
-   - `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS` を、cluster に
-      `standard` が無い場合は導入前に置き換える
-   - `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` を、dynamic
-      provisioning 可能な storage class へ置き換える
-   - この変数を省略する場合は、cluster に default StorageClass を必ず用意する
-   - `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で `/tmp` と `/var/tmp` の
-     合計上限を調整する
-   - `CONTROL_PLANE_FAST_EXECUTION_IMAGE` を変える場合は `/bin/sh` と
-     `apt-get` または `apk` を持つ image を使う
+   - `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON` 内の
+     `storageClassName` を、cluster に `standard` が無い場合は導入前に置き換える
+   - `CONTROL_PLANE_FAST_EXECUTION_IMAGE` は dedicated exec-pod image を使う
    - `CONTROL_PLANE_BIOME_HOOK_IMAGE` は bundled Biome hook を別 Job image
      へ逃がす。sample 既定は official Biome image の Renovate-managed ref
    - `CONTROL_PLANE_RUST_HOOK_IMAGE` は compile-heavy な Rust hook を別
@@ -79,7 +71,6 @@ kubectl apply -k deploy/kubernetes/control-plane.example
    - sample 既定は
      `ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest`
    - image を差し替えると `control-plane/control-plane-instance-env` 側の
-     `CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` /
      `CONTROL_PLANE_JOB_TRANSFER_IMAGE` も自動で追従する
    - 再現性が必要なら GitHub Packages の
      `copilot-sandbox-container/control-plane`
@@ -128,9 +119,8 @@ ServiceAccount も含みます。`copilot-sandbox-jobs` 側の
 `control-plane-exec-workloads` Role / RoleBinding も含みます。SSH shell や
 delegated `bash` では `kubectl -n copilot-sandbox-jobs ...` を使えます。
 作業後に削除する前提の Deployment / Service / Job / Pod を扱えます。
-`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` を省略したときは、
-cluster default StorageClass を解決する。
-そのための read-only な ClusterRole / ClusterRoleBinding も sample に含む。
+exec-pod の cache volume は generic volume JSON に明示した StorageClass を使います。
+control-plane runtime は StorageClass 一覧を読みません。
 
 ## default overlay のカスタマイズ
 

@@ -42,7 +42,7 @@ copilot session PVC へまとめるものは次のとおりです。
 - `/var/lib/control-plane/ssh-host-keys`
 
 `session-exec.json` には、hook rewrite が使う session key ごとの Execution Pod 名 /
-Pod IP / auth token / environment PVC 名が入ります。incoming SSH auth は
+Pod IP / auth token が入ります。incoming SSH auth は
 `~/.config/control-plane/ssh-auth/authorized_keys` へ切り出して同じ PVC に残します。
 `~/.ssh/authorized_keys` は互換 symlink にとどめます。これにより delegated exec pod
 が共有する client-side SSH state から切り離します。
@@ -98,27 +98,33 @@ interactive shell からの direct read は exec policy が拒否します。
 `COPILOT_GITHUB_TOKEN_FILE` は private runtime token file へ移します。
 以後は raw mount を読ませません。
 
-sample manifest の fast execution pod では、runtime image とは別に
-`CONTROL_PLANE_FAST_EXECUTION_BOOTSTRAP_IMAGE` を指定します。initContainer は
-Rust 製 `control-plane-exec-api` と bundled Git hook を、node-scoped な RWO PVC
-へ初回 staging します。この PVC 名は
-`CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_PVC_PREFIX` で決めます。staging 先は
-`/environment` です。本体 container は cached binary を
-`/control-plane/bin/control-plane-exec-api` へ staging して起動します。初回だけ
-runtime image の rootfs を `/environment/root` へ複製します。そこへ `bash` /
-`git` / `gh` / `kubectl` / `openssh-client` を入れます。以後の session pod は、
-同じ node 上でその chroot を再利用します。毎回の package install を避けられます。
-remote HOME (`/root`) には `.gitconfig` と一緒に `.cargo/config.toml` も毎回生成し、
-Rust の `target-dir` を `/var/tmp/control-plane/cargo-target` へ固定します。
-また chroot 内の `/tmp` と `/var/tmp` は 1 本の generic ephemeral volume を
-共有し、Execution Pod ごとに初期化します。storage class と合計サイズは
-`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` /
-`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で制御します。storage class を
-省略した場合は cluster の default StorageClass を解決し、default が無ければ
-prepare を失敗させます。
+sample manifest の fast execution pod は専用の
+`ghcr.io/chalharu/copilot-sandbox-container/exec-pod:<tag>` image を使います。
+`/usr/local/bin/control-plane-exec-api serve` を直接起動し、initContainer /
+node-scoped environment PVC / chroot は使いません。workspace PVC は
+`CONTROL_PLANE_WORKSPACE_MOUNT_PATH`（既定 `/workspace`）へ直接 mount します。
+`gh` と SSH の shared session mount も remote HOME (`/root`) 配下へ直接 mount します。
+exec-pod image には `bash` / `git` / `gh` / `kubectl` / `sudo` / `sccache` と
+bundled hook が含まれます。remote HOME には `.gitconfig` を毎回生成します。
+`.cargo/config.toml` は image default または追加 volume mount で供給し、Rust の
+`target-dir` と sccache 用 cache を `/var/tmp/control-plane` 配下へ寄せます。
+
+追加の Kubernetes volume は
+`CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON` に渡します。
+追加の volumeMount は
+`CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUME_MOUNTS_JSON` に渡します。
+値は core/v1 `Volume` / `VolumeMount` の JSON array です。
+runtime は JSON array であることを検証します。volume 名は built-in
+(`workspace`, `copilot-session`) と重複できません。mount は既知 volume を参照し、
+`mountPath` は絶対 path にします。
+`hostPath` volume と、workspace / shared `gh` / SSH / service account token などの
+予約済み mount path と重なる追加 mount は拒否します。
+sample では generic ephemeral volume `ephemeral-storage` を
+`/var/tmp/control-plane` に mount し、Execution Pod ごとに初期化します。
 `CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT` を設定すると、各 Execution Pod は
-serve 前にその値を chroot 内で `/bin/sh -lc` として実行します。値は inline
-command でも script path でも構いません。初回 bootstrap は数分かかりうるため、
+serve 前にその値を `/bin/sh -lc` として実行します。値は inline
+command でも script path でも構いません。image pull と startup script に時間が
+かかりうるため、
 Execution Pod は gRPC startupProbe と長めの
 `CONTROL_PLANE_FAST_EXECUTION_START_TIMEOUT` を前提にしています。
 Pod 自体の OwnerReference / node pin には Deployment の downward API env
@@ -170,13 +176,11 @@ same-namespace / same-node の Execution Pod へ自動委譲します。operator
 agent が `bash` tool からこの helper を直接呼ぶ想定はありません。helper は
 same-namespace / same-node の Execution Pod を on-demand で作成または再利用します。
 `/workspace` PVC を共有したまま、gRPC 経由で転送します。
-Execution Pod は任意の Linux image を起点にできます。
-node-scoped な `/environment` PVC を同じ node 上で共有します。
-`/environment/root` の chroot runtime と cached `control-plane-exec-api`、
-`/environment/hooks/git` も再利用します。`postToolUse` hook は Execution Pod 内で
+Execution Pod は dedicated exec-pod image を起点にします。
+`postToolUse` hook は Execution Pod 内で
 ローカル実行しません。`CONTROL_PLANE_POST_TOOL_USE_FORWARD_*` で Control Plane Pod
 側の限定 reverse API へ転送します。そのため hook 実行に必要な追加 tool を
-chroot 側へ複製しません。Exec API は per-pod token が必須です。
+exec-pod image へ複製しません。Exec API は per-pod token が必須です。
 delegated command 自体は `CONTROL_PLANE_FAST_EXECUTION_RUN_AS_{UID,GID}` で指定した
 非 root UID/GID へ drop してから実行します。delegated stdout の先頭には
 submit された command line をそのまま出力します。remote 実行時でも何を流したかを

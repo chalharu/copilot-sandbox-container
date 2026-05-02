@@ -1,14 +1,13 @@
 use std::time::Duration;
 
 use control_plane_exec_api::check_health;
-use k8s_openapi::api::core::v1::{PersistentVolumeClaim, Pod};
-use k8s_openapi::api::storage::v1::StorageClass;
-use kube::api::{DeleteParams, ListParams, PostParams};
+use k8s_openapi::api::core::v1::Pod;
+use kube::api::{DeleteParams, PostParams};
 use kube::{Api, Client};
 use tokio::time::{Instant, sleep};
 
 use super::config::SessionExecConfig;
-use super::manifest::{STARTUP_PROBE_GRACE_SECONDS, build_environment_pvc};
+use super::manifest::STARTUP_PROBE_GRACE_SECONDS;
 use super::state::SessionEntry;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,117 +20,6 @@ pub(super) async fn kube_client() -> Result<Client, String> {
     Client::try_default()
         .await
         .map_err(|error| format!("failed to create Kubernetes client: {error}"))
-}
-
-pub(super) async fn ensure_environment_pvc(
-    client: &Client,
-    config: &SessionExecConfig,
-    pvc_name: &str,
-) -> Result<(), String> {
-    let pvcs: Api<PersistentVolumeClaim> = Api::namespaced(client.clone(), &config.namespace);
-    if pvcs.get(pvc_name).await.is_ok() {
-        return Ok(());
-    }
-
-    let pvc = build_environment_pvc(config, pvc_name)?;
-    match pvcs.create(&PostParams::default(), &pvc).await {
-        Ok(_) => Ok(()),
-        Err(kube::Error::Api(error)) if error.code == 409 => Ok(()),
-        Err(error) => Err(format!(
-            "failed to create execution environment PVC {pvc_name}: {error}"
-        )),
-    }
-}
-
-pub(super) async fn resolve_exec_ephemeral_storage_class(
-    client: &Client,
-    config: &SessionExecConfig,
-) -> Result<String, String> {
-    if let Some(storage_class) = config.ephemeral_storage_class.as_ref() {
-        return Ok(storage_class.clone());
-    }
-
-    let storage_classes: Api<StorageClass> = Api::all(client.clone());
-    let storage_classes = storage_classes
-        .list(&ListParams::default())
-        .await
-        .map_err(|error| {
-            format!(
-                "failed to resolve fast execution ephemeral storage class: {error}; \
-                 set CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS or grant access to list StorageClasses"
-            )
-        })?;
-    find_default_storage_class_name(&storage_classes.items).map_err(|error| {
-        format!("{error}; set CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS to override")
-    })
-}
-
-pub(super) fn find_default_storage_class_name(
-    storage_classes: &[StorageClass],
-) -> Result<String, String> {
-    let mut defaults = storage_classes
-        .iter()
-        .filter(|storage_class| storage_class_is_default(storage_class))
-        .filter_map(|storage_class| storage_class.metadata.name.clone())
-        .collect::<Vec<_>>();
-    defaults.sort();
-    defaults.dedup();
-
-    match defaults.as_slice() {
-        [storage_class] => Ok(storage_class.clone()),
-        [] => Err("no default StorageClass found for fast execution ephemeral storage".to_string()),
-        _ => Err(format!(
-            "multiple default StorageClasses found for fast execution ephemeral storage: {}",
-            defaults.join(", ")
-        )),
-    }
-}
-
-fn storage_class_is_default(storage_class: &StorageClass) -> bool {
-    storage_class
-        .metadata
-        .annotations
-        .as_ref()
-        .is_some_and(|annotations| {
-            [
-                "storageclass.kubernetes.io/is-default-class",
-                "storageclass.beta.kubernetes.io/is-default-class",
-            ]
-            .into_iter()
-            .filter_map(|key| annotations.get(key))
-            .any(|value| value.trim().eq_ignore_ascii_case("true"))
-        })
-}
-
-pub(super) async fn resolve_bootstrap_image(
-    client: &Client,
-    config: &SessionExecConfig,
-) -> Result<String, String> {
-    if let Some(image) = &config.bootstrap_image {
-        return Ok(image.clone());
-    }
-
-    let pods: Api<Pod> = Api::namespaced(client.clone(), &config.namespace);
-    let owner_pod = pods
-        .get(&config.owner_pod_name)
-        .await
-        .map_err(|error| format!("failed to determine bootstrap image: {error}"))?;
-    owner_pod
-        .spec
-        .as_ref()
-        .and_then(|spec| {
-            spec.containers
-                .iter()
-                .find(|container| container.name == "control-plane")
-                .or_else(|| spec.containers.first())
-        })
-        .and_then(|container| container.image.clone())
-        .ok_or_else(|| {
-            format!(
-                "owner pod {} does not expose a bootstrap image",
-                config.owner_pod_name
-            )
-        })
 }
 
 pub(super) async fn get_existing_pod(

@@ -35,14 +35,11 @@ sample manifest では Copilot CLI の `bash` tool を session-scoped Execution 
 - deploy 先 namespace と PVC を作成できる Kubernetes 権限
 - session 用の `ReadWriteMany` storage class
 - workspace PVC 用の storage class（sample の既定は `standard`）
-- Execution Pod が node ごとに使う environment PVC 用の storage class
-  - 対応する変数は `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS`
+- Execution Pod の rebuildable cache に使う generic ephemeral volume 用の
+  storage class。
+  対応する変数は `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON`（Volume 定義）と
+  `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUME_MOUNTS_JSON`（VolumeMount 定義）。
   - sample の既定値は `standard`
-- Execution Pod の `/tmp` と `/var/tmp` に使う generic ephemeral volume 用の
-  storage class
-  - 対応する変数は `CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS`
-  - sample の既定値は `standard`
-  - 未設定時は cluster の default StorageClass を使う
 - SSH 公開鍵
 - `latest` 以外へ pin したい場合だけ published image tag
 
@@ -57,16 +54,17 @@ sample manifest では Copilot CLI の `bash` tool を session-scoped Execution 
   - `deploy/kubernetes/control-plane.example/base/pvc-control-plane-workspace.yaml`
     の storage class / size
   - `deploy/kubernetes/control-plane.example/common/configmap-control-plane-env.yaml`
-    の `CONTROL_PLANE_FAST_EXECUTION_ENVIRONMENT_STORAGE_CLASS`
+    の `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON`。
+    generic ephemeral volume の storage class / size の設定対象。
   - `deploy/kubernetes/control-plane.example/common/configmap-control-plane-env.yaml`
     の `CONTROL_PLANE_BIOME_HOOK_IMAGE`
   - `deploy/kubernetes/control-plane.example/common/configmap-control-plane-env.yaml`
     の `CONTROL_PLANE_RUST_HOOK_IMAGE`
 - **既定のまま試せる値**
-  - Control Plane / bootstrap / job transfer image は
+  - Control Plane / job transfer image は
     `ghcr.io/chalharu/copilot-sandbox-container/control-plane:latest`
-  - `CONTROL_PLANE_FAST_EXECUTION_IMAGE` は `/bin/sh` と `apt-get` または `apk`
-    を持つ image が必要で、sample は `docker.io/library/ubuntu:24.04`
+  - `CONTROL_PLANE_FAST_EXECUTION_IMAGE` は dedicated exec-pod image の
+    `ghcr.io/chalharu/copilot-sandbox-container/exec-pod:latest`
   - `CONTROL_PLANE_BIOME_HOOK_IMAGE` は JS/TS 向け Biome hook を別 Job image へ
     逃がす既定値で、sample は Renovate-managed な official Biome image ref を使う
   - `CONTROL_PLANE_RUST_HOOK_IMAGE` は compile-heavy な Rust hook を別
@@ -78,11 +76,13 @@ sample manifest では Copilot CLI の `bash` tool を session-scoped Execution 
 
 workspace PVC は sample 既定で `ReadWriteOnce` です。Execution Pod は
 control-plane Pod と同じ node に pin されるため、この構成のまま共有できます。
-published tag を pin したい場合は GitHub Packages の
+published tag を pin したい場合は GitHub Packages から選びます。
 `copilot-sandbox-container/control-plane`
 （<https://github.com/chalharu/copilot-sandbox-container/pkgs/container/copilot-sandbox-container%2Fcontrol-plane>）
-から同じ full commit SHA tag を選んでください。Deployment / bootstrap / job
-transfer の 3 箇所をそろえてください。
+と `copilot-sandbox-container/exec-pod`
+（<https://github.com/chalharu/copilot-sandbox-container/pkgs/container/copilot-sandbox-container%2Fexec-pod>）
+から同じ full commit SHA tag を選んでください。Deployment / job transfer /
+Execution Pod の image tag をそろえてください。
 
 ### 3. apply する
 
@@ -168,14 +168,19 @@ ServiceAccount で起動します。`copilot-sandbox-jobs` namespace の
 `control-plane-exec-workloads` Role に bind します。Execution Pod 内で
 `kubectl -n copilot-sandbox-jobs ...` を使えば、一時的な Deployment / Service /
 Job / Pod を control-plane 本体とは分離した権限で扱えます。
-Execution Pod の `/tmp` と `/var/tmp` は pod ごとの generic ephemeral volume です。
-storage class / 合計サイズは
-`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_STORAGE_CLASS` /
-`CONTROL_PLANE_FAST_EXECUTION_EPHEMERAL_SIZE` で調整できます。storage class を
-省略した場合は cluster の default StorageClass を解決し、default が無ければ
-prepare を失敗させます。
-Rust を使う場合も `/root/.cargo/config.toml` を自動生成し、`target-dir` を
-`/var/tmp/control-plane/cargo-target` へ固定します。
+Execution Pod の rebuildable cache は、sample manifest では pod ごとの generic
+ephemeral volume です。`ephemeral-storage` を `/var/tmp/control-plane` に
+mount します。
+storage class / size は
+`CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON` 内の Kubernetes Volume 定義で
+調整できます。追加の ConfigMap / Secret / PVC も JSON で指定できます。
+指定先は `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON` と
+`CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUME_MOUNTS_JSON` です。node filesystem を
+露出する `hostPath` は拒否されます。workspace / shared `gh` / SSH などの
+予約済み mount path との重複も拒否されます。
+Rust を使う場合は dedicated exec-pod image に `sccache` が含まれます。
+`/root/.cargo/config.toml` を ConfigMap から `subPath` mount すると、
+`rustc-wrapper = "/usr/bin/sccache"` などの cargo 設定を session ごとに注入できます。
 
 ### current-cluster の smoke を取る
 
