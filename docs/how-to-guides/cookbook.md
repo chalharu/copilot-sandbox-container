@@ -93,8 +93,8 @@ ConfigMap / Secret / write-back の具体的な path は
    runtime file へ staging されるので、`/run/control-plane-auth` から直接
    読まない
 4. Copilot CLI の追加設定は `control-plane-config` ConfigMap の
-   `copilot-config.json` へ書き、PVC 上の既存 `~/.copilot/config.json`
-   へ merge させる
+   `copilot-config.json` へ書く。entrypoint は startup ごとにそれを
+   ephemeral な `~/.copilot/config.json` の初期値として入れる
 5. 非機密 env は Deployment の `envFrom` で読み、shared な runtime 設定は
    `control-plane-env`、instance 固有の namespace / Service host / workspace PVC /
    helper image は `control-plane-instance-env` へ分ける

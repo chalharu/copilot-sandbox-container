@@ -546,11 +546,16 @@ metadata:
 data:
   copilot-config.json: |
     {
+      "auth": {
+        "provider": "github"
+      },
       "features": {
+        "sessionPicker": true,
         "persisted": false,
         "overlayOnly": true
       },
       "nested": {
+        "keep": 1,
         "replace": {
           "fromOverlay": true
         },
@@ -659,9 +664,7 @@ spec:
                 /copilot-session/session-state \
                 /workspace-state/workspace \
                 /cache/runtime-tmp
-              touch \
-                /copilot-session/state/copilot-config.json \
-                /copilot-session/state/command-history-state.json
+              touch /copilot-session/state/command-history-state.json
               chown -R 1000:1000 /copilot-session/state /copilot-session/session-state
               find /copilot-session/state /copilot-session/session-state -type d -exec chmod 700 {} +
               find /copilot-session/state /copilot-session/session-state -type f -exec chmod 600 {} +
@@ -705,26 +708,6 @@ spec:
             - |
               set -eu
               umask 077
-              [ -s /state/copilot-config.json ] || cat > /state/copilot-config.json <<'JSON'
-              {
-                "auth": {
-                  "provider": "github"
-                },
-                "features": {
-                  "persisted": true,
-                  "sessionPicker": true
-                },
-                "nested": {
-                  "keep": 1,
-                  "replace": {
-                    "fromBase": true
-                  },
-                  "array": [
-                    "base"
-                  ]
-                }
-              }
-              JSON
               [ -f /state/gh/hosts.yml ] || cat > /state/gh/hosts.yml <<'YAML'
               github.com:
                 oauth_token: stale-kind-token
@@ -823,9 +806,6 @@ spec:
               memory: 1Gi
           volumeMounts:
             - name: copilot-session
-              mountPath: /home/copilot/.copilot/config.json
-              subPath: state/copilot-config.json
-            - name: copilot-session
               mountPath: /home/copilot/.copilot/command-history-state.json
               subPath: state/command-history-state.json
             - name: copilot-session
@@ -908,19 +888,21 @@ test -f ~/.copilot/config.json
 test -f ~/.copilot/command-history-state.json
 test -d ~/.copilot/session-state
 test -f ~/.config/gh/hosts.yml
+test -L "${COPILOT_HOME}"
+test "$(readlink "${COPILOT_HOME}")" = '/home/copilot/.copilot'
 test "\$(stat -c '%a %U %G' ~/.copilot/config.json)" = '600 copilot copilot'
 test "\$(stat -c '%a %U %G' ~/.copilot/command-history-state.json)" = '600 copilot copilot'
 test "\$(stat -c '%a %U %G' ~/.config/gh/hosts.yml)" = '600 copilot copilot'
 printf '%s\n' 'kind-test remote: persisted files ok' >&2
-jq -e '.auth.provider == "github"' ~/.copilot/config.json >/dev/null
-jq -e '.features.sessionPicker == true' ~/.copilot/config.json >/dev/null
 jq -e '.features.persisted == false' ~/.copilot/config.json >/dev/null
 jq -e '.features.overlayOnly == true' ~/.copilot/config.json >/dev/null
+jq -e '.features.sessionPicker == true' ~/.copilot/config.json >/dev/null
+jq -e '.auth.provider == "github"' ~/.copilot/config.json >/dev/null
 jq -e '.nested.keep == 1' ~/.copilot/config.json >/dev/null
-jq -e '.nested.replace.fromBase == true and .nested.replace.fromOverlay == true' ~/.copilot/config.json >/dev/null
+jq -e '.nested.replace.fromOverlay == true' ~/.copilot/config.json >/dev/null
 jq -e '.nested.array == ["overlay"]' ~/.copilot/config.json >/dev/null
 jq -e '.topLevelOverlay == "kind"' ~/.copilot/config.json >/dev/null
-printf '%s\n' 'kind-test remote: config merge ok' >&2
+printf '%s\n' 'kind-test remote: config overlay ok' >&2
 if cat ~/.config/gh/hosts.yml >/dev/null 2>&1; then
   printf '%s\n' 'expected direct ~/.config/gh/hosts.yml reads to be blocked by the exec policy' >&2
   exit 1

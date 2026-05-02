@@ -52,24 +52,10 @@ prepare_state_tree() {
 
 require_command "${container_bin}"
 
-printf '%s\n' 'config-injection-test: verifying Copilot merge and Secret-backed gh hosts injection' >&2
+printf '%s\n' 'config-injection-test: verifying ephemeral Copilot config startup and Secret-backed gh hosts injection' >&2
 prepare_state_tree file-backed
 cat > "${workdir}/file-backed/state/copilot/config.json" <<'EOF'
-{
-  "chat": {
-    "editor": "vim",
-    "theme": "dark"
-  },
-  "nested": {
-    "keep": 1,
-    "replace": {
-      "fromBase": true
-    },
-    "array": [
-      "base"
-    ]
-  }
-}
+// stale persisted config from an older session should not block startup
 EOF
 cat > "${workdir}/file-backed/state/gh/hosts.yml" <<'EOF'
 github.com:
@@ -132,11 +118,11 @@ test "$(stat -c '%a %U %G' /home/copilot/.copilot)" = '1770 root copilot'
 test "$(stat -c '%a %U %G' /home/copilot/.copilot/config.json)" = '600 copilot copilot'
 test "$(stat -c '%a %U %G' /home/copilot/.copilot/restart)" = '755 copilot copilot'
 test "$(stat -c '%a %U %G' /home/copilot/.config/gh/hosts.yml)" = '600 copilot copilot'
-test "$(stat -c '%a %U %G' "${COPILOT_HOME}")" = '755 root root'
+test -L "${COPILOT_HOME}"
+test "$(readlink "${COPILOT_HOME}")" = '/home/copilot/.copilot'
+test "$(stat -c '%a %U %G' "${COPILOT_HOME}")" = '1770 root copilot'
 test "$(stat -c '%a %U %G' "${COPILOT_HOME}/hooks/hooks.json")" = '644 root root'
 test "$(stat -c '%a %U %G' "${GIT_CONFIG_GLOBAL}")" = '644 root root'
-test -L "${COPILOT_HOME}/restart"
-test "$(readlink "${COPILOT_HOME}/restart")" = '/home/copilot/.copilot/restart'
 test -L /home/copilot/.copilot/hooks
 test "$(readlink /home/copilot/.copilot/hooks)" = '/usr/local/share/control-plane/hooks'
 test -L /home/copilot/.gitconfig
@@ -208,12 +194,15 @@ FAKE
 chmod 755 /tmp/fake-copilot
 copilot_ld_preload="$(su -s /bin/bash copilot -lc 'CONTROL_PLANE_COPILOT_BIN=/tmp/fake-copilot control-plane-copilot')"
 grep -qx '/usr/local/lib/libcontrol_plane_exec_policy.so' <<<"${copilot_ld_preload}"
-jq -e '.chat.editor == "vim"' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.chat.theme == "light"' /home/copilot/.copilot/config.json >/dev/null
-jq -e '.nested.keep == 1' /home/copilot/.copilot/config.json >/dev/null
-jq -e '.nested.replace.fromBase == true and .nested.replace.fromOverlay == true' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.chat.editor == null' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.nested.keep == null' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.nested.replace.fromOverlay == true' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.nested.array == ["overlay"]' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.topLevelOverlay == "configmap"' /home/copilot/.copilot/config.json >/dev/null
+su -s /bin/bash copilot -lc 'tmp="${COPILOT_HOME}/config.json.tmp"; printf "%s\n" "{\"chat\":{\"theme\":\"rewritten\"},\"topLevelOverlay\":\"runtime\"}" > "${tmp}"; mv "${tmp}" "${COPILOT_HOME}/config.json"'
+jq -e '.chat.theme == "rewritten"' /home/copilot/.copilot/config.json >/dev/null
+jq -e '.topLevelOverlay == "runtime"' /home/copilot/.copilot/config.json >/dev/null
 grep -Fqx '  git_protocol: ssh' /home/copilot/.config/gh/hosts.yml
 printf '%s\n' file-backed-ok
 EOF
@@ -222,132 +211,11 @@ file_backed_status=$?
 set -e
 
 if [[ "${file_backed_status}" -ne 0 ]]; then
-  printf 'Expected file-backed gh hosts injection and Copilot config merge to succeed\n' >&2
+  printf 'Expected file-backed gh hosts injection and ephemeral Copilot config startup to succeed\n' >&2
   printf '%s\n' "${file_backed_output}" >&2
   exit 1
 fi
 grep -qx 'file-backed-ok' <<<"${file_backed_output}"
-
-printf '%s\n' 'config-injection-test: verifying Copilot merge works with single-file config mounts' >&2
-prepare_state_tree file-mounted
-cat > "${workdir}/file-mounted/state/copilot-config.json" <<'EOF'
-{
-  "chat": {
-    "editor": "vim",
-    "theme": "dark"
-  },
-  "nested": {
-    "keep": 1,
-    "replace": {
-      "fromBase": true
-    },
-    "array": [
-      "base"
-    ]
-  }
-}
-EOF
-cat > "${workdir}/file-mounted/config/copilot-config.json" <<'EOF'
-{
-  "chat": {
-    "theme": "light"
-  },
-  "nested": {
-    "replace": {
-      "fromOverlay": true
-    },
-    "array": [
-      "overlay"
-    ]
-  },
-  "topLevelOverlay": "single-file-mount"
-}
-EOF
-cat > "${workdir}/file-mounted/auth/gh-hosts.yml" <<'EOF'
-github.com:
-  oauth_token: single-file-secret-token
-  git_protocol: ssh
-EOF
-
-set +e
-file_mounted_output="$("${container_bin}" run --rm \
-  --name "${container_name}" \
-  "${control_plane_run_user[@]}" \
-  -i \
-  "${startup_caps[@]}" \
-  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForConfigInjection control-plane-config-injection' \
-  -e COPILOT_CONFIG_JSON_FILE=/var/run/control-plane-config/copilot-config.json \
-  -e GH_HOSTS_YML_FILE=/var/run/control-plane-auth/gh-hosts.yml \
-  -v "${workdir}/file-mounted/state/copilot-config.json:/home/copilot/.copilot/config.json" \
-  -v "${workdir}/file-mounted/state/gh:/home/copilot/.config/gh" \
-  -v "${workdir}/file-mounted/state/ssh:/home/copilot/.ssh" \
-  -v "${workdir}/file-mounted/state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
-  -v "${workdir}/file-mounted/state/workspace:/workspace" \
-  -v "${workdir}/file-mounted/auth:/var/run/control-plane-auth:ro" \
-  -v "${workdir}/file-mounted/config:/var/run/control-plane-config:ro" \
-  "${control_plane_image}" \
-  bash -l -se 2>&1 <<'EOF'
-set -euo pipefail
-test "$(stat -c '%a %U %G' /home/copilot/.copilot/config.json)" = '600 copilot copilot'
-jq -e '.chat.editor == "vim"' /home/copilot/.copilot/config.json >/dev/null
-jq -e '.chat.theme == "light"' /home/copilot/.copilot/config.json >/dev/null
-jq -e '.nested.keep == 1' /home/copilot/.copilot/config.json >/dev/null
-jq -e '.nested.replace.fromBase == true and .nested.replace.fromOverlay == true' /home/copilot/.copilot/config.json >/dev/null
-jq -e '.nested.array == ["overlay"]' /home/copilot/.copilot/config.json >/dev/null
-jq -e '.topLevelOverlay == "single-file-mount"' /home/copilot/.copilot/config.json >/dev/null
-printf '%s\n' file-mounted-ok
-EOF
-)"
-file_mounted_status=$?
-set -e
-
-if [[ "${file_mounted_status}" -ne 0 ]]; then
-  printf 'Expected Copilot config merge to succeed when config.json is a single-file mount\n' >&2
-  printf '%s\n' "${file_mounted_output}" >&2
-  exit 1
-fi
-grep -qx 'file-mounted-ok' <<<"${file_mounted_output}"
-
-printf '%s\n' 'config-injection-test: verifying empty single-file config mounts fail clearly' >&2
-prepare_state_tree empty-file-mounted
-: > "${workdir}/empty-file-mounted/state/copilot-config.json"
-cat > "${workdir}/empty-file-mounted/config/copilot-config.json" <<'EOF'
-{
-  "chat": {
-    "theme": "light"
-  }
-}
-EOF
-
-set +e
-empty_file_mounted_output="$("${container_bin}" run --rm \
-  --name "${container_name}" \
-  "${control_plane_run_user[@]}" \
-  -i \
-  "${startup_caps[@]}" \
-  -e SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForConfigInjection control-plane-config-injection' \
-  -e COPILOT_CONFIG_JSON_FILE=/var/run/control-plane-config/copilot-config.json \
-  -v "${workdir}/empty-file-mounted/state/copilot-config.json:/home/copilot/.copilot/config.json" \
-  -v "${workdir}/empty-file-mounted/state/gh:/home/copilot/.config/gh" \
-  -v "${workdir}/empty-file-mounted/state/ssh:/home/copilot/.ssh" \
-  -v "${workdir}/empty-file-mounted/state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
-  -v "${workdir}/empty-file-mounted/state/workspace:/workspace" \
-  -v "${workdir}/empty-file-mounted/config:/var/run/control-plane-config:ro" \
-  "${control_plane_image}" \
-  bash -l -se 2>&1 <<'EOF'
-set -euo pipefail
-printf '%s\n' unexpected-success
-EOF
-)"
-empty_file_mounted_status=$?
-set -e
-
-if [[ "${empty_file_mounted_status}" -eq 0 ]]; then
-  printf 'Expected empty single-file config mount to fail validation\n' >&2
-  printf '%s\n' "${empty_file_mounted_output}" >&2
-  exit 1
-fi
-grep -Fq 'Expected existing Copilot config at /home/copilot/.copilot/config.json to contain a single top-level JSON object' <<<"${empty_file_mounted_output}"
 
 printf '%s\n' 'config-injection-test: verifying gh token Secret generates hosts.yml when no file override exists' >&2
 prepare_state_tree token-backed

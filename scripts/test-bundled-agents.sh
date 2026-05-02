@@ -135,7 +135,7 @@ agent_output="$("${container_bin}" run --rm \
   -v "${workdir}/workspace:/workspace" \
   "${control_plane_image}" \
   bash -lc "set -euo pipefail
-test -L /var/lib/control-plane/managed-runtime/copilot-home/agents
+test -d /var/lib/control-plane/managed-runtime/copilot-home/agents
 su -s /bin/bash copilot -c 'set -euo pipefail${startup_check_script}
 printf \"%s\n\" bundled-agents-ok'" 2>&1)"
 agent_status=$?

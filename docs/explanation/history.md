@@ -115,3 +115,18 @@ Helm chart へ切り出しました。
 
 この変更により、「shipped sample を 1 つ整えて使う repo」から、「同じ cluster に
 複数 repo の control plane を並べて管理できる repo」へ性格が広がりました。
+
+## フェーズ 9: Copilot config を ephemeral 化した段階
+
+`~/.copilot/config.json` を session PVC に置いたままにすると、古い commented JSON や
+single-file mount の更新不能状態が startup と runtime の両方を壊しやすくなりました。
+特に `COPILOT_HOME` を root-owned な managed dir + per-file symlink で見せていた構成は、
+Copilot 側の model 変更のような rewrite と相性が悪くなっていました。
+
+- `config.json` は PVC mount から外し、startup ごとに ephemeral な実効 file を作る
+- `COPILOT_HOME` は値を保ちつつ、`/var/lib/.../copilot-home -> ~/.copilot` の symlink に寄せる
+- `hooks` だけは sticky な `~/.copilot` 配下の root-owned symlink で固定し、差し替えは防ぐ
+- `command-history-state.json`、`session-state`、gh/SSH state、host key staging は従来どおり残す
+
+この段階で、「再開のために残す state」と「runtime 中に自由に書き換わるべき config」を
+切り分ける方針が明確になりました。

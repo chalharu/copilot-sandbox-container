@@ -305,57 +305,28 @@ merge_json_object_file() {
   local owner="$3"
   local owner_user
   local target_path_shell
-  local base_tmp
   local merged_tmp
 
-  [[ -n "${overlay_path}" ]] || return 0
-
   require_regular_file_or_absent "${target_path}" "Copilot config path"
-  require_regular_file "${overlay_path}" "Copilot config source"
-
-  base_tmp="$(mktemp)"
+  [[ -z "${overlay_path}" ]] || require_regular_file "${overlay_path}" "Copilot config source"
   merged_tmp="$(mktemp)"
 
-  if [[ -f "${target_path}" ]]; then
-    require_json_object_file "${target_path}" "existing Copilot config"
-    cp "${target_path}" "${base_tmp}"
+  if [[ -n "${overlay_path}" ]]; then
+    require_json_object_file "${overlay_path}" "injected Copilot config"
+    cp "${overlay_path}" "${merged_tmp}"
   else
-    printf '%s\n' '{}' > "${base_tmp}"
-  fi
-
-  require_json_object_file "${overlay_path}" "injected Copilot config"
-
-  if ! jq -s '
-    def deepmerge($base; $overlay):
-      if ($base | type) == "object" and ($overlay | type) == "object" then
-        reduce (($base + $overlay) | keys_unsorted[]) as $key
-          ({};
-           .[$key] =
-             if ($base | has($key)) and ($overlay | has($key)) then
-               deepmerge($base[$key]; $overlay[$key])
-             elif ($overlay | has($key)) then
-               $overlay[$key]
-             else
-               $base[$key]
-             end)
-      else
-        $overlay
-      end;
-    deepmerge(.[0]; .[1])
-  ' "${base_tmp}" "${overlay_path}" > "${merged_tmp}"; then
-    rm -f "${base_tmp}" "${merged_tmp}"
-    exit 1
+    printf '%s\n' '{}' > "${merged_tmp}"
   fi
 
   owner_user="${owner%%:*}"
   printf -v target_path_shell '%q' "${target_path}"
   if ! su -s /bin/bash "${owner_user}" -c "cat > ${target_path_shell}" < "${merged_tmp}"; then
-    rm -f "${base_tmp}" "${merged_tmp}"
+    rm -f "${merged_tmp}"
     exit 1
   fi
   chown "${owner}" "${target_path}"
   chmod 600 "${target_path}"
-  rm -f "${base_tmp}" "${merged_tmp}"
+  rm -f "${merged_tmp}"
 }
 
 write_gh_hosts_from_token() {
@@ -509,51 +480,43 @@ install_bundled_control_plane_agents() {
 }
 
 configure_managed_copilot_home() {
+  require_regular_file_or_absent "${copilot_config_path}" "Copilot config path"
   require_regular_file_or_absent "${copilot_command_history_state_path}" "Copilot command history path"
+  require_regular_file_or_absent "${copilot_mcp_config_path}" "Copilot MCP config path"
 
-  mkdir -p "${managed_runtime_dir}" "${managed_copilot_home}" "${copilot_logs_dir}" "${copilot_agents_dir}"
+  mkdir -p "${managed_runtime_dir}" "${copilot_logs_dir}" "${copilot_agents_dir}"
   mkdir -p "${copilot_restart_dir}"
+  touch "${copilot_config_path}"
   touch "${copilot_command_history_state_path}"
+  if [[ -f "${copilot_mcp_config_path}" ]]; then
+    chown "${control_plane_user}:${control_plane_user}" "${copilot_mcp_config_path}"
+    chmod 600 "${copilot_mcp_config_path}"
+  fi
+  chown "${control_plane_user}:${control_plane_user}" "${copilot_config_path}"
+  chmod 600 "${copilot_config_path}"
   chown "${control_plane_user}:${control_plane_user}" "${copilot_command_history_state_path}"
   chmod 600 "${copilot_command_history_state_path}"
   chown "${control_plane_user}:${control_plane_user}" \
     "${copilot_restart_dir}" \
     "${copilot_logs_dir}" \
     "${copilot_agents_dir}"
-  chown root:root "${managed_runtime_dir}" "${managed_copilot_home}"
-  chmod 755 "${managed_runtime_dir}" "${managed_copilot_home}"
+  chown root:root "${managed_runtime_dir}"
+  chmod 755 "${managed_runtime_dir}"
 
-  ensure_symlink_path "${managed_copilot_home}/config.json" "${copilot_config_path}"
-  ensure_symlink_path "${managed_copilot_home}/command-history-state.json" "${copilot_command_history_state_path}"
-  ensure_symlink_path "${managed_copilot_home}/session-state" "${copilot_session_state_dir}"
-  ensure_symlink_path "${managed_copilot_home}/restart" "${copilot_restart_dir}"
-  ensure_symlink_path "${managed_copilot_home}/logs" "${copilot_logs_dir}"
-  ensure_symlink_path "${managed_copilot_home}/skills" "${copilot_skills_dir}"
-  ensure_symlink_path "${managed_copilot_home}/agents" "${copilot_agents_dir}"
-  ensure_symlink_path "${managed_copilot_home}/mcp-config.json" "${copilot_mcp_config_path}"
-
-  chown -h root:root \
-    "${managed_copilot_home}/config.json" \
-    "${managed_copilot_home}/command-history-state.json" \
-    "${managed_copilot_home}/session-state" \
-    "${managed_copilot_home}/restart" \
-    "${managed_copilot_home}/logs" \
-    "${managed_copilot_home}/skills" \
-    "${managed_copilot_home}/agents" \
-    "${managed_copilot_home}/mcp-config.json"
+  ensure_symlink_path "${managed_copilot_home}" "${copilot_state_dir}"
+  chown -h root:root "${managed_copilot_home}"
 }
 
 install_bundled_control_plane_hooks() {
   [[ -d "${bundled_hooks_dir}" ]] || return 0
 
-  mkdir -p "${managed_runtime_dir}" "${managed_copilot_home}"
-  chown root:root "${managed_runtime_dir}" "${managed_copilot_home}"
-  chmod 755 "${managed_runtime_dir}" "${managed_copilot_home}"
+  mkdir -p "${managed_runtime_dir}"
+  chown root:root "${managed_runtime_dir}"
+  chmod 755 "${managed_runtime_dir}"
 
-  ensure_symlink_path "${managed_copilot_hooks_dir}" "${bundled_hooks_dir}"
   ensure_symlink_path "${copilot_hooks_dir}" "${bundled_hooks_dir}"
 
-  chown -h root:root "${managed_copilot_hooks_dir}" "${copilot_hooks_dir}"
+  chown -h root:root "${copilot_hooks_dir}"
 }
 
 configure_git() {
