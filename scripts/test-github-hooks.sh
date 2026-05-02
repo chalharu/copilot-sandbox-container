@@ -238,7 +238,7 @@ test -L /home/copilot/.copilot/hooks
 test "$(readlink /home/copilot/.copilot/hooks)" = /usr/local/share/control-plane/hooks
 test -L /home/copilot/.gitconfig
 test "$(readlink /home/copilot/.gitconfig)" = "${GIT_CONFIG_GLOBAL}"
-test "$(stat -c '%a %U %G' "${COPILOT_HOME}")" = "1770 root copilot"
+test "$(stat -Lc '%a %U %G' "${COPILOT_HOME}")" = "1770 root copilot"
 test "$(stat -c '%a %U %G' "${COPILOT_HOME}/hooks/hooks.json")" = "644 root root"
 test "$(stat -c '%a %U %G' "${GIT_CONFIG_GLOBAL}")" = "644 root root"
 test -f /home/copilot/.copilot/hooks/hooks.json

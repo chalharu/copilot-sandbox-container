@@ -120,7 +120,7 @@ test "$(stat -c '%a %U %G' /home/copilot/.copilot/restart)" = '755 copilot copil
 test "$(stat -c '%a %U %G' /home/copilot/.config/gh/hosts.yml)" = '600 copilot copilot'
 test -L "${COPILOT_HOME}"
 test "$(readlink "${COPILOT_HOME}")" = '/home/copilot/.copilot'
-test "$(stat -c '%a %U %G' "${COPILOT_HOME}")" = '1770 root copilot'
+test "$(stat -Lc '%a %U %G' "${COPILOT_HOME}")" = '1770 root copilot'
 test "$(stat -c '%a %U %G' "${COPILOT_HOME}/hooks/hooks.json")" = '644 root root'
 test "$(stat -c '%a %U %G' "${GIT_CONFIG_GLOBAL}")" = '644 root root'
 test -L /home/copilot/.copilot/hooks
