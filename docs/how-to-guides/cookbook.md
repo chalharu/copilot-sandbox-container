@@ -120,8 +120,9 @@ ConfigMap / Secret / write-back の具体的な path は
    `kubectl -n "${CONTROL_PLANE_JOB_NAMESPACE}" ...` のように明示する
 10. `CONTROL_PLANE_FAST_EXECUTION_IMAGE` には dedicated exec-pod image を置く。
     sample の GHCR image 以外を使う場合も `control-plane-exec-api`、bundled
-    hook、`git` / `gh` / `kubectl` / `sudo` / `sccache` を含め、本番では
-    digest-pinned ref を使う。
+    hook、`git` / `gh` / `kubectl` / `sudo` / `sccache` / `node` / `pnpm` /
+    `trunk` / `wasm-opt` / `wasm-bindgen` / `cargo-deny` / `cargo-audit` /
+    `mold` / `lizard` を含め、本番では digest-pinned ref を使う。
     `CONTROL_PLANE_BIOME_HOOK_IMAGE` は bundled JS/TS Biome hook を別 Job image
     へ逃がす設定で、shipped sample 既定は Renovate-managed な official Biome
     image ref。

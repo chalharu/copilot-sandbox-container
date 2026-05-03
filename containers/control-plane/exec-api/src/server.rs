@@ -2,6 +2,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder as HyperServerBuilder;
 use hyper_util::service::TowerToHyperService;
 use std::convert::Infallible;
+use std::error::Error as StdError;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -163,6 +164,67 @@ fn log_grpc_connection_task_result(result: Result<(), tokio::task::JoinError>) {
     }
 }
 
+fn log_grpc_connection_error(error: &(dyn StdError + 'static), shutting_down: bool) {
+    if is_benign_grpc_connection_error(error, shutting_down) {
+        return;
+    }
+
+    log_message(&format!("gRPC connection failed: {error}"));
+}
+
+fn is_benign_grpc_connection_error(error: &(dyn StdError + 'static), shutting_down: bool) -> bool {
+    if let Some(hyper_error) = find_error_in_chain::<hyper::Error>(error)
+        && (hyper_error.is_incomplete_message() || hyper_error.is_canceled())
+    {
+        return true;
+    }
+
+    if let Some(h2_error) = find_error_in_chain::<h2::Error>(error) {
+        if h2_error.reason() == Some(h2::Reason::NO_ERROR) {
+            return true;
+        }
+
+        if let Some(io_error) = h2_error.get_io() {
+            // h2 0.4.13 sometimes flattens routine peer disconnects into
+            // ErrorKind::Other with the opaque "connection error" message.
+            return is_benign_grpc_io_error(io_error, shutting_down)
+                || (io_error.kind() == std::io::ErrorKind::Other
+                    && io_error.to_string() == "connection error");
+        }
+    }
+
+    if let Some(io_error) = find_error_in_chain::<std::io::Error>(error) {
+        return is_benign_grpc_io_error(io_error, shutting_down);
+    }
+
+    false
+}
+
+fn is_benign_grpc_io_error(io_error: &std::io::Error, shutting_down: bool) -> bool {
+    matches!(
+        io_error.kind(),
+        std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::UnexpectedEof
+    ) || (shutting_down && io_error.kind() == std::io::ErrorKind::Interrupted)
+}
+
+fn find_error_in_chain<'a, T>(error: &'a (dyn StdError + 'static)) -> Option<&'a T>
+where
+    T: StdError + 'static,
+{
+    let mut current = Some(error);
+    while let Some(error) = current {
+        if let Some(typed_error) = error.downcast_ref::<T>() {
+            return Some(typed_error);
+        }
+        current = error.source();
+    }
+
+    None
+}
+
 fn spawn_grpc_connection(
     connections: &mut JoinSet<()>,
     stream: TcpStream,
@@ -178,7 +240,7 @@ fn spawn_grpc_connection(
         tokio::select! {
             result = connection.as_mut() => {
                 if let Err(error) = result {
-                    log_message(&format!("gRPC connection failed: {error}"));
+                    log_grpc_connection_error(error.as_ref(), false);
                 }
             }
             changed = shutdown.changed() => {
@@ -186,7 +248,7 @@ fn spawn_grpc_connection(
                     connection.as_mut().graceful_shutdown();
                 }
                 if let Err(error) = connection.await {
-                    log_message(&format!("gRPC connection failed: {error}"));
+                    log_grpc_connection_error(error.as_ref(), true);
                 }
             }
         }
@@ -246,4 +308,59 @@ async fn connect(addr: &str, timeout: Duration) -> Result<Channel, DynError> {
         .timeout(timeout)
         .connect()
         .await?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_benign_grpc_connection_error, is_benign_grpc_io_error};
+
+    #[test]
+    fn treats_known_peer_disconnect_io_errors_as_benign() {
+        assert!(is_benign_grpc_io_error(
+            &std::io::Error::from(std::io::ErrorKind::BrokenPipe),
+            false
+        ));
+        assert!(is_benign_grpc_io_error(
+            &std::io::Error::from(std::io::ErrorKind::ConnectionReset),
+            false
+        ));
+        assert!(is_benign_grpc_io_error(
+            &std::io::Error::from(std::io::ErrorKind::UnexpectedEof),
+            false
+        ));
+        assert!(!is_benign_grpc_io_error(
+            &std::io::Error::other("boom"),
+            false
+        ));
+    }
+
+    #[test]
+    fn treats_interrupted_shutdown_io_as_benign() {
+        assert!(is_benign_grpc_connection_error(
+            &std::io::Error::from(std::io::ErrorKind::Interrupted),
+            true
+        ));
+        assert!(!is_benign_grpc_connection_error(
+            &std::io::Error::from(std::io::ErrorKind::Interrupted),
+            false
+        ));
+    }
+
+    #[test]
+    fn treats_no_error_goaway_as_benign() {
+        let error = h2::Error::from(h2::Reason::NO_ERROR);
+        assert!(is_benign_grpc_connection_error(&error, false));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn treats_closed_h2_handshake_as_benign() {
+        let (server, client) = tokio::io::duplex(1024);
+        drop(client);
+
+        let error = h2::server::handshake(server)
+            .await
+            .expect_err("closed peer should fail h2 handshake");
+
+        assert!(is_benign_grpc_connection_error(&error, false));
+    }
 }

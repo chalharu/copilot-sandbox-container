@@ -1119,9 +1119,40 @@ control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace
 blocked_status=$?
 set -e
 test "${blocked_status}" -ne 0
-! [ -s /workspace/k8s-fast-exec-blocked-stdout.txt ]
+test "$(sed -n '1p' /workspace/k8s-fast-exec-blocked-stdout.txt)" = '$ cat /root/.config/gh/hosts.yml'
+test -z "$(sed -n '2p' /workspace/k8s-fast-exec-blocked-stdout.txt)"
 grep -Fq 'Direct reads of ~/.config/gh/hosts.yml are blocked by control-plane policy.' \
   /workspace/k8s-fast-exec-blocked-stderr.txt
+tooling_command=$(cat <<'INNER'
+set -euo pipefail
+command -v node >/dev/null
+command -v npm >/dev/null
+command -v pnpm >/dev/null
+command -v wasm-opt >/dev/null
+command -v trunk >/dev/null
+command -v wasm-bindgen >/dev/null
+command -v lizard >/dev/null
+command -v mold >/dev/null
+command -v cargo >/dev/null
+command -v rustc >/dev/null
+command -v rustup >/dev/null
+rustup target list --installed | grep -qx 'wasm32-unknown-unknown'
+node --version >/dev/null
+npm --version >/dev/null
+pnpm --version >/dev/null
+wasm-opt --version >/dev/null
+trunk --version >/dev/null
+wasm-bindgen --version >/dev/null
+lizard --version >/dev/null
+mold --version >/dev/null
+cargo deny --version >/dev/null
+cargo audit --version >/dev/null
+printf 'exec-tooling-ok\n' > /workspace/fast-exec-tooling-marker.txt
+INNER
+)
+tooling_command_base64="$(printf '%s' "${tooling_command}" | base64 | tr -d '\n')"
+control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${tooling_command_base64}" >/dev/null
+grep -qx 'exec-tooling-ok' /workspace/fast-exec-tooling-marker.txt
 service_account_command=$'set -euo pipefail\ntest -n "${KUBERNETES_SERVICE_HOST:-}"\ntest -n "${KUBERNETES_SERVICE_PORT:-}"\ntest -f /var/run/secrets/kubernetes.io/serviceaccount/token\ntest -f /var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
 service_account_command_base64="$(printf '%s' "${service_account_command}" | base64 | tr -d '\n')"
 control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${service_account_command_base64}" >/dev/null
@@ -1167,6 +1198,8 @@ INNER
 kubectl_command_base64="$(printf '%s' "${kubectl_command}" | base64 | tr -d '\n')"
 control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${kubectl_command_base64}" >/dev/null
 grep -qx 'exec-kubectl-ok' /workspace/fast-exec-kubectl-marker.txt
+kubectl logs --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${pod_name}" > /workspace/k8s-fast-exec-pod.log
+! grep -Fq 'control-plane-exec-api: gRPC connection failed: connection error' /workspace/k8s-fast-exec-pod.log
 control-plane-session-exec cleanup --session-key "${session_key}"
 ! kubectl get pod --namespace "${CONTROL_PLANE_POD_NAMESPACE}" "${pod_name}" >/dev/null 2>&1
 jq -e --arg key "${session_key}" '.sessions[$key] == null' ~/.copilot/session-state/session-exec.json >/dev/null
@@ -1206,6 +1239,7 @@ set +e
 printf '%s\n' '--- fast exec debug ---'
 cat ~/.copilot/session-state/session-exec.json || true
 cat /workspace/k8s-fast-exec-pod.json || true
+cat /workspace/k8s-fast-exec-pod.log || true
 cat /workspace/k8s-fast-exec-stdout.txt || true
 cat /workspace/k8s-fast-exec-stderr.txt || true
 cat /workspace/k8s-fast-exec-blocked-stdout.txt || true
