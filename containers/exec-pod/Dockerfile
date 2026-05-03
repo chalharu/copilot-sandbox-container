@@ -204,6 +204,12 @@ RUN apt-get update -o Acquire::Retries=3 \
     && python3 -c 'import base64, hashlib, pathlib, sys; algorithm, expected = sys.argv[1].split("-", 1); actual = base64.b64encode(hashlib.new(algorithm, pathlib.Path(sys.argv[2]).read_bytes()).digest()).decode(); sys.exit(0 if actual == expected else f"pnpm integrity mismatch: expected {expected}, got {actual}")' "${pnpm_integrity}" /tmp/pnpm.tgz \
     && npm install --global "/tmp/pnpm.tgz" \
     && npm cache clean --force \
+    && printf '%s\n' '#!/usr/bin/env bash' 'unset LD_PRELOAD CONTROL_PLANE_EXEC_POLICY_RULES_FILE' 'exec /usr/bin/mold "$@"' > /usr/local/bin/mold \
+    && chmod 755 /usr/local/bin/mold \
+    && if [ -x /usr/bin/ld.mold ]; then \
+         printf '%s\n' '#!/usr/bin/env bash' 'unset LD_PRELOAD CONTROL_PLANE_EXEC_POLICY_RULES_FILE' 'exec /usr/bin/ld.mold "$@"' > /usr/local/bin/ld.mold; \
+         chmod 755 /usr/local/bin/ld.mold; \
+       fi \
     && ln -sf /usr/local/cargo/bin/cargo /usr/local/bin/cargo \
     && ln -sf /usr/local/cargo/bin/rustc /usr/local/bin/rustc \
     && ln -sf /usr/local/cargo/bin/rustdoc /usr/local/bin/rustdoc \
