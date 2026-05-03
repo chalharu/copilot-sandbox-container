@@ -204,6 +204,14 @@ RUN apt-get update -o Acquire::Retries=3 \
     && python3 -c 'import base64, hashlib, pathlib, sys; algorithm, expected = sys.argv[1].split("-", 1); actual = base64.b64encode(hashlib.new(algorithm, pathlib.Path(sys.argv[2]).read_bytes()).digest()).decode(); sys.exit(0 if actual == expected else f"pnpm integrity mismatch: expected {expected}, got {actual}")' "${pnpm_integrity}" /tmp/pnpm.tgz \
     && npm install --global "/tmp/pnpm.tgz" \
     && npm cache clean --force \
+    && ln -sf /usr/local/cargo/bin/cargo /usr/local/bin/cargo \
+    && ln -sf /usr/local/cargo/bin/rustc /usr/local/bin/rustc \
+    && ln -sf /usr/local/cargo/bin/rustdoc /usr/local/bin/rustdoc \
+    && ln -sf /usr/local/cargo/bin/rustfmt /usr/local/bin/rustfmt \
+    && ln -sf /usr/local/cargo/bin/rustup /usr/local/bin/rustup \
+    && if [ -x /usr/local/cargo/bin/cargo-clippy ]; then ln -sf /usr/local/cargo/bin/cargo-clippy /usr/local/bin/cargo-clippy; fi \
+    && if [ -x /usr/local/cargo/bin/cargo-fmt ]; then ln -sf /usr/local/cargo/bin/cargo-fmt /usr/local/bin/cargo-fmt; fi \
+    && if [ -x /usr/local/cargo/bin/clippy-driver ]; then ln -sf /usr/local/cargo/bin/clippy-driver /usr/local/bin/clippy-driver; fi \
     && chgrp -R "${CONTROL_PLANE_GID}" /root \
     && chmod 1770 /root \
     && chown -R "${CONTROL_PLANE_UID}:${CONTROL_PLANE_GID}" "/home/${CONTROL_PLANE_USER}" /var/tmp/control-plane /workspace \

@@ -1133,8 +1133,10 @@ command -v trunk >/dev/null
 command -v wasm-bindgen >/dev/null
 command -v lizard >/dev/null
 command -v mold >/dev/null
+command -v cargo >/dev/null
 command -v rustc >/dev/null
-rustc --print target-libdir --target wasm32-unknown-unknown >/dev/null
+command -v rustup >/dev/null
+rustup target list --installed | grep -qx 'wasm32-unknown-unknown'
 node --version >/dev/null
 npm --version >/dev/null
 pnpm --version >/dev/null
