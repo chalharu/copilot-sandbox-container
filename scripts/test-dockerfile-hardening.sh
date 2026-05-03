@@ -80,22 +80,45 @@ assert_file_not_matches "${control_plane_dockerfile}" 'cpulimit|gcc|libc6-dev|li
 # shellcheck disable=SC2016
 assert_file_contains "${exec_pod_dockerfile}" 'FROM ${RUST_BASE_IMAGE}'
 assert_file_contains "${exec_pod_dockerfile}" "        build-essential \\"
+assert_file_contains "${exec_pod_dockerfile}" "        binaryen \\"
 assert_file_contains "${exec_pod_dockerfile}" "        cmake \\"
 assert_file_contains "${exec_pod_dockerfile}" "        docker.io \\"
 assert_file_contains "${exec_pod_dockerfile}" "        jq \\"
 assert_file_contains "${exec_pod_dockerfile}" "        libssl-dev \\"
+assert_file_contains "${exec_pod_dockerfile}" "        mold \\"
+assert_file_contains "${exec_pod_dockerfile}" "        nodejs \\"
+assert_file_contains "${exec_pod_dockerfile}" "        npm \\"
 assert_file_contains "${exec_pod_dockerfile}" "        pkg-config \\"
 assert_file_contains "${exec_pod_dockerfile}" "        pkgconf \\"
 assert_file_contains "${exec_pod_dockerfile}" "        python3 \\"
+assert_file_contains "${exec_pod_dockerfile}" "        python3-pathspec \\"
+assert_file_contains "${exec_pod_dockerfile}" "        python3-pygments \\"
+assert_file_contains "${exec_pod_dockerfile}" "        python3-venv \\"
 assert_file_contains "${exec_pod_dockerfile}" "        ripgrep \\"
 assert_file_contains "${exec_pod_dockerfile}" "        sccache \\"
 assert_file_contains "${exec_pod_dockerfile}" "        sudo \\"
 assert_file_contains "${exec_pod_dockerfile}" "        yamllint \\"
+assert_file_contains "${exec_pod_dockerfile}" 'cargo install --locked --root /opt/control-plane-tools --version "${TRUNK_VERSION}" trunk'
+assert_file_contains "${exec_pod_dockerfile}" 'cargo install --locked --root /opt/control-plane-tools --version "${WASM_BINDGEN_CLI_VERSION}" wasm-bindgen-cli'
+assert_file_contains "${exec_pod_dockerfile}" 'cargo install --locked --root /opt/control-plane-tools --version "${CARGO_DENY_VERSION}" cargo-deny'
+assert_file_contains "${exec_pod_dockerfile}" 'cargo install --locked --root /opt/control-plane-tools --version "${CARGO_AUDIT_VERSION}" cargo-audit'
+assert_file_contains "${exec_pod_dockerfile}" 'LIZARD_VIRTUAL_ENV=/opt/lizard'
+assert_file_contains "${exec_pod_dockerfile}" 'rustup target add wasm32-unknown-unknown'
+assert_file_contains "${exec_pod_dockerfile}" '/tmp/lizard-pypi.json'
+assert_file_contains "${exec_pod_dockerfile}" '"/tmp/${lizard_wheel}"'
+assert_file_contains "${exec_pod_dockerfile}" 'sha256sum -c -'
+assert_file_contains "${exec_pod_dockerfile}" 'python3 -m venv --system-site-packages "${LIZARD_VIRTUAL_ENV}"'
+assert_file_contains "${exec_pod_dockerfile}" '"${LIZARD_VIRTUAL_ENV}/bin/pip" install --no-cache-dir --no-deps "/tmp/${lizard_wheel}"'
+assert_file_contains "${exec_pod_dockerfile}" '/tmp/pnpm-metadata.json'
+assert_file_contains "${exec_pod_dockerfile}" "pnpm_integrity=\"\$(jq -er '.dist.integrity' /tmp/pnpm-metadata.json)\""
+assert_file_contains "${exec_pod_dockerfile}" 'pnpm integrity mismatch'
+assert_file_contains "${exec_pod_dockerfile}" 'npm install --global "/tmp/pnpm.tgz"'
 assert_file_contains "${exec_pod_dockerfile}" '/usr/libexec/docker/cli-plugins/docker-buildx'
 assert_file_contains "${exec_pod_dockerfile}" 'chmod 1770 /root'
 assert_file_contains "${exec_pod_dockerfile}" 'COPY containers/control-plane/hooks/ /usr/local/share/control-plane/hooks/'
+assert_file_contains "${exec_pod_dockerfile}" 'COPY --from=cargo-tools-builder /opt/control-plane-tools/bin/ /usr/local/bin/'
 assert_file_contains "${exec_pod_dockerfile}" 'COPY --from=exec-api-builder /var/tmp/control-plane/cargo-target/release/control-plane-exec-api /usr/local/bin/control-plane-exec-api'
-assert_healthcheck_cmd "${exec_pod_dockerfile}" '    CMD ["bash", "-lc", "control-plane-exec-api --help >/dev/null && bash --version >/dev/null && sh -c true && rg --version >/dev/null && python3 --version >/dev/null && curl --version >/dev/null && docker --version >/dev/null && docker buildx version >/dev/null && cc --version >/dev/null && git --version >/dev/null && jq --version >/dev/null && cmake --version >/dev/null && pkgconf --version >/dev/null && pkg-config --version >/dev/null && test -e /usr/include/openssl/ssl.h && yamllint --version >/dev/null && kubectl version --client=true >/dev/null && rustup --version >/dev/null && rustc --version >/dev/null && cargo --version >/dev/null && sccache --version >/dev/null && sudo -V >/dev/null && test -x /usr/local/bin/control-plane-runtime-tool && test -r /usr/local/lib/libcontrol_plane_exec_policy.so"]'
+assert_healthcheck_cmd "${exec_pod_dockerfile}" '    CMD ["bash", "-lc", "control-plane-exec-api --help >/dev/null && bash --version >/dev/null && sh -c true && rg --version >/dev/null && python3 --version >/dev/null && curl --version >/dev/null && docker --version >/dev/null && docker buildx version >/dev/null && cc --version >/dev/null && git --version >/dev/null && jq --version >/dev/null && cmake --version >/dev/null && pkgconf --version >/dev/null && pkg-config --version >/dev/null && test -e /usr/include/openssl/ssl.h && yamllint --version >/dev/null && kubectl version --client=true >/dev/null && rustup --version >/dev/null && rustup target list --installed | grep -qx wasm32-unknown-unknown && rustc --version >/dev/null && cargo --version >/dev/null && cargo deny --version >/dev/null && cargo audit --version >/dev/null && sccache --version >/dev/null && node --version >/dev/null && npm --version >/dev/null && pnpm --version >/dev/null && wasm-opt --version >/dev/null && wasm-bindgen --version >/dev/null && trunk --version >/dev/null && lizard --version >/dev/null && mold --version >/dev/null && sudo -V >/dev/null && test -x /usr/local/bin/control-plane-runtime-tool && test -x /usr/local/bin/trunk && test -x /usr/local/bin/wasm-bindgen && test -r /usr/local/lib/libcontrol_plane_exec_policy.so"]'
 # shellcheck disable=SC2016
 assert_file_contains "${exec_pod_dockerfile}" 'USER ${CONTROL_PLANE_USER}'
 assert_file_not_matches "${exec_pod_dockerfile}" '^USER root$'

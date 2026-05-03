@@ -2,6 +2,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder as HyperServerBuilder;
 use hyper_util::service::TowerToHyperService;
 use std::convert::Infallible;
+use std::error::Error as StdError;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -163,6 +164,47 @@ fn log_grpc_connection_task_result(result: Result<(), tokio::task::JoinError>) {
     }
 }
 
+fn log_grpc_connection_error(error: &(dyn StdError + 'static), shutting_down: bool) {
+    if is_benign_grpc_connection_error(error, shutting_down) {
+        return;
+    }
+
+    log_message(&format!("gRPC connection failed: {error}"));
+}
+
+fn is_benign_grpc_connection_error(error: &(dyn StdError + 'static), shutting_down: bool) -> bool {
+    if let Some(hyper_error) = find_error_in_chain::<hyper::Error>(error) {
+        if hyper_error.is_incomplete_message() || hyper_error.is_canceled() {
+            return true;
+        }
+    }
+
+    if shutting_down {
+        if let Some(io_error) = find_error_in_chain::<std::io::Error>(error) {
+            if io_error.kind() == std::io::ErrorKind::Interrupted {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+fn find_error_in_chain<'a, T>(error: &'a (dyn StdError + 'static)) -> Option<&'a T>
+where
+    T: StdError + 'static,
+{
+    let mut current = Some(error);
+    while let Some(error) = current {
+        if let Some(typed_error) = error.downcast_ref::<T>() {
+            return Some(typed_error);
+        }
+        current = error.source();
+    }
+
+    None
+}
+
 fn spawn_grpc_connection(
     connections: &mut JoinSet<()>,
     stream: TcpStream,
@@ -178,7 +220,7 @@ fn spawn_grpc_connection(
         tokio::select! {
             result = connection.as_mut() => {
                 if let Err(error) = result {
-                    log_message(&format!("gRPC connection failed: {error}"));
+                    log_grpc_connection_error(error.as_ref(), false);
                 }
             }
             changed = shutdown.changed() => {
@@ -186,7 +228,7 @@ fn spawn_grpc_connection(
                     connection.as_mut().graceful_shutdown();
                 }
                 if let Err(error) = connection.await {
-                    log_message(&format!("gRPC connection failed: {error}"));
+                    log_grpc_connection_error(error.as_ref(), true);
                 }
             }
         }
