@@ -61,9 +61,7 @@ spec:
                 /copilot-session/{{ $sessionStateSubPath }}/session-state \
                 /workspace-state/{{ $workspace.subPath }} \
                 /cache/runtime-tmp
-              touch \
-                /copilot-session/{{ $sessionStateSubPath }}/state/copilot-config.json \
-                /copilot-session/{{ $sessionStateSubPath }}/state/command-history-state.json
+              touch /copilot-session/{{ $sessionStateSubPath }}/state/command-history-state.json
               chown -R 1000:1000 \
                 /copilot-session/{{ $sessionStateSubPath }}/state \
                 /copilot-session/{{ $sessionStateSubPath }}/session-state \
@@ -107,33 +105,6 @@ spec:
               mountPath: /workspace-state
             - name: cache
               mountPath: /cache
-        - name: init-state
-          image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
-          command:
-            - sh
-            - -c
-            - |
-              set -eu
-              umask 077
-              [ -s /state/copilot-config.json ] || cat > /state/copilot-config.json <<'JSON'
-              {
-                "telemetry": false
-              }
-              JSON
-          securityContext:
-            privileged: false
-            runAsUser: 1000
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
-            seccompProfile:
-              type: RuntimeDefault
-          volumeMounts:
-            - name: copilot-session
-              mountPath: /state
-              subPath: {{ printf "%s/state" $sessionStateSubPath | quote }}
       containers:
         - name: control-plane
           image: {{ include "control-plane.imageRef" (dict "image" $image) }}
@@ -206,9 +177,6 @@ spec:
           resources:
 {{ toYaml $resources | nindent 12 }}
           volumeMounts:
-            - name: copilot-session
-              mountPath: /home/copilot/.copilot/config.json
-              subPath: {{ printf "%s/state/copilot-config.json" $sessionStateSubPath | quote }}
             - name: copilot-session
               mountPath: /home/copilot/.copilot/command-history-state.json
               subPath: {{ printf "%s/state/command-history-state.json" $sessionStateSubPath | quote }}

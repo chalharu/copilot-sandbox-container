@@ -30,7 +30,6 @@ sample manifest の既定値では、次の 2 つを分けます。
 
 copilot session PVC へまとめるものは次のとおりです。
 
-- `~/.copilot/config.json`
 - `~/.copilot/command-history-state.json`
 - `~/.copilot/session-state`
 - `~/.copilot/restart`
@@ -40,6 +39,10 @@ copilot session PVC へまとめるものは次のとおりです。
 - `~/.config/control-plane/ssh-auth/authorized_keys`
 - `~/.ssh`
 - `/var/lib/control-plane/ssh-host-keys`
+
+`~/.copilot/config.json` は session PVC へは置きません。entrypoint が startup ごとに
+ephemeral な実効 config を作り直し、runtime 中の Copilot 側更新もその writable path に
+反映させます。古い PVC 上の `state/copilot-config.json` が残っていても参照しません。
 
 `session-exec.json` には、hook rewrite が使う session key ごとの Execution Pod 名 /
 Pod IP / auth token が入ります。incoming SSH auth は
@@ -82,8 +85,8 @@ storage backend が persistent file に group bit を残す場合でも、再起
 - `control-plane-env`: namespace / PVC / Job 既定値 / file path / fast execution pod
   設定のような非機密 env
 
-`COPILOT_CONFIG_JSON_FILE` で渡した JSON object は、PVC 上の既存
-`~/.copilot/config.json` へ deep-merge されます。
+`COPILOT_CONFIG_JSON_FILE` で渡した JSON object は、startup 時に毎回
+ephemeral な `~/.copilot/config.json` の初期値として書き込みます。
 
 ### Secret
 
@@ -140,10 +143,10 @@ namespace は owner Pod 側のままです。別 namespace のリソースは
 
 ## 5. Hook と Git policy surface
 
-entrypoint は bundled Copilot hook を root-owned な `COPILOT_HOME` 配下へ
-配置し、互換用に `~/.copilot/hooks` からも参照できるようにします。
-同様に `/restart` が使う state も、managed `COPILOT_HOME` から
-user-owned な `~/.copilot/restart` へ symlink で公開します。
+entrypoint は `COPILOT_HOME=/var/lib/control-plane/managed-runtime/copilot-home` を保ちつつ、
+その path 自体を `~/.copilot` への root-owned symlink にします。Copilot 側は writable な
+`~/.copilot/config.json` を直接更新できます。bundled hook は root-owned な
+`~/.copilot/hooks -> /usr/local/share/control-plane/hooks` で固定します。
 `~/.copilot/` は sticky directory として管理するため、Copilot user は他の
 state を更新できても `hooks` symlink 自体は差し替えられません。
 

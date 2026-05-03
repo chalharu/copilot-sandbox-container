@@ -215,8 +215,8 @@ Expected injected Copilot config at /var/run/control-plane-config/copilot-config
 ### 意味
 
 `COPILOT_CONFIG_JSON_FILE` へ渡したファイルが JSON object ではないか、
-JSON 自体が壊れています。entrypoint は PVC 上の既存
-`~/.copilot/config.json` と deep-merge する前提です。
+JSON 自体が壊れています。entrypoint は startup ごとに
+ephemeral な `~/.copilot/config.json` をこの overlay から初期化します。
 top-level array / string / invalid JSON は受け付けません。
 
 ## 11. gh Secret の指定が足りない

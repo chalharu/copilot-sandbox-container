@@ -4,8 +4,8 @@ metadata:
   name: control-plane-config
   namespace: copilot-sandbox
 data:
-  # The entrypoint deep-merges this object onto any existing
-  # ~/.copilot/config.json stored on the PVC.
+  # The entrypoint writes this object into the ephemeral runtime
+  # ~/.copilot/config.json on each startup.
   copilot-config.json: |
     {
       "telemetry": false

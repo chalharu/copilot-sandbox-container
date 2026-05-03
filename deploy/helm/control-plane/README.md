@@ -59,9 +59,10 @@ helm upgrade --install control-plane deploy/helm/control-plane \
 
 既定では、すべての instance が `global.namespace` と `global.jobNamespace` を
 共有します。Session PVC は `global.session.claimName` も共有します。
-`copilot-config.json`、`command-history-state.json`、`session-state`、SSH auth/host
-keys は `instances/<name>/...` 配下へ自動で分離されます。GitHub CLI / SSH client
-state は `global.session.{ghSubPath,sshSubPath}` を使います。repo ごとに
+`command-history-state.json`、`session-state`、SSH auth/host keys は
+`instances/<name>/...` 配下へ自動で分離されます。`copilot-config.json` は
+ConfigMap overlay として使い、実効 `~/.copilot/config.json` 自体は runtime-ephemeral です。
+GitHub CLI / SSH client state は `global.session.{ghSubPath,sshSubPath}` を使います。repo ごとに
 分けたい場合は `instances[].session` で上書きしてください。
 
 chart-managed な `global.auth` / `instances[].auth` に `ghGithubToken` を入れると、

@@ -40,9 +40,7 @@ spec:
                 /copilot-session/session-state \
                 /workspace-state/workspace \
                 /cache/runtime-tmp
-              touch \
-                /copilot-session/state/copilot-config.json \
-                /copilot-session/state/command-history-state.json
+              touch /copilot-session/state/command-history-state.json
               chown -R 1000:1000 /copilot-session/state /copilot-session/session-state
               find /copilot-session/state /copilot-session/session-state -type d -exec chmod 700 {} +
               find /copilot-session/state /copilot-session/session-state -type f -exec chmod 600 {} +
@@ -75,34 +73,6 @@ spec:
               mountPath: /workspace-state
             - name: cache
               mountPath: /cache
-        - name: init-state
-          # renovate: datasource=docker depName=busybox versioning=docker
-          image: busybox:1.37.0@sha256:b3255e7dfbcd10cb367af0d409747d511aeb66dfac98cf30e97e87e4207dd76f
-          command:
-            - sh
-            - -c
-            - |
-              set -eu
-              umask 077
-              [ -s /state/copilot-config.json ] || cat > /state/copilot-config.json <<'JSON'
-              {
-                "telemetry": false
-              }
-              JSON
-          securityContext:
-            privileged: false
-            runAsUser: 1000
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
-            seccompProfile:
-              type: RuntimeDefault
-          volumeMounts:
-            - name: copilot-session
-              mountPath: /state
-              subPath: state
       containers:
         - name: control-plane
           # The sample starts with the repository's published latest tag so a
@@ -188,9 +158,6 @@ spec:
               cpu: "2"
               memory: 2Gi
           volumeMounts:
-            - name: copilot-session
-              mountPath: /home/copilot/.copilot/config.json
-              subPath: state/copilot-config.json
             - name: copilot-session
               mountPath: /home/copilot/.copilot/command-history-state.json
               subPath: state/command-history-state.json
