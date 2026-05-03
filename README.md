@@ -178,9 +178,9 @@ storage class / size は
 `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUME_MOUNTS_JSON` です。node filesystem を
 露出する `hostPath` は拒否されます。workspace / shared `gh` / SSH などの
 予約済み mount path との重複も拒否されます。
-Rust / Wasm を使う場合は dedicated exec-pod image に `sccache` / `trunk` /
-`wasm-opt` / `wasm-bindgen` / `cargo-deny` / `cargo-audit` / `mold` / `node` /
-`pnpm` / `lizard` が含まれます。`wasm32-unknown-unknown` target も同梱します。
+Rust / Wasm を使う場合、dedicated exec-pod image には `sccache` / `trunk` /
+`wasm-opt` / `wasm-bindgen` を含めます。`cargo-deny` / `cargo-audit` / `mold` /
+`node` / `pnpm` / `lizard` も使えます。`wasm32-unknown-unknown` target も同梱します。
 `/root/.cargo/config.toml` を ConfigMap から `subPath` mount すると、
 `rustc-wrapper = "/usr/bin/sccache"` などの cargo 設定を session ごとに注入できます。
 

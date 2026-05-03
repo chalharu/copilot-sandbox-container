@@ -98,17 +98,17 @@ assert_file_contains "${exec_pod_dockerfile}" "        ripgrep \\"
 assert_file_contains "${exec_pod_dockerfile}" "        sccache \\"
 assert_file_contains "${exec_pod_dockerfile}" "        sudo \\"
 assert_file_contains "${exec_pod_dockerfile}" "        yamllint \\"
-assert_file_contains "${exec_pod_dockerfile}" 'cargo install --locked --root /opt/control-plane-tools --version "${TRUNK_VERSION}" trunk'
-assert_file_contains "${exec_pod_dockerfile}" 'cargo install --locked --root /opt/control-plane-tools --version "${WASM_BINDGEN_CLI_VERSION}" wasm-bindgen-cli'
-assert_file_contains "${exec_pod_dockerfile}" 'cargo install --locked --root /opt/control-plane-tools --version "${CARGO_DENY_VERSION}" cargo-deny'
-assert_file_contains "${exec_pod_dockerfile}" 'cargo install --locked --root /opt/control-plane-tools --version "${CARGO_AUDIT_VERSION}" cargo-audit'
+assert_file_contains "${exec_pod_dockerfile}" "cargo install --locked --root /opt/control-plane-tools --version \"\${TRUNK_VERSION}\" trunk"
+assert_file_contains "${exec_pod_dockerfile}" "cargo install --locked --root /opt/control-plane-tools --version \"\${WASM_BINDGEN_CLI_VERSION}\" wasm-bindgen-cli"
+assert_file_contains "${exec_pod_dockerfile}" "cargo install --locked --root /opt/control-plane-tools --version \"\${CARGO_DENY_VERSION}\" cargo-deny"
+assert_file_contains "${exec_pod_dockerfile}" "cargo install --locked --root /opt/control-plane-tools --version \"\${CARGO_AUDIT_VERSION}\" cargo-audit"
 assert_file_contains "${exec_pod_dockerfile}" 'LIZARD_VIRTUAL_ENV=/opt/lizard'
 assert_file_contains "${exec_pod_dockerfile}" 'rustup target add wasm32-unknown-unknown'
 assert_file_contains "${exec_pod_dockerfile}" '/tmp/lizard-pypi.json'
-assert_file_contains "${exec_pod_dockerfile}" '"/tmp/${lizard_wheel}"'
+assert_file_contains "${exec_pod_dockerfile}" "\"/tmp/\${lizard_wheel}\""
 assert_file_contains "${exec_pod_dockerfile}" 'sha256sum -c -'
-assert_file_contains "${exec_pod_dockerfile}" 'python3 -m venv --system-site-packages "${LIZARD_VIRTUAL_ENV}"'
-assert_file_contains "${exec_pod_dockerfile}" '"${LIZARD_VIRTUAL_ENV}/bin/pip" install --no-cache-dir --no-deps "/tmp/${lizard_wheel}"'
+assert_file_contains "${exec_pod_dockerfile}" "python3 -m venv --system-site-packages \"\${LIZARD_VIRTUAL_ENV}\""
+assert_file_contains "${exec_pod_dockerfile}" "\"\${LIZARD_VIRTUAL_ENV}/bin/pip\" install --no-cache-dir --no-deps \"/tmp/\${lizard_wheel}\""
 assert_file_contains "${exec_pod_dockerfile}" '/tmp/pnpm-metadata.json'
 assert_file_contains "${exec_pod_dockerfile}" "pnpm_integrity=\"\$(jq -er '.dist.integrity' /tmp/pnpm-metadata.json)\""
 assert_file_contains "${exec_pod_dockerfile}" 'pnpm integrity mismatch'

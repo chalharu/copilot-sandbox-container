@@ -160,6 +160,7 @@ name = "control-plane-exec-api"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "h2",
  "http",
  "hyper",
  "hyper-util",
