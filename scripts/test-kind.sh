@@ -1119,7 +1119,8 @@ control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace
 blocked_status=$?
 set -e
 test "${blocked_status}" -ne 0
-! [ -s /workspace/k8s-fast-exec-blocked-stdout.txt ]
+test "$(sed -n '1p' /workspace/k8s-fast-exec-blocked-stdout.txt)" = '$ cat /root/.config/gh/hosts.yml'
+test -z "$(sed -n '2p' /workspace/k8s-fast-exec-blocked-stdout.txt)"
 grep -Fq 'Direct reads of ~/.config/gh/hosts.yml are blocked by control-plane policy.' \
   /workspace/k8s-fast-exec-blocked-stderr.txt
 tooling_command=$(cat <<'INNER'
