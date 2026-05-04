@@ -239,10 +239,14 @@ pub(crate) async fn run_post_tool_use_hook(
         .spawn()
         .map_err(|error| Status::new(Code::Internal, error.to_string()))?;
     if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(raw_input.as_bytes())
-            .await
-            .map_err(|error| Status::new(Code::Internal, error.to_string()))?;
+        match stdin.write_all(raw_input.as_bytes()).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::BrokenPipe => {
+                // Hooks are allowed to ignore stdin and exit before the writer
+                // finishes sending the postToolUse payload.
+            }
+            Err(error) => return Err(Status::new(Code::Internal, error.to_string())),
+        }
     }
     let output = tokio::time::timeout(exec_timeout, child.wait_with_output())
         .await
@@ -341,13 +345,31 @@ fn exit_code_from_status(status: std::process::ExitStatus) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{managed_exec_path, managed_shell_environment, stdout_with_command_line};
+    use super::{
+        managed_exec_path, managed_shell_environment, run_post_tool_use_hook,
+        stdout_with_command_line,
+    };
+    use crate::paths::ResolvedCwd;
     use crate::test_support::{ScopedEnvVar, env_lock};
     use crate::{
         CHROOT_EXEC_POLICY_LIBRARY_PATH, CHROOT_EXEC_POLICY_RULES_PATH, DEFAULT_EXEC_PATH,
     };
+    use std::fs;
     use std::ffi::OsString;
     use std::path::Path;
+    use std::time::Duration;
+    use tempfile::TempDir;
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    #[cfg(unix)]
+    fn write_executable(path: &Path, content: &str) {
+        fs::write(path, content).unwrap();
+        let mut permissions = fs::metadata(path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).unwrap();
+    }
 
     #[test]
     fn managed_shell_environment_enables_exec_policy_for_chroot() {
@@ -421,5 +443,58 @@ mod tests {
             stdout_with_command_line("printf 'hello\\n'", b"hello\n"),
             "$ printf 'hello\\n'\nhello\n"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_post_tool_use_hook_ignores_broken_pipe_when_hook_skips_stdin() {
+        let _env_lock = env_lock().lock().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let remote_home = workspace.path().join("home");
+        let hook_dir = remote_home.join(".copilot/hooks/postToolUse");
+        let runtime_bin_dir = workspace.path().join("runtime-bin");
+        let tool_output_path = workspace.path().join("tool-output.txt");
+
+        fs::create_dir_all(&hook_dir).unwrap();
+        fs::create_dir_all(&runtime_bin_dir).unwrap();
+        write_executable(
+            &runtime_bin_dir.join("runtime-path-tool"),
+            "#!/bin/sh\nset -eu\nprintf 'runtime-path-ok\\n'\n",
+        );
+        write_executable(
+            &hook_dir.join("main"),
+            &format!(
+                "#!/bin/sh\nset -eu\nruntime-path-tool > {}\n",
+                tool_output_path.display()
+            ),
+        );
+
+        let runtime_path = format!("{}:/usr/bin:/bin", runtime_bin_dir.display());
+        let _path = ScopedEnvVar::set("PATH", Some(&runtime_path));
+        let raw_input = format!(
+            r#"{{"cwd":"{}","toolResult":{{"resultType":"success","details":"{}"}}}}"#,
+            workspace.path().display(),
+            "x".repeat(2 * 1024 * 1024)
+        );
+        let cwd = ResolvedCwd {
+            host: workspace.path().to_path_buf(),
+            logical: workspace.path().to_path_buf(),
+        };
+
+        let result = run_post_tool_use_hook(
+            &raw_input,
+            &cwd,
+            Duration::from_secs(5),
+            unsafe { libc::geteuid() },
+            unsafe { libc::getegid() },
+            None,
+            &remote_home,
+        )
+        .await
+        .expect("hook should succeed even when it does not read stdin");
+
+        assert_eq!(result.stdout, "");
+        assert_eq!(result.stderr, "");
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(fs::read_to_string(tool_output_path).unwrap(), "runtime-path-ok\n");
     }
 }
