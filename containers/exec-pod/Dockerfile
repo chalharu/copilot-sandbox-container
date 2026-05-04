@@ -9,10 +9,16 @@ ARG WASM_BINDGEN_CLI_VERSION=0.2.120
 ARG CARGO_DENY_VERSION=0.19.4
 # renovate: datasource=crate depName=cargo-audit
 ARG CARGO_AUDIT_VERSION=0.22.1
+# renovate: datasource=crate depName=cargo-llvm-cov
+ARG CARGO_LLVM_COV_VERSION=0.8.5
 # renovate: datasource=npm depName=pnpm
 ARG PNPM_VERSION=10.33.2
 # renovate: datasource=pypi depName=lizard
 ARG LIZARD_VERSION=1.22.1
+# Keep the Chrome for Testing version and Linux64 digests in sync when updating them.
+ARG CHROME_FOR_TESTING_VERSION=148.0.7778.97
+ARG CHROME_FOR_TESTING_CHROME_LINUX64_SHA256=8a760543807c67d3836d530cc4bc2e39c93e217f1629ec6ea311415fdfa21a75
+ARG CHROME_FOR_TESTING_CHROMEDRIVER_LINUX64_SHA256=ad324679086572b638a0388a96f21185615482c55aafc45f3f01adf134fafbf5
 # renovate: datasource=github-releases depName=kubernetes/kubernetes
 ARG KUBECTL_VERSION=v1.36.0
 # renovate: datasource=github-releases depName=docker/buildx
@@ -93,6 +99,7 @@ ARG TRUNK_VERSION
 ARG WASM_BINDGEN_CLI_VERSION
 ARG CARGO_DENY_VERSION
 ARG CARGO_AUDIT_VERSION
+ARG CARGO_LLVM_COV_VERSION
 
 # hadolint ignore=DL3008
 RUN apt-get update -o Acquire::Retries=3 \
@@ -105,7 +112,8 @@ RUN apt-get update -o Acquire::Retries=3 \
 RUN cargo install --locked --root /opt/control-plane-tools --version "${TRUNK_VERSION}" trunk \
     && cargo install --locked --root /opt/control-plane-tools --version "${WASM_BINDGEN_CLI_VERSION}" wasm-bindgen-cli \
     && cargo install --locked --root /opt/control-plane-tools --version "${CARGO_DENY_VERSION}" cargo-deny \
-    && cargo install --locked --root /opt/control-plane-tools --version "${CARGO_AUDIT_VERSION}" cargo-audit
+    && cargo install --locked --root /opt/control-plane-tools --version "${CARGO_AUDIT_VERSION}" cargo-audit \
+    && cargo install --locked --root /opt/control-plane-tools --version "${CARGO_LLVM_COV_VERSION}" cargo-llvm-cov
 
 FROM ${RUST_BASE_IMAGE}
 
@@ -113,6 +121,9 @@ ARG KUBECTL_VERSION
 ARG DOCKER_BUILDX_VERSION
 ARG PNPM_VERSION
 ARG LIZARD_VERSION
+ARG CHROME_FOR_TESTING_VERSION
+ARG CHROME_FOR_TESTING_CHROME_LINUX64_SHA256
+ARG CHROME_FOR_TESTING_CHROMEDRIVER_LINUX64_SHA256
 ARG CONTROL_PLANE_UID=1000
 ARG CONTROL_PLANE_GID=1000
 ARG CONTROL_PLANE_USER=copilot
@@ -131,6 +142,13 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # hadolint ignore=DL3008
 RUN apt-get update -o Acquire::Retries=3 \
+    && browser_apt_packages=() \
+    && arch="$(dpkg --print-architecture)" \
+    && case "${arch}" in \
+        amd64) kubectl_arch=amd64; buildx_arch=amd64; chrome_install_mode=chrome-for-testing; chrome_for_testing_platform=linux64 ;; \
+        arm64) kubectl_arch=arm64; buildx_arch=arm64; chrome_install_mode=debian-chromium; browser_apt_packages=(chromium chromium-driver) ;; \
+        *) printf 'Unsupported architecture for exec-pod tools: %s\n' "${arch}" >&2; exit 1 ;; \
+    esac \
     && apt-get install -y --no-install-recommends \
         bash \
         binaryen \
@@ -156,13 +174,32 @@ RUN apt-get update -o Acquire::Retries=3 \
         ripgrep \
         sccache \
         sudo \
+        unzip \
+        xdg-utils \
         yamllint \
-    && arch="$(dpkg --print-architecture)" \
-    && case "${arch}" in \
-        amd64) kubectl_arch=amd64; buildx_arch=amd64 ;; \
-        arm64) kubectl_arch=arm64; buildx_arch=arm64 ;; \
-        *) printf 'Unsupported architecture for exec-pod tools: %s\n' "${arch}" >&2; exit 1 ;; \
-    esac \
+        fonts-liberation \
+        libasound2 \
+        libatk-bridge2.0-0 \
+        libatk1.0-0 \
+        libcups2 \
+        libdbus-1-3 \
+        libdrm2 \
+        libgbm1 \
+        libgtk-3-0 \
+        libnspr4 \
+        libnss3 \
+        libu2f-udev \
+        libvulkan1 \
+        libx11-6 \
+        libx11-xcb1 \
+        libxcb1 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxext6 \
+        libxfixes3 \
+        libxkbcommon0 \
+        libxrandr2 \
+        "${browser_apt_packages[@]}" \
     && kubectl_download_root="https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${kubectl_arch}" \
     && curl -fsSLo /tmp/kubectl "${kubectl_download_root}/kubectl" \
     && curl -fsSLo /tmp/kubectl.sha256 "${kubectl_download_root}/kubectl.sha256" \
@@ -188,6 +225,7 @@ RUN apt-get update -o Acquire::Retries=3 \
     && printf '[build]\ntarget-dir = "/var/tmp/control-plane/cargo-target"\nrustc-wrapper = "/usr/bin/sccache"\n' > /root/.cargo/config.toml \
     && cp /root/.cargo/config.toml "/home/${CONTROL_PLANE_USER}/.cargo/config.toml" \
     && rustup target add wasm32-unknown-unknown \
+    && rustup component add llvm-tools-preview \
     && curl -fsSLo /tmp/lizard-pypi.json "https://pypi.org/pypi/lizard/${LIZARD_VERSION}/json" \
     && lizard_wheel="$(jq -er 'first(.urls[] | select(.packagetype == "bdist_wheel" and (.filename | endswith("-none-any.whl"))) | .filename)' /tmp/lizard-pypi.json)" \
     && lizard_url="$(jq -er --arg filename "${lizard_wheel}" 'first(.urls[] | select(.filename == $filename) | .url)' /tmp/lizard-pypi.json)" \
@@ -204,6 +242,30 @@ RUN apt-get update -o Acquire::Retries=3 \
     && python3 -c 'import base64, hashlib, pathlib, sys; algorithm, expected = sys.argv[1].split("-", 1); actual = base64.b64encode(hashlib.new(algorithm, pathlib.Path(sys.argv[2]).read_bytes()).digest()).decode(); sys.exit(0 if actual == expected else f"pnpm integrity mismatch: expected {expected}, got {actual}")' "${pnpm_integrity}" /tmp/pnpm.tgz \
     && npm install --global "/tmp/pnpm.tgz" \
     && npm cache clean --force \
+    && case "${chrome_install_mode}" in \
+        chrome-for-testing) \
+          curl -fsSLo /tmp/chrome-for-testing.json "https://googlechromelabs.github.io/chrome-for-testing/${CHROME_FOR_TESTING_VERSION}.json" \
+          && jq -er --arg version "${CHROME_FOR_TESTING_VERSION}" 'select(.version == $version) | .version' /tmp/chrome-for-testing.json >/dev/null \
+          && chrome_download_url="$(jq -er --arg platform "${chrome_for_testing_platform}" 'first(.downloads.chrome[] | select(.platform == $platform) | .url)' /tmp/chrome-for-testing.json)" \
+          && chromedriver_download_url="$(jq -er --arg platform "${chrome_for_testing_platform}" 'first(.downloads.chromedriver[] | select(.platform == $platform) | .url)' /tmp/chrome-for-testing.json)" \
+          && curl -fsSLo /tmp/chrome-linux64.zip "${chrome_download_url}" \
+          && printf '%s  %s\n' "${CHROME_FOR_TESTING_CHROME_LINUX64_SHA256}" /tmp/chrome-linux64.zip | sha256sum -c - \
+          && curl -fsSLo /tmp/chromedriver-linux64.zip "${chromedriver_download_url}" \
+          && printf '%s  %s\n' "${CHROME_FOR_TESTING_CHROMEDRIVER_LINUX64_SHA256}" /tmp/chromedriver-linux64.zip | sha256sum -c - \
+          && unzip -q /tmp/chrome-linux64.zip -d /opt \
+          && unzip -q /tmp/chromedriver-linux64.zip -d /opt \
+          && ln -sf /opt/chrome-linux64/chrome /usr/local/bin/google-chrome \
+          && ln -sf /usr/local/bin/google-chrome /usr/local/bin/google-chrome-stable \
+          && ln -sf /usr/local/bin/google-chrome /usr/local/bin/chrome \
+          && ln -sf /opt/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver \
+          ;; \
+        debian-chromium) \
+          ln -sf /usr/bin/chromium /usr/local/bin/google-chrome \
+          && ln -sf /usr/local/bin/google-chrome /usr/local/bin/google-chrome-stable \
+          && ln -sf /usr/local/bin/google-chrome /usr/local/bin/chrome \
+          && ln -sf /usr/bin/chromedriver /usr/local/bin/chromedriver \
+          ;; \
+      esac \
     && printf '%s\n' '#!/usr/bin/env bash' 'unset LD_PRELOAD CONTROL_PLANE_EXEC_POLICY_RULES_FILE' 'exec /usr/bin/mold "$@"' > /usr/local/bin/mold \
     && chmod 755 /usr/local/bin/mold \
     && if [ -x /usr/bin/ld.mold ]; then \
@@ -242,6 +304,6 @@ RUN ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/share/control-pl
 
 WORKDIR /workspace
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["bash", "-lc", "control-plane-exec-api --help >/dev/null && bash --version >/dev/null && sh -c true && rg --version >/dev/null && python3 --version >/dev/null && curl --version >/dev/null && docker --version >/dev/null && docker buildx version >/dev/null && cc --version >/dev/null && git --version >/dev/null && jq --version >/dev/null && cmake --version >/dev/null && pkgconf --version >/dev/null && pkg-config --version >/dev/null && test -e /usr/include/openssl/ssl.h && yamllint --version >/dev/null && kubectl version --client=true >/dev/null && rustup --version >/dev/null && rustup target list --installed | grep -qx wasm32-unknown-unknown && rustc --version >/dev/null && cargo --version >/dev/null && cargo deny --version >/dev/null && cargo audit --version >/dev/null && sccache --version >/dev/null && node --version >/dev/null && npm --version >/dev/null && pnpm --version >/dev/null && wasm-opt --version >/dev/null && wasm-bindgen --version >/dev/null && trunk --version >/dev/null && lizard --version >/dev/null && mold --version >/dev/null && sudo -V >/dev/null && test -x /usr/local/bin/control-plane-runtime-tool && test -x /usr/local/bin/trunk && test -x /usr/local/bin/wasm-bindgen && test -r /usr/local/lib/libcontrol_plane_exec_policy.so"]
+    CMD ["bash", "-lc", "control-plane-exec-api --help >/dev/null && bash --version >/dev/null && sh -c true && rg --version >/dev/null && python3 --version >/dev/null && curl --version >/dev/null && docker --version >/dev/null && docker buildx version >/dev/null && cc --version >/dev/null && git --version >/dev/null && jq --version >/dev/null && cmake --version >/dev/null && pkgconf --version >/dev/null && pkg-config --version >/dev/null && test -e /usr/include/openssl/ssl.h && yamllint --version >/dev/null && kubectl version --client=true >/dev/null && rustup --version >/dev/null && rustup target list --installed | grep -qx wasm32-unknown-unknown && rustup component list --installed | grep -Eq '^llvm-tools-.*-unknown-linux-gnu$' && rustc --version >/dev/null && cargo --version >/dev/null && cargo deny --version >/dev/null && cargo audit --version >/dev/null && cargo llvm-cov --version >/dev/null && sccache --version >/dev/null && node --version >/dev/null && npm --version >/dev/null && pnpm --version >/dev/null && wasm-opt --version >/dev/null && wasm-bindgen --version >/dev/null && trunk --version >/dev/null && lizard --version >/dev/null && google-chrome --version >/dev/null && chromedriver --version >/dev/null && mold --version >/dev/null && sudo -V >/dev/null && test -x /usr/local/bin/control-plane-runtime-tool && test -x /usr/local/bin/trunk && test -x /usr/local/bin/wasm-bindgen && test -x /usr/local/bin/google-chrome && test -x /usr/local/bin/chromedriver && test -r /usr/local/lib/libcontrol_plane_exec_policy.so"]
 USER ${CONTROL_PLANE_USER}
 CMD ["/usr/local/bin/control-plane-exec-api", "serve"]
