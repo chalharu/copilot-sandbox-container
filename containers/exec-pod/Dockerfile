@@ -142,10 +142,11 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # hadolint ignore=DL3008
 RUN apt-get update -o Acquire::Retries=3 \
+    && browser_apt_packages=() \
     && arch="$(dpkg --print-architecture)" \
     && case "${arch}" in \
-        amd64) kubectl_arch=amd64; buildx_arch=amd64; chrome_install_mode=chrome-for-testing; chrome_for_testing_platform=linux64; browser_apt_packages='' ;; \
-        arm64) kubectl_arch=arm64; buildx_arch=arm64; chrome_install_mode=debian-chromium; browser_apt_packages='chromium chromium-driver' ;; \
+        amd64) kubectl_arch=amd64; buildx_arch=amd64; chrome_install_mode=chrome-for-testing; chrome_for_testing_platform=linux64 ;; \
+        arm64) kubectl_arch=arm64; buildx_arch=arm64; chrome_install_mode=debian-chromium; browser_apt_packages=(chromium chromium-driver) ;; \
         *) printf 'Unsupported architecture for exec-pod tools: %s\n' "${arch}" >&2; exit 1 ;; \
     esac \
     && apt-get install -y --no-install-recommends \
@@ -198,7 +199,7 @@ RUN apt-get update -o Acquire::Retries=3 \
         libxfixes3 \
         libxkbcommon0 \
         libxrandr2 \
-        ${browser_apt_packages} \
+        "${browser_apt_packages[@]}" \
     && kubectl_download_root="https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${kubectl_arch}" \
     && curl -fsSLo /tmp/kubectl "${kubectl_download_root}/kubectl" \
     && curl -fsSLo /tmp/kubectl.sha256 "${kubectl_download_root}/kubectl.sha256" \

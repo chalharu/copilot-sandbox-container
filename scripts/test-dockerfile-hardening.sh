@@ -119,21 +119,22 @@ assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_LLVM_COV_VERSION='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CHROME_FOR_TESTING_VERSION='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CHROME_FOR_TESTING_CHROME_LINUX64_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CHROME_FOR_TESTING_CHROMEDRIVER_LINUX64_SHA256='
-assert_file_contains "${exec_pod_dockerfile}" "        amd64) kubectl_arch=amd64; buildx_arch=amd64; chrome_install_mode=chrome-for-testing; chrome_for_testing_platform=linux64; browser_apt_packages='' ;; \\"
-assert_file_contains "${exec_pod_dockerfile}" "        arm64) kubectl_arch=arm64; buildx_arch=arm64; chrome_install_mode=debian-chromium; browser_apt_packages='chromium chromium-driver' ;; \\"
+assert_file_contains "${exec_pod_dockerfile}" 'browser_apt_packages=()'
+assert_file_contains "${exec_pod_dockerfile}" "        amd64) kubectl_arch=amd64; buildx_arch=amd64; chrome_install_mode=chrome-for-testing; chrome_for_testing_platform=linux64 ;; \\"
+assert_file_contains "${exec_pod_dockerfile}" "        arm64) kubectl_arch=arm64; buildx_arch=arm64; chrome_install_mode=debian-chromium; browser_apt_packages=(chromium chromium-driver) ;; \\"
 assert_file_contains "${exec_pod_dockerfile}" "        unzip \\"
 assert_file_contains "${exec_pod_dockerfile}" "        xdg-utils \\"
 assert_file_contains "${exec_pod_dockerfile}" "        fonts-liberation \\"
 assert_file_contains "${exec_pod_dockerfile}" "        libgtk-3-0 \\"
 assert_file_contains "${exec_pod_dockerfile}" "        libnss3 \\"
-assert_file_contains "${exec_pod_dockerfile}" "        \${browser_apt_packages} \\"
+assert_file_contains "${exec_pod_dockerfile}" "        \"\${browser_apt_packages[@]}\" \\"
 assert_file_contains "${exec_pod_dockerfile}" '/tmp/chrome-for-testing.json'
 assert_file_contains "${exec_pod_dockerfile}" "jq -er --arg version \"\${CHROME_FOR_TESTING_VERSION}\" 'select(.version == \$version) | .version' /tmp/chrome-for-testing.json >/dev/null"
 assert_file_contains "${exec_pod_dockerfile}" "chrome_download_url=\"\$(jq -er --arg platform \"\${chrome_for_testing_platform}\" 'first(.downloads.chrome[] | select(.platform == \$platform) | .url)' /tmp/chrome-for-testing.json)\""
 assert_file_contains "${exec_pod_dockerfile}" "chromedriver_download_url=\"\$(jq -er --arg platform \"\${chrome_for_testing_platform}\" 'first(.downloads.chromedriver[] | select(.platform == \$platform) | .url)' /tmp/chrome-for-testing.json)\""
-assert_file_contains "${exec_pod_dockerfile}" 'curl -fsSLo /tmp/chrome-linux64.zip "${chrome_download_url}"'
+assert_file_contains "${exec_pod_dockerfile}" "curl -fsSLo /tmp/chrome-linux64.zip \"\${chrome_download_url}\""
 assert_file_contains "${exec_pod_dockerfile}" "printf '%s  %s\\n' \"\${CHROME_FOR_TESTING_CHROME_LINUX64_SHA256}\" /tmp/chrome-linux64.zip | sha256sum -c -"
-assert_file_contains "${exec_pod_dockerfile}" 'curl -fsSLo /tmp/chromedriver-linux64.zip "${chromedriver_download_url}"'
+assert_file_contains "${exec_pod_dockerfile}" "curl -fsSLo /tmp/chromedriver-linux64.zip \"\${chromedriver_download_url}\""
 assert_file_contains "${exec_pod_dockerfile}" "printf '%s  %s\\n' \"\${CHROME_FOR_TESTING_CHROMEDRIVER_LINUX64_SHA256}\" /tmp/chromedriver-linux64.zip | sha256sum -c -"
 assert_file_contains "${exec_pod_dockerfile}" 'unzip -q /tmp/chrome-linux64.zip -d /opt'
 assert_file_contains "${exec_pod_dockerfile}" 'unzip -q /tmp/chromedriver-linux64.zip -d /opt'

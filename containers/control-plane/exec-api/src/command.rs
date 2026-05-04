@@ -354,11 +354,13 @@ mod tests {
     use crate::{
         CHROOT_EXEC_POLICY_LIBRARY_PATH, CHROOT_EXEC_POLICY_RULES_PATH, DEFAULT_EXEC_PATH,
     };
-    use std::fs;
     use std::ffi::OsString;
+    use std::fs;
     use std::path::Path;
+    use std::sync::OnceLock;
     use std::time::Duration;
     use tempfile::TempDir;
+    use tokio::sync::Mutex as AsyncMutex;
 
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -369,6 +371,11 @@ mod tests {
         let mut permissions = fs::metadata(path).unwrap().permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(path, permissions).unwrap();
+    }
+
+    fn async_env_lock() -> &'static AsyncMutex<()> {
+        static LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| AsyncMutex::new(()))
     }
 
     #[test]
@@ -447,7 +454,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn run_post_tool_use_hook_ignores_broken_pipe_when_hook_skips_stdin() {
-        let _env_lock = env_lock().lock().unwrap();
+        let _env_lock = async_env_lock().lock().await;
         let workspace = TempDir::new().unwrap();
         let remote_home = workspace.path().join("home");
         let hook_dir = remote_home.join(".copilot/hooks/postToolUse");
@@ -495,6 +502,9 @@ mod tests {
         assert_eq!(result.stdout, "");
         assert_eq!(result.stderr, "");
         assert_eq!(result.exit_code, 0);
-        assert_eq!(fs::read_to_string(tool_output_path).unwrap(), "runtime-path-ok\n");
+        assert_eq!(
+            fs::read_to_string(tool_output_path).unwrap(),
+            "runtime-path-ok\n"
+        );
     }
 }
