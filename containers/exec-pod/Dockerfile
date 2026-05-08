@@ -12,7 +12,7 @@ ARG CARGO_AUDIT_VERSION=0.22.1
 # renovate: datasource=crate depName=cargo-llvm-cov
 ARG CARGO_LLVM_COV_VERSION=0.8.5
 # renovate: datasource=npm depName=pnpm
-ARG PNPM_VERSION=10.33.2
+ARG PNPM_VERSION=10.33.3
 # renovate: datasource=pypi depName=lizard
 ARG LIZARD_VERSION=1.22.1
 # Keep the Chrome for Testing version and Linux64 digests in sync when updating them.
