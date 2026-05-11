@@ -1,5 +1,5 @@
 - repository: https://github.com/anthropics/skills
-  ref: 5128e1865d670f5d6c9cef000e6dfc4e951fb5b9 # renovate: datasource=git-refs currentValue=main
+  ref: f458cee31a7577a47ba0c9a101976fa599385174 # renovate: datasource=git-refs currentValue=main
   skills:
     - skills/doc-coauthoring
     - skills/skill-creator
