@@ -597,14 +597,22 @@ mod tests {
             "CONTROL_PLANE_SESSION_EXEC_BIN",
             helper_path.to_str().unwrap(),
         );
-        let _workspace = EnvRestore::set("CONTROL_PLANE_WORKSPACE_MOUNT_PATH", "/workspace");
-
-        assert!(
-            handle(
-                r#"{"toolName":"Read","cwd":"/workspace","toolArgs":{"file_path":"/workspace/shared.txt"}}"#
-            )
-            .is_none()
+        let workspace = temp_dir.path().join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let _workspace = EnvRestore::set(
+            "CONTROL_PLANE_WORKSPACE_MOUNT_PATH",
+            workspace.to_str().unwrap(),
         );
+        let input = json!({
+            "toolName": "Read",
+            "cwd": workspace,
+            "toolArgs": {
+                "file_path": temp_dir.path().join("workspace").join("shared.txt")
+            }
+        })
+        .to_string();
+
+        assert!(handle(&input).is_none());
     }
 
     #[test]
@@ -622,14 +630,24 @@ mod tests {
             "CONTROL_PLANE_SESSION_EXEC_BIN",
             helper_path.to_str().unwrap(),
         );
-        let _workspace = EnvRestore::set("CONTROL_PLANE_WORKSPACE_MOUNT_PATH", "/workspace");
-
-        assert!(
-            handle(
-                r#"{"toolName":"Write","cwd":"/workspace/project","toolArgs":{"file_path":"src/shared.txt","content":"shared\n"}}"#
-            )
-            .is_none()
+        let workspace = temp_dir.path().join("workspace");
+        let project = workspace.join("project");
+        fs::create_dir_all(&project).unwrap();
+        let _workspace = EnvRestore::set(
+            "CONTROL_PLANE_WORKSPACE_MOUNT_PATH",
+            workspace.to_str().unwrap(),
         );
+        let input = json!({
+            "toolName": "Write",
+            "cwd": project,
+            "toolArgs": {
+                "file_path": "src/shared.txt",
+                "content": "shared\n"
+            }
+        })
+        .to_string();
+
+        assert!(handle(&input).is_none());
     }
 
     #[test]
@@ -721,14 +739,23 @@ mod tests {
             "CONTROL_PLANE_SESSION_EXEC_BIN",
             helper_path.to_str().unwrap(),
         );
-        let _workspace = EnvRestore::set("CONTROL_PLANE_WORKSPACE_MOUNT_PATH", "/workspace");
-
-        assert!(
-            handle(
-                r#"{"toolName":"Read","cwd":"/workspace/subdir","toolArgs":{"file_path":"../shared.txt"}}"#
-            )
-            .is_none()
+        let workspace = temp_dir.path().join("workspace");
+        let subdir = workspace.join("subdir");
+        fs::create_dir_all(&subdir).unwrap();
+        let _workspace = EnvRestore::set(
+            "CONTROL_PLANE_WORKSPACE_MOUNT_PATH",
+            workspace.to_str().unwrap(),
         );
+        let input = json!({
+            "toolName": "Read",
+            "cwd": subdir,
+            "toolArgs": {
+                "file_path": "../shared.txt"
+            }
+        })
+        .to_string();
+
+        assert!(handle(&input).is_none());
     }
 
     #[cfg(unix)]
