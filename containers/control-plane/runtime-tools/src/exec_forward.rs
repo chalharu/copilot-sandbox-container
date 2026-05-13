@@ -746,4 +746,98 @@ printf '%s' {}
             .is_none()
         );
     }
+
+    #[test]
+    fn proxies_read_tool_when_path_traversal_escapes_workspace() {
+        let _env_lock = lock_env();
+        let temp_dir = TempDir::new().unwrap();
+        let (helper_path, log_path) = write_proxy_stub(&temp_dir, "escaped\n");
+        let cache_dir = temp_dir.path().join("hook-cache");
+
+        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
+        let _session_exec = EnvRestore::set(
+            "CONTROL_PLANE_SESSION_EXEC_BIN",
+            helper_path.to_str().unwrap(),
+        );
+        let _session_key = EnvRestore::set("CONTROL_PLANE_HOOK_SESSION_KEY", "session-123");
+        let _cache_root =
+            EnvRestore::set("CONTROL_PLANE_HOOK_TMP_ROOT", cache_dir.to_str().unwrap());
+        let _workspace = EnvRestore::set("CONTROL_PLANE_WORKSPACE_MOUNT_PATH", "/workspace");
+
+        let output = handle(
+            r#"{"toolName":"Read","cwd":"/workspace","toolArgs":{"file_path":"/workspace/../etc/config"}}"#,
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(value["permissionDecision"], "allow");
+        assert_ne!(
+            value["modifiedArgs"]["file_path"].as_str().unwrap(),
+            "/workspace/../etc/config"
+        );
+        assert_eq!(
+            fs::read_to_string(log_path).unwrap(),
+            "cat -- '/workspace/../etc/config'\n"
+        );
+    }
+
+    #[test]
+    fn proxies_write_tool_for_near_workspace_prefix() {
+        let _env_lock = lock_env();
+        let temp_dir = TempDir::new().unwrap();
+        let (helper_path, log_path) = write_proxy_stub(&temp_dir, "");
+        let cache_dir = temp_dir.path().join("hook-cache");
+
+        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
+        let _session_exec = EnvRestore::set(
+            "CONTROL_PLANE_SESSION_EXEC_BIN",
+            helper_path.to_str().unwrap(),
+        );
+        let _session_key = EnvRestore::set("CONTROL_PLANE_HOOK_SESSION_KEY", "session-123");
+        let _cache_root =
+            EnvRestore::set("CONTROL_PLANE_HOOK_TMP_ROOT", cache_dir.to_str().unwrap());
+        let _workspace = EnvRestore::set("CONTROL_PLANE_WORKSPACE_MOUNT_PATH", "/workspace");
+
+        let output = handle(
+            r#"{"toolName":"Write","cwd":"/workspace","toolArgs":{"file_path":"/workspace-other/file.txt","content":"outside\n"}}"#,
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(value["permissionDecision"], "allow");
+        assert_ne!(
+            value["modifiedArgs"]["file_path"].as_str().unwrap(),
+            "/workspace-other/file.txt"
+        );
+        assert!(
+            fs::read_to_string(log_path)
+                .unwrap()
+                .contains("path='/workspace-other/file.txt'")
+        );
+    }
+
+    #[test]
+    fn passes_read_tool_through_when_normalized_relative_path_stays_in_workspace() {
+        let _env_lock = lock_env();
+        let temp_dir = TempDir::new().unwrap();
+        let helper_path = temp_dir.path().join("control-plane-session-exec");
+        write_executable(
+            &helper_path,
+            "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'unexpected helper call\\n' >&2\nexit 1\n",
+        );
+
+        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
+        let _session_exec = EnvRestore::set(
+            "CONTROL_PLANE_SESSION_EXEC_BIN",
+            helper_path.to_str().unwrap(),
+        );
+        let _workspace = EnvRestore::set("CONTROL_PLANE_WORKSPACE_MOUNT_PATH", "/workspace");
+
+        assert!(
+            handle(
+                r#"{"toolName":"Read","cwd":"/workspace/subdir","toolArgs":{"file_path":"../shared.txt"}}"#
+            )
+            .is_none()
+        );
+    }
 }
