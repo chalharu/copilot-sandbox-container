@@ -321,10 +321,7 @@ exit 1
             "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ACTIVE".to_string(),
             "1".to_string(),
         ),
-        (
-            "PATH".to_string(),
-            format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", bin_dir.display()),
-        ),
+        ("PATH".to_string(), bin_dir.display().to_string()),
         ("HOOK_LOG".to_string(), log_file.display().to_string()),
     ]);
     if let Some(mode) = options.biome_runtime_failure_mode {
