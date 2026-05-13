@@ -180,10 +180,12 @@ Copilot CLI の `bash` tool 自体はそのまま使います。bundled `preTool
 runtime が、内部 helper の `control-plane-session-exec proxy` を呼んで
 same-namespace / same-node の Execution Pod へ自動委譲します。Read / Write 系 tool は
 workspace PVC の共有 mount 配下ならそのまま実行し、Execution Pod と同じ file を
-読み書きします。workspace 外の path だけ proxy します。
-Read 系 tool は Execution Pod から一時 cache へ copy した内容を読みます。
-Write 系 tool は Execution Pod 内へ先に書き込んだうえで、
-control-plane 側の安全な一時 file へ差し替えます。
+読み書きします。workspace 外の path は deny します。
+symlink 解決後に workspace mount 外へ出る path も deny します。
+built-in file tool は Control Plane Pod 側 filesystem で動きます。
+Execution Pod 側から copy すると、同一 path で内容が異なる場合に
+path semantics を保てません。workspace 外の Exec Pod file access が
+必要な場合は、Bash tool 経由で操作してください。
 operator や agent が `bash` tool からこの helper を直接呼ぶ想定はありません。
 helper は same-namespace / same-node の Execution Pod を on-demand で作成または再利用します。
 `/workspace` PVC を共有したまま、gRPC 経由で転送します。
