@@ -32,7 +32,20 @@ pub fn handle(raw_input: &str) -> Option<String> {
         Ok(value) => value,
         Err(message) => return Some(deny_json(&message)),
     };
-    let command = command_text(&tool_args)?;
+
+    let tool_name = input.get("toolName").and_then(Value::as_str).unwrap_or("bash");
+
+    let command = if tool_name == "bash" {
+        match command_text(&tool_args) {
+            Some(c) => c.to_string(),
+            None => return Some(deny_json("preToolUse: bash requires non-empty 'command'")),
+        }
+    } else {
+        match build_command_for_tool(tool_name, &tool_args) {
+            Ok(c) => c,
+            Err(message) => return Some(deny_json(&message)),
+        }
+    };
 
     let session_exec_bin = session_exec_bin();
     let session_key = match session_key() {
@@ -66,7 +79,12 @@ pub fn handle(raw_input: &str) -> Option<String> {
 }
 
 fn should_rewrite(input: &Map<String, Value>) -> bool {
-    input.get("toolName").and_then(Value::as_str) == Some("bash") && fast_execution_enabled()
+    match input.get("toolName").and_then(Value::as_str) {
+        Some("bash") | Some("view") | Some("read") | Some("write") | Some("edit") => {
+            fast_execution_enabled()
+        }
+        _ => false,
+    }
 }
 
 fn command_text(tool_args: &Map<String, Value>) -> Option<&str> {
@@ -74,6 +92,34 @@ fn command_text(tool_args: &Map<String, Value>) -> Option<&str> {
         .get("command")
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
+}
+
+fn build_command_for_tool(tool_name: &str, tool_args: &Map<String, Value>) -> Result<String, String> {
+    match tool_name {
+        "view" | "read" => {
+            let path = tool_args
+                .get("path")
+                .and_then(Value::as_str)
+                .filter(|v| !v.is_empty())
+                .ok_or_else(|| "preToolUse: view/read requires a non-empty 'path'".to_string())?;
+            Ok(format!("cat {}", shell_quote(path)))
+        }
+        "write" | "edit" => {
+            let path = tool_args
+                .get("path")
+                .and_then(Value::as_str)
+                .filter(|v| !v.is_empty())
+                .ok_or_else(|| "preToolUse: write/edit requires a non-empty 'path'".to_string())?;
+            let content = tool_args
+                .get("content")
+                .and_then(Value::as_str)
+                .or_else(|| tool_args.get("text").and_then(Value::as_str))
+                .ok_or_else(|| "preToolUse: write/edit requires 'content' or 'text'".to_string())?;
+            // Use printf to preserve newlines and avoid interpretation by the shell
+            Ok(format!("printf '%s' {} > {}", shell_quote(content), shell_quote(path)))
+        }
+        _ => Err(format!("preToolUse: unsupported tool for exec-forward: {}", tool_name)),
+    }
 }
 
 fn should_passthrough(command: &str, session_exec_bin: &str, session_key: &str) -> bool {
