@@ -181,8 +181,16 @@ Copilot CLI の `bash` tool 自体はそのまま使います。bundled `preTool
 runtime が、内部 helper の `control-plane-session-exec proxy` を呼んで
 same-namespace / same-node の Execution Pod へ自動委譲します。Read / Write 系 tool は
 workspace PVC の共有 mount 配下ならそのまま実行し、Execution Pod と同じ file を
-読み書きします。workspace 外の path は deny します。
-symlink 解決後に workspace mount 外へ出る path も deny します。
+読み書きします。Control Plane local root もそのまま実行します。ただし Write / edit
+を許可するのは `COPILOT_HOME/session-state`、`COPILOT_HOME/tmp`、
+`CONTROL_PLANE_TMP_ROOT`、`CONTROL_PLANE_HOOK_TMP_ROOT`、および
+`CONTROL_PLANE_LOCAL_READ_WRITE_ROOTS` に限定します。Read / view はこれに加えて
+`~/.config/control-plane`、`~/.config/gh`、`~/.ssh`、
+`/var/lib/control-plane/ssh-host-keys`、`/run/control-plane`、
+`CONTROL_PLANE_LOCAL_READ_ONLY_ROOTS`、互換用の `CONTROL_PLANE_LOCAL_FILE_ROOTS`
+も許可します。
+それ以外の workspace 外 path は deny します。
+symlink 解決後に許可 root 外へ出る path も deny します。
 built-in file tool は Control Plane Pod 側 filesystem で動きます。
 Execution Pod 側から copy すると、同一 path で内容が異なる場合に
 path semantics を保てません。workspace 外の Exec Pod file access が
