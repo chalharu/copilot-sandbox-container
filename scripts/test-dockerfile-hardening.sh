@@ -84,6 +84,8 @@ assert_file_contains "${exec_pod_dockerfile}" "        binaryen \\"
 assert_file_contains "${exec_pod_dockerfile}" "        cmake \\"
 assert_file_contains "${exec_pod_dockerfile}" "        docker.io \\"
 assert_file_contains "${exec_pod_dockerfile}" "        jq \\"
+assert_file_contains "${exec_pod_dockerfile}" "        libgtk-4-dev \\"
+assert_file_contains "${exec_pod_dockerfile}" "        libpango1.0-dev \\"
 assert_file_contains "${exec_pod_dockerfile}" "        libssl-dev \\"
 assert_file_contains "${exec_pod_dockerfile}" "        mold \\"
 assert_file_contains "${exec_pod_dockerfile}" "        nodejs \\"
@@ -103,9 +105,10 @@ assert_file_contains "${exec_pod_dockerfile}" "cargo install --locked --root /op
 assert_file_contains "${exec_pod_dockerfile}" "cargo install --locked --root /opt/control-plane-tools --version \"\${CARGO_DENY_VERSION}\" cargo-deny"
 assert_file_contains "${exec_pod_dockerfile}" "cargo install --locked --root /opt/control-plane-tools --version \"\${CARGO_AUDIT_VERSION}\" cargo-audit"
 assert_file_contains "${exec_pod_dockerfile}" "cargo install --locked --root /opt/control-plane-tools --version \"\${CARGO_LLVM_COV_VERSION}\" cargo-llvm-cov"
+assert_file_contains "${exec_pod_dockerfile}" "cargo install --locked --root /opt/control-plane-tools --version \"\${TAPLO_CLI_VERSION}\" taplo-cli"
 assert_file_contains "${exec_pod_dockerfile}" 'LIZARD_VIRTUAL_ENV=/opt/lizard'
 assert_file_contains "${exec_pod_dockerfile}" 'rustup target add wasm32-unknown-unknown'
-assert_file_contains "${exec_pod_dockerfile}" 'rustup component add llvm-tools-preview'
+assert_file_contains "${exec_pod_dockerfile}" 'rustup component add clippy llvm-tools-preview rustfmt'
 assert_file_contains "${exec_pod_dockerfile}" '/tmp/lizard-pypi.json'
 assert_file_contains "${exec_pod_dockerfile}" "\"/tmp/\${lizard_wheel}\""
 assert_file_contains "${exec_pod_dockerfile}" 'sha256sum -c -'
@@ -116,6 +119,7 @@ assert_file_contains "${exec_pod_dockerfile}" "pnpm_integrity=\"\$(jq -er '.dist
 assert_file_contains "${exec_pod_dockerfile}" 'pnpm integrity mismatch'
 assert_file_contains "${exec_pod_dockerfile}" 'npm install --global "/tmp/pnpm.tgz"'
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_LLVM_COV_VERSION='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG TAPLO_CLI_VERSION='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CHROME_FOR_TESTING_VERSION='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CHROME_FOR_TESTING_CHROME_LINUX64_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CHROME_FOR_TESTING_CHROMEDRIVER_LINUX64_SHA256='
@@ -155,7 +159,7 @@ assert_file_contains "${exec_pod_dockerfile}" 'chmod 1770 /root'
 assert_file_contains "${exec_pod_dockerfile}" 'COPY containers/control-plane/hooks/ /usr/local/share/control-plane/hooks/'
 assert_file_contains "${exec_pod_dockerfile}" 'COPY --from=cargo-tools-builder /opt/control-plane-tools/bin/ /usr/local/bin/'
 assert_file_contains "${exec_pod_dockerfile}" 'COPY --from=exec-api-builder /var/tmp/control-plane/cargo-target/release/control-plane-exec-api /usr/local/bin/control-plane-exec-api'
-assert_healthcheck_cmd "${exec_pod_dockerfile}" '    CMD ["bash", "-lc", "control-plane-exec-api --help >/dev/null && bash --version >/dev/null && sh -c true && rg --version >/dev/null && python3 --version >/dev/null && curl --version >/dev/null && docker --version >/dev/null && docker buildx version >/dev/null && cc --version >/dev/null && git --version >/dev/null && jq --version >/dev/null && cmake --version >/dev/null && pkgconf --version >/dev/null && pkg-config --version >/dev/null && test -e /usr/include/openssl/ssl.h && yamllint --version >/dev/null && kubectl version --client=true >/dev/null && rustup --version >/dev/null && rustup target list --installed | grep -qx wasm32-unknown-unknown && rustup component list --installed | grep -Eq '\''^llvm-tools-.*-unknown-linux-gnu$'\'' && rustc --version >/dev/null && cargo --version >/dev/null && cargo deny --version >/dev/null && cargo audit --version >/dev/null && cargo llvm-cov --version >/dev/null && sccache --version >/dev/null && node --version >/dev/null && npm --version >/dev/null && pnpm --version >/dev/null && wasm-opt --version >/dev/null && wasm-bindgen --version >/dev/null && trunk --version >/dev/null && lizard --version >/dev/null && google-chrome --version >/dev/null && chromedriver --version >/dev/null && mold --version >/dev/null && sudo -V >/dev/null && test -x /usr/local/bin/control-plane-runtime-tool && test -x /usr/local/bin/trunk && test -x /usr/local/bin/wasm-bindgen && test -x /usr/local/bin/google-chrome && test -x /usr/local/bin/chromedriver && test -r /usr/local/lib/libcontrol_plane_exec_policy.so"]'
+assert_healthcheck_cmd "${exec_pod_dockerfile}" '    CMD ["bash", "-lc", "control-plane-exec-api --help >/dev/null && bash --version >/dev/null && sh -c true && rg --version >/dev/null && python3 --version >/dev/null && curl --version >/dev/null && docker --version >/dev/null && docker buildx version >/dev/null && cc --version >/dev/null && git --version >/dev/null && jq --version >/dev/null && cmake --version >/dev/null && pkgconf --version >/dev/null && pkg-config --version >/dev/null && pkg-config --exists gtk4 pango && test -e /usr/include/openssl/ssl.h && yamllint --version >/dev/null && kubectl version --client=true >/dev/null && rustup --version >/dev/null && rustup target list --installed | grep -qx wasm32-unknown-unknown && rustup component list --installed | grep -Eq '\''^clippy-.*-unknown-linux-gnu$'\'' && rustup component list --installed | grep -Eq '\''^llvm-tools-.*-unknown-linux-gnu$'\'' && rustup component list --installed | grep -Eq '\''^rustfmt-.*-unknown-linux-gnu$'\'' && rustc --version >/dev/null && cargo --version >/dev/null && cargo clippy --version >/dev/null && rustfmt --version >/dev/null && cargo deny --version >/dev/null && cargo audit --version >/dev/null && cargo llvm-cov --version >/dev/null && taplo --version >/dev/null && sccache --version >/dev/null && node --version >/dev/null && npm --version >/dev/null && pnpm --version >/dev/null && wasm-opt --version >/dev/null && wasm-bindgen --version >/dev/null && trunk --version >/dev/null && lizard --version >/dev/null && google-chrome --version >/dev/null && chromedriver --version >/dev/null && mold --version >/dev/null && sudo -V >/dev/null && test -x /usr/local/bin/control-plane-runtime-tool && test -x /usr/local/bin/trunk && test -x /usr/local/bin/wasm-bindgen && test -x /usr/local/bin/taplo && test -x /usr/local/bin/google-chrome && test -x /usr/local/bin/chromedriver && test -r /usr/local/lib/libcontrol_plane_exec_policy.so"]'
 # shellcheck disable=SC2016
 assert_file_contains "${exec_pod_dockerfile}" 'USER ${CONTROL_PLANE_USER}'
 assert_file_not_matches "${exec_pod_dockerfile}" '^USER root$'

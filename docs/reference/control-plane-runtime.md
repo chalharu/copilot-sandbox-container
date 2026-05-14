@@ -108,9 +108,10 @@ node-scoped environment PVC / chroot は使いません。workspace PVC は
 `CONTROL_PLANE_WORKSPACE_MOUNT_PATH`（既定 `/workspace`）へ直接 mount します。
 `gh` と SSH の shared session mount も remote HOME (`/root`) 配下へ直接 mount します。
 exec-pod image には `bash` / `git` / `gh` / `kubectl` / `sudo` / `sccache` を
-含めます。`node` / `pnpm` / `trunk` / `wasm-opt` / `wasm-bindgen` /
-`cargo-deny` も入ります。`cargo-audit` / `mold` / `lizard` と bundled hook
-も含まれます。remote HOME には `.gitconfig` を毎回生成します。Rust/Wasm 用の
+含めます。`node` / `pnpm` / `rustfmt` / `clippy` / `trunk` / `wasm-opt` /
+`wasm-bindgen` / `cargo-deny` も入ります。`cargo-audit` / `taplo` / `mold` /
+`lizard` と bundled hook も含まれます。remote HOME には `.gitconfig` を毎回生成します。
+Rust/GTK 用の GTK4 / Pango development package と Rust/Wasm 用の
 `wasm32-unknown-unknown` target も image build 時に追加します。
 `.cargo/config.toml` は image default または追加 volume mount で供給し、Rust の
 `target-dir` と sccache 用 cache を `/var/tmp/control-plane` 配下へ寄せます。

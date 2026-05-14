@@ -1136,7 +1136,12 @@ command -v mold >/dev/null
 command -v cargo >/dev/null
 command -v rustc >/dev/null
 command -v rustup >/dev/null
+command -v rustfmt >/dev/null
+command -v taplo >/dev/null
+pkg-config --exists gtk4 pango
 rustup target list --installed | grep -qx 'wasm32-unknown-unknown'
+rustup component list --installed | grep -Eq '^clippy-.*-unknown-linux-gnu$'
+rustup component list --installed | grep -Eq '^rustfmt-.*-unknown-linux-gnu$'
 node --version >/dev/null
 npm --version >/dev/null
 pnpm --version >/dev/null
@@ -1145,8 +1150,11 @@ trunk --version >/dev/null
 wasm-bindgen --version >/dev/null
 lizard --version >/dev/null
 mold --version >/dev/null
+cargo clippy --version >/dev/null
+rustfmt --version >/dev/null
 cargo deny --version >/dev/null
 cargo audit --version >/dev/null
+taplo --version >/dev/null
 printf 'exec-tooling-ok\n' > /workspace/fast-exec-tooling-marker.txt
 INNER
 )
