@@ -64,16 +64,30 @@ pub fn handle(raw_input: &str) -> Option<String> {
                 )),
             );
         }
-        ToolKind::Read => match path_uses_shared_workspace(&input, &tool_args, "Read") {
-            Ok(true) => return None,
-            Ok(false) => return Some(deny_json(&non_workspace_file_tool_reason("Read"))),
-            Err(message) => return Some(deny_json(&message)),
-        },
-        ToolKind::Write => match path_uses_shared_workspace(&input, &tool_args, "Write") {
-            Ok(true) => return None,
-            Ok(false) => return Some(deny_json(&non_workspace_file_tool_reason("Write"))),
-            Err(message) => return Some(deny_json(&message)),
-        },
+        ToolKind::Read => {
+            match path_uses_passthrough_root(&input, &tool_args, "Read", FileToolAccess::Read) {
+                Ok(true) => return None,
+                Ok(false) => {
+                    return Some(deny_json(&non_workspace_file_tool_reason(
+                        "Read",
+                        FileToolAccess::Read,
+                    )));
+                }
+                Err(message) => return Some(deny_json(&message)),
+            }
+        }
+        ToolKind::Write => {
+            match path_uses_passthrough_root(&input, &tool_args, "Write", FileToolAccess::Write) {
+                Ok(true) => return None,
+                Ok(false) => {
+                    return Some(deny_json(&non_workspace_file_tool_reason(
+                        "Write",
+                        FileToolAccess::Write,
+                    )));
+                }
+                Err(message) => return Some(deny_json(&message)),
+            }
+        }
     }
 
     Some(
@@ -88,6 +102,12 @@ pub fn handle(raw_input: &str) -> Option<String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ToolKind {
     Bash,
+    Read,
+    Write,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FileToolAccess {
     Read,
     Write,
 }
@@ -166,23 +186,50 @@ fn path_arg<'a>(
     ))
 }
 
-fn path_uses_shared_workspace(
+fn path_uses_passthrough_root(
     input: &Map<String, Value>,
     tool_args: &Map<String, Value>,
     tool_label: &str,
+    access: FileToolAccess,
 ) -> Result<bool, String> {
     let (_, path) = path_arg(tool_args, tool_label)?;
-    Ok(is_shared_workspace_path(&cwd_text(input), path))
+    Ok(is_file_tool_passthrough_path(
+        &cwd_text(input),
+        path,
+        access,
+    ))
 }
 
-fn non_workspace_file_tool_reason(tool_label: &str) -> String {
+fn non_workspace_file_tool_reason(tool_label: &str, access: FileToolAccess) -> String {
+    let local_root_scope = match access {
+        FileToolAccess::Read => "control-plane local roots",
+        FileToolAccess::Write => "control-plane writable local roots",
+    };
     format!(
-        "preToolUse: {tool_label} path is outside the shared workspace; the built-in file tool would run against the control-plane filesystem, and copying from the Exec Pod would not preserve path semantics. Use Bash for non-workspace Exec Pod file access."
+        "preToolUse: {tool_label} path is outside the shared workspace and {local_root_scope}; the built-in file tool would run against the control-plane filesystem, and copying from the Exec Pod would not preserve path semantics. Use Bash for non-workspace Exec Pod file access."
     )
 }
 
+fn is_file_tool_passthrough_path(cwd: &str, path: &str, access: FileToolAccess) -> bool {
+    is_shared_workspace_path(cwd, path) || is_control_plane_local_path(cwd, path, access)
+}
+
 fn is_shared_workspace_path(cwd: &str, path: &str) -> bool {
-    let workspace_root = normalize_path(&shared_workspace_root());
+    path_stays_under_root(cwd, path, &shared_workspace_root())
+}
+
+fn is_control_plane_local_path(cwd: &str, path: &str, access: FileToolAccess) -> bool {
+    control_plane_local_roots(access)
+        .iter()
+        .any(|root| path_stays_under_root(cwd, path, root))
+}
+
+fn path_stays_under_root(cwd: &str, path: &str, root: &Path) -> bool {
+    let root = normalize_path(root);
+    let canonical_root = match fs::canonicalize(&root) {
+        Ok(path) => normalize_path(&path),
+        Err(_) => return false,
+    };
     let path = Path::new(path);
     let raw_candidate = if path.is_absolute() {
         path.to_path_buf()
@@ -191,12 +238,12 @@ fn is_shared_workspace_path(cwd: &str, path: &str) -> bool {
     };
     let candidate = normalize_path(&raw_candidate);
 
-    (candidate == workspace_root || candidate.starts_with(&workspace_root))
-        && symlink_components_stay_in_workspace(&raw_candidate, &workspace_root)
+    (is_path_under_root(&candidate, &root) || is_path_under_root(&candidate, &canonical_root))
+        && symlink_components_stay_in_root(&raw_candidate, &root)
 }
 
-fn symlink_components_stay_in_workspace(raw_candidate: &Path, workspace_root: &Path) -> bool {
-    let canonical_workspace_root = match fs::canonicalize(workspace_root) {
+fn symlink_components_stay_in_root(raw_candidate: &Path, root: &Path) -> bool {
+    let canonical_root = match fs::canonicalize(root) {
         Ok(path) => normalize_path(&path),
         Err(_) => return false,
     };
@@ -222,14 +269,14 @@ fn symlink_components_stay_in_workspace(raw_candidate: &Path, workspace_root: &P
                     return false;
                 };
                 current = normalize_path(&resolved);
-                if !is_path_under_root(&current, &canonical_workspace_root) {
+                if !is_path_under_root(&current, &canonical_root) {
                     return false;
                 }
             }
         }
     }
 
-    is_path_under_root(&normalize_path(&current), &canonical_workspace_root)
+    is_path_under_root(&normalize_path(&current), &canonical_root)
 }
 
 fn is_path_under_root(path: &Path, root: &Path) -> bool {
@@ -240,6 +287,58 @@ fn shared_workspace_root() -> PathBuf {
     env_path("CONTROL_PLANE_WORKSPACE_MOUNT_PATH")
         .or_else(|| env_path("CONTROL_PLANE_WORKSPACE"))
         .unwrap_or_else(|| PathBuf::from("/workspace"))
+}
+
+fn control_plane_local_roots(access: FileToolAccess) -> Vec<PathBuf> {
+    match access {
+        FileToolAccess::Read => control_plane_read_roots(),
+        FileToolAccess::Write => control_plane_write_roots(),
+    }
+}
+
+fn control_plane_read_roots() -> Vec<PathBuf> {
+    let mut roots = control_plane_write_roots();
+    roots.extend(env_paths("CONTROL_PLANE_LOCAL_FILE_ROOTS"));
+    roots.extend(env_paths("CONTROL_PLANE_LOCAL_READ_ONLY_ROOTS"));
+
+    let home_dir = home_dir();
+    roots.push(home_dir.join(".config").join("control-plane"));
+    roots.push(home_dir.join(".config").join("gh"));
+    roots.push(home_dir.join(".ssh"));
+    roots.push(PathBuf::from("/var/lib/control-plane/ssh-host-keys"));
+    roots.push(PathBuf::from("/run/control-plane"));
+    roots
+}
+
+fn control_plane_write_roots() -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = env_paths("CONTROL_PLANE_LOCAL_READ_WRITE_ROOTS");
+
+    let copilot_home = copilot_home();
+    roots.push(copilot_home.join("session-state"));
+    roots.push(copilot_home.join("tmp"));
+    if let Some(path) = env_path("CONTROL_PLANE_HOOK_TMP_ROOT") {
+        roots.push(path);
+    }
+    roots.push(control_plane_tmp_root());
+    roots
+}
+
+fn env_paths(name: &str) -> Vec<PathBuf> {
+    env::var_os(name)
+        .map(|value| env::split_paths(&value).collect())
+        .unwrap_or_default()
+}
+
+fn copilot_home() -> PathBuf {
+    env_path("COPILOT_HOME").unwrap_or_else(|| home_dir().join(".copilot"))
+}
+
+fn home_dir() -> PathBuf {
+    env_path("HOME").unwrap_or_else(|| PathBuf::from("/home/copilot"))
+}
+
+fn control_plane_tmp_root() -> PathBuf {
+    env_path("CONTROL_PLANE_TMP_ROOT").unwrap_or_else(|| PathBuf::from("/var/tmp/control-plane"))
 }
 
 fn env_path(name: &str) -> Option<PathBuf> {
@@ -329,583 +428,4 @@ fn deny_json(message: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::fs;
-
-    use serde_json::{Value, json};
-    use tempfile::TempDir;
-
-    use crate::support::shell_quote;
-    use crate::test_support::{EnvRestore, lock_env, write_executable};
-
-    use super::handle;
-
-    #[test]
-    fn rewrites_bash_command() {
-        let _env_lock = lock_env();
-        let temp_dir = TempDir::new().unwrap();
-        let helper_path = temp_dir.path().join("control-plane-session-exec");
-        write_executable(
-            &helper_path,
-            "#!/usr/bin/env bash\nset -euo pipefail\nif [[ \"$1\" == prepare ]]; then exit 0; fi\nexit 1\n",
-        );
-
-        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _session_exec = EnvRestore::set(
-            "CONTROL_PLANE_SESSION_EXEC_BIN",
-            helper_path.to_str().unwrap(),
-        );
-        let _session_key = EnvRestore::set("CONTROL_PLANE_HOOK_SESSION_KEY", "session-123");
-
-        let output = handle(
-            r#"{"toolName":"bash","cwd":"/workspace","toolArgs":{"command":"echo hello","description":"demo"}}"#,
-        )
-        .unwrap();
-        let value: Value = serde_json::from_str(&output).unwrap();
-
-        assert_eq!(value["permissionDecision"], "allow");
-        let command = value["modifiedArgs"]["command"].as_str().unwrap();
-        assert!(command.contains("proxy"));
-        assert!(command.contains("--session-key 'session-123'"));
-        assert!(command.contains("--cwd '/workspace'"));
-        assert!(command.contains("--command-base64 'ZWNobyBoZWxsbw=='"));
-    }
-
-    #[test]
-    fn passes_through_same_session_proxy_command() {
-        let _env_lock = lock_env();
-        let temp_dir = TempDir::new().unwrap();
-        let helper_path = temp_dir.path().join("control-plane-session-exec");
-        write_executable(
-            &helper_path,
-            "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'unexpected helper call\\n' >&2\nexit 1\n",
-        );
-
-        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _session_exec = EnvRestore::set(
-            "CONTROL_PLANE_SESSION_EXEC_BIN",
-            helper_path.to_str().unwrap(),
-        );
-        let _session_key = EnvRestore::set("CONTROL_PLANE_HOOK_SESSION_KEY", "session-123");
-
-        let proxied_command = [
-            shell_quote(helper_path.to_str().unwrap()),
-            "proxy".to_string(),
-            "--session-key".to_string(),
-            shell_quote("session-123"),
-            "--cwd".to_string(),
-            shell_quote("/workspace"),
-            "--command-base64".to_string(),
-            shell_quote("ZWNobyBoZWxsbw=="),
-        ]
-        .join(" ");
-        let input = json!({
-            "toolName": "bash",
-            "cwd": "/workspace",
-            "toolArgs": {
-                "command": proxied_command,
-                "description": "demo"
-            }
-        })
-        .to_string();
-
-        assert!(handle(&input).is_none());
-    }
-
-    #[test]
-    fn denies_on_prepare_failure() {
-        let _env_lock = lock_env();
-        let temp_dir = TempDir::new().unwrap();
-        let helper_path = temp_dir.path().join("control-plane-session-exec");
-        write_executable(
-            &helper_path,
-            "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'prepare exploded\\n' >&2\nexit 1\n",
-        );
-
-        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _session_exec = EnvRestore::set(
-            "CONTROL_PLANE_SESSION_EXEC_BIN",
-            helper_path.to_str().unwrap(),
-        );
-
-        let output = handle(
-            r#"{"toolName":"bash","toolArgs":{"command":"echo hello","description":"demo"}}"#,
-        )
-        .unwrap();
-        let value: Value = serde_json::from_str(&output).unwrap();
-
-        assert_eq!(value["permissionDecision"], "deny");
-        assert_eq!(value["permissionDecisionReason"], "prepare exploded");
-    }
-
-    #[test]
-    fn denies_read_tool_for_non_workspace_path_without_copying() {
-        let _env_lock = lock_env();
-        let temp_dir = TempDir::new().unwrap();
-        let helper_path = temp_dir.path().join("control-plane-session-exec");
-        write_executable(
-            &helper_path,
-            "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'unexpected helper call\\n' >&2\nexit 1\n",
-        );
-        let cache_dir = temp_dir.path().join("hook-cache");
-
-        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _session_exec = EnvRestore::set(
-            "CONTROL_PLANE_SESSION_EXEC_BIN",
-            helper_path.to_str().unwrap(),
-        );
-        let _session_key = EnvRestore::set("CONTROL_PLANE_HOOK_SESSION_KEY", "session-123");
-        let _cache_root =
-            EnvRestore::set("CONTROL_PLANE_HOOK_TMP_ROOT", cache_dir.to_str().unwrap());
-
-        let output = handle(
-            r#"{"toolName":"Read","cwd":"/workspace","toolArgs":{"file_path":"/var/tmp/control-plane/remote.txt","limit":200}}"#,
-        )
-        .unwrap();
-        let value: Value = serde_json::from_str(&output).unwrap();
-
-        assert_eq!(value["permissionDecision"], "deny");
-        let reason = value["permissionDecisionReason"].as_str().unwrap();
-        assert!(
-            reason.contains("built-in file tool would run against the control-plane filesystem")
-        );
-        assert!(reason.contains("copying from the Exec Pod would not preserve path semantics"));
-        assert!(reason.contains("Use Bash for non-workspace Exec Pod file access"));
-        assert!(!cache_dir.exists());
-    }
-
-    #[test]
-    fn denies_view_tool_for_non_workspace_path_without_copying() {
-        let _env_lock = lock_env();
-        let temp_dir = TempDir::new().unwrap();
-        let helper_path = temp_dir.path().join("control-plane-session-exec");
-        write_executable(
-            &helper_path,
-            "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'unexpected helper call\\n' >&2\nexit 1\n",
-        );
-        let cache_dir = temp_dir.path().join("hook-cache");
-
-        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _session_exec = EnvRestore::set(
-            "CONTROL_PLANE_SESSION_EXEC_BIN",
-            helper_path.to_str().unwrap(),
-        );
-        let _session_key = EnvRestore::set("CONTROL_PLANE_HOOK_SESSION_KEY", "session-123");
-        let _cache_root =
-            EnvRestore::set("CONTROL_PLANE_HOOK_TMP_ROOT", cache_dir.to_str().unwrap());
-
-        let output = handle(
-            r#"{"toolName":"view","cwd":"/workspace","toolArgs":{"path":"/var/tmp/control-plane/remote.txt","limit":200}}"#,
-        )
-        .unwrap();
-        let value: Value = serde_json::from_str(&output).unwrap();
-
-        assert_eq!(value["permissionDecision"], "deny");
-        assert!(
-            value["permissionDecisionReason"]
-                .as_str()
-                .unwrap()
-                .contains("copying from the Exec Pod would not preserve path semantics")
-        );
-        assert!(!cache_dir.exists());
-    }
-
-    #[test]
-    fn denies_write_tool_for_non_workspace_path_without_marker_file() {
-        let _env_lock = lock_env();
-        let temp_dir = TempDir::new().unwrap();
-        let helper_path = temp_dir.path().join("control-plane-session-exec");
-        write_executable(
-            &helper_path,
-            "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'unexpected helper call\\n' >&2\nexit 1\n",
-        );
-        let cache_dir = temp_dir.path().join("hook-cache");
-
-        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _session_exec = EnvRestore::set(
-            "CONTROL_PLANE_SESSION_EXEC_BIN",
-            helper_path.to_str().unwrap(),
-        );
-        let _session_key = EnvRestore::set("CONTROL_PLANE_HOOK_SESSION_KEY", "session-123");
-        let _cache_root =
-            EnvRestore::set("CONTROL_PLANE_HOOK_TMP_ROOT", cache_dir.to_str().unwrap());
-
-        let output = handle(
-            r#"{"toolName":"Write","cwd":"/workspace","toolArgs":{"file_path":"/var/tmp/control-plane/new.txt","content":"hello\nworld\n"}}"#,
-        )
-        .unwrap();
-        let value: Value = serde_json::from_str(&output).unwrap();
-
-        assert_eq!(value["permissionDecision"], "deny");
-        let reason = value["permissionDecisionReason"].as_str().unwrap();
-        assert!(
-            reason.contains("built-in file tool would run against the control-plane filesystem")
-        );
-        assert!(reason.contains("copying from the Exec Pod would not preserve path semantics"));
-        assert!(reason.contains("Use Bash for non-workspace Exec Pod file access"));
-        assert!(!cache_dir.exists());
-    }
-
-    #[test]
-    fn denies_edit_tool_for_non_workspace_path_without_marker_file() {
-        let _env_lock = lock_env();
-        let temp_dir = TempDir::new().unwrap();
-        let helper_path = temp_dir.path().join("control-plane-session-exec");
-        write_executable(
-            &helper_path,
-            "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'unexpected helper call\\n' >&2\nexit 1\n",
-        );
-        let cache_dir = temp_dir.path().join("hook-cache");
-
-        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _session_exec = EnvRestore::set(
-            "CONTROL_PLANE_SESSION_EXEC_BIN",
-            helper_path.to_str().unwrap(),
-        );
-        let _session_key = EnvRestore::set("CONTROL_PLANE_HOOK_SESSION_KEY", "session-123");
-        let _cache_root =
-            EnvRestore::set("CONTROL_PLANE_HOOK_TMP_ROOT", cache_dir.to_str().unwrap());
-
-        let output = handle(
-            r#"{"toolName":"edit","cwd":"/workspace","toolArgs":{"path":"/var/tmp/control-plane/edit.txt","text":"edited\n"}}"#,
-        )
-        .unwrap();
-        let value: Value = serde_json::from_str(&output).unwrap();
-
-        assert_eq!(value["permissionDecision"], "deny");
-        assert!(
-            value["permissionDecisionReason"]
-                .as_str()
-                .unwrap()
-                .contains("copying from the Exec Pod would not preserve path semantics")
-        );
-        assert!(!cache_dir.exists());
-    }
-
-    #[test]
-    fn passes_read_tool_through_for_shared_workspace_path() {
-        let _env_lock = lock_env();
-        let temp_dir = TempDir::new().unwrap();
-        let helper_path = temp_dir.path().join("control-plane-session-exec");
-        write_executable(
-            &helper_path,
-            "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'unexpected helper call\\n' >&2\nexit 1\n",
-        );
-
-        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _session_exec = EnvRestore::set(
-            "CONTROL_PLANE_SESSION_EXEC_BIN",
-            helper_path.to_str().unwrap(),
-        );
-        let workspace = temp_dir.path().join("workspace");
-        fs::create_dir_all(&workspace).unwrap();
-        let _workspace = EnvRestore::set(
-            "CONTROL_PLANE_WORKSPACE_MOUNT_PATH",
-            workspace.to_str().unwrap(),
-        );
-        let input = json!({
-            "toolName": "Read",
-            "cwd": workspace,
-            "toolArgs": {
-                "file_path": temp_dir.path().join("workspace").join("shared.txt")
-            }
-        })
-        .to_string();
-
-        assert!(handle(&input).is_none());
-    }
-
-    #[test]
-    fn passes_write_tool_through_for_relative_shared_workspace_path() {
-        let _env_lock = lock_env();
-        let temp_dir = TempDir::new().unwrap();
-        let helper_path = temp_dir.path().join("control-plane-session-exec");
-        write_executable(
-            &helper_path,
-            "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'unexpected helper call\\n' >&2\nexit 1\n",
-        );
-
-        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _session_exec = EnvRestore::set(
-            "CONTROL_PLANE_SESSION_EXEC_BIN",
-            helper_path.to_str().unwrap(),
-        );
-        let workspace = temp_dir.path().join("workspace");
-        let project = workspace.join("project");
-        fs::create_dir_all(&project).unwrap();
-        let _workspace = EnvRestore::set(
-            "CONTROL_PLANE_WORKSPACE_MOUNT_PATH",
-            workspace.to_str().unwrap(),
-        );
-        let input = json!({
-            "toolName": "Write",
-            "cwd": project,
-            "toolArgs": {
-                "file_path": "src/shared.txt",
-                "content": "shared\n"
-            }
-        })
-        .to_string();
-
-        assert!(handle(&input).is_none());
-    }
-
-    #[test]
-    fn denies_read_tool_when_path_traversal_escapes_workspace() {
-        let _env_lock = lock_env();
-        let temp_dir = TempDir::new().unwrap();
-        let helper_path = temp_dir.path().join("control-plane-session-exec");
-        write_executable(
-            &helper_path,
-            "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'unexpected helper call\\n' >&2\nexit 1\n",
-        );
-        let cache_dir = temp_dir.path().join("hook-cache");
-
-        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _session_exec = EnvRestore::set(
-            "CONTROL_PLANE_SESSION_EXEC_BIN",
-            helper_path.to_str().unwrap(),
-        );
-        let _session_key = EnvRestore::set("CONTROL_PLANE_HOOK_SESSION_KEY", "session-123");
-        let _cache_root =
-            EnvRestore::set("CONTROL_PLANE_HOOK_TMP_ROOT", cache_dir.to_str().unwrap());
-        let _workspace = EnvRestore::set("CONTROL_PLANE_WORKSPACE_MOUNT_PATH", "/workspace");
-
-        let output = handle(
-            r#"{"toolName":"Read","cwd":"/workspace","toolArgs":{"file_path":"/workspace/../etc/config"}}"#,
-        )
-        .unwrap();
-        let value: Value = serde_json::from_str(&output).unwrap();
-
-        assert_eq!(value["permissionDecision"], "deny");
-        assert!(
-            value["permissionDecisionReason"]
-                .as_str()
-                .unwrap()
-                .contains("copying from the Exec Pod would not preserve path semantics")
-        );
-        assert!(!cache_dir.exists());
-    }
-
-    #[test]
-    fn denies_write_tool_for_near_workspace_prefix() {
-        let _env_lock = lock_env();
-        let temp_dir = TempDir::new().unwrap();
-        let helper_path = temp_dir.path().join("control-plane-session-exec");
-        write_executable(
-            &helper_path,
-            "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'unexpected helper call\\n' >&2\nexit 1\n",
-        );
-        let cache_dir = temp_dir.path().join("hook-cache");
-
-        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _session_exec = EnvRestore::set(
-            "CONTROL_PLANE_SESSION_EXEC_BIN",
-            helper_path.to_str().unwrap(),
-        );
-        let _session_key = EnvRestore::set("CONTROL_PLANE_HOOK_SESSION_KEY", "session-123");
-        let _cache_root =
-            EnvRestore::set("CONTROL_PLANE_HOOK_TMP_ROOT", cache_dir.to_str().unwrap());
-        let _workspace = EnvRestore::set("CONTROL_PLANE_WORKSPACE_MOUNT_PATH", "/workspace");
-
-        let output = handle(
-            r#"{"toolName":"Write","cwd":"/workspace","toolArgs":{"file_path":"/workspace-other/file.txt","content":"outside\n"}}"#,
-        )
-        .unwrap();
-        let value: Value = serde_json::from_str(&output).unwrap();
-
-        assert_eq!(value["permissionDecision"], "deny");
-        assert!(
-            value["permissionDecisionReason"]
-                .as_str()
-                .unwrap()
-                .contains("copying from the Exec Pod would not preserve path semantics")
-        );
-        assert!(!cache_dir.exists());
-    }
-
-    #[test]
-    fn passes_read_tool_through_when_normalized_relative_path_stays_in_workspace() {
-        let _env_lock = lock_env();
-        let temp_dir = TempDir::new().unwrap();
-        let helper_path = temp_dir.path().join("control-plane-session-exec");
-        write_executable(
-            &helper_path,
-            "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'unexpected helper call\\n' >&2\nexit 1\n",
-        );
-
-        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _session_exec = EnvRestore::set(
-            "CONTROL_PLANE_SESSION_EXEC_BIN",
-            helper_path.to_str().unwrap(),
-        );
-        let workspace = temp_dir.path().join("workspace");
-        let subdir = workspace.join("subdir");
-        fs::create_dir_all(&subdir).unwrap();
-        let _workspace = EnvRestore::set(
-            "CONTROL_PLANE_WORKSPACE_MOUNT_PATH",
-            workspace.to_str().unwrap(),
-        );
-        let input = json!({
-            "toolName": "Read",
-            "cwd": subdir,
-            "toolArgs": {
-                "file_path": "../shared.txt"
-            }
-        })
-        .to_string();
-
-        assert!(handle(&input).is_none());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn denies_read_tool_when_workspace_symlink_points_outside() {
-        let _env_lock = lock_env();
-        let temp_dir = TempDir::new().unwrap();
-        let workspace = temp_dir.path().join("workspace");
-        let outside = temp_dir.path().join("outside");
-        fs::create_dir_all(&workspace).unwrap();
-        fs::create_dir_all(&outside).unwrap();
-        fs::write(outside.join("secret.txt"), "secret\n").unwrap();
-        std::os::unix::fs::symlink(outside.join("secret.txt"), workspace.join("secret-link"))
-            .unwrap();
-
-        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _workspace = EnvRestore::set(
-            "CONTROL_PLANE_WORKSPACE_MOUNT_PATH",
-            workspace.to_str().unwrap(),
-        );
-        let input = json!({
-            "toolName": "Read",
-            "cwd": workspace,
-            "toolArgs": {
-                "file_path": temp_dir.path().join("workspace").join("secret-link")
-            }
-        })
-        .to_string();
-
-        let output = handle(&input).unwrap();
-        let value: Value = serde_json::from_str(&output).unwrap();
-
-        assert_eq!(value["permissionDecision"], "deny");
-        assert!(
-            value["permissionDecisionReason"]
-                .as_str()
-                .unwrap()
-                .contains("copying from the Exec Pod would not preserve path semantics")
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn denies_write_tool_when_workspace_parent_symlink_points_outside() {
-        let _env_lock = lock_env();
-        let temp_dir = TempDir::new().unwrap();
-        let workspace = temp_dir.path().join("workspace");
-        let outside = temp_dir.path().join("outside");
-        fs::create_dir_all(&workspace).unwrap();
-        fs::create_dir_all(&outside).unwrap();
-        std::os::unix::fs::symlink(&outside, workspace.join("outside-link")).unwrap();
-
-        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _workspace = EnvRestore::set(
-            "CONTROL_PLANE_WORKSPACE_MOUNT_PATH",
-            workspace.to_str().unwrap(),
-        );
-        let input = json!({
-            "toolName": "Write",
-            "cwd": workspace,
-            "toolArgs": {
-                "file_path": temp_dir.path().join("workspace").join("outside-link").join("new.txt"),
-                "content": "outside\n"
-            }
-        })
-        .to_string();
-
-        let output = handle(&input).unwrap();
-        let value: Value = serde_json::from_str(&output).unwrap();
-
-        assert_eq!(value["permissionDecision"], "deny");
-        assert!(
-            value["permissionDecisionReason"]
-                .as_str()
-                .unwrap()
-                .contains("copying from the Exec Pod would not preserve path semantics")
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn passes_read_tool_through_when_workspace_symlink_stays_inside() {
-        let _env_lock = lock_env();
-        let temp_dir = TempDir::new().unwrap();
-        let workspace = temp_dir.path().join("workspace");
-        let target_dir = workspace.join("target");
-        fs::create_dir_all(&target_dir).unwrap();
-        fs::write(target_dir.join("shared.txt"), "shared\n").unwrap();
-        std::os::unix::fs::symlink(target_dir.join("shared.txt"), workspace.join("shared-link"))
-            .unwrap();
-
-        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _workspace = EnvRestore::set(
-            "CONTROL_PLANE_WORKSPACE_MOUNT_PATH",
-            workspace.to_str().unwrap(),
-        );
-        let input = json!({
-            "toolName": "Read",
-            "cwd": workspace,
-            "toolArgs": {
-                "file_path": temp_dir.path().join("workspace").join("shared-link")
-            }
-        })
-        .to_string();
-
-        assert!(handle(&input).is_none());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn denies_read_tool_when_workspace_symlink_then_parent_escapes() {
-        let _env_lock = lock_env();
-        let temp_dir = TempDir::new().unwrap();
-        let workspace = temp_dir.path().join("workspace");
-        let link_parent = workspace.join("a").join("b");
-        fs::create_dir_all(&link_parent).unwrap();
-        std::os::unix::fs::symlink(&workspace, link_parent.join("link")).unwrap();
-
-        let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
-        let _workspace = EnvRestore::set(
-            "CONTROL_PLANE_WORKSPACE_MOUNT_PATH",
-            workspace.to_str().unwrap(),
-        );
-        let input = json!({
-            "toolName": "Read",
-            "cwd": workspace,
-            "toolArgs": {
-                "file_path": temp_dir
-                    .path()
-                    .join("workspace")
-                    .join("a")
-                    .join("b")
-                    .join("link")
-                    .join("..")
-                    .join("..")
-                    .join("etc")
-                    .join("passwd")
-            }
-        })
-        .to_string();
-
-        let output = handle(&input).unwrap();
-        let value: Value = serde_json::from_str(&output).unwrap();
-
-        assert_eq!(value["permissionDecision"], "deny");
-        assert!(
-            value["permissionDecisionReason"]
-                .as_str()
-                .unwrap()
-                .contains("copying from the Exec Pod would not preserve path semantics")
-        );
-    }
-}
+mod tests;
