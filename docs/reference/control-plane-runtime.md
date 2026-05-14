@@ -186,9 +186,10 @@ workspace PVC の共有 mount 配下ならそのまま実行し、Execution Pod 
 `COPILOT_HOME/session-state`、`COPILOT_HOME/tmp`、`CONTROL_PLANE_TMP_ROOT`、
 `CONTROL_PLANE_HOOK_TMP_ROOT`、および `CONTROL_PLANE_LOCAL_READ_WRITE_ROOTS` です。
 Read / view はこれに加えて、次の root も許可します。
-`~/.config/control-plane`、`~/.config/gh`、`~/.ssh`、
-`/var/lib/control-plane/ssh-host-keys`、`/run/control-plane`、
-`CONTROL_PLANE_LOCAL_READ_ONLY_ROOTS`、互換用の `CONTROL_PLANE_LOCAL_FILE_ROOTS` です。
+`~/.config/control-plane`、`~/.config/gh`、`~/.ssh` です。
+`/var/lib/control-plane/ssh-host-keys` と `/run/control-plane` も許可します。
+`CONTROL_PLANE_LOCAL_READ_ONLY_ROOTS` も許可します。
+互換用に `CONTROL_PLANE_LOCAL_FILE_ROOTS` も許可します。
 それ以外の workspace 外 path は deny します。
 symlink 解決後に許可 root 外へ出る path も deny します。
 built-in file tool は Control Plane Pod 側 filesystem で動きます。
