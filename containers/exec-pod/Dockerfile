@@ -11,6 +11,8 @@ ARG CARGO_DENY_VERSION=0.19.4
 ARG CARGO_AUDIT_VERSION=0.22.1
 # renovate: datasource=crate depName=cargo-llvm-cov
 ARG CARGO_LLVM_COV_VERSION=0.8.5
+# renovate: datasource=crate depName=taplo-cli
+ARG TAPLO_CLI_VERSION=0.10.0
 # renovate: datasource=npm depName=pnpm
 ARG PNPM_VERSION=10.33.4
 # renovate: datasource=pypi depName=lizard
@@ -100,6 +102,7 @@ ARG WASM_BINDGEN_CLI_VERSION
 ARG CARGO_DENY_VERSION
 ARG CARGO_AUDIT_VERSION
 ARG CARGO_LLVM_COV_VERSION
+ARG TAPLO_CLI_VERSION
 
 # hadolint ignore=DL3008
 RUN apt-get update -o Acquire::Retries=3 \
@@ -113,7 +116,8 @@ RUN cargo install --locked --root /opt/control-plane-tools --version "${TRUNK_VE
     && cargo install --locked --root /opt/control-plane-tools --version "${WASM_BINDGEN_CLI_VERSION}" wasm-bindgen-cli \
     && cargo install --locked --root /opt/control-plane-tools --version "${CARGO_DENY_VERSION}" cargo-deny \
     && cargo install --locked --root /opt/control-plane-tools --version "${CARGO_AUDIT_VERSION}" cargo-audit \
-    && cargo install --locked --root /opt/control-plane-tools --version "${CARGO_LLVM_COV_VERSION}" cargo-llvm-cov
+    && cargo install --locked --root /opt/control-plane-tools --version "${CARGO_LLVM_COV_VERSION}" cargo-llvm-cov \
+    && cargo install --locked --root /opt/control-plane-tools --version "${TAPLO_CLI_VERSION}" taplo-cli
 
 FROM ${RUST_BASE_IMAGE}
 
@@ -160,6 +164,8 @@ RUN apt-get update -o Acquire::Retries=3 \
         gh \
         git \
         jq \
+        libgtk-4-dev \
+        libpango1.0-dev \
         libssl-dev \
         mold \
         nodejs \
@@ -225,7 +231,7 @@ RUN apt-get update -o Acquire::Retries=3 \
     && printf '[build]\ntarget-dir = "/var/tmp/control-plane/cargo-target"\nrustc-wrapper = "/usr/bin/sccache"\n' > /root/.cargo/config.toml \
     && cp /root/.cargo/config.toml "/home/${CONTROL_PLANE_USER}/.cargo/config.toml" \
     && rustup target add wasm32-unknown-unknown \
-    && rustup component add llvm-tools-preview \
+    && rustup component add clippy llvm-tools-preview rustfmt \
     && curl -fsSLo /tmp/lizard-pypi.json "https://pypi.org/pypi/lizard/${LIZARD_VERSION}/json" \
     && lizard_wheel="$(jq -er 'first(.urls[] | select(.packagetype == "bdist_wheel" and (.filename | endswith("-none-any.whl"))) | .filename)' /tmp/lizard-pypi.json)" \
     && lizard_url="$(jq -er --arg filename "${lizard_wheel}" 'first(.urls[] | select(.filename == $filename) | .url)' /tmp/lizard-pypi.json)" \
@@ -304,6 +310,6 @@ RUN ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/share/control-pl
 
 WORKDIR /workspace
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["bash", "-lc", "control-plane-exec-api --help >/dev/null && bash --version >/dev/null && sh -c true && rg --version >/dev/null && python3 --version >/dev/null && curl --version >/dev/null && docker --version >/dev/null && docker buildx version >/dev/null && cc --version >/dev/null && git --version >/dev/null && jq --version >/dev/null && cmake --version >/dev/null && pkgconf --version >/dev/null && pkg-config --version >/dev/null && test -e /usr/include/openssl/ssl.h && yamllint --version >/dev/null && kubectl version --client=true >/dev/null && rustup --version >/dev/null && rustup target list --installed | grep -qx wasm32-unknown-unknown && rustup component list --installed | grep -Eq '^llvm-tools-.*-unknown-linux-gnu$' && rustc --version >/dev/null && cargo --version >/dev/null && cargo deny --version >/dev/null && cargo audit --version >/dev/null && cargo llvm-cov --version >/dev/null && sccache --version >/dev/null && node --version >/dev/null && npm --version >/dev/null && pnpm --version >/dev/null && wasm-opt --version >/dev/null && wasm-bindgen --version >/dev/null && trunk --version >/dev/null && lizard --version >/dev/null && google-chrome --version >/dev/null && chromedriver --version >/dev/null && mold --version >/dev/null && sudo -V >/dev/null && test -x /usr/local/bin/control-plane-runtime-tool && test -x /usr/local/bin/trunk && test -x /usr/local/bin/wasm-bindgen && test -x /usr/local/bin/google-chrome && test -x /usr/local/bin/chromedriver && test -r /usr/local/lib/libcontrol_plane_exec_policy.so"]
+    CMD ["bash", "-lc", "control-plane-exec-api --help >/dev/null && bash --version >/dev/null && sh -c true && rg --version >/dev/null && python3 --version >/dev/null && curl --version >/dev/null && docker --version >/dev/null && docker buildx version >/dev/null && cc --version >/dev/null && git --version >/dev/null && jq --version >/dev/null && cmake --version >/dev/null && pkgconf --version >/dev/null && pkg-config --version >/dev/null && pkg-config --exists gtk4 pango && test -e /usr/include/openssl/ssl.h && yamllint --version >/dev/null && kubectl version --client=true >/dev/null && rustup --version >/dev/null && rustup target list --installed | grep -qx wasm32-unknown-unknown && rustup component list --installed | grep -Eq '^clippy-.*-unknown-linux-gnu$' && rustup component list --installed | grep -Eq '^llvm-tools-.*-unknown-linux-gnu$' && rustup component list --installed | grep -Eq '^rustfmt-.*-unknown-linux-gnu$' && rustc --version >/dev/null && cargo --version >/dev/null && cargo clippy --version >/dev/null && rustfmt --version >/dev/null && cargo deny --version >/dev/null && cargo audit --version >/dev/null && cargo llvm-cov --version >/dev/null && taplo --version >/dev/null && sccache --version >/dev/null && node --version >/dev/null && npm --version >/dev/null && pnpm --version >/dev/null && wasm-opt --version >/dev/null && wasm-bindgen --version >/dev/null && trunk --version >/dev/null && lizard --version >/dev/null && google-chrome --version >/dev/null && chromedriver --version >/dev/null && mold --version >/dev/null && sudo -V >/dev/null && test -x /usr/local/bin/control-plane-runtime-tool && test -x /usr/local/bin/trunk && test -x /usr/local/bin/wasm-bindgen && test -x /usr/local/bin/taplo && test -x /usr/local/bin/google-chrome && test -x /usr/local/bin/chromedriver && test -r /usr/local/lib/libcontrol_plane_exec_policy.so"]
 USER ${CONTROL_PLANE_USER}
 CMD ["/usr/local/bin/control-plane-exec-api", "serve"]
