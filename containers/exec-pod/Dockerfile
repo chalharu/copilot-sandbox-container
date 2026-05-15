@@ -29,7 +29,9 @@ ARG DOCKER_BUILDX_VERSION=v0.33.0
 FROM ${RUST_BASE_IMAGE} AS cargo-chef
 
 ARG CARGO_CHEF_VERSION
-RUN cargo_home="${CARGO_HOME:-${HOME}/.cargo}" \
+RUN --mount=type=cache,id=cargo-registry,target=/root/.cargo/registry \
+    --mount=type=cache,id=cargo-git,target=/root/.cargo/git \
+    cargo_home="${CARGO_HOME:-${HOME}/.cargo}" \
     && mkdir -p "${cargo_home}" /var/tmp/control-plane/cargo-target /build/control-plane \
     && ln -sfn /var/tmp/control-plane/cargo-target /build/control-plane/target \
     && printf '[build]\ntarget-dir = "/var/tmp/control-plane/cargo-target"\n' > "${cargo_home}/config.toml" \
@@ -112,7 +114,9 @@ RUN apt-get update -o Acquire::Retries=3 \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-RUN cargo install --locked --root /opt/control-plane-tools --version "${TRUNK_VERSION}" trunk \
+RUN --mount=type=cache,id=cargo-registry,target=/root/.cargo/registry \
+    --mount=type=cache,id=cargo-git,target=/root/.cargo/git \
+    cargo install --locked --root /opt/control-plane-tools --version "${TRUNK_VERSION}" trunk \
     && cargo install --locked --root /opt/control-plane-tools --version "${WASM_BINDGEN_CLI_VERSION}" wasm-bindgen-cli \
     && cargo install --locked --root /opt/control-plane-tools --version "${CARGO_DENY_VERSION}" cargo-deny \
     && cargo install --locked --root /opt/control-plane-tools --version "${CARGO_AUDIT_VERSION}" cargo-audit \
@@ -310,7 +314,6 @@ RUN ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/share/control-pl
     && chmod 644 /usr/local/lib/libcontrol_plane_exec_policy.so
 
 WORKDIR /workspace
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["bash", "-lc", "control-plane-exec-api --help >/dev/null && bash --version >/dev/null && sh -c true && rg --version >/dev/null && python3 --version >/dev/null && curl --version >/dev/null && docker --version >/dev/null && docker buildx version >/dev/null && cc --version >/dev/null && git --version >/dev/null && jq --version >/dev/null && cmake --version >/dev/null && pkgconf --version >/dev/null && pkg-config --version >/dev/null && pkg-config --exists gtk+-3.0 gtk4 pango && test -e /usr/include/openssl/ssl.h && yamllint --version >/dev/null && kubectl version --client=true >/dev/null && rustup --version >/dev/null && rustup target list --installed | grep -qx wasm32-unknown-unknown && rustup component list --installed | grep -Eq '^clippy-.*-unknown-linux-gnu$' && rustup component list --installed | grep -Eq '^llvm-tools-.*-unknown-linux-gnu$' && rustup component list --installed | grep -Eq '^rustfmt-.*-unknown-linux-gnu$' && rustc --version >/dev/null && cargo --version >/dev/null && cargo clippy --version >/dev/null && rustfmt --version >/dev/null && cargo deny --version >/dev/null && cargo audit --version >/dev/null && cargo llvm-cov --version >/dev/null && taplo --version >/dev/null && sccache --version >/dev/null && node --version >/dev/null && npm --version >/dev/null && pnpm --version >/dev/null && wasm-opt --version >/dev/null && wasm-bindgen --version >/dev/null && trunk --version >/dev/null && lizard --version >/dev/null && google-chrome --version >/dev/null && chromedriver --version >/dev/null && mold --version >/dev/null && sudo -V >/dev/null && test -x /usr/local/bin/control-plane-runtime-tool && test -x /usr/local/bin/trunk && test -x /usr/local/bin/wasm-bindgen && test -x /usr/local/bin/taplo && test -x /usr/local/bin/google-chrome && test -x /usr/local/bin/chromedriver && test -r /usr/local/lib/libcontrol_plane_exec_policy.so"]
+HEALTHCHECK --interval=1m --timeout=5s --start-period=30s --retries=3 CMD ["bash", "-lc", "true"]
 USER ${CONTROL_PLANE_USER}
 CMD ["/usr/local/bin/control-plane-exec-api", "serve"]

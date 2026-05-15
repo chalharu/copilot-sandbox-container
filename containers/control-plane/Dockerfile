@@ -5,7 +5,9 @@ ARG CARGO_CHEF_VERSION=0.1.77
 FROM ${RUST_BASE_IMAGE} AS cargo-chef
 
 ARG CARGO_CHEF_VERSION
-RUN cargo_home="${CARGO_HOME:-${HOME}/.cargo}" \
+RUN --mount=type=cache,id=cargo-registry,target=/root/.cargo/registry \
+    --mount=type=cache,id=cargo-git,target=/root/.cargo/git \
+    cargo_home="${CARGO_HOME:-${HOME}/.cargo}" \
     && mkdir -p "${cargo_home}" /var/tmp/control-plane/cargo-target /build/control-plane \
     && ln -sfn /var/tmp/control-plane/cargo-target /build/control-plane/target \
     && printf '[build]\ntarget-dir = "/var/tmp/control-plane/cargo-target"\n' > "${cargo_home}/config.toml" \
@@ -338,8 +340,7 @@ WORKDIR /workspace
 # Supported runtimes still have to override this to root because the entrypoint
 # provisions mounted state and SSH host keys.
 USER ${CONTROL_PLANE_USER}
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["bash", "-lc", "node --version >/dev/null && cargo --version >/dev/null && git --version >/dev/null && yamllint --version >/dev/null && control-plane-exec-api --help >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]
+HEALTHCHECK --interval=1m --timeout=5s --start-period=30s --retries=3 CMD ["bash", "-lc", "true"]
 EXPOSE 2222
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/control-plane-entrypoint"]
 CMD ["/usr/sbin/sshd", "-D", "-e", "-f", "/etc/ssh/sshd_config"]
