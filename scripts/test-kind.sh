@@ -1138,7 +1138,7 @@ command -v rustc >/dev/null
 command -v rustup >/dev/null
 command -v rustfmt >/dev/null
 command -v taplo >/dev/null
-pkg-config --exists gtk4 pango
+pkg-config --exists gtk+-3.0 gtk4 pango
 rustup target list --installed | grep -qx 'wasm32-unknown-unknown'
 rustup component list --installed | grep -Eq '^clippy-.*-unknown-linux-gnu$'
 rustup component list --installed | grep -Eq '^rustfmt-.*-unknown-linux-gnu$'
