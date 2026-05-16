@@ -197,6 +197,160 @@ EOF
   grep -Fqx "${repo_dir}/containers/control-plane|fmt --all" "${cargo_log}"
 )
 
+printf '%s\n' 'test-github-hooks.sh: verifying Rust hook workspace member routing' >&2
+(
+  set -euo pipefail
+
+  workdir="$(mktemp -d)"
+  trap 'rm -rf "${workdir}"' EXIT
+
+  repo_dir="${workdir}/repo"
+  bin_dir="${workdir}/bin"
+  cargo_log="${workdir}/cargo.log"
+  mkdir -p "${repo_dir}/containers/control-plane/exec-api/src" "${bin_dir}"
+  git -C "${repo_dir}" init -q
+
+  cat > "${repo_dir}/containers/control-plane/Cargo.toml" <<'EOF'
+[workspace]
+members = ["exec-api"]
+resolver = "3"
+EOF
+  cat > "${repo_dir}/containers/control-plane/exec-api/Cargo.toml" <<'EOF'
+[package]
+name = "test-exec-api"
+version = "0.1.0"
+edition = "2024"
+EOF
+  cat > "${repo_dir}/containers/control-plane/exec-api/src/lib.rs" <<'EOF'
+pub fn value() -> i32 { 1 }
+EOF
+
+  cat > "${bin_dir}/cargo" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s|%s\n' "${PWD}" "$*" >> "${TEST_CARGO_LOG}"
+EOF
+  chmod 755 "${bin_dir}/cargo"
+
+  (
+    cd "${repo_dir}"
+    TEST_CARGO_LOG="${cargo_log}" \
+      PATH="${bin_dir}:/usr/bin:/bin" \
+      CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+      CONTROL_PLANE_RUST_HOOK_IMAGE='' \
+      CONTROL_PLANE_JOB_TRANSFER_IMAGE='' \
+      bash "${repo_root}/containers/control-plane/hooks/postToolUse/control-plane-rust.sh" \
+        fmt containers/control-plane/exec-api/src/lib.rs
+  )
+
+  grep -Fqx "${repo_dir}/containers/control-plane/exec-api|fmt --all" "${cargo_log}"
+)
+
+printf '%s\n' 'test-github-hooks.sh: verifying generic Rust hook routing' >&2
+(
+  set -euo pipefail
+
+  workdir="$(mktemp -d)"
+  trap 'rm -rf "${workdir}"' EXIT
+
+  repo_dir="${workdir}/repo"
+  bin_dir="${workdir}/bin"
+  cargo_log="${workdir}/cargo.log"
+  mkdir -p "${repo_dir}/src" "${bin_dir}"
+  git -C "${repo_dir}" init -q
+
+  cat > "${repo_dir}/Cargo.toml" <<'EOF'
+[package]
+name = "test-root-crate"
+version = "0.1.0"
+edition = "2024"
+EOF
+  cat > "${repo_dir}/Cargo.lock" <<'EOF'
+# synthetic lockfile for routing coverage
+EOF
+  cat > "${repo_dir}/src/main.rs" <<'EOF'
+fn main() {}
+EOF
+
+  cat > "${bin_dir}/cargo" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s|%s\n' "${PWD}" "$*" >> "${TEST_CARGO_LOG}"
+EOF
+  chmod 755 "${bin_dir}/cargo"
+
+  (
+    cd "${repo_dir}"
+    TEST_CARGO_LOG="${cargo_log}" \
+      PATH="${bin_dir}:/usr/bin:/bin" \
+      CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+      CONTROL_PLANE_RUST_HOOK_IMAGE='' \
+      CONTROL_PLANE_JOB_TRANSFER_IMAGE='' \
+      bash "${repo_root}/containers/control-plane/hooks/postToolUse/control-plane-rust.sh" \
+        fmt src/main.rs Cargo.lock Cargo.toml
+  )
+
+  line_count="$(wc -l < "${cargo_log}")"
+  [[ "${line_count}" -eq 1 ]]
+  grep -Fqx "${repo_dir}|fmt --all" "${cargo_log}"
+)
+
+printf '%s\n' 'test-github-hooks.sh: verifying Rust hook no-op outside Cargo repos' >&2
+(
+  set -euo pipefail
+
+  workdir="$(mktemp -d)"
+  trap 'rm -rf "${workdir}"' EXIT
+
+  repo_dir="${workdir}/repo"
+  mkdir -p "${repo_dir}/src"
+  git -C "${repo_dir}" init -q
+
+  cat > "${repo_dir}/src/main.rs" <<'EOF'
+fn main() {}
+EOF
+
+  stderr_log="${workdir}/stderr.log"
+  (
+    cd "${repo_dir}"
+    PATH="/usr/bin:/bin" \
+      CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+      CONTROL_PLANE_RUST_HOOK_IMAGE='' \
+      CONTROL_PLANE_JOB_TRANSFER_IMAGE='' \
+      bash "${repo_root}/containers/control-plane/hooks/postToolUse/control-plane-rust.sh" \
+        fmt src/main.rs
+  ) > /dev/null 2> "${stderr_log}"
+
+  grep -Fqx 'control-plane-rust: no affected Rust crates' "${stderr_log}"
+  ! grep -Fq 'no Cargo.toml files found' "${stderr_log}"
+)
+
+printf '%s\n' 'test-github-hooks.sh: verifying Rust hook no-op without paths outside Cargo repos' >&2
+(
+  set -euo pipefail
+
+  workdir="$(mktemp -d)"
+  trap 'rm -rf "${workdir}"' EXIT
+
+  repo_dir="${workdir}/repo"
+  mkdir -p "${repo_dir}"
+  git -C "${repo_dir}" init -q
+
+  stderr_log="${workdir}/stderr.log"
+  (
+    cd "${repo_dir}"
+    PATH="/usr/bin:/bin" \
+      CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+      CONTROL_PLANE_RUST_HOOK_IMAGE='' \
+      CONTROL_PLANE_JOB_TRANSFER_IMAGE='' \
+      bash "${repo_root}/containers/control-plane/hooks/postToolUse/control-plane-rust.sh" \
+        fmt
+  ) > /dev/null 2> "${stderr_log}"
+
+  grep -Fqx 'control-plane-rust: no affected Rust crates' "${stderr_log}"
+  ! grep -Fq 'control-plane-rust: .' "${stderr_log}"
+)
+
 if [[ -z "${control_plane_image}" ]]; then
   exit 0
 fi

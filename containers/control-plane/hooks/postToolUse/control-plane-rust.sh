@@ -12,8 +12,8 @@ usage() {
 Usage:
   control-plane-rust.sh <fmt|fmt-check|check|clippy-fix|clippy|build|test> [PATH ...]
 
-Run the requested cargo command across the affected Rust crates shipped under
-containers/control-plane/. When no paths are provided, every shipped crate runs.
+Run the requested cargo command across affected Rust crates in the active
+repository. When no paths are provided, every discovered crate or workspace runs.
 USAGE
 }
 
@@ -35,25 +35,73 @@ find_repo_root() {
 }
 
 repo_root="$(find_repo_root)"
-control_plane_tree="${repo_root}/containers/control-plane"
-workspace_manifest="${control_plane_tree}/Cargo.toml"
-[[ -d "${control_plane_tree}" ]] || die "run this hook from the repository root"
+
+repo_relative_path() {
+  local path="$1"
+
+  if [[ "${path}" == "${repo_root}" ]]; then
+    printf '.\n'
+  elif [[ "${path}" == "${repo_root}/"* ]]; then
+    printf '%s\n' "${path#"${repo_root}/"}"
+  else
+    printf '%s\n' "${path}"
+  fi
+}
+
+is_workspace_manifest() {
+  local manifest="$1"
+
+  grep -Eq '^[[:space:]]*\[workspace\][[:space:]]*$' "${manifest}"
+}
+
+owning_workspace_manifest() {
+  local path="$1"
+  local search_dir
+  local parent
+  local manifest
+
+  if [[ -d "${path}" ]]; then
+    search_dir="${path}"
+  else
+    search_dir="$(dirname "${path}")"
+  fi
+
+  while [[ "${search_dir}" == "${repo_root}" || "${search_dir}" == "${repo_root}/"* ]]; do
+    manifest="${search_dir}/Cargo.toml"
+    if [[ -f "${manifest}" ]] && is_workspace_manifest "${manifest}"; then
+      printf '%s\n' "${manifest}"
+      return 0
+    fi
+    [[ "${search_dir}" == "${repo_root}" ]] && return 1
+    parent="$(dirname "${search_dir}")"
+    [[ "${parent}" != "${search_dir}" ]] || return 1
+    search_dir="${parent}"
+  done
+
+  return 1
+}
 
 load_all_manifests() {
   local manifest
+  local workspace
+  declare -A seen_manifests=()
 
   manifests=()
-  if [[ -f "${workspace_manifest}" ]]; then
-    manifests=("${workspace_manifest}")
-    return 0
-  fi
   while IFS= read -r manifest; do
-    manifests+=("${manifest}")
+    workspace="$(owning_workspace_manifest "${manifest}" || true)"
+    if [[ -n "${workspace}" ]]; then
+      manifest="${workspace}"
+    fi
+    if [[ -z "${seen_manifests["${manifest}"]+x}" ]]; then
+      seen_manifests["${manifest}"]=1
+      manifests+=("${manifest}")
+    fi
   done < <(
-    find "${control_plane_tree}" -mindepth 2 -maxdepth 2 -name Cargo.toml -print \
+    find "${repo_root}" \
+      \( -name .git -o -name target -o -name node_modules \) -prune -o \
+      -name Cargo.toml -print \
       | LC_ALL=C sort
   )
-  [[ "${#manifests[@]}" -gt 0 ]] || die "no Cargo.toml files found under containers/control-plane"
 }
 
 normalize_candidate_path() {
@@ -73,11 +121,7 @@ manifest_for_path() {
   local parent
 
   path="$(normalize_candidate_path "${candidate}")"
-  [[ "${path}" == "${control_plane_tree}" || "${path}" == "${control_plane_tree}/"* ]] || return 1
-  if [[ "${path}" == "${workspace_manifest}" ]]; then
-    printf '%s\n' "${workspace_manifest}"
-    return 0
-  fi
+  [[ "${path}" == "${repo_root}" || "${path}" == "${repo_root}/"* ]] || return 1
   if [[ -d "${path}" ]]; then
     search_dir="${path}"
   else
@@ -89,7 +133,7 @@ manifest_for_path() {
       printf '%s\n' "${search_dir}/Cargo.toml"
       return 0
     fi
-    [[ "${search_dir}" == "${control_plane_tree}" ]] && return 1
+    [[ "${search_dir}" == "${repo_root}" ]] && return 1
     parent="$(dirname "${search_dir}")"
     [[ "${parent}" != "${search_dir}" ]] || return 1
     search_dir="${parent}"
@@ -102,6 +146,7 @@ collect_target_manifests() {
 
   load_all_manifests
   if [[ "$#" -eq 0 ]]; then
+    [[ "${#manifests[@]}" -gt 0 ]] || return 0
     printf '%s\n' "${manifests[@]}"
     return 0
   fi
@@ -124,7 +169,7 @@ resolved_cargo_args() {
   local manifest="$1"
 
   command_args=("${cargo_args[@]}")
-  [[ "${manifest}" == "${workspace_manifest}" ]] || return 0
+  is_workspace_manifest "${manifest}" || return 0
 
   case "${preset}" in
     fmt|fmt-check)
@@ -225,8 +270,9 @@ run_remote_cargo() {
   local target_dir
 
   crate_dir="$(dirname "${manifest}")"
-  crate_relative="${crate_dir#"${repo_root}/"}"
-  remote_dir="/workspace/${crate_relative}"
+  crate_relative="$(repo_relative_path "${crate_dir}")"
+  remote_dir="/workspace"
+  [[ "${crate_relative}" == "." ]] || remote_dir="/workspace/${crate_relative}"
   resolved_cargo_args "${manifest}"
   target_dir="$(cargo_target_dir)"
 
@@ -248,13 +294,13 @@ require_local_build_toolchain() {
 
 mapfile -t manifests < <(collect_target_manifests "$@")
 if [[ "${#manifests[@]}" -eq 0 ]]; then
-  printf '%s\n' 'control-plane-rust: no affected control-plane Rust crates' >&2
+  printf '%s\n' 'control-plane-rust: no affected Rust crates' >&2
   exit 0
 fi
 
 for manifest in "${manifests[@]}"; do
   crate_dir="$(dirname "${manifest}")"
-  printf 'control-plane-rust: %s\n' "${crate_dir#"${repo_root}/"}" >&2
+  printf 'control-plane-rust: %s\n' "$(repo_relative_path "${crate_dir}")" >&2
   if [[ "${use_remote}" -eq 1 ]]; then
     run_remote_cargo "${manifest}"
   else
