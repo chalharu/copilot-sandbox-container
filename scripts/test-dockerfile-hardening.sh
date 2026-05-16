@@ -135,13 +135,13 @@ assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_LLVM_COV_X86_64_UNKNOWN
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_LLVM_COV_AARCH64_UNKNOWN_LINUX_GNU_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" "cargo_audit_download_root=\"https://github.com/rustsec/rustsec/releases/download/cargo-audit/v\${CARGO_AUDIT_VERSION}\""
 assert_file_contains "${exec_pod_dockerfile}" "cargo_llvm_cov_download_root=\"https://github.com/taiki-e/cargo-llvm-cov/releases/download/v\${CARGO_LLVM_COV_VERSION}\""
-assert_file_not_matches "${exec_pod_dockerfile}" 'cargo install --locked --root /opt/control-plane-tools --version "\${TRUNK_VERSION}" trunk|cargo install --locked --root /opt/control-plane-tools --version "\${WASM_BINDGEN_CLI_VERSION}" wasm-bindgen-cli|cargo install --locked --root /opt/control-plane-tools --version "\${CARGO_DENY_VERSION}" cargo-deny|cargo install --locked --root /opt/control-plane-tools --version "\${CARGO_AUDIT_VERSION}" cargo-audit|cargo install --locked --root /opt/control-plane-tools --version "\${CARGO_LLVM_COV_VERSION}" cargo-llvm-cov|cargo install --locked --root /opt/control-plane-tools --version "\${TAPLO_CLI_VERSION}" taplo-cli'
+assert_file_not_matches "${exec_pod_dockerfile}" "cargo install --locked --root /opt/control-plane-tools --version \"\${TRUNK_VERSION}\" trunk|cargo install --locked --root /opt/control-plane-tools --version \"\${WASM_BINDGEN_CLI_VERSION}\" wasm-bindgen-cli|cargo install --locked --root /opt/control-plane-tools --version \"\${CARGO_DENY_VERSION}\" cargo-deny|cargo install --locked --root /opt/control-plane-tools --version \"\${CARGO_AUDIT_VERSION}\" cargo-audit|cargo install --locked --root /opt/control-plane-tools --version \"\${CARGO_LLVM_COV_VERSION}\" cargo-llvm-cov|cargo install --locked --root /opt/control-plane-tools --version \"\${TAPLO_CLI_VERSION}\" taplo-cli"
 assert_file_contains "${exec_pod_dockerfile}" 'ARG TAPLO_LINUX_X86_64_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG TAPLO_LINUX_AARCH64_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" "taplo_download_root=\"https://github.com/tamasfe/taplo/releases/download/\${TAPLO_CLI_VERSION}\""
 assert_file_contains "${exec_pod_dockerfile}" 'taplo_asset="taplo-linux-x86_64.gz"'
 assert_file_contains "${exec_pod_dockerfile}" 'taplo_asset="taplo-linux-aarch64.gz"'
-assert_file_contains "${exec_pod_dockerfile}" 'gzip -dc "/tmp/${taplo_asset}" > /opt/control-plane-tools/bin/taplo'
+assert_file_contains "${exec_pod_dockerfile}" "gzip -dc \"/tmp/\${taplo_asset}\" > /opt/control-plane-tools/bin/taplo"
 assert_file_contains "${exec_pod_dockerfile}" 'LIZARD_VIRTUAL_ENV=/opt/lizard'
 assert_file_contains "${exec_pod_dockerfile}" 'rustup target add wasm32-unknown-unknown'
 assert_file_contains "${exec_pod_dockerfile}" 'rustup component add clippy llvm-tools-preview rustfmt'

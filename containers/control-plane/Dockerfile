@@ -9,8 +9,8 @@ FROM ${RUST_BASE_IMAGE} AS cargo-chef
 ARG CARGO_CHEF_VERSION
 ARG CARGO_CHEF_X86_64_UNKNOWN_LINUX_GNU_SHA256
 ARG CARGO_CHEF_AARCH64_UNKNOWN_LINUX_GNU_SHA256
-# hadolint ignore=DL3008
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+# hadolint ignore=DL3008
 RUN apt-get update -o Acquire::Retries=3 \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
