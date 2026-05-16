@@ -50,6 +50,12 @@
 			matchManagers: ["github-actions"],
 			matchPackageNames: ["engineerd/setup-kind"],
 			enabled: false
+		},
+		{
+			description: "Keep release-binary tools with companion hashes manually pinned",
+			matchManagers: ["custom.regex"],
+			matchPackageNames: ["cargo-chef", "trunk", "wasm-bindgen-cli", "cargo-deny", "cargo-audit", "cargo-llvm-cov", "taplo-cli"],
+			enabled: false
 		}
 	],
 	customManagers: [

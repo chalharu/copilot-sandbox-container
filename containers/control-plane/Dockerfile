@@ -1,15 +1,38 @@
 ARG RUST_BASE_IMAGE=docker.io/library/rust:1.95.0-bookworm@sha256:503651ea31e66ecb74623beabde781059a5978df1595a9e8ed03974d5fec1bf0
 # renovate: datasource=crate depName=cargo-chef
 ARG CARGO_CHEF_VERSION=0.1.77
+ARG CARGO_CHEF_X86_64_UNKNOWN_LINUX_GNU_SHA256=ff390181459f53c787a496c4ee9a52d8c9c7975ab8d02c8dbd1a0fa1626171f4
+ARG CARGO_CHEF_AARCH64_UNKNOWN_LINUX_GNU_SHA256=64cd1b405894f587a461a0dd0f60127330b1ebd204fd46b1a36fb0ff6da157e0
 
 FROM ${RUST_BASE_IMAGE} AS cargo-chef
 
 ARG CARGO_CHEF_VERSION
-RUN cargo_home="${CARGO_HOME:-${HOME}/.cargo}" \
+ARG CARGO_CHEF_X86_64_UNKNOWN_LINUX_GNU_SHA256
+ARG CARGO_CHEF_AARCH64_UNKNOWN_LINUX_GNU_SHA256
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+# hadolint ignore=DL3008
+RUN apt-get update -o Acquire::Retries=3 \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        xz-utils \
+    && cargo_home="${CARGO_HOME:-${HOME}/.cargo}" \
     && mkdir -p "${cargo_home}" /var/tmp/control-plane/cargo-target /build/control-plane \
     && ln -sfn /var/tmp/control-plane/cargo-target /build/control-plane/target \
     && printf '[build]\ntarget-dir = "/var/tmp/control-plane/cargo-target"\n' > "${cargo_home}/config.toml" \
-    && cargo install cargo-chef --locked --version "${CARGO_CHEF_VERSION}"
+    && mkdir -p "${cargo_home}/bin" \
+    && case "$(dpkg --print-architecture)" in \
+        amd64) cargo_chef_asset="cargo-chef-x86_64-unknown-linux-gnu.tar.xz"; cargo_chef_sha256="${CARGO_CHEF_X86_64_UNKNOWN_LINUX_GNU_SHA256}" ;; \
+        arm64) cargo_chef_asset="cargo-chef-aarch64-unknown-linux-gnu.tar.xz"; cargo_chef_sha256="${CARGO_CHEF_AARCH64_UNKNOWN_LINUX_GNU_SHA256}" ;; \
+        *) printf 'Unsupported architecture for cargo-chef: %s\n' "$(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac \
+    && cargo_chef_download_root="https://github.com/LukeMathWalker/cargo-chef/releases/download/v${CARGO_CHEF_VERSION}" \
+    && curl -fsSLo "/tmp/${cargo_chef_asset}" "${cargo_chef_download_root}/${cargo_chef_asset}" \
+    && printf '%s  %s\n' "${cargo_chef_sha256}" "/tmp/${cargo_chef_asset}" | sha256sum -c - \
+    && cargo_chef_dir="$(tar -tf "/tmp/${cargo_chef_asset}" | awk -F/ 'NF > 1 && $NF == "cargo-chef" { print $1; found=1; exit } END { exit(found ? 0 : 1) }')" \
+    && tar -xJf "/tmp/${cargo_chef_asset}" -C /tmp \
+    && install -m 0755 "/tmp/${cargo_chef_dir}/cargo-chef" "${cargo_home}/bin/cargo-chef" \
+    && rm -rf /var/lib/apt/lists/* /tmp/*
 
 FROM cargo-chef AS workspace-planner
 
@@ -339,7 +362,7 @@ WORKDIR /workspace
 # provisions mounted state and SSH host keys.
 USER ${CONTROL_PLANE_USER}
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["bash", "-lc", "node --version >/dev/null && cargo --version >/dev/null && git --version >/dev/null && yamllint --version >/dev/null && control-plane-exec-api --help >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]
+    CMD ["bash", "-lc", "pgrep -x sshd >/dev/null"]
 EXPOSE 2222
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/control-plane-entrypoint"]
 CMD ["/usr/sbin/sshd", "-D", "-e", "-f", "/etc/ssh/sshd_config"]
