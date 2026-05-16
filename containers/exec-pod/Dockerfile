@@ -17,7 +17,7 @@ ARG CARGO_DENY_X86_64_UNKNOWN_LINUX_MUSL_SHA256=3bd58b784e83715b86ddbc9deac59189
 ARG CARGO_DENY_AARCH64_UNKNOWN_LINUX_MUSL_SHA256=c32ded194b38b48e0b44a838a0d85c856120801e1253fc7febf6f2e48ccb84d8
 # renovate: datasource=crate depName=cargo-audit
 ARG CARGO_AUDIT_VERSION=0.22.1
-ARG CARGO_AUDIT_X86_64_UNKNOWN_LINUX_GNU_SHA256=1890badd5f15831a9af4b074399fcd21e6f7c0fe42c84e9254cdffc9f813765c
+ARG CARGO_AUDIT_X86_64_UNKNOWN_LINUX_MUSL_SHA256=c32506f338bdcdaef5a17fb9f33abb6ecf9561324cfd34237fd335f9283a1eab
 ARG CARGO_AUDIT_AARCH64_UNKNOWN_LINUX_GNU_SHA256=4c8df835ee484441bd2c8c6bcac28c4ce4b4058ba9e7477cb9e0012fe7769f66
 # renovate: datasource=crate depName=cargo-llvm-cov
 ARG CARGO_LLVM_COV_VERSION=0.8.5
@@ -142,7 +142,7 @@ ARG CARGO_DENY_VERSION
 ARG CARGO_DENY_X86_64_UNKNOWN_LINUX_MUSL_SHA256
 ARG CARGO_DENY_AARCH64_UNKNOWN_LINUX_MUSL_SHA256
 ARG CARGO_AUDIT_VERSION
-ARG CARGO_AUDIT_X86_64_UNKNOWN_LINUX_GNU_SHA256
+ARG CARGO_AUDIT_X86_64_UNKNOWN_LINUX_MUSL_SHA256
 ARG CARGO_AUDIT_AARCH64_UNKNOWN_LINUX_GNU_SHA256
 ARG CARGO_LLVM_COV_VERSION
 ARG CARGO_LLVM_COV_X86_64_UNKNOWN_LINUX_GNU_SHA256
@@ -169,8 +169,8 @@ RUN mkdir -p /opt/control-plane-tools/bin \
             wasm_bindgen_sha256="${WASM_BINDGEN_X86_64_UNKNOWN_LINUX_MUSL_SHA256}"; \
             cargo_deny_asset="cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz"; \
             cargo_deny_sha256="${CARGO_DENY_X86_64_UNKNOWN_LINUX_MUSL_SHA256}"; \
-            cargo_audit_asset="cargo-audit-x86_64-unknown-linux-gnu-v${CARGO_AUDIT_VERSION}.tgz"; \
-            cargo_audit_sha256="${CARGO_AUDIT_X86_64_UNKNOWN_LINUX_GNU_SHA256}"; \
+            cargo_audit_asset="cargo-audit-x86_64-unknown-linux-musl-v${CARGO_AUDIT_VERSION}.tgz"; \
+            cargo_audit_sha256="${CARGO_AUDIT_X86_64_UNKNOWN_LINUX_MUSL_SHA256}"; \
             cargo_llvm_cov_asset="cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz"; \
             cargo_llvm_cov_sha256="${CARGO_LLVM_COV_X86_64_UNKNOWN_LINUX_GNU_SHA256}"; \
             taplo_asset="taplo-linux-x86_64.gz"; \

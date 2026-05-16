@@ -129,7 +129,7 @@ assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_DENY_X86_64_UNKNOWN_LIN
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_DENY_AARCH64_UNKNOWN_LINUX_MUSL_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" "cargo_deny_sha256=\"\${CARGO_DENY_X86_64_UNKNOWN_LINUX_MUSL_SHA256}\""
 assert_file_contains "${exec_pod_dockerfile}" "cargo_deny_sha256=\"\${CARGO_DENY_AARCH64_UNKNOWN_LINUX_MUSL_SHA256}\""
-assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_AUDIT_X86_64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_AUDIT_X86_64_UNKNOWN_LINUX_MUSL_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_AUDIT_AARCH64_UNKNOWN_LINUX_GNU_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_LLVM_COV_X86_64_UNKNOWN_LINUX_GNU_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_LLVM_COV_AARCH64_UNKNOWN_LINUX_GNU_SHA256='
@@ -155,7 +155,7 @@ assert_file_contains "${exec_pod_dockerfile}" "pnpm_integrity=\"\$(jq -er '.dist
 assert_file_contains "${exec_pod_dockerfile}" 'pnpm integrity mismatch'
 assert_file_contains "${exec_pod_dockerfile}" 'npm install --global "/tmp/pnpm.tgz"'
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_LLVM_COV_VERSION='
-assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_AUDIT_X86_64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_AUDIT_X86_64_UNKNOWN_LINUX_MUSL_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_AUDIT_AARCH64_UNKNOWN_LINUX_GNU_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_LLVM_COV_X86_64_UNKNOWN_LINUX_GNU_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_LLVM_COV_AARCH64_UNKNOWN_LINUX_GNU_SHA256='
