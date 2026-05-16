@@ -1,18 +1,32 @@
 ARG RUST_BASE_IMAGE=docker.io/library/rust:1.95.0-bookworm@sha256:503651ea31e66ecb74623beabde781059a5978df1595a9e8ed03974d5fec1bf0
 # renovate: datasource=crate depName=cargo-chef
 ARG CARGO_CHEF_VERSION=0.1.77
+ARG CARGO_CHEF_X86_64_UNKNOWN_LINUX_GNU_SHA256=ff390181459f53c787a496c4ee9a52d8c9c7975ab8d02c8dbd1a0fa1626171f4
+ARG CARGO_CHEF_AARCH64_UNKNOWN_LINUX_GNU_SHA256=64cd1b405894f587a461a0dd0f60127330b1ebd204fd46b1a36fb0ff6da157e0
 # renovate: datasource=crate depName=trunk
 ARG TRUNK_VERSION=0.21.14
+ARG TRUNK_X86_64_UNKNOWN_LINUX_GNU_SHA256=f2b4680cd239693a646a2795e4633c625328d7b2a044fbe749fa3a2fe9e7036b
+ARG TRUNK_AARCH64_UNKNOWN_LINUX_GNU_SHA256=b1d8e60e454f7fc182d9a4d95d1506ffbae947d8ba90f8f6f02da93b60f980f9
 # renovate: datasource=crate depName=wasm-bindgen-cli
 ARG WASM_BINDGEN_CLI_VERSION=0.2.120
+ARG WASM_BINDGEN_X86_64_UNKNOWN_LINUX_MUSL_SHA256=ceb6f0b9fea9d2868f258215a1d7f86a4c28330a0d64432cc7d53674618772d6
+ARG WASM_BINDGEN_AARCH64_UNKNOWN_LINUX_GNU_SHA256=430abb4d1f2b68ba266bac223542747fcb994df2a300ed5edffc7dbaa219ff9d
 # renovate: datasource=crate depName=cargo-deny
 ARG CARGO_DENY_VERSION=0.19.4
+ARG CARGO_DENY_X86_64_UNKNOWN_LINUX_MUSL_SHA256=3bd58b784e83715b86ddbc9deac591890372ec77fda5741bb0826970b958506f
+ARG CARGO_DENY_AARCH64_UNKNOWN_LINUX_MUSL_SHA256=c32ded194b38b48e0b44a838a0d85c856120801e1253fc7febf6f2e48ccb84d8
 # renovate: datasource=crate depName=cargo-audit
 ARG CARGO_AUDIT_VERSION=0.22.1
+ARG CARGO_AUDIT_X86_64_UNKNOWN_LINUX_GNU_SHA256=1890badd5f15831a9af4b074399fcd21e6f7c0fe42c84e9254cdffc9f813765c
+ARG CARGO_AUDIT_AARCH64_UNKNOWN_LINUX_GNU_SHA256=4c8df835ee484441bd2c8c6bcac28c4ce4b4058ba9e7477cb9e0012fe7769f66
 # renovate: datasource=crate depName=cargo-llvm-cov
 ARG CARGO_LLVM_COV_VERSION=0.8.5
+ARG CARGO_LLVM_COV_X86_64_UNKNOWN_LINUX_GNU_SHA256=7e62d664f5133d43d33a3b11138c93feff98bd71e953ddc260ea8ddf360a37c6
+ARG CARGO_LLVM_COV_AARCH64_UNKNOWN_LINUX_GNU_SHA256=8248a6d5dcb47307c2ef6d5815f90bca07d04a6f1acd06b658f689cb2d8247d9
 # renovate: datasource=crate depName=taplo-cli
 ARG TAPLO_CLI_VERSION=0.10.0
+ARG TAPLO_LINUX_X86_64_SHA256=8fe196b894ccf9072f98d4e1013a180306e17d244830b03986ee5e8eabeb6156
+ARG TAPLO_LINUX_AARCH64_SHA256=033681d01eec8376c3fd38fa3703c79316f5e14bb013d859943b60a07bccdcc3
 # renovate: datasource=npm depName=pnpm
 ARG PNPM_VERSION=10.33.4
 # renovate: datasource=pypi depName=lizard
@@ -29,11 +43,30 @@ ARG DOCKER_BUILDX_VERSION=v0.33.0
 FROM ${RUST_BASE_IMAGE} AS cargo-chef
 
 ARG CARGO_CHEF_VERSION
-RUN cargo_home="${CARGO_HOME:-${HOME}/.cargo}" \
+ARG CARGO_CHEF_X86_64_UNKNOWN_LINUX_GNU_SHA256
+ARG CARGO_CHEF_AARCH64_UNKNOWN_LINUX_GNU_SHA256
+RUN apt-get update -o Acquire::Retries=3 \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        xz-utils \
+    && cargo_home="${CARGO_HOME:-${HOME}/.cargo}" \
     && mkdir -p "${cargo_home}" /var/tmp/control-plane/cargo-target /build/control-plane \
     && ln -sfn /var/tmp/control-plane/cargo-target /build/control-plane/target \
     && printf '[build]\ntarget-dir = "/var/tmp/control-plane/cargo-target"\n' > "${cargo_home}/config.toml" \
-    && cargo install cargo-chef --locked --version "${CARGO_CHEF_VERSION}"
+    && mkdir -p "${cargo_home}/bin" \
+    && case "$(dpkg --print-architecture)" in \
+        amd64) cargo_chef_asset="cargo-chef-x86_64-unknown-linux-gnu.tar.xz"; cargo_chef_sha256="${CARGO_CHEF_X86_64_UNKNOWN_LINUX_GNU_SHA256}" ;; \
+        arm64) cargo_chef_asset="cargo-chef-aarch64-unknown-linux-gnu.tar.xz"; cargo_chef_sha256="${CARGO_CHEF_AARCH64_UNKNOWN_LINUX_GNU_SHA256}" ;; \
+        *) printf 'Unsupported architecture for cargo-chef: %s\n' "$(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac \
+    && cargo_chef_download_root="https://github.com/LukeMathWalker/cargo-chef/releases/download/v${CARGO_CHEF_VERSION}" \
+    && curl -fsSLo "/tmp/${cargo_chef_asset}" "${cargo_chef_download_root}/${cargo_chef_asset}" \
+    && printf '%s  %s\n' "${cargo_chef_sha256}" "/tmp/${cargo_chef_asset}" | sha256sum -c - \
+    && cargo_chef_dir="$(tar -tf "/tmp/${cargo_chef_asset}" | awk -F/ 'NF > 1 && $NF == "cargo-chef" { print $1; found=1; exit } END { exit(found ? 0 : 1) }')" \
+    && tar -xJf "/tmp/${cargo_chef_asset}" -C /tmp \
+    && install -m 0755 "/tmp/${cargo_chef_dir}/cargo-chef" "${cargo_home}/bin/cargo-chef" \
+    && rm -rf /var/lib/apt/lists/* /tmp/*
 
 FROM cargo-chef AS workspace-planner
 
@@ -98,26 +131,99 @@ RUN cargo test --locked --release -p control-plane-runtime-tools \
 FROM cargo-chef AS cargo-tools-builder
 
 ARG TRUNK_VERSION
+ARG TRUNK_X86_64_UNKNOWN_LINUX_GNU_SHA256
+ARG TRUNK_AARCH64_UNKNOWN_LINUX_GNU_SHA256
 ARG WASM_BINDGEN_CLI_VERSION
+ARG WASM_BINDGEN_X86_64_UNKNOWN_LINUX_MUSL_SHA256
+ARG WASM_BINDGEN_AARCH64_UNKNOWN_LINUX_GNU_SHA256
 ARG CARGO_DENY_VERSION
+ARG CARGO_DENY_X86_64_UNKNOWN_LINUX_MUSL_SHA256
+ARG CARGO_DENY_AARCH64_UNKNOWN_LINUX_MUSL_SHA256
 ARG CARGO_AUDIT_VERSION
+ARG CARGO_AUDIT_X86_64_UNKNOWN_LINUX_GNU_SHA256
+ARG CARGO_AUDIT_AARCH64_UNKNOWN_LINUX_GNU_SHA256
 ARG CARGO_LLVM_COV_VERSION
+ARG CARGO_LLVM_COV_X86_64_UNKNOWN_LINUX_GNU_SHA256
+ARG CARGO_LLVM_COV_AARCH64_UNKNOWN_LINUX_GNU_SHA256
 ARG TAPLO_CLI_VERSION
+ARG TAPLO_LINUX_X86_64_SHA256
+ARG TAPLO_LINUX_AARCH64_SHA256
 
 # hadolint ignore=DL3008
 RUN apt-get update -o Acquire::Retries=3 \
     && apt-get install -y --no-install-recommends \
-        cmake \
-        libssl-dev \
-        pkg-config \
+        ca-certificates \
+        curl \
+        gzip \
     && rm -rf /var/lib/apt/lists/*
 
-RUN cargo install --locked --root /opt/control-plane-tools --version "${TRUNK_VERSION}" trunk \
-    && cargo install --locked --root /opt/control-plane-tools --version "${WASM_BINDGEN_CLI_VERSION}" wasm-bindgen-cli \
-    && cargo install --locked --root /opt/control-plane-tools --version "${CARGO_DENY_VERSION}" cargo-deny \
-    && cargo install --locked --root /opt/control-plane-tools --version "${CARGO_AUDIT_VERSION}" cargo-audit \
-    && cargo install --locked --root /opt/control-plane-tools --version "${CARGO_LLVM_COV_VERSION}" cargo-llvm-cov \
-    && cargo install --locked --root /opt/control-plane-tools --version "${TAPLO_CLI_VERSION}" taplo-cli
+RUN mkdir -p /opt/control-plane-tools/bin \
+    && case "$(dpkg --print-architecture)" in \
+        amd64) \
+            trunk_asset="trunk-x86_64-unknown-linux-gnu.tar.gz"; \
+            trunk_sha256="${TRUNK_X86_64_UNKNOWN_LINUX_GNU_SHA256}"; \
+            wasm_bindgen_asset="wasm-bindgen-${WASM_BINDGEN_CLI_VERSION}-x86_64-unknown-linux-musl.tar.gz"; \
+            wasm_bindgen_sha256="${WASM_BINDGEN_X86_64_UNKNOWN_LINUX_MUSL_SHA256}"; \
+            cargo_deny_asset="cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz"; \
+            cargo_deny_sha256="${CARGO_DENY_X86_64_UNKNOWN_LINUX_MUSL_SHA256}"; \
+            cargo_audit_asset="cargo-audit-x86_64-unknown-linux-gnu-v${CARGO_AUDIT_VERSION}.tgz"; \
+            cargo_audit_sha256="${CARGO_AUDIT_X86_64_UNKNOWN_LINUX_GNU_SHA256}"; \
+            cargo_llvm_cov_asset="cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz"; \
+            cargo_llvm_cov_sha256="${CARGO_LLVM_COV_X86_64_UNKNOWN_LINUX_GNU_SHA256}"; \
+            taplo_asset="taplo-linux-x86_64.gz"; \
+            taplo_sha256="${TAPLO_LINUX_X86_64_SHA256}"; \
+            ;; \
+        arm64) \
+            trunk_asset="trunk-aarch64-unknown-linux-gnu.tar.gz"; \
+            trunk_sha256="${TRUNK_AARCH64_UNKNOWN_LINUX_GNU_SHA256}"; \
+            wasm_bindgen_asset="wasm-bindgen-${WASM_BINDGEN_CLI_VERSION}-aarch64-unknown-linux-gnu.tar.gz"; \
+            wasm_bindgen_sha256="${WASM_BINDGEN_AARCH64_UNKNOWN_LINUX_GNU_SHA256}"; \
+            cargo_deny_asset="cargo-deny-${CARGO_DENY_VERSION}-aarch64-unknown-linux-musl.tar.gz"; \
+            cargo_deny_sha256="${CARGO_DENY_AARCH64_UNKNOWN_LINUX_MUSL_SHA256}"; \
+            cargo_audit_asset="cargo-audit-aarch64-unknown-linux-gnu-v${CARGO_AUDIT_VERSION}.tgz"; \
+            cargo_audit_sha256="${CARGO_AUDIT_AARCH64_UNKNOWN_LINUX_GNU_SHA256}"; \
+            cargo_llvm_cov_asset="cargo-llvm-cov-aarch64-unknown-linux-gnu.tar.gz"; \
+            cargo_llvm_cov_sha256="${CARGO_LLVM_COV_AARCH64_UNKNOWN_LINUX_GNU_SHA256}"; \
+            taplo_asset="taplo-linux-aarch64.gz"; \
+            taplo_sha256="${TAPLO_LINUX_AARCH64_SHA256}"; \
+            ;; \
+        *) printf 'Unsupported architecture for cargo tools: %s\n' "$(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac \
+    && trunk_download_root="https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}" \
+    && curl -fsSLo "/tmp/${trunk_asset}" "${trunk_download_root}/${trunk_asset}" \
+    && printf '%s  %s\n' "${trunk_sha256}" "/tmp/${trunk_asset}" | sha256sum -c - \
+    && tar -xzf "/tmp/${trunk_asset}" -C /tmp \
+    && install -m 0755 /tmp/trunk /opt/control-plane-tools/bin/trunk \
+    && wasm_bindgen_download_root="https://github.com/rustwasm/wasm-bindgen/releases/download/${WASM_BINDGEN_CLI_VERSION}" \
+    && curl -fsSLo "/tmp/${wasm_bindgen_asset}" "${wasm_bindgen_download_root}/${wasm_bindgen_asset}" \
+    && printf '%s  %s\n' "${wasm_bindgen_sha256}" "/tmp/${wasm_bindgen_asset}" | sha256sum -c - \
+    && wasm_bindgen_dir="$(tar -tf "/tmp/${wasm_bindgen_asset}" | awk -F/ 'NF > 1 && $2 == "wasm-bindgen" { print $1; found=1; exit } END { exit(found ? 0 : 1) }')" \
+    && tar -xzf "/tmp/${wasm_bindgen_asset}" -C /tmp \
+    && install -m 0755 "/tmp/${wasm_bindgen_dir}/wasm-bindgen" /opt/control-plane-tools/bin/wasm-bindgen \
+    && install -m 0755 "/tmp/${wasm_bindgen_dir}/wasm-bindgen-test-runner" /opt/control-plane-tools/bin/wasm-bindgen-test-runner \
+    && install -m 0755 "/tmp/${wasm_bindgen_dir}/wasm2es6js" /opt/control-plane-tools/bin/wasm2es6js \
+    && cargo_deny_download_root="https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}" \
+    && curl -fsSLo "/tmp/${cargo_deny_asset}" "${cargo_deny_download_root}/${cargo_deny_asset}" \
+    && printf '%s  %s\n' "${cargo_deny_sha256}" "/tmp/${cargo_deny_asset}" | sha256sum -c - \
+    && cargo_deny_dir="$(tar -tf "/tmp/${cargo_deny_asset}" | awk -F/ 'NF > 1 && $2 == "cargo-deny" { print $1; found=1; exit } END { exit(found ? 0 : 1) }')" \
+    && tar -xzf "/tmp/${cargo_deny_asset}" -C /tmp \
+    && install -m 0755 "/tmp/${cargo_deny_dir}/cargo-deny" /opt/control-plane-tools/bin/cargo-deny \
+    && cargo_audit_download_root="https://github.com/rustsec/rustsec/releases/download/cargo-audit/v${CARGO_AUDIT_VERSION}" \
+    && curl -fsSLo "/tmp/${cargo_audit_asset}" "${cargo_audit_download_root}/${cargo_audit_asset}" \
+    && printf '%s  %s\n' "${cargo_audit_sha256}" "/tmp/${cargo_audit_asset}" | sha256sum -c - \
+    && cargo_audit_dir="$(tar -tf "/tmp/${cargo_audit_asset}" | awk -F/ 'NF > 1 && $2 == "cargo-audit" { print $1; found=1; exit } END { exit(found ? 0 : 1) }')" \
+    && tar -xzf "/tmp/${cargo_audit_asset}" -C /tmp \
+    && install -m 0755 "/tmp/${cargo_audit_dir}/cargo-audit" /opt/control-plane-tools/bin/cargo-audit \
+    && cargo_llvm_cov_download_root="https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${CARGO_LLVM_COV_VERSION}" \
+    && curl -fsSLo "/tmp/${cargo_llvm_cov_asset}" "${cargo_llvm_cov_download_root}/${cargo_llvm_cov_asset}" \
+    && printf '%s  %s\n' "${cargo_llvm_cov_sha256}" "/tmp/${cargo_llvm_cov_asset}" | sha256sum -c - \
+    && tar -xzf "/tmp/${cargo_llvm_cov_asset}" -C /tmp \
+    && install -m 0755 /tmp/cargo-llvm-cov /opt/control-plane-tools/bin/cargo-llvm-cov \
+    && taplo_download_root="https://github.com/tamasfe/taplo/releases/download/${TAPLO_CLI_VERSION}" \
+    && curl -fsSLo "/tmp/${taplo_asset}" "${taplo_download_root}/${taplo_asset}" \
+    && printf '%s  %s\n' "${taplo_sha256}" "/tmp/${taplo_asset}" | sha256sum -c - \
+    && gzip -dc "/tmp/${taplo_asset}" > /opt/control-plane-tools/bin/taplo \
+    && chmod 0755 /opt/control-plane-tools/bin/taplo
 
 FROM ${RUST_BASE_IMAGE}
 
@@ -311,6 +417,6 @@ RUN ln -sf /usr/local/bin/control-plane-runtime-tool /usr/local/share/control-pl
 
 WORKDIR /workspace
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["bash", "-lc", "control-plane-exec-api --help >/dev/null && bash --version >/dev/null && sh -c true && rg --version >/dev/null && python3 --version >/dev/null && curl --version >/dev/null && docker --version >/dev/null && docker buildx version >/dev/null && cc --version >/dev/null && git --version >/dev/null && jq --version >/dev/null && cmake --version >/dev/null && pkgconf --version >/dev/null && pkg-config --version >/dev/null && pkg-config --exists gtk+-3.0 gtk4 pango && test -e /usr/include/openssl/ssl.h && yamllint --version >/dev/null && kubectl version --client=true >/dev/null && rustup --version >/dev/null && rustup target list --installed | grep -qx wasm32-unknown-unknown && rustup component list --installed | grep -Eq '^clippy-.*-unknown-linux-gnu$' && rustup component list --installed | grep -Eq '^llvm-tools-.*-unknown-linux-gnu$' && rustup component list --installed | grep -Eq '^rustfmt-.*-unknown-linux-gnu$' && rustc --version >/dev/null && cargo --version >/dev/null && cargo clippy --version >/dev/null && rustfmt --version >/dev/null && cargo deny --version >/dev/null && cargo audit --version >/dev/null && cargo llvm-cov --version >/dev/null && taplo --version >/dev/null && sccache --version >/dev/null && node --version >/dev/null && npm --version >/dev/null && pnpm --version >/dev/null && wasm-opt --version >/dev/null && wasm-bindgen --version >/dev/null && trunk --version >/dev/null && lizard --version >/dev/null && google-chrome --version >/dev/null && chromedriver --version >/dev/null && mold --version >/dev/null && sudo -V >/dev/null && test -x /usr/local/bin/control-plane-runtime-tool && test -x /usr/local/bin/trunk && test -x /usr/local/bin/wasm-bindgen && test -x /usr/local/bin/taplo && test -x /usr/local/bin/google-chrome && test -x /usr/local/bin/chromedriver && test -r /usr/local/lib/libcontrol_plane_exec_policy.so"]
+    CMD ["bash", "-lc", "control-plane-exec-api health --addr \"http://127.0.0.1:${CONTROL_PLANE_FAST_EXECUTION_PORT:-8080}\" --timeout-sec 2"]
 USER ${CONTROL_PLANE_USER}
 CMD ["/usr/local/bin/control-plane-exec-api", "serve"]

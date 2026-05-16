@@ -62,7 +62,7 @@ legacy_yamllint_dockerfile="${repo_root}/containers/yamllint/Dockerfile"
 
 assert_file_contains "${control_plane_dockerfile}" "USER \${CONTROL_PLANE_USER}"
 assert_file_not_matches "${control_plane_dockerfile}" '^USER root$'
-assert_healthcheck_cmd "${control_plane_dockerfile}" '    CMD ["bash", "-lc", "node --version >/dev/null && cargo --version >/dev/null && git --version >/dev/null && yamllint --version >/dev/null && control-plane-exec-api --help >/dev/null && test -x /usr/local/bin/control-plane-entrypoint && test -r /etc/ssh/sshd_config"]'
+assert_healthcheck_cmd "${control_plane_dockerfile}" '    CMD ["bash", "-lc", "pgrep -x sshd >/dev/null"]'
 assert_file_contains "${control_plane_dockerfile}" 'YAMLLINT_VIRTUAL_ENV=/opt/yamllint'
 assert_file_contains "${control_plane_dockerfile}" 'python3-venv'
 assert_file_contains "${control_plane_dockerfile}" "python3 -m venv \"\${YAMLLINT_VIRTUAL_ENV}\""
@@ -71,6 +71,14 @@ assert_file_contains "${control_plane_dockerfile}" '/tmp/yamllint-requirements.t
 assert_file_contains "${control_plane_dockerfile}" '--only-binary=:all: --require-hashes -r /tmp/yamllint-requirements.txt'
 assert_file_contains "${control_plane_dockerfile}" 'LANG=C.UTF-8'
 assert_file_contains "${control_plane_dockerfile}" 'LC_CTYPE=C.UTF-8'
+assert_file_contains "${control_plane_dockerfile}" 'cargo_chef_download_root="https://github.com/LukeMathWalker/cargo-chef/releases/download/v${CARGO_CHEF_VERSION}"'
+assert_file_contains "${control_plane_dockerfile}" 'ARG CARGO_CHEF_X86_64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${control_plane_dockerfile}" 'ARG CARGO_CHEF_AARCH64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${control_plane_dockerfile}" 'cargo_chef_sha256="${CARGO_CHEF_X86_64_UNKNOWN_LINUX_GNU_SHA256}"'
+assert_file_contains "${control_plane_dockerfile}" 'cargo_chef_sha256="${CARGO_CHEF_AARCH64_UNKNOWN_LINUX_GNU_SHA256}"'
+assert_file_contains "${control_plane_dockerfile}" 'cargo-chef-x86_64-unknown-linux-gnu.tar.xz'
+assert_file_contains "${control_plane_dockerfile}" 'cargo-chef-aarch64-unknown-linux-gnu.tar.xz'
+assert_file_not_matches "${control_plane_dockerfile}" 'cargo install cargo-chef'
 assert_file_contains "${control_plane_dockerfile}" "        locales \\"
 assert_file_contains "${control_plane_dockerfile}" "        vim \\"
 assert_file_contains "${control_plane_dockerfile}" 'locale-gen'
@@ -101,12 +109,39 @@ assert_file_contains "${exec_pod_dockerfile}" "        ripgrep \\"
 assert_file_contains "${exec_pod_dockerfile}" "        sccache \\"
 assert_file_contains "${exec_pod_dockerfile}" "        sudo \\"
 assert_file_contains "${exec_pod_dockerfile}" "        yamllint \\"
-assert_file_contains "${exec_pod_dockerfile}" "cargo install --locked --root /opt/control-plane-tools --version \"\${TRUNK_VERSION}\" trunk"
-assert_file_contains "${exec_pod_dockerfile}" "cargo install --locked --root /opt/control-plane-tools --version \"\${WASM_BINDGEN_CLI_VERSION}\" wasm-bindgen-cli"
-assert_file_contains "${exec_pod_dockerfile}" "cargo install --locked --root /opt/control-plane-tools --version \"\${CARGO_DENY_VERSION}\" cargo-deny"
-assert_file_contains "${exec_pod_dockerfile}" "cargo install --locked --root /opt/control-plane-tools --version \"\${CARGO_AUDIT_VERSION}\" cargo-audit"
-assert_file_contains "${exec_pod_dockerfile}" "cargo install --locked --root /opt/control-plane-tools --version \"\${CARGO_LLVM_COV_VERSION}\" cargo-llvm-cov"
-assert_file_contains "${exec_pod_dockerfile}" "cargo install --locked --root /opt/control-plane-tools --version \"\${TAPLO_CLI_VERSION}\" taplo-cli"
+assert_file_contains "${exec_pod_dockerfile}" 'cargo_chef_download_root="https://github.com/LukeMathWalker/cargo-chef/releases/download/v${CARGO_CHEF_VERSION}"'
+assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_CHEF_X86_64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_CHEF_AARCH64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'cargo_chef_sha256="${CARGO_CHEF_X86_64_UNKNOWN_LINUX_GNU_SHA256}"'
+assert_file_contains "${exec_pod_dockerfile}" 'cargo_chef_sha256="${CARGO_CHEF_AARCH64_UNKNOWN_LINUX_GNU_SHA256}"'
+assert_file_contains "${exec_pod_dockerfile}" 'trunk_download_root="https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}"'
+assert_file_contains "${exec_pod_dockerfile}" 'ARG TRUNK_X86_64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG TRUNK_AARCH64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'trunk_sha256="${TRUNK_X86_64_UNKNOWN_LINUX_GNU_SHA256}"'
+assert_file_contains "${exec_pod_dockerfile}" 'trunk_sha256="${TRUNK_AARCH64_UNKNOWN_LINUX_GNU_SHA256}"'
+assert_file_contains "${exec_pod_dockerfile}" 'wasm_bindgen_download_root="https://github.com/rustwasm/wasm-bindgen/releases/download/${WASM_BINDGEN_CLI_VERSION}"'
+assert_file_contains "${exec_pod_dockerfile}" 'ARG WASM_BINDGEN_X86_64_UNKNOWN_LINUX_MUSL_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG WASM_BINDGEN_AARCH64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'wasm_bindgen_sha256="${WASM_BINDGEN_X86_64_UNKNOWN_LINUX_MUSL_SHA256}"'
+assert_file_contains "${exec_pod_dockerfile}" 'wasm_bindgen_sha256="${WASM_BINDGEN_AARCH64_UNKNOWN_LINUX_GNU_SHA256}"'
+assert_file_contains "${exec_pod_dockerfile}" 'cargo_deny_download_root="https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}"'
+assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_DENY_X86_64_UNKNOWN_LINUX_MUSL_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_DENY_AARCH64_UNKNOWN_LINUX_MUSL_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'cargo_deny_sha256="${CARGO_DENY_X86_64_UNKNOWN_LINUX_MUSL_SHA256}"'
+assert_file_contains "${exec_pod_dockerfile}" 'cargo_deny_sha256="${CARGO_DENY_AARCH64_UNKNOWN_LINUX_MUSL_SHA256}"'
+assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_AUDIT_X86_64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_AUDIT_AARCH64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_LLVM_COV_X86_64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_LLVM_COV_AARCH64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'cargo_audit_download_root="https://github.com/rustsec/rustsec/releases/download/cargo-audit/v${CARGO_AUDIT_VERSION}"'
+assert_file_contains "${exec_pod_dockerfile}" 'cargo_llvm_cov_download_root="https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${CARGO_LLVM_COV_VERSION}"'
+assert_file_not_matches "${exec_pod_dockerfile}" 'cargo install --locked --root /opt/control-plane-tools --version "\${TRUNK_VERSION}" trunk|cargo install --locked --root /opt/control-plane-tools --version "\${WASM_BINDGEN_CLI_VERSION}" wasm-bindgen-cli|cargo install --locked --root /opt/control-plane-tools --version "\${CARGO_DENY_VERSION}" cargo-deny|cargo install --locked --root /opt/control-plane-tools --version "\${CARGO_AUDIT_VERSION}" cargo-audit|cargo install --locked --root /opt/control-plane-tools --version "\${CARGO_LLVM_COV_VERSION}" cargo-llvm-cov|cargo install --locked --root /opt/control-plane-tools --version "\${TAPLO_CLI_VERSION}" taplo-cli'
+assert_file_contains "${exec_pod_dockerfile}" 'ARG TAPLO_LINUX_X86_64_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG TAPLO_LINUX_AARCH64_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'taplo_download_root="https://github.com/tamasfe/taplo/releases/download/${TAPLO_CLI_VERSION}"'
+assert_file_contains "${exec_pod_dockerfile}" 'taplo_asset="taplo-linux-x86_64.gz"'
+assert_file_contains "${exec_pod_dockerfile}" 'taplo_asset="taplo-linux-aarch64.gz"'
+assert_file_contains "${exec_pod_dockerfile}" 'gzip -dc "/tmp/${taplo_asset}" > /opt/control-plane-tools/bin/taplo'
 assert_file_contains "${exec_pod_dockerfile}" 'LIZARD_VIRTUAL_ENV=/opt/lizard'
 assert_file_contains "${exec_pod_dockerfile}" 'rustup target add wasm32-unknown-unknown'
 assert_file_contains "${exec_pod_dockerfile}" 'rustup component add clippy llvm-tools-preview rustfmt'
@@ -120,7 +155,19 @@ assert_file_contains "${exec_pod_dockerfile}" "pnpm_integrity=\"\$(jq -er '.dist
 assert_file_contains "${exec_pod_dockerfile}" 'pnpm integrity mismatch'
 assert_file_contains "${exec_pod_dockerfile}" 'npm install --global "/tmp/pnpm.tgz"'
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_LLVM_COV_VERSION='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_AUDIT_X86_64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_AUDIT_AARCH64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_LLVM_COV_X86_64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_LLVM_COV_AARCH64_UNKNOWN_LINUX_GNU_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG TAPLO_CLI_VERSION='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG TRUNK_X86_64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG TRUNK_AARCH64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG WASM_BINDGEN_X86_64_UNKNOWN_LINUX_MUSL_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG WASM_BINDGEN_AARCH64_UNKNOWN_LINUX_GNU_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_DENY_X86_64_UNKNOWN_LINUX_MUSL_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_DENY_AARCH64_UNKNOWN_LINUX_MUSL_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG TAPLO_LINUX_X86_64_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG TAPLO_LINUX_AARCH64_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CHROME_FOR_TESTING_VERSION='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CHROME_FOR_TESTING_CHROME_LINUX64_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CHROME_FOR_TESTING_CHROMEDRIVER_LINUX64_SHA256='
@@ -160,7 +207,7 @@ assert_file_contains "${exec_pod_dockerfile}" 'chmod 1770 /root'
 assert_file_contains "${exec_pod_dockerfile}" 'COPY containers/control-plane/hooks/ /usr/local/share/control-plane/hooks/'
 assert_file_contains "${exec_pod_dockerfile}" 'COPY --from=cargo-tools-builder /opt/control-plane-tools/bin/ /usr/local/bin/'
 assert_file_contains "${exec_pod_dockerfile}" 'COPY --from=exec-api-builder /var/tmp/control-plane/cargo-target/release/control-plane-exec-api /usr/local/bin/control-plane-exec-api'
-assert_healthcheck_cmd "${exec_pod_dockerfile}" '    CMD ["bash", "-lc", "control-plane-exec-api --help >/dev/null && bash --version >/dev/null && sh -c true && rg --version >/dev/null && python3 --version >/dev/null && curl --version >/dev/null && docker --version >/dev/null && docker buildx version >/dev/null && cc --version >/dev/null && git --version >/dev/null && jq --version >/dev/null && cmake --version >/dev/null && pkgconf --version >/dev/null && pkg-config --version >/dev/null && pkg-config --exists gtk+-3.0 gtk4 pango && test -e /usr/include/openssl/ssl.h && yamllint --version >/dev/null && kubectl version --client=true >/dev/null && rustup --version >/dev/null && rustup target list --installed | grep -qx wasm32-unknown-unknown && rustup component list --installed | grep -Eq '\''^clippy-.*-unknown-linux-gnu$'\'' && rustup component list --installed | grep -Eq '\''^llvm-tools-.*-unknown-linux-gnu$'\'' && rustup component list --installed | grep -Eq '\''^rustfmt-.*-unknown-linux-gnu$'\'' && rustc --version >/dev/null && cargo --version >/dev/null && cargo clippy --version >/dev/null && rustfmt --version >/dev/null && cargo deny --version >/dev/null && cargo audit --version >/dev/null && cargo llvm-cov --version >/dev/null && taplo --version >/dev/null && sccache --version >/dev/null && node --version >/dev/null && npm --version >/dev/null && pnpm --version >/dev/null && wasm-opt --version >/dev/null && wasm-bindgen --version >/dev/null && trunk --version >/dev/null && lizard --version >/dev/null && google-chrome --version >/dev/null && chromedriver --version >/dev/null && mold --version >/dev/null && sudo -V >/dev/null && test -x /usr/local/bin/control-plane-runtime-tool && test -x /usr/local/bin/trunk && test -x /usr/local/bin/wasm-bindgen && test -x /usr/local/bin/taplo && test -x /usr/local/bin/google-chrome && test -x /usr/local/bin/chromedriver && test -r /usr/local/lib/libcontrol_plane_exec_policy.so"]'
+assert_healthcheck_cmd "${exec_pod_dockerfile}" '    CMD ["bash", "-lc", "control-plane-exec-api health --addr \"http://127.0.0.1:${CONTROL_PLANE_FAST_EXECUTION_PORT:-8080}\" --timeout-sec 2"]'
 # shellcheck disable=SC2016
 assert_file_contains "${exec_pod_dockerfile}" 'USER ${CONTROL_PLANE_USER}'
 assert_file_not_matches "${exec_pod_dockerfile}" '^USER root$'
