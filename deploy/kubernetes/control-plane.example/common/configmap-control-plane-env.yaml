@@ -81,7 +81,7 @@ data:
   # instead of the slim control-plane image. The shipped sample default below
   # also tracks a Renovate-managed ref.
   # renovate: datasource=docker depName=docker.io/library/rust versioning=docker
-  CONTROL_PLANE_RUST_HOOK_IMAGE: docker.io/library/rust:1.95.0-bookworm@sha256:503651ea31e66ecb74623beabde781059a5978df1595a9e8ed03974d5fec1bf0
+  CONTROL_PLANE_RUST_HOOK_IMAGE: docker.io/library/rust:1.95.0-bookworm@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1
   CONTROL_PLANE_JOB_SERVICE_ACCOUNT: control-plane-job
   # Audit logs are written to ~/.copilot/session-state/audit/audit-log.db
   # on the shared copilot session PVC. Tune the retained row cap to
