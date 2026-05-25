@@ -142,12 +142,14 @@ token を平文 ConfigMap へ流さない設計です。mounted Secret は
 direct read は policy で拒否し、startup 後は `ssh`・`gh`・`control-plane-copilot`
 のような surface だけを使わせます。
 
-custom provider も同じ分離方針です。`COPILOT_PROVIDER_TYPE` /
-`COPILOT_PROVIDER_BASE_URL` / `COPILOT_MODEL` は `control-plane-env`
-ConfigMap 側の文字列 env として渡し、API key は `copilot-provider-api-key`
-Secret + `COPILOT_PROVIDER_API_KEY_FILE` で startup 入力にします。entrypoint は
-それを private runtime file へ staging し、Copilot process への注入は
-`control-plane-copilot` が `--secret-env-vars=COPILOT_PROVIDER_API_KEY` で担います。
+custom provider も同じ分離方針です。
+`COPILOT_PROVIDER_TYPE` / `COPILOT_PROVIDER_BASE_URL` / `COPILOT_MODEL` は
+`control-plane-env` ConfigMap 側の文字列 env として渡します。
+API key は `copilot-provider-api-key` Secret +
+`COPILOT_PROVIDER_API_KEY_FILE` で startup 入力にします。
+entrypoint はそれを private runtime file へ staging します。
+Copilot process への注入は `control-plane-copilot` が
+`--secret-env-vars=COPILOT_PROVIDER_API_KEY` で担います。
 
 ## 8. bundled skill / agent を `~/.copilot` 配下へ同期する理由
 
