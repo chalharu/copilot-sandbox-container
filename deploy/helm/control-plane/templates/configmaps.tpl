@@ -35,6 +35,9 @@ data:
 {{- if and (not (hasKey $globalControlPlaneEnv "GH_HOSTS_YML_FILE")) (not (hasKey $instanceEnv "GH_HOSTS_YML_FILE")) (or (and $usesManagedInstanceSecret (ne (default "" $auth.ghHostsYml) "")) (and $usesManagedSharedSecret (ne (default "" $globalAuth.ghHostsYml) ""))) }}
 {{- $_ := set $instanceEnv "GH_HOSTS_YML_FILE" "/var/run/control-plane-auth/gh-hosts.yml" -}}
 {{- end }}
+{{- if and (not (hasKey $globalControlPlaneEnv "COPILOT_PROVIDER_API_KEY_FILE")) (not (hasKey $instanceEnv "COPILOT_PROVIDER_API_KEY_FILE")) (or (and $usesManagedInstanceSecret (ne (default "" $auth.copilotProviderApiKey) "")) (and $usesManagedSharedSecret (ne (default "" $globalAuth.copilotProviderApiKey) ""))) }}
+{{- $_ := set $instanceEnv "COPILOT_PROVIDER_API_KEY_FILE" "/var/run/control-plane-auth/copilot-provider-api-key" -}}
+{{- end }}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_K8S_NAMESPACE" $mainNamespace -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_JOB_NAMESPACE" $jobNamespace -}}
 {{- $_ := set $instanceEnv "CONTROL_PLANE_COPILOT_SESSION_PVC" (include "control-plane.sessionClaimName" $ctx) -}}

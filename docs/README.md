@@ -11,6 +11,7 @@
 | はじめて control plane をデプロイする | `docs/tutorials/first-deployment.md` |
 | sample manifest の構成と編集ポイントを知りたい | `deploy/kubernetes/README.md` |
 | 複数 repo / instance を Helm で管理したい | `deploy/helm/control-plane/README.md` |
+| custom provider / model を設定したい | `docs/how-to-guides/cookbook.md` |
 | 既存環境で smoke / update を進めたい | `docs/how-to-guides/cookbook.md` |
 | エラー時に症状から当たりを付けたい | `docs/reference/debug-log.md` |
 

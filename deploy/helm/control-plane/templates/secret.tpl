@@ -24,6 +24,9 @@ stringData:
 {{- if $auth.copilotGithubToken }}
   copilot-github-token: {{ $auth.copilotGithubToken | quote }}
 {{- end }}
+{{- if $auth.copilotProviderApiKey }}
+  copilot-provider-api-key: {{ $auth.copilotProviderApiKey | quote }}
+{{- end }}
 ---
 {{- else if and (not $globalAuth.existingSecretName) (not (hasKey $seenGlobalAuthNamespaces $mainNamespace)) }}
 {{- $_ := set $seenGlobalAuthNamespaces $mainNamespace true -}}
@@ -44,6 +47,9 @@ stringData:
 {{- end }}
 {{- if $globalAuth.copilotGithubToken }}
   copilot-github-token: {{ $globalAuth.copilotGithubToken | quote }}
+{{- end }}
+{{- if $globalAuth.copilotProviderApiKey }}
+  copilot-provider-api-key: {{ $globalAuth.copilotProviderApiKey | quote }}
 {{- end }}
 ---
 {{- end }}

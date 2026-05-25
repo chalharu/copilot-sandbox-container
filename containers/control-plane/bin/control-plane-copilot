@@ -11,6 +11,7 @@ fi
 
 copilot_bin="${CONTROL_PLANE_COPILOT_BIN:-copilot}"
 copilot_github_token_file="${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE:-}"
+copilot_provider_api_key_file="${CONTROL_PLANE_COPILOT_PROVIDER_API_KEY_FILE:-}"
 copilot_nice_level="${CONTROL_PLANE_COPILOT_NICE_LEVEL:-10}"
 
 die() {
@@ -38,6 +39,14 @@ if [[ -n "${copilot_github_token_file}" ]] && [[ -f "${copilot_github_token_file
   if [[ -n "${copilot_github_token:-}" ]]; then
     export COPILOT_GITHUB_TOKEN="${copilot_github_token}"
     copilot_args+=(--secret-env-vars=COPILOT_GITHUB_TOKEN)
+  fi
+fi
+
+if [[ -n "${copilot_provider_api_key_file}" ]] && [[ -f "${copilot_provider_api_key_file}" ]]; then
+  IFS= read -r copilot_provider_api_key < "${copilot_provider_api_key_file}" || true
+  if [[ -n "${copilot_provider_api_key:-}" ]]; then
+    export COPILOT_PROVIDER_API_KEY="${copilot_provider_api_key}"
+    copilot_args+=(--secret-env-vars=COPILOT_PROVIDER_API_KEY)
   fi
 fi
 

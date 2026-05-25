@@ -92,33 +92,37 @@ ConfigMap / Secret / write-back の具体的な path は
 3. 必要なら `copilot-github-token` も入れる。Copilot token は private
    runtime file へ staging されるので、`/run/control-plane-auth` から直接
    読まない
-4. Copilot CLI の追加設定は `control-plane-config` ConfigMap の
+4. custom provider を使うなら `copilot-provider-api-key` も Secret 側で管理し、
+   `COPILOT_PROVIDER_TYPE` / `COPILOT_PROVIDER_BASE_URL` / `COPILOT_MODEL` は
+   `control-plane-env` 側へ置く。API key は private runtime file へ staging
+   されるので、同じく raw mount を直接読まない
+5. Copilot CLI の追加設定は `control-plane-config` ConfigMap の
    `copilot-config.json` へ書く。entrypoint は startup ごとにそれを
    ephemeral な `~/.copilot/config.json` の初期値として入れる
-5. 非機密 env は Deployment の `envFrom` で読み、shared な runtime 設定は
+6. 非機密 env は Deployment の `envFrom` で読み、shared な runtime 設定は
    `control-plane-env`、instance 固有の namespace / Service host / workspace PVC /
    helper image は `control-plane-instance-env` へ分ける
-6. Copilot CLI の `bash` tool を fast execution pod へ委譲する場合は、
+7. Copilot CLI の `bash` tool を fast execution pod へ委譲する場合は、
    shared な `CONTROL_PLANE_FAST_EXECUTION_*` と
    `CONTROL_PLANE_COPILOT_SESSION_{PVC,GH_SUBPATH,SSH_SUBPATH}` は
    `control-plane-env` に置き、helper image や job-transfer host は shipped
    replacement に追従させる
-7. `CONTROL_PLANE_POD_NAME` / `CONTROL_PLANE_POD_NAMESPACE` /
+8. `CONTROL_PLANE_POD_NAME` / `CONTROL_PLANE_POD_NAMESPACE` /
    `CONTROL_PLANE_POD_UID` / `CONTROL_PLANE_NODE_NAME` は Deployment の
    downward API `env:` で注入し、Execution Pod の OwnerReference / node pin
    に使う
-8. control-plane ServiceAccount には同じ namespace の Pod と ExecPod 用 PVC を
+9. control-plane ServiceAccount には同じ namespace の Pod と ExecPod 用 PVC を
    `create/get/list/watch` でき、Pod は `delete` できる Role / RoleBinding
    (`control-plane-exec-pods`) を付ける。ただし shared namespace ではなく、
    control-plane 専用 namespace に閉じ込める
-9. Exec Pod から in-cluster kubectl も使いたい場合は、
+10. Exec Pod から in-cluster kubectl も使いたい場合は、
    `CONTROL_PLANE_FAST_EXECUTION_SERVICE_ACCOUNT` を dedicated な
    `control-plane-exec` ServiceAccount へ向け、`copilot-sandbox-jobs` 側では
    Deployment / Service / Job / Pod だけを許す
    `control-plane-exec-workloads` Role / RoleBinding を別で bind する。
    delegated shell の default namespace は control-plane 側のままなので、
    `kubectl -n "${CONTROL_PLANE_JOB_NAMESPACE}" ...` のように明示する
-10. `CONTROL_PLANE_FAST_EXECUTION_IMAGE` には dedicated exec-pod image を置く。
+11. `CONTROL_PLANE_FAST_EXECUTION_IMAGE` には dedicated exec-pod image を置く。
     sample の GHCR image 以外を使う場合も `control-plane-exec-api`、bundled
     hook、`git` / `gh` / `kubectl` / `sudo` / `sccache` / `node` / `pnpm` /
     `rustfmt` / `clippy` / `trunk` / `wasm-opt` / `wasm-bindgen` /
@@ -141,7 +145,7 @@ ConfigMap / Secret / write-back の具体的な path は
    delegated command を非 root で走らせたい場合は
    `CONTROL_PLANE_FAST_EXECUTION_RUN_AS_UID` /
    `CONTROL_PLANE_FAST_EXECUTION_RUN_AS_GID` も合わせて定義する
-11. 監査ログ DB の保持件数は `control-plane-env` ConfigMap の
+12. 監査ログ DB の保持件数は `control-plane-env` ConfigMap の
     `CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS`（既定 `10000`）で調整する。
 
 ### 永続化と storage class を合わせる

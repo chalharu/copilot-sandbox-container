@@ -8,6 +8,8 @@ source "${script_dir}/lib-biome-hook-image.sh"
 rust_hook_image="${CONTROL_PLANE_TEST_RUST_HOOK_IMAGE:-docker.io/library/rust:1.95.0-bookworm@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1}"
 manifest_root="${script_dir}/../deploy/kubernetes/control-plane.example"
 install_manifest_root="${script_dir}/../deploy/kubernetes/control-plane.example/install"
+sample_env_path="${manifest_root}/common/configmap-control-plane-env.yaml"
+sample_auth_secret_path="${manifest_root}/common/secret-control-plane-auth.yaml"
 manifest_path="$(mktemp)"
 install_manifest_path="$(mktemp)"
 overlay_manifest_path="$(mktemp)"
@@ -270,6 +272,28 @@ if grep -R -n '^bases:' "${manifest_root}" >/dev/null; then
   printf 'Expected sample kustomizations to stop using deprecated bases\n' >&2
   exit 1
 fi
+
+printf '%s\n' 'k8s-sample-storage-layout-test: checking sample provider config surfaces' >&2
+grep -Fq '# COPILOT_PROVIDER_TYPE: openai' "${sample_env_path}" || {
+  printf 'Expected sample control-plane-env ConfigMap to document COPILOT_PROVIDER_TYPE\n' >&2
+  exit 1
+}
+grep -Fq '# COPILOT_PROVIDER_BASE_URL: https://api.openai.com/v1' "${sample_env_path}" || {
+  printf 'Expected sample control-plane-env ConfigMap to document COPILOT_PROVIDER_BASE_URL\n' >&2
+  exit 1
+}
+grep -Fq '# COPILOT_MODEL: gpt-4.1' "${sample_env_path}" || {
+  printf 'Expected sample control-plane-env ConfigMap to document COPILOT_MODEL\n' >&2
+  exit 1
+}
+grep -Fq '# COPILOT_PROVIDER_API_KEY_FILE: /var/run/control-plane-auth/copilot-provider-api-key' "${sample_env_path}" || {
+  printf 'Expected sample control-plane-env ConfigMap to document COPILOT_PROVIDER_API_KEY_FILE\n' >&2
+  exit 1
+}
+grep -Fq '# copilot-provider-api-key: sk-... replace-me' "${sample_auth_secret_path}" || {
+  printf 'Expected sample control-plane-auth Secret to document copilot-provider-api-key\n' >&2
+  exit 1
+}
 
 render_sample_manifests
 

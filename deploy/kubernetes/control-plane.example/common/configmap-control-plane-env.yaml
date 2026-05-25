@@ -18,6 +18,12 @@ data:
   # This full file wins over GH_GITHUB_TOKEN_FILE.
   # GH_HOSTS_YML_FILE: /var/run/control-plane-auth/gh-hosts.yml
   COPILOT_GITHUB_TOKEN_FILE: /var/run/control-plane-auth/copilot-github-token
+  # Optional: configure a non-default Copilot provider / model.
+  # COPILOT_PROVIDER_TYPE: openai
+  # COPILOT_PROVIDER_BASE_URL: https://api.openai.com/v1
+  # COPILOT_MODEL: gpt-4.1
+  # Optional: uncomment when the Secret contains copilot-provider-api-key.
+  # COPILOT_PROVIDER_API_KEY_FILE: /var/run/control-plane-auth/copilot-provider-api-key
   # Optional: preseed ~/.gitconfig inside the control plane.
   # CONTROL_PLANE_GIT_USER_NAME: Your Name
   # CONTROL_PLANE_GIT_USER_EMAIL: you@example.com

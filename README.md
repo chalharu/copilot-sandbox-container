@@ -56,6 +56,12 @@ sample manifest では Copilot CLI の `bash` tool を session-scoped Execution 
   - `deploy/kubernetes/control-plane.example/common/configmap-control-plane-env.yaml`
     の `CONTROL_PLANE_FAST_EXECUTION_EXTRA_VOLUMES_JSON`。
     generic ephemeral volume の storage class / size の設定対象。
+  - custom provider を使う場合だけ
+    `deploy/kubernetes/control-plane.example/common/configmap-control-plane-env.yaml`
+    の `COPILOT_PROVIDER_TYPE` / `COPILOT_PROVIDER_BASE_URL` / `COPILOT_MODEL`
+  - custom provider を使う場合だけ
+    `deploy/kubernetes/control-plane.example/common/secret-control-plane-auth.yaml`
+    の `copilot-provider-api-key`
   - `deploy/kubernetes/control-plane.example/common/configmap-control-plane-env.yaml`
     の `CONTROL_PLANE_BIOME_HOOK_IMAGE`
   - `deploy/kubernetes/control-plane.example/common/configmap-control-plane-env.yaml`

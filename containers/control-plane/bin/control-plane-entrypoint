@@ -46,6 +46,7 @@ runtime_config_dir="${control_plane_home}/.config/control-plane"
 runtime_config_parent_dir="$(dirname "${runtime_config_dir}")"
 runtime_config_path="${runtime_config_dir}/runtime.env"
 copilot_token_path="${runtime_config_dir}/copilot-github-token"
+copilot_provider_api_key_path="${runtime_config_dir}/copilot-provider-api-key"
 authorized_keys_dir="${runtime_config_dir}/ssh-auth"
 authorized_keys_path="${authorized_keys_dir}/authorized_keys"
 legacy_authorized_keys_path="${control_plane_home}/.ssh/authorized_keys"
@@ -61,6 +62,11 @@ gh_github_token="${GH_GITHUB_TOKEN:-}"
 gh_github_token_file="${GH_GITHUB_TOKEN_FILE:-}"
 gh_hosts_yml_file="${GH_HOSTS_YML_FILE:-}"
 copilot_github_token="${COPILOT_GITHUB_TOKEN:-}"
+copilot_provider_type="${COPILOT_PROVIDER_TYPE:-}"
+copilot_provider_base_url="${COPILOT_PROVIDER_BASE_URL:-}"
+copilot_provider_api_key="${COPILOT_PROVIDER_API_KEY:-}"
+copilot_provider_api_key_file="${COPILOT_PROVIDER_API_KEY_FILE:-}"
+copilot_model="${COPILOT_MODEL:-}"
 git_user_name="${CONTROL_PLANE_GIT_USER_NAME:-}"
 git_user_email="${CONTROL_PLANE_GIT_USER_EMAIL:-}"
 audit_log_max_records="${CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS:-10000}"
@@ -795,6 +801,12 @@ fi
 
 write_private_file "${copilot_token_path}" "${copilot_github_token}" "${control_plane_user}:${control_plane_user}"
 
+if [[ -z "${copilot_provider_api_key}" ]] && [[ -n "${copilot_provider_api_key_file}" ]] && [[ -f "${copilot_provider_api_key_file}" ]]; then
+  IFS= read -r copilot_provider_api_key < "${copilot_provider_api_key_file}" || true
+fi
+
+write_private_file "${copilot_provider_api_key_path}" "${copilot_provider_api_key}" "${control_plane_user}:${control_plane_user}"
+
 if [[ -z "${KUBECONFIG:-}" ]] \
   && [[ -n "${KUBERNETES_SERVICE_HOST:-}" ]] \
   && [[ -f "${service_account_dir}/token" ]] \
@@ -911,6 +923,15 @@ runtime_config_tmp="$(mktemp "${runtime_config_path}.XXXXXX")"
     write_runtime_var CONTROL_PLANE_COPILOT_BIN "${CONTROL_PLANE_COPILOT_BIN}"
   fi
   write_runtime_var CONTROL_PLANE_COPILOT_NICE_LEVEL "${copilot_nice_level}"
+  if [[ -n "${copilot_provider_type}" ]]; then
+    write_runtime_var COPILOT_PROVIDER_TYPE "${copilot_provider_type}"
+  fi
+  if [[ -n "${copilot_provider_base_url}" ]]; then
+    write_runtime_var COPILOT_PROVIDER_BASE_URL "${copilot_provider_base_url}"
+  fi
+  if [[ -n "${copilot_model}" ]]; then
+    write_runtime_var COPILOT_MODEL "${copilot_model}"
+  fi
   if [[ -n "${CONTROL_PLANE_BIOME_HOOK_IMAGE:-}" ]]; then
     write_runtime_var CONTROL_PLANE_BIOME_HOOK_IMAGE "${CONTROL_PLANE_BIOME_HOOK_IMAGE}"
   fi
@@ -960,6 +981,9 @@ runtime_config_tmp="$(mktemp "${runtime_config_path}.XXXXXX")"
   if [[ -n "${copilot_github_token}" ]]; then
     write_runtime_var CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE "${copilot_token_path}"
   fi
+  if [[ -n "${copilot_provider_api_key}" ]]; then
+    write_runtime_var CONTROL_PLANE_COPILOT_PROVIDER_API_KEY_FILE "${copilot_provider_api_key_path}"
+  fi
 } > "${runtime_config_tmp}"
 mv "${runtime_config_tmp}" "${runtime_config_path}"
 chown "${control_plane_user}:${control_plane_user}" "${runtime_config_path}"
@@ -976,6 +1000,7 @@ remove_ssh_host_key ssh_host_rsa_key
 remove_ssh_host_key ssh_host_ecdsa_key
 ensure_ssh_host_key ed25519 ssh_host_ed25519_key
 start_reverse_exec_api
+unset COPILOT_PROVIDER_API_KEY COPILOT_PROVIDER_API_KEY_FILE
 
 if [[ $# -eq 0 ]]; then
   set -- /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config
