@@ -11,9 +11,10 @@ Control Plane entrypoint は bundled Git hook を root-owned な
 `pre-commit` は `main` / `master` への commit を拒否します。feature branch
 では current commit に staged された file だけを対象にします。
 bundled `postToolUse` linter
-(`${COPILOT_HOME:-$HOME/.copilot}/hooks/postToolUse/main`) を JSON stdin 付きで
-起動したあと、repo root に executable な `.github/git-hooks/pre-commit`
-があれば続けて実行します。どちらかが失敗したら commit を止めます。
+(`${COPILOT_HOME:-$HOME/.copilot}/hooks/postToolUse/main`) は、
+JSON stdin 付きで起動します。
+repo root に executable な `.github/git-hooks/pre-commit` があれば、
+その後に続けて実行します。どちらかが失敗したら commit を止めます。
 
 `pre-push` は Git が渡す stdin を調べて、`refs/heads/main` /
 `refs/heads/master` への push を拒否します。保護対象でない push では、

@@ -410,6 +410,7 @@ assert_block_contains "${publish_block}" 'Delete old GHCR package versions' 'pub
 assert_block_contains "${publish_block}" 'Delete old exec-pod GHCR package versions' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" 'publish_architecture_image downloaded-images/amd64/control-plane-images.tar.gz amd64' 'publish-architecture-images job block'
 assert_block_contains "${publish_block}" 'publish_architecture_image downloaded-images/arm64/control-plane-images.tar.gz arm64' 'publish-architecture-images job block'
+# shellcheck disable=SC2016
 assert_block_contains "${publish_block}" 'gzip -dc "${archive_path}" | docker load' 'publish-architecture-images job block'
 # shellcheck disable=SC2016
 assert_block_contains "${publish_block}" 'docker tag localhost/control-plane-exec-pod:test "${GHCR_EXEC_POD_IMAGE}:${GITHUB_SHA}-${image_arch}"' 'publish-architecture-images job block'
