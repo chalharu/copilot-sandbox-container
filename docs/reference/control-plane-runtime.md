@@ -175,7 +175,8 @@ Git 側では次を固定します。
 hook 側は `sh -c` / `bash -lc` を unwrap します。exec 側は `execve`、
 `execveat`、`posix_spawn`、`posix_spawnp` を監視します。Node.js の
 child-process や shell script 経由でも同じ policy を適用できます。
-pre-commit では bundled `postToolUse` linter を走らせます。必要なら repo ごとの
+pre-commit では current commit に staged された file だけへ bundled `postToolUse`
+linter を走らせます。必要なら repo ごとの
 `.github/git-hooks/pre-commit` / `.github/git-hooks/pre-push` も続けて実行します。
 
 bundled `preToolUse/exec-forward` は、

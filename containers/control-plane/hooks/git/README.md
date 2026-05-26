@@ -9,7 +9,7 @@ Control Plane entrypoint は bundled Git hook を root-owned な
 これにより、Control Plane 内の全リポジトリで共通の Git hook を自動的に使えます。
 
 `pre-commit` は `main` / `master` への commit を拒否します。feature branch
-では bundled `postToolUse` linter
+では current commit に staged された file だけを対象に、bundled `postToolUse` linter
 (`${COPILOT_HOME:-$HOME/.copilot}/hooks/postToolUse/main`) を JSON stdin 付きで
 起動します。その後、repo root に executable な `.github/git-hooks/pre-commit`
 があれば続けて実行します。どちらかが失敗したら commit を止めます。
