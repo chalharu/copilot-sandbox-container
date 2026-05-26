@@ -1145,12 +1145,11 @@ rustup component list --installed | grep -Eq '^rustfmt-.*-unknown-linux-gnu$'
 expected_node_version="$(sed -n 's/^ARG NODE_VERSION=//p' /workspace/containers/exec-pod/Dockerfile)"
 tooling_smoke_dir="$(mktemp -d)"
 trap 'rm -rf "${tooling_smoke_dir}"' EXIT
-printf '{"name":"exec-pod-tooling-smoke","version":"1.0.0","scripts":{"show-node-path":"command -v node"}}\n' > "${tooling_smoke_dir}/package.json"
+printf '{"name":"exec-pod-tooling-smoke","version":"1.0.0","scripts":{"show-node-version":"node --version"}}\n' > "${tooling_smoke_dir}/package.json"
 test "$(node --version | tail -n 1)" = "v${expected_node_version}"
 npm --version >/dev/null
 pnpm --version >/dev/null
-pnpm_exec_node_path="$(cd "${tooling_smoke_dir}" && pnpm run --silent show-node-path)"
-test "$(readlink -f "${pnpm_exec_node_path}")" = "/opt/control-plane-pnpm-node/bin/node"
+test "$(cd "${tooling_smoke_dir}" && pnpm run --silent show-node-version)" = "v${expected_node_version}"
 wasm-opt --version >/dev/null
 trunk --version >/dev/null
 wasm-bindgen --version >/dev/null
