@@ -141,6 +141,8 @@ assert_file_contains "${exec_pod_dockerfile}" "        libgtk-4-dev \\"
 assert_file_contains "${exec_pod_dockerfile}" "        libpango1.0-dev \\"
 assert_file_contains "${exec_pod_dockerfile}" "        libssl-dev \\"
 assert_file_contains "${exec_pod_dockerfile}" "        mold \\"
+assert_file_contains "${exec_pod_dockerfile}" "        nodejs \\"
+assert_file_contains "${exec_pod_dockerfile}" "        npm \\"
 assert_file_contains "${exec_pod_dockerfile}" "        pkg-config \\"
 assert_file_contains "${exec_pod_dockerfile}" "        pkgconf \\"
 assert_file_contains "${exec_pod_dockerfile}" "        python3 \\"
@@ -190,8 +192,27 @@ assert_file_contains "${exec_pod_dockerfile}" 'ARG NODE_LINUX_X64_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG NODE_LINUX_ARM64_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" "node_download_root=\"https://nodejs.org/dist/v\${NODE_VERSION}\""
 assert_file_contains "${exec_pod_dockerfile}" 'node_asset="node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"'
-assert_file_contains "${exec_pod_dockerfile}" 'ln -sfn "/opt/node-v${NODE_VERSION}-linux-${node_arch}/bin/node" /usr/local/bin/node'
-assert_file_contains "${exec_pod_dockerfile}" 'ln -sfn "/opt/node-v${NODE_VERSION}-linux-${node_arch}/bin/npm" /usr/local/bin/npm'
+assert_file_contains "${exec_pod_dockerfile}" 'install -d /opt/control-plane-pnpm-node/bin'
+assert_file_contains "${exec_pod_dockerfile}" 'tar -xJf "/tmp/${node_asset}" -C /opt/control-plane-pnpm-node/bin --strip-components=2 \'
+assert_file_contains "${exec_pod_dockerfile}" '"node-v${NODE_VERSION}-linux-${node_arch}/bin/node"'
+assert_file_contains "${exec_pod_dockerfile}" 'rm -f "/tmp/${node_asset}"'
+assert_file_contains "${exec_pod_dockerfile}" 'ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/local/bin/node'
+assert_file_contains "${exec_pod_dockerfile}" 'ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/local/bin/nodejs'
+assert_file_contains "${exec_pod_dockerfile}" 'npm_entry="$(readlink -f "$(command -v npm)")"'
+assert_file_contains "${exec_pod_dockerfile}" 'rm -f /usr/local/bin/npm'
+assert_file_contains "${exec_pod_dockerfile}" '/opt/control-plane-pnpm-node/bin/node \"${npm_entry}\" \"\$@\"'
+assert_file_contains "${exec_pod_dockerfile}" 'node --version >/dev/null'
+assert_file_contains "${exec_pod_dockerfile}" 'npm --version >/dev/null'
+assert_file_contains "${exec_pod_dockerfile}" 'apt-get purge -y --auto-remove xz-utils'
+assert_file_contains "${exec_pod_dockerfile}" 'pnpm_package_root="$(npm root --global)/pnpm"'
+assert_file_contains "${exec_pod_dockerfile}" "pnpm_entry=\"\${pnpm_package_root}/\$(jq -er '.bin.pnpm' \"\${pnpm_package_root}/package.json\")\""
+assert_file_contains "${exec_pod_dockerfile}" 'rm -f /usr/local/bin/pnpm'
+assert_file_contains "${exec_pod_dockerfile}" 'export PATH="/opt/control-plane-pnpm-node/bin:${PATH}"'
+assert_file_contains "${exec_pod_dockerfile}" '/opt/control-plane-pnpm-node/bin/node \"${pnpm_entry}\" \"\$@\"'
+assert_file_contains "${exec_pod_dockerfile}" "pnpx_relative=\"\$(jq -er '.bin.pnpx // empty' \"\${pnpm_package_root}/package.json\")\""
+assert_file_contains "${exec_pod_dockerfile}" 'pnpx_entry="${pnpm_package_root}/${pnpx_relative}"'
+assert_file_contains "${exec_pod_dockerfile}" 'rm -f /usr/local/bin/pnpx; \'
+assert_file_contains "${exec_pod_dockerfile}" '/opt/control-plane-pnpm-node/bin/node \"${pnpx_entry}\" \"\$@\"'
 assert_exact_following_lines \
   "${exec_pod_dockerfile}" \
   'FROM ${RUST_BASE_IMAGE}' \
@@ -228,8 +249,14 @@ assert_file_contains "${exec_pod_dockerfile}" 'ARG CHROME_FOR_TESTING_VERSION='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CHROME_FOR_TESTING_CHROME_LINUX64_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CHROME_FOR_TESTING_CHROMEDRIVER_LINUX64_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" 'browser_apt_packages=()'
-assert_file_contains "${exec_pod_dockerfile}" "        amd64) kubectl_arch=amd64; buildx_arch=amd64; node_arch=x64; node_sha256=\"\${NODE_LINUX_X64_SHA256}\"; chrome_install_mode=chrome-for-testing; chrome_for_testing_platform=linux64 ;; \\"
-assert_file_contains "${exec_pod_dockerfile}" "        arm64) kubectl_arch=arm64; buildx_arch=arm64; node_arch=arm64; node_sha256=\"\${NODE_LINUX_ARM64_SHA256}\"; chrome_install_mode=debian-chromium; browser_apt_packages=(chromium chromium-driver) ;; \\"
+assert_file_contains "${exec_pod_dockerfile}" '        amd64) \'
+assert_file_contains "${exec_pod_dockerfile}" '          node_arch=x64; \'
+assert_file_contains "${exec_pod_dockerfile}" '          node_sha256="${NODE_LINUX_X64_SHA256}"; \'
+assert_file_contains "${exec_pod_dockerfile}" '          chrome_for_testing_platform=linux64; \'
+assert_file_contains "${exec_pod_dockerfile}" '        arm64) \'
+assert_file_contains "${exec_pod_dockerfile}" '          node_arch=arm64; \'
+assert_file_contains "${exec_pod_dockerfile}" '          node_sha256="${NODE_LINUX_ARM64_SHA256}"; \'
+assert_file_contains "${exec_pod_dockerfile}" '          browser_apt_packages=(chromium chromium-driver); \'
 assert_file_contains "${exec_pod_dockerfile}" "        unzip \\"
 assert_file_contains "${exec_pod_dockerfile}" "        xdg-utils \\"
 assert_file_contains "${exec_pod_dockerfile}" "        fonts-liberation \\"

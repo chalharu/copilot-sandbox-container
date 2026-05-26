@@ -264,8 +264,22 @@ RUN apt-get update -o Acquire::Retries=3 \
     && browser_apt_packages=() \
     && arch="$(dpkg --print-architecture)" \
     && case "${arch}" in \
-        amd64) kubectl_arch=amd64; buildx_arch=amd64; node_arch=x64; node_sha256="${NODE_LINUX_X64_SHA256}"; chrome_install_mode=chrome-for-testing; chrome_for_testing_platform=linux64 ;; \
-        arm64) kubectl_arch=arm64; buildx_arch=arm64; node_arch=arm64; node_sha256="${NODE_LINUX_ARM64_SHA256}"; chrome_install_mode=debian-chromium; browser_apt_packages=(chromium chromium-driver) ;; \
+        amd64) \
+          kubectl_arch=amd64; \
+          buildx_arch=amd64; \
+          node_arch=x64; \
+          node_sha256="${NODE_LINUX_X64_SHA256}"; \
+          chrome_install_mode=chrome-for-testing; \
+          chrome_for_testing_platform=linux64; \
+          ;; \
+        arm64) \
+          kubectl_arch=arm64; \
+          buildx_arch=arm64; \
+          node_arch=arm64; \
+          node_sha256="${NODE_LINUX_ARM64_SHA256}"; \
+          chrome_install_mode=debian-chromium; \
+          browser_apt_packages=(chromium chromium-driver); \
+          ;; \
         *) printf 'Unsupported architecture for exec-pod tools: %s\n' "${arch}" >&2; exit 1 ;; \
     esac \
     && apt-get install -y --no-install-recommends \
@@ -284,6 +298,8 @@ RUN apt-get update -o Acquire::Retries=3 \
         libpango1.0-dev \
         libssl-dev \
         mold \
+        nodejs \
+        npm \
         openssh-client \
         pkg-config \
         pkgconf \
@@ -336,13 +352,23 @@ RUN apt-get update -o Acquire::Retries=3 \
     && node_asset="node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" \
     && curl -fsSLo "/tmp/${node_asset}" "${node_download_root}/${node_asset}" \
     && printf '%s  %s\n' "${node_sha256}" "/tmp/${node_asset}" | sha256sum -c - \
-    && tar -xJf "/tmp/${node_asset}" -C /opt \
-    && ln -sfn "/opt/node-v${NODE_VERSION}-linux-${node_arch}/bin/corepack" /usr/local/bin/corepack \
-    && ln -sfn "/opt/node-v${NODE_VERSION}-linux-${node_arch}/bin/node" /usr/local/bin/node \
-    && ln -sfn "/opt/node-v${NODE_VERSION}-linux-${node_arch}/bin/npm" /usr/local/bin/npm \
-    && ln -sfn "/opt/node-v${NODE_VERSION}-linux-${node_arch}/bin/npx" /usr/local/bin/npx \
+    && install -d /opt/control-plane-pnpm-node/bin \
+    && tar -xJf "/tmp/${node_asset}" -C /opt/control-plane-pnpm-node/bin --strip-components=2 \
+        "node-v${NODE_VERSION}-linux-${node_arch}/bin/node" \
+    && chmod 0755 /opt/control-plane-pnpm-node/bin/node \
+    && rm -f "/tmp/${node_asset}" \
+    && ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/local/bin/node \
+    && ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/local/bin/nodejs \
+    && npm_entry="$(readlink -f "$(command -v npm)")" \
+    && rm -f /usr/local/bin/npm \
+    && printf '%s\n' '#!/usr/bin/env bash' \
+        'export PATH="/opt/control-plane-pnpm-node/bin:${PATH}"' \
+        "exec /opt/control-plane-pnpm-node/bin/node \"${npm_entry}\" \"\$@\"" \
+        > /usr/local/bin/npm \
+    && chmod 0755 /usr/local/bin/npm \
     && node --version >/dev/null \
     && npm --version >/dev/null \
+    && apt-get purge -y --auto-remove xz-utils \
     && groupadd --gid "${CONTROL_PLANE_GID}" "${CONTROL_PLANE_USER}" \
     && useradd --uid "${CONTROL_PLANE_UID}" \
         --gid "${CONTROL_PLANE_USER}" \
@@ -374,6 +400,25 @@ RUN apt-get update -o Acquire::Retries=3 \
     && python3 -c 'import base64, hashlib, pathlib, sys; algorithm, expected = sys.argv[1].split("-", 1); actual = base64.b64encode(hashlib.new(algorithm, pathlib.Path(sys.argv[2]).read_bytes()).digest()).decode(); sys.exit(0 if actual == expected else f"pnpm integrity mismatch: expected {expected}, got {actual}")' "${pnpm_integrity}" /tmp/pnpm.tgz \
     && npm install --global "/tmp/pnpm.tgz" \
     && npm cache clean --force \
+    && pnpm_package_root="$(npm root --global)/pnpm" \
+    && pnpm_entry="${pnpm_package_root}/$(jq -er '.bin.pnpm' "${pnpm_package_root}/package.json")" \
+    && rm -f /usr/local/bin/pnpm \
+    && printf '%s\n' '#!/usr/bin/env bash' \
+        'export PATH="/opt/control-plane-pnpm-node/bin:${PATH}"' \
+        "exec /opt/control-plane-pnpm-node/bin/node \"${pnpm_entry}\" \"\$@\"" \
+        > /usr/local/bin/pnpm \
+    && chmod 0755 /usr/local/bin/pnpm \
+    && pnpx_relative="$(jq -er '.bin.pnpx // empty' "${pnpm_package_root}/package.json")" \
+    && if [ -n "${pnpx_relative}" ]; then \
+         pnpx_entry="${pnpm_package_root}/${pnpx_relative}"; \
+         rm -f /usr/local/bin/pnpx; \
+         printf '%s\n' '#!/usr/bin/env bash' \
+           'export PATH="/opt/control-plane-pnpm-node/bin:${PATH}"' \
+           "exec /opt/control-plane-pnpm-node/bin/node \"${pnpx_entry}\" \"\$@\"" \
+           > /usr/local/bin/pnpx; \
+         chmod 0755 /usr/local/bin/pnpx; \
+       fi \
+    && pnpm --version >/dev/null \
     && case "${chrome_install_mode}" in \
         chrome-for-testing) \
           curl -fsSLo /tmp/chrome-for-testing.json "https://googlechromelabs.github.io/chrome-for-testing/${CHROME_FOR_TESTING_VERSION}.json" \

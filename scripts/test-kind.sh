@@ -1142,9 +1142,14 @@ pkg-config --exists gtk+-3.0 gtk4 pango
 rustup target list --installed | grep -qx 'wasm32-unknown-unknown'
 rustup component list --installed | grep -Eq '^clippy-.*-unknown-linux-gnu$'
 rustup component list --installed | grep -Eq '^rustfmt-.*-unknown-linux-gnu$'
+expected_node_version="$(sed -n 's/^ARG NODE_VERSION=//p' /workspace/containers/exec-pod/Dockerfile)"
+tooling_smoke_dir="$(mktemp -d)"
+trap 'rm -rf "${tooling_smoke_dir}"' EXIT
+printf '{"name":"exec-pod-tooling-smoke","version":"1.0.0"}\n' > "${tooling_smoke_dir}/package.json"
 node --version >/dev/null
 npm --version >/dev/null
 pnpm --version >/dev/null
+test "$(cd "${tooling_smoke_dir}" && pnpm exec node --version | tail -n 1)" = "v${expected_node_version}"
 wasm-opt --version >/dev/null
 trunk --version >/dev/null
 wasm-bindgen --version >/dev/null
