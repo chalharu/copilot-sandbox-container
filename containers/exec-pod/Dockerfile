@@ -362,7 +362,7 @@ RUN apt-get update -o Acquire::Retries=3 \
     && npm_entry="$(readlink -f "$(command -v npm)")" \
     && rm -f /usr/local/bin/npm \
     && printf '%s\n' '#!/usr/bin/env bash' \
-        'export PATH="/opt/control-plane-pnpm-node/bin:${PATH}"' \
+        "export PATH=\"/opt/control-plane-pnpm-node/bin:\${PATH}\"" \
         "exec /opt/control-plane-pnpm-node/bin/node \"${npm_entry}\" \"\$@\"" \
         > /usr/local/bin/npm \
     && chmod 0755 /usr/local/bin/npm \
@@ -404,7 +404,7 @@ RUN apt-get update -o Acquire::Retries=3 \
     && pnpm_entry="${pnpm_package_root}/$(jq -er '.bin.pnpm' "${pnpm_package_root}/package.json")" \
     && rm -f /usr/local/bin/pnpm \
     && printf '%s\n' '#!/usr/bin/env bash' \
-        'export PATH="/opt/control-plane-pnpm-node/bin:${PATH}"' \
+        "export PATH=\"/opt/control-plane-pnpm-node/bin:\${PATH}\"" \
         "exec /opt/control-plane-pnpm-node/bin/node \"${pnpm_entry}\" \"\$@\"" \
         > /usr/local/bin/pnpm \
     && chmod 0755 /usr/local/bin/pnpm \
@@ -413,7 +413,7 @@ RUN apt-get update -o Acquire::Retries=3 \
          pnpx_entry="${pnpm_package_root}/${pnpx_relative}"; \
          rm -f /usr/local/bin/pnpx; \
          printf '%s\n' '#!/usr/bin/env bash' \
-           'export PATH="/opt/control-plane-pnpm-node/bin:${PATH}"' \
+           "export PATH=\"/opt/control-plane-pnpm-node/bin:\${PATH}\"" \
            "exec /opt/control-plane-pnpm-node/bin/node \"${pnpx_entry}\" \"\$@\"" \
            > /usr/local/bin/pnpx; \
          chmod 0755 /usr/local/bin/pnpx; \
