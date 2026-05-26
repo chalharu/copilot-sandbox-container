@@ -1146,10 +1146,10 @@ expected_node_version="$(sed -n 's/^ARG NODE_VERSION=//p' /workspace/containers/
 tooling_smoke_dir="$(mktemp -d)"
 trap 'rm -rf "${tooling_smoke_dir}"' EXIT
 printf '{"name":"exec-pod-tooling-smoke","version":"1.0.0"}\n' > "${tooling_smoke_dir}/package.json"
-node --version >/dev/null
+test "$(node --version | tail -n 1)" = "v${expected_node_version}"
 npm --version >/dev/null
 pnpm --version >/dev/null
-test "$(cd "${tooling_smoke_dir}" && pnpm exec node --version | tail -n 1)" = "v${expected_node_version}"
+test "$(cd "${tooling_smoke_dir}" && pnpm exec sh -c 'command -v node' | tail -n 1)" = "/opt/control-plane-pnpm-node/bin/node"
 wasm-opt --version >/dev/null
 trunk --version >/dev/null
 wasm-bindgen --version >/dev/null
