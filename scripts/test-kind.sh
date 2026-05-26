@@ -1124,7 +1124,8 @@ test -z "$(sed -n '2p' /workspace/k8s-fast-exec-blocked-stdout.txt)"
 grep -Fq 'Direct reads of ~/.config/gh/hosts.yml are blocked by control-plane policy.' \
   /workspace/k8s-fast-exec-blocked-stderr.txt
 tooling_command=$(cat <<'INNER'
-set -euo pipefail
+set -Eeuo pipefail
+trap 'printf "tooling smoke failed while running: %s\n" "${BASH_COMMAND}" >&2' ERR
 command -v node >/dev/null
 command -v npm >/dev/null
 command -v pnpm >/dev/null
@@ -1152,11 +1153,13 @@ npm --version >/dev/null
 pnpm --version >/dev/null
 pnpm_child_node_output_file="${tooling_smoke_dir}/pnpm-child-node-output.txt"
 if ! (cd "${tooling_smoke_dir}" && pnpm --reporter=silent exec node --version > "${pnpm_child_node_output_file}" 2>&1); then
-  printf 'pnpm exec node --version failed:\n%s\n' "$(cat "${pnpm_child_node_output_file}")" >&2
+  printf 'pnpm exec node --version failed:\n' >&2
+  cat "${pnpm_child_node_output_file}" >&2 || true
   exit 1
 fi
 if ! tr -d '\r' < "${pnpm_child_node_output_file}" | grep -Fqx "v${expected_node_version}"; then
-  printf 'unexpected pnpm child node output:\n%s\n' "$(cat "${pnpm_child_node_output_file}")" >&2
+  printf 'unexpected pnpm child node output:\n' >&2
+  cat "${pnpm_child_node_output_file}" >&2 || true
   exit 1
 fi
 wasm-opt --version >/dev/null
