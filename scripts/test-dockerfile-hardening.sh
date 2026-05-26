@@ -198,6 +198,8 @@ assert_file_contains "${exec_pod_dockerfile}" "\"node-v\${NODE_VERSION}-linux-\$
 assert_file_contains "${exec_pod_dockerfile}" "rm -f \"/tmp/\${node_asset}\""
 assert_file_contains "${exec_pod_dockerfile}" 'ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/local/bin/node'
 assert_file_contains "${exec_pod_dockerfile}" 'ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/local/bin/nodejs'
+assert_file_contains "${exec_pod_dockerfile}" 'ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/bin/node'
+assert_file_contains "${exec_pod_dockerfile}" 'ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/bin/nodejs'
 assert_file_contains "${exec_pod_dockerfile}" "npm_entry=\"\$(readlink -f \"\$(command -v npm)\")\""
 assert_file_contains "${exec_pod_dockerfile}" 'rm -f /usr/local/bin/npm'
 assert_file_contains "${exec_pod_dockerfile}" "/opt/control-plane-pnpm-node/bin/node \\\"\${npm_entry}\\\" \\\"\\\$@\\\""

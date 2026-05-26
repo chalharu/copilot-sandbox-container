@@ -359,6 +359,8 @@ RUN apt-get update -o Acquire::Retries=3 \
     && rm -f "/tmp/${node_asset}" \
     && ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/local/bin/node \
     && ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/local/bin/nodejs \
+    && ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/bin/node \
+    && ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/bin/nodejs \
     && npm_entry="$(readlink -f "$(command -v npm)")" \
     && rm -f /usr/local/bin/npm \
     && printf '%s\n' '#!/usr/bin/env bash' \
