@@ -649,7 +649,7 @@ spec:
       initContainers:
         - name: init-state-dirs
           # renovate: datasource=docker depName=busybox versioning=docker
-          image: busybox:1.37.0@sha256:1487d0af5f52b4ba31c7e465126ee2123fe3f2305d638e7827681e7cf6c83d5e
+          image: busybox:1.37.0@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028
           command:
             - sh
             - -c
@@ -701,7 +701,7 @@ spec:
               mountPath: /cache
         - name: init-state
           # renovate: datasource=docker depName=busybox versioning=docker
-          image: busybox:1.37.0@sha256:1487d0af5f52b4ba31c7e465126ee2123fe3f2305d638e7827681e7cf6c83d5e
+          image: busybox:1.37.0@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028
           command:
             - sh
             - -c
