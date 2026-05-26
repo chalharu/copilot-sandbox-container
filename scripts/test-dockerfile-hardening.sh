@@ -187,15 +187,16 @@ assert_file_contains "${exec_pod_dockerfile}" "taplo_download_root=\"https://git
 assert_file_contains "${exec_pod_dockerfile}" 'taplo_asset="taplo-linux-x86_64.gz"'
 assert_file_contains "${exec_pod_dockerfile}" 'taplo_asset="taplo-linux-aarch64.gz"'
 assert_file_contains "${exec_pod_dockerfile}" "gzip -dc \"/tmp/\${taplo_asset}\" > /opt/control-plane-tools/bin/taplo"
+assert_file_contains "${exec_pod_dockerfile}" '# renovate: datasource=node-version depName=node'
 assert_file_contains "${exec_pod_dockerfile}" 'ARG NODE_VERSION='
-assert_file_contains "${exec_pod_dockerfile}" 'ARG NODE_LINUX_X64_SHA256='
-assert_file_contains "${exec_pod_dockerfile}" 'ARG NODE_LINUX_ARM64_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" "node_download_root=\"https://nodejs.org/dist/v\${NODE_VERSION}\""
 assert_file_contains "${exec_pod_dockerfile}" "node_asset=\"node-v\${NODE_VERSION}-linux-\${node_arch}.tar.xz\""
+assert_file_contains "${exec_pod_dockerfile}" 'curl -fsSLo /tmp/node-SHASUMS256.txt "${node_download_root}/SHASUMS256.txt"'
+assert_file_contains "${exec_pod_dockerfile}" "awk -v asset=\"\${node_asset}\" '\$2 == asset { print \$1 \"  /tmp/\" asset; found=1 } END { exit(found ? 0 : 1) }' /tmp/node-SHASUMS256.txt | sha256sum -c -"
 assert_file_contains "${exec_pod_dockerfile}" 'install -d /opt/control-plane-pnpm-node/bin'
 assert_file_contains "${exec_pod_dockerfile}" "tar -xJf \"/tmp/\${node_asset}\" -C /opt/control-plane-pnpm-node/bin --strip-components=2 \\"
 assert_file_contains "${exec_pod_dockerfile}" "\"node-v\${NODE_VERSION}-linux-\${node_arch}/bin/node\""
-assert_file_contains "${exec_pod_dockerfile}" "rm -f \"/tmp/\${node_asset}\""
+assert_file_contains "${exec_pod_dockerfile}" "rm -f \"/tmp/\${node_asset}\" /tmp/node-SHASUMS256.txt"
 assert_file_contains "${exec_pod_dockerfile}" 'ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/local/bin/node'
 assert_file_contains "${exec_pod_dockerfile}" 'ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/local/bin/nodejs'
 assert_file_contains "${exec_pod_dockerfile}" 'ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/bin/node'
@@ -219,8 +220,8 @@ assert_exact_following_lines \
   "${exec_pod_dockerfile}" \
   "FROM \${RUST_BASE_IMAGE}" \
   'ARG NODE_VERSION' \
-  'ARG NODE_LINUX_X64_SHA256' \
-  'ARG NODE_LINUX_ARM64_SHA256'
+  'ARG KUBECTL_VERSION' \
+  'ARG DOCKER_BUILDX_VERSION'
 assert_file_contains "${exec_pod_dockerfile}" 'LIZARD_VIRTUAL_ENV=/opt/lizard'
 assert_file_contains "${exec_pod_dockerfile}" 'rustup target add wasm32-unknown-unknown'
 assert_file_contains "${exec_pod_dockerfile}" 'rustup component add clippy llvm-tools-preview rustfmt'
@@ -253,11 +254,9 @@ assert_file_contains "${exec_pod_dockerfile}" 'ARG CHROME_FOR_TESTING_CHROMEDRIV
 assert_file_contains "${exec_pod_dockerfile}" 'browser_apt_packages=()'
 assert_file_contains "${exec_pod_dockerfile}" "        amd64) \\"
 assert_file_contains "${exec_pod_dockerfile}" "          node_arch=x64; \\"
-assert_file_contains "${exec_pod_dockerfile}" "          node_sha256=\"\${NODE_LINUX_X64_SHA256}\"; \\"
 assert_file_contains "${exec_pod_dockerfile}" "          chrome_for_testing_platform=linux64; \\"
 assert_file_contains "${exec_pod_dockerfile}" "        arm64) \\"
 assert_file_contains "${exec_pod_dockerfile}" "          node_arch=arm64; \\"
-assert_file_contains "${exec_pod_dockerfile}" "          node_sha256=\"\${NODE_LINUX_ARM64_SHA256}\"; \\"
 assert_file_contains "${exec_pod_dockerfile}" "          browser_apt_packages=(chromium chromium-driver); \\"
 assert_file_contains "${exec_pod_dockerfile}" "        unzip \\"
 assert_file_contains "${exec_pod_dockerfile}" "        xdg-utils \\"
