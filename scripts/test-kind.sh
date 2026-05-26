@@ -1146,10 +1146,15 @@ expected_node_version="$(sed -n 's/^ARG NODE_VERSION=//p' /workspace/containers/
 tooling_smoke_dir="$(mktemp -d)"
 trap 'rm -rf "${tooling_smoke_dir}"' EXIT
 printf '{"name":"exec-pod-tooling-smoke","version":"1.0.0","scripts":{"show-node-version":"node --version"}}\n' > "${tooling_smoke_dir}/package.json"
-test "$(node --version | tail -n 1)" = "v${expected_node_version}"
+actual_node_version="$(node --version | tr -d '\r')"
+test "${actual_node_version}" = "v${expected_node_version}"
 npm --version >/dev/null
 pnpm --version >/dev/null
-test "$(cd "${tooling_smoke_dir}" && pnpm run --silent show-node-version | tail -n 1)" = "v${expected_node_version}"
+pnpm_child_node_output="$(cd "${tooling_smoke_dir}" && pnpm run --silent show-node-version)"
+if ! printf '%s\n' "${pnpm_child_node_output}" | tr -d '\r' | grep -Fqx "v${expected_node_version}"; then
+  printf 'unexpected pnpm child node output:\n%s\n' "${pnpm_child_node_output}" >&2
+  exit 1
+fi
 wasm-opt --version >/dev/null
 trunk --version >/dev/null
 wasm-bindgen --version >/dev/null
