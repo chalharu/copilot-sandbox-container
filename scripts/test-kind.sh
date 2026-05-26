@@ -1149,7 +1149,7 @@ printf '{"name":"exec-pod-tooling-smoke","version":"1.0.0","scripts":{"show-node
 test "$(node --version | tail -n 1)" = "v${expected_node_version}"
 npm --version >/dev/null
 pnpm --version >/dev/null
-test "$(cd "${tooling_smoke_dir}" && pnpm run --silent show-node-version)" = "v${expected_node_version}"
+test "$(cd "${tooling_smoke_dir}" && pnpm run --silent show-node-version | tail -n 1)" = "v${expected_node_version}"
 wasm-opt --version >/dev/null
 trunk --version >/dev/null
 wasm-bindgen --version >/dev/null
