@@ -1150,9 +1150,13 @@ actual_node_version="$(node --version | tr -d '\r')"
 test "${actual_node_version}" = "v${expected_node_version}"
 npm --version >/dev/null
 pnpm --version >/dev/null
-pnpm_child_node_output="$(cd "${tooling_smoke_dir}" && pnpm run --silent show-node-version)"
-if ! printf '%s\n' "${pnpm_child_node_output}" | tr -d '\r' | grep -Fqx "v${expected_node_version}"; then
-  printf 'unexpected pnpm child node output:\n%s\n' "${pnpm_child_node_output}" >&2
+pnpm_child_node_output_file="${tooling_smoke_dir}/pnpm-child-node-output.txt"
+if ! (cd "${tooling_smoke_dir}" && pnpm --reporter=silent exec node --version > "${pnpm_child_node_output_file}" 2>&1); then
+  printf 'pnpm exec node --version failed:\n%s\n' "$(cat "${pnpm_child_node_output_file}")" >&2
+  exit 1
+fi
+if ! tr -d '\r' < "${pnpm_child_node_output_file}" | grep -Fqx "v${expected_node_version}"; then
+  printf 'unexpected pnpm child node output:\n%s\n' "$(cat "${pnpm_child_node_output_file}")" >&2
   exit 1
 fi
 wasm-opt --version >/dev/null
