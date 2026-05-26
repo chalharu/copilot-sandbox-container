@@ -20,7 +20,7 @@ Execute repository changes through a full delivery loop instead of stopping at a
    - If an earlier design or research artifact already exists, validate and reuse it instead of restarting from scratch.
    - If the environment also provides a dedicated design-only agent, reserve it for standalone investigation-only requests.
    - Use that agent only when the request stops before implementation.
-   - Do not skip this by immediately handing work to an implementation-focused sub-agent.
+   - Do not skip this by immediately handing off implementation before you understand the change.
    - Map the repository, prior art, and constraints that shape the change.
    - Read the relevant specifications together with the user's request.
    - Consult official references when requirements or expected behavior are unclear.
@@ -28,8 +28,8 @@ Execute repository changes through a full delivery loop instead of stopping at a
 
 3. Delegate with sub-agents when they help.
    - After this skill completes the initial investigation, use exploration agents for deeper file-level research when they help.
-   - Choose an appropriate implementation sub-agent from the available agents.
-   - If one is available and relevant, prefer an implementation-focused agent and use task agents for command-heavy edits and validation loops.
+   - Choose the appropriate available agent for the work at hand.
+   - Use task agents for command-heavy edits and validation loops when they help.
    - Use a critical review agent after local validation.
    - Ask agents to do the work, not only to advise, and batch related questions into one prompt.
 
@@ -45,7 +45,7 @@ Execute repository changes through a full delivery loop instead of stopping at a
    - When repo-local supplemental skills exist, read them before choosing exact commands.
 
 6. Treat review as a blocking loop.
-   - Run a critical review after local validation, using `review-coordinator-agent` when it is available.
+   - Run a critical review after local validation.
    - Fix every actionable issue, including small but real ones.
    - After fixes, rerun the affected validation and fall back to the full baseline when the blast radius is unclear.
 
