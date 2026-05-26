@@ -55,7 +55,7 @@ pub fn list_dirty_files(repo_root: &Path) -> Result<Vec<PathBuf>, String> {
     let mut seen = HashSet::new();
     let mut files = Vec::new();
     for entry in statuses.iter() {
-        let Some(relative_path) = entry.path() else {
+        let Ok(relative_path) = entry.path() else {
             continue;
         };
         if !seen.insert(relative_path.to_string()) {
@@ -79,10 +79,10 @@ pub fn list_remotes(repo_root: &Path) -> Vec<RemoteInfo> {
 
     let mut remotes = remote_names
         .iter()
-        .flatten()
         .filter_map(|name| {
+            let name = name.ok().flatten()?;
             let remote = repo.find_remote(name).ok()?;
-            let url = remote.url()?.to_string();
+            let url = remote.url().ok()?.to_string();
             Some(RemoteInfo {
                 name: name.to_string(),
                 url,
@@ -105,4 +105,55 @@ fn repo_root_from_repository(repo: &Repository) -> Option<PathBuf> {
 
 fn normalize_path(path: &Path) -> PathBuf {
     path.components().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RemoteInfo, get_repo_root, list_dirty_files, list_remotes};
+    use git2::Repository;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn list_dirty_files_includes_untracked_files() {
+        let temp_dir = tempdir().expect("create temp dir");
+        let repo = Repository::init(temp_dir.path()).expect("init repo");
+        let nested_dir = temp_dir.path().join("nested");
+        let file_path = nested_dir.join("dirty.txt");
+
+        fs::create_dir_all(&nested_dir).expect("create nested dir");
+        fs::write(&file_path, "dirty").expect("write dirty file");
+
+        let dirty_files = list_dirty_files(temp_dir.path()).expect("list dirty files");
+
+        assert_eq!(get_repo_root(&nested_dir), temp_dir.path());
+        assert!(repo.workdir().is_some());
+        assert_eq!(dirty_files, vec![file_path]);
+    }
+
+    #[test]
+    fn list_remotes_returns_named_urls_in_sorted_order() {
+        let temp_dir = tempdir().expect("create temp dir");
+        let repo = Repository::init(temp_dir.path()).expect("init repo");
+        repo.remote("upstream", "https://example.com/upstream.git")
+            .expect("add upstream remote");
+        repo.remote("origin", "https://example.com/origin.git")
+            .expect("add origin remote");
+
+        let remotes = list_remotes(temp_dir.path());
+
+        assert_eq!(
+            remotes,
+            vec![
+                RemoteInfo {
+                    name: "origin".to_string(),
+                    url: "https://example.com/origin.git".to_string(),
+                },
+                RemoteInfo {
+                    name: "upstream".to_string(),
+                    url: "https://example.com/upstream.git".to_string(),
+                },
+            ]
+        );
+    }
 }
