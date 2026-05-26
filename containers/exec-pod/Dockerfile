@@ -370,7 +370,6 @@ RUN apt-get update -o Acquire::Retries=3 \
     && chmod 0755 /usr/local/bin/npm \
     && node --version >/dev/null \
     && npm --version >/dev/null \
-    && apt-get purge -y --auto-remove xz-utils \
     && groupadd --gid "${CONTROL_PLANE_GID}" "${CONTROL_PLANE_USER}" \
     && useradd --uid "${CONTROL_PLANE_UID}" \
         --gid "${CONTROL_PLANE_USER}" \

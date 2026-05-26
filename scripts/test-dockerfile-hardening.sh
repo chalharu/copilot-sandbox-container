@@ -205,7 +205,7 @@ assert_file_contains "${exec_pod_dockerfile}" 'rm -f /usr/local/bin/npm'
 assert_file_contains "${exec_pod_dockerfile}" "/opt/control-plane-pnpm-node/bin/node \\\"\${npm_entry}\\\" \\\"\\\$@\\\""
 assert_file_contains "${exec_pod_dockerfile}" 'node --version >/dev/null'
 assert_file_contains "${exec_pod_dockerfile}" 'npm --version >/dev/null'
-assert_file_contains "${exec_pod_dockerfile}" 'apt-get purge -y --auto-remove xz-utils'
+assert_file_not_matches "${exec_pod_dockerfile}" 'apt-get purge -y --auto-remove xz-utils'
 assert_file_contains "${exec_pod_dockerfile}" "pnpm_package_root=\"\$(npm root --global)/pnpm\""
 assert_file_contains "${exec_pod_dockerfile}" "pnpm_entry=\"\${pnpm_package_root}/\$(jq -er '.bin.pnpm' \"\${pnpm_package_root}/package.json\")\""
 assert_file_contains "${exec_pod_dockerfile}" 'rm -f /usr/local/bin/pnpm'
