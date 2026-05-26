@@ -24,6 +24,50 @@ assert_file_not_matches() {
   fi
 }
 
+assert_exact_following_lines() {
+  local path="$1"
+  local anchor="$2"
+  local first_expected="$3"
+  local second_expected="$4"
+  local third_expected="$5"
+
+  awk \
+    -v anchor="${anchor}" \
+    -v first_expected="${first_expected}" \
+    -v second_expected="${second_expected}" \
+    -v third_expected="${third_expected}" '
+      $0 == anchor {
+        if (getline <= 0) {
+          next
+        }
+        first_line = $0
+        if (getline <= 0) {
+          next
+        }
+        second_line = $0
+        if (getline <= 0) {
+          next
+        }
+        third_line = $0
+        if (first_line == first_expected && second_line == second_expected && third_line == third_expected) {
+          found = 1
+          exit 0
+        }
+      }
+      END {
+        exit(found ? 0 : 1)
+      }
+    ' "${path}" || {
+      printf 'Expected %s to contain %s, %s, and %s immediately after %s\n' \
+        "${path}" \
+        "${first_expected}" \
+        "${second_expected}" \
+        "${third_expected}" \
+        "${anchor}" >&2
+      exit 1
+    }
+}
+
 assert_path_absent() {
   local path="$1"
 
@@ -97,8 +141,6 @@ assert_file_contains "${exec_pod_dockerfile}" "        libgtk-4-dev \\"
 assert_file_contains "${exec_pod_dockerfile}" "        libpango1.0-dev \\"
 assert_file_contains "${exec_pod_dockerfile}" "        libssl-dev \\"
 assert_file_contains "${exec_pod_dockerfile}" "        mold \\"
-assert_file_contains "${exec_pod_dockerfile}" "        nodejs \\"
-assert_file_contains "${exec_pod_dockerfile}" "        npm \\"
 assert_file_contains "${exec_pod_dockerfile}" "        pkg-config \\"
 assert_file_contains "${exec_pod_dockerfile}" "        pkgconf \\"
 assert_file_contains "${exec_pod_dockerfile}" "        python3 \\"
@@ -108,6 +150,7 @@ assert_file_contains "${exec_pod_dockerfile}" "        python3-venv \\"
 assert_file_contains "${exec_pod_dockerfile}" "        ripgrep \\"
 assert_file_contains "${exec_pod_dockerfile}" "        sccache \\"
 assert_file_contains "${exec_pod_dockerfile}" "        sudo \\"
+assert_file_contains "${exec_pod_dockerfile}" "        xz-utils \\"
 assert_file_contains "${exec_pod_dockerfile}" "        yamllint \\"
 assert_file_contains "${exec_pod_dockerfile}" "cargo_chef_download_root=\"https://github.com/LukeMathWalker/cargo-chef/releases/download/v\${CARGO_CHEF_VERSION}\""
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CARGO_CHEF_X86_64_UNKNOWN_LINUX_GNU_SHA256='
@@ -142,6 +185,19 @@ assert_file_contains "${exec_pod_dockerfile}" "taplo_download_root=\"https://git
 assert_file_contains "${exec_pod_dockerfile}" 'taplo_asset="taplo-linux-x86_64.gz"'
 assert_file_contains "${exec_pod_dockerfile}" 'taplo_asset="taplo-linux-aarch64.gz"'
 assert_file_contains "${exec_pod_dockerfile}" "gzip -dc \"/tmp/\${taplo_asset}\" > /opt/control-plane-tools/bin/taplo"
+assert_file_contains "${exec_pod_dockerfile}" 'ARG NODE_VERSION='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG NODE_LINUX_X64_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" 'ARG NODE_LINUX_ARM64_SHA256='
+assert_file_contains "${exec_pod_dockerfile}" "node_download_root=\"https://nodejs.org/dist/v\${NODE_VERSION}\""
+assert_file_contains "${exec_pod_dockerfile}" 'node_asset="node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"'
+assert_file_contains "${exec_pod_dockerfile}" 'ln -sfn "/opt/node-v${NODE_VERSION}-linux-${node_arch}/bin/node" /usr/local/bin/node'
+assert_file_contains "${exec_pod_dockerfile}" 'ln -sfn "/opt/node-v${NODE_VERSION}-linux-${node_arch}/bin/npm" /usr/local/bin/npm'
+assert_exact_following_lines \
+  "${exec_pod_dockerfile}" \
+  'FROM ${RUST_BASE_IMAGE}' \
+  'ARG NODE_VERSION' \
+  'ARG NODE_LINUX_X64_SHA256' \
+  'ARG NODE_LINUX_ARM64_SHA256'
 assert_file_contains "${exec_pod_dockerfile}" 'LIZARD_VIRTUAL_ENV=/opt/lizard'
 assert_file_contains "${exec_pod_dockerfile}" 'rustup target add wasm32-unknown-unknown'
 assert_file_contains "${exec_pod_dockerfile}" 'rustup component add clippy llvm-tools-preview rustfmt'
@@ -172,8 +228,8 @@ assert_file_contains "${exec_pod_dockerfile}" 'ARG CHROME_FOR_TESTING_VERSION='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CHROME_FOR_TESTING_CHROME_LINUX64_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" 'ARG CHROME_FOR_TESTING_CHROMEDRIVER_LINUX64_SHA256='
 assert_file_contains "${exec_pod_dockerfile}" 'browser_apt_packages=()'
-assert_file_contains "${exec_pod_dockerfile}" "        amd64) kubectl_arch=amd64; buildx_arch=amd64; chrome_install_mode=chrome-for-testing; chrome_for_testing_platform=linux64 ;; \\"
-assert_file_contains "${exec_pod_dockerfile}" "        arm64) kubectl_arch=arm64; buildx_arch=arm64; chrome_install_mode=debian-chromium; browser_apt_packages=(chromium chromium-driver) ;; \\"
+assert_file_contains "${exec_pod_dockerfile}" "        amd64) kubectl_arch=amd64; buildx_arch=amd64; node_arch=x64; node_sha256=\"\${NODE_LINUX_X64_SHA256}\"; chrome_install_mode=chrome-for-testing; chrome_for_testing_platform=linux64 ;; \\"
+assert_file_contains "${exec_pod_dockerfile}" "        arm64) kubectl_arch=arm64; buildx_arch=arm64; node_arch=arm64; node_sha256=\"\${NODE_LINUX_ARM64_SHA256}\"; chrome_install_mode=debian-chromium; browser_apt_packages=(chromium chromium-driver) ;; \\"
 assert_file_contains "${exec_pod_dockerfile}" "        unzip \\"
 assert_file_contains "${exec_pod_dockerfile}" "        xdg-utils \\"
 assert_file_contains "${exec_pod_dockerfile}" "        fonts-liberation \\"

@@ -27,6 +27,10 @@ ARG CARGO_LLVM_COV_AARCH64_UNKNOWN_LINUX_GNU_SHA256=8248a6d5dcb47307c2ef6d5815f9
 ARG TAPLO_CLI_VERSION=0.10.0
 ARG TAPLO_LINUX_X86_64_SHA256=8fe196b894ccf9072f98d4e1013a180306e17d244830b03986ee5e8eabeb6156
 ARG TAPLO_LINUX_AARCH64_SHA256=033681d01eec8376c3fd38fa3703c79316f5e14bb013d859943b60a07bccdcc3
+# Keep the Node.js version and Linux digests in sync when updating them.
+ARG NODE_VERSION=22.21.1
+ARG NODE_LINUX_X64_SHA256=680d3f30b24a7ff24b98db5e96f294c0070f8f9078df658da1bce1b9c9873c88
+ARG NODE_LINUX_ARM64_SHA256=e660365729b434af422bcd2e8e14228637ecf24a1de2cd7c916ad48f2a0521e1
 # renovate: datasource=npm depName=pnpm
 ARG PNPM_VERSION=11.3.0
 # renovate: datasource=pypi depName=lizard
@@ -229,7 +233,9 @@ RUN mkdir -p /opt/control-plane-tools/bin \
     && chmod 0755 /opt/control-plane-tools/bin/taplo
 
 FROM ${RUST_BASE_IMAGE}
-
+ARG NODE_VERSION
+ARG NODE_LINUX_X64_SHA256
+ARG NODE_LINUX_ARM64_SHA256
 ARG KUBECTL_VERSION
 ARG DOCKER_BUILDX_VERSION
 ARG PNPM_VERSION
@@ -258,8 +264,8 @@ RUN apt-get update -o Acquire::Retries=3 \
     && browser_apt_packages=() \
     && arch="$(dpkg --print-architecture)" \
     && case "${arch}" in \
-        amd64) kubectl_arch=amd64; buildx_arch=amd64; chrome_install_mode=chrome-for-testing; chrome_for_testing_platform=linux64 ;; \
-        arm64) kubectl_arch=arm64; buildx_arch=arm64; chrome_install_mode=debian-chromium; browser_apt_packages=(chromium chromium-driver) ;; \
+        amd64) kubectl_arch=amd64; buildx_arch=amd64; node_arch=x64; node_sha256="${NODE_LINUX_X64_SHA256}"; chrome_install_mode=chrome-for-testing; chrome_for_testing_platform=linux64 ;; \
+        arm64) kubectl_arch=arm64; buildx_arch=arm64; node_arch=arm64; node_sha256="${NODE_LINUX_ARM64_SHA256}"; chrome_install_mode=debian-chromium; browser_apt_packages=(chromium chromium-driver) ;; \
         *) printf 'Unsupported architecture for exec-pod tools: %s\n' "${arch}" >&2; exit 1 ;; \
     esac \
     && apt-get install -y --no-install-recommends \
@@ -278,8 +284,6 @@ RUN apt-get update -o Acquire::Retries=3 \
         libpango1.0-dev \
         libssl-dev \
         mold \
-        nodejs \
-        npm \
         openssh-client \
         pkg-config \
         pkgconf \
@@ -291,6 +295,7 @@ RUN apt-get update -o Acquire::Retries=3 \
         sccache \
         sudo \
         unzip \
+        xz-utils \
         xdg-utils \
         yamllint \
         fonts-liberation \
@@ -327,6 +332,17 @@ RUN apt-get update -o Acquire::Retries=3 \
     && curl -fsSLo /tmp/buildx-checksums.txt "${buildx_download_root}/checksums.txt" \
     && awk -v asset="${buildx_asset}" '$2 == asset || $2 == "*" asset { print $1 "  /tmp/" asset; found=1 } END { exit(found ? 0 : 1) }' /tmp/buildx-checksums.txt | sha256sum -c - \
     && install -D -m 0755 "/tmp/${buildx_asset}" /usr/libexec/docker/cli-plugins/docker-buildx \
+    && node_download_root="https://nodejs.org/dist/v${NODE_VERSION}" \
+    && node_asset="node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" \
+    && curl -fsSLo "/tmp/${node_asset}" "${node_download_root}/${node_asset}" \
+    && printf '%s  %s\n' "${node_sha256}" "/tmp/${node_asset}" | sha256sum -c - \
+    && tar -xJf "/tmp/${node_asset}" -C /opt \
+    && ln -sfn "/opt/node-v${NODE_VERSION}-linux-${node_arch}/bin/corepack" /usr/local/bin/corepack \
+    && ln -sfn "/opt/node-v${NODE_VERSION}-linux-${node_arch}/bin/node" /usr/local/bin/node \
+    && ln -sfn "/opt/node-v${NODE_VERSION}-linux-${node_arch}/bin/npm" /usr/local/bin/npm \
+    && ln -sfn "/opt/node-v${NODE_VERSION}-linux-${node_arch}/bin/npx" /usr/local/bin/npx \
+    && node --version >/dev/null \
+    && npm --version >/dev/null \
     && groupadd --gid "${CONTROL_PLANE_GID}" "${CONTROL_PLANE_USER}" \
     && useradd --uid "${CONTROL_PLANE_UID}" \
         --gid "${CONTROL_PLANE_USER}" \
