@@ -216,6 +216,7 @@ fi
 assert_block_contains "${integration_amd64_block}" 'name: Integration Images (x64)' 'integration-amd64 job block'
 assert_block_contains "${integration_amd64_block}" 'runs-on: ubuntu-24.04' 'integration-amd64 job block'
 assert_block_contains "${integration_amd64_block}" 'path: /tmp/control-plane-buildx-cache-amd64' 'integration-amd64 job block'
+# shellcheck disable=SC2016
 assert_block_contains "${integration_amd64_block}" '${{ runner.os }}-amd64-control-plane-buildx-min-' 'integration-amd64 job block'
 assert_block_contains "${integration_amd64_block}" 'CONTROL_PLANE_BUILDX_CACHE_ROOT: /tmp/control-plane-buildx-cache-amd64' 'integration-amd64 job block'
 assert_block_contains "${integration_amd64_block}" 'CONTROL_PLANE_BUILDX_CACHE_MODE: min' 'integration-amd64 job block'
@@ -227,6 +228,7 @@ assert_block_contains "${integration_amd64_block}" 'driver: docker-container' 'i
 assert_block_contains "${integration_arm64_block}" 'name: Integration Images (aarch64)' 'integration-arm64 job block'
 assert_block_contains "${integration_arm64_block}" 'runs-on: ubuntu-24.04-arm' 'integration-arm64 job block'
 assert_block_contains "${integration_arm64_block}" 'path: /tmp/control-plane-buildx-cache-arm64' 'integration-arm64 job block'
+# shellcheck disable=SC2016
 assert_block_contains "${integration_arm64_block}" '${{ runner.os }}-arm64-control-plane-buildx-min-' 'integration-arm64 job block'
 assert_block_contains "${integration_arm64_block}" 'CONTROL_PLANE_BUILDX_CACHE_ROOT: /tmp/control-plane-buildx-cache-arm64' 'integration-arm64 job block'
 assert_block_contains "${integration_arm64_block}" 'CONTROL_PLANE_BUILDX_CACHE_MODE: min' 'integration-arm64 job block'
@@ -269,6 +271,7 @@ assert_block_contains_one_of \
 
 # shellcheck disable=SC2016
 assert_block_contains "${integration_regressions_block}" 'path: /tmp/control-plane-buildx-cache-amd64' 'integration-regressions job block'
+# shellcheck disable=SC2016
 assert_block_contains "${integration_regressions_block}" '${{ runner.os }}-amd64-control-plane-buildx-min-' 'integration-regressions job block'
 # shellcheck disable=SC2016
 assert_block_contains "${integration_regressions_block}" 'path: /tmp/control-plane-rust-regression-cache' 'integration-regressions job block'
