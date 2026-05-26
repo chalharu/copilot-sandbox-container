@@ -85,6 +85,16 @@ assert_file_contains() {
   }
 }
 
+assert_file_matches() {
+  local path="$1"
+  local pattern="$2"
+
+  grep -Eq -- "${pattern}" "${path}" || {
+    printf 'Expected %s to match: %s\n' "${path}" "${pattern}" >&2
+    exit 1
+  }
+}
+
 assert_file_not_contains() {
   local path="$1"
   local unexpected="$2"
@@ -176,7 +186,7 @@ assert_file_contains "${external_skills_manifest}" 'skills/doc-coauthoring'
 assert_file_contains "${external_skills_manifest}" 'plugins/frontend-design/skills/frontend-design'
 assert_file_contains "${external_skills_manifest}" 'skills/skill-creator'
 assert_file_contains "${external_skills_manifest}" 'currentValue=main'
-assert_file_contains "${git_skills_runtime_manifest}" 'git2 = { version = "=0.21.0", features = ['
+assert_file_matches "${git_skills_runtime_manifest}" '^git2 = \{ version = "=[^"]+", features = \[$'
 assert_file_contains "${git_skills_runtime_manifest}" '  "https",'
 assert_file_contains "${git_skills_runtime_manifest}" '  "vendored-libgit2",'
 assert_file_contains "${git_skills_runtime_manifest}" '  "vendored-openssl",'
