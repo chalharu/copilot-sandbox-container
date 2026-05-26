@@ -191,7 +191,7 @@ assert_file_contains "${exec_pod_dockerfile}" '# renovate: datasource=node-versi
 assert_file_contains "${exec_pod_dockerfile}" 'ARG NODE_VERSION='
 assert_file_contains "${exec_pod_dockerfile}" "node_download_root=\"https://nodejs.org/dist/v\${NODE_VERSION}\""
 assert_file_contains "${exec_pod_dockerfile}" "node_asset=\"node-v\${NODE_VERSION}-linux-\${node_arch}.tar.xz\""
-assert_file_contains "${exec_pod_dockerfile}" 'curl -fsSLo /tmp/node-SHASUMS256.txt "${node_download_root}/SHASUMS256.txt"'
+assert_file_contains "${exec_pod_dockerfile}" "curl -fsSLo /tmp/node-SHASUMS256.txt \"\${node_download_root}/SHASUMS256.txt\""
 assert_file_contains "${exec_pod_dockerfile}" "awk -v asset=\"\${node_asset}\" '\$2 == asset { print \$1 \"  /tmp/\" asset; found=1 } END { exit(found ? 0 : 1) }' /tmp/node-SHASUMS256.txt | sha256sum -c -"
 assert_file_contains "${exec_pod_dockerfile}" 'install -d /opt/control-plane-pnpm-node/bin'
 assert_file_contains "${exec_pod_dockerfile}" "tar -xJf \"/tmp/\${node_asset}\" -C /opt/control-plane-pnpm-node/bin --strip-components=2 \\"
