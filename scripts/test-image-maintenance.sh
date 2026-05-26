@@ -290,6 +290,13 @@ cache_dir="$(buildx_local_cache_dir_for_context "${context_dir}")"
 grep -Fq -- "--cache-from type=local,src=${cache_dir} --cache-to type=local,dest=${cache_dir}-new,mode=max" "${docker_log}"
 [[ -d "${cache_dir}" ]]
 [[ ! -e "${cache_dir}-new" ]]
+printf '%s\n' 'image-maintenance-test: verifying buildx cache mode override' >&2
+: > "${docker_log}"
+rm -f "${label_store}"
+export CONTROL_PLANE_BUILDX_CACHE_MODE=min
+build_image_for_toolchain docker localhost/image-maintenance-cache-min:test "${context_dir}"
+grep -Fq -- "--cache-from type=local,src=${cache_dir} --cache-to type=local,dest=${cache_dir}-new,mode=min" "${docker_log}"
+unset CONTROL_PLANE_BUILDX_CACHE_MODE
 unset CONTROL_PLANE_BUILDX_CACHE_ROOT
 
 printf '%s\n' 'image-maintenance-test: verifying buildkitd remote helper wiring and reuse' >&2

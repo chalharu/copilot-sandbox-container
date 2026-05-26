@@ -34,12 +34,13 @@ jobs:
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/control-plane-buildx-cache-amd64
-          key: ${{ runner.os }}-amd64-control-plane-buildx-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/exec-pod/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
+          key: ${{ runner.os }}-amd64-control-plane-buildx-min-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/exec-pod/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
           restore-keys: |
-            ${{ runner.os }}-amd64-control-plane-buildx-
+            ${{ runner.os }}-amd64-control-plane-buildx-min-
       - name: Build integration images
         env:
           CONTROL_PLANE_BUILDX_CACHE_ROOT: /tmp/control-plane-buildx-cache-amd64
+          CONTROL_PLANE_BUILDX_CACHE_MODE: min
           CONTROL_PLANE_TOOLCHAIN: docker
         run: ./scripts/build-test.sh --build-only
       - name: Save integration images
@@ -64,12 +65,13 @@ jobs:
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/control-plane-buildx-cache-arm64
-          key: ${{ runner.os }}-arm64-control-plane-buildx-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/exec-pod/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
+          key: ${{ runner.os }}-arm64-control-plane-buildx-min-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/exec-pod/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
           restore-keys: |
-            ${{ runner.os }}-arm64-control-plane-buildx-
+            ${{ runner.os }}-arm64-control-plane-buildx-min-
       - name: Build integration images
         env:
           CONTROL_PLANE_BUILDX_CACHE_ROOT: /tmp/control-plane-buildx-cache-arm64
+          CONTROL_PLANE_BUILDX_CACHE_MODE: min
           CONTROL_PLANE_TOOLCHAIN: docker
         run: ./scripts/build-test.sh --build-only
       - name: Save integration images
@@ -138,9 +140,9 @@ jobs:
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/control-plane-buildx-cache-amd64
-          key: ${{ runner.os }}-amd64-control-plane-buildx-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/exec-pod/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
+          key: ${{ runner.os }}-amd64-control-plane-buildx-min-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/exec-pod/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
           restore-keys: |
-            ${{ runner.os }}-amd64-control-plane-buildx-
+            ${{ runner.os }}-amd64-control-plane-buildx-min-
       - name: Restore regression Rust cache
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -158,6 +160,7 @@ jobs:
       - name: Run regression integration group
         env:
           CONTROL_PLANE_BUILDX_CACHE_ROOT: /tmp/control-plane-buildx-cache-amd64
+          CONTROL_PLANE_BUILDX_CACHE_MODE: min
           CONTROL_PLANE_RUST_CONTAINER_CACHE_ROOT: /tmp/control-plane-rust-regression-cache
           CONTROL_PLANE_TOOLCHAIN: docker
         run: ./scripts/build-test.sh --skip-image-build --group regressions

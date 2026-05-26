@@ -216,7 +216,9 @@ fi
 assert_block_contains "${integration_amd64_block}" 'name: Integration Images (x64)' 'integration-amd64 job block'
 assert_block_contains "${integration_amd64_block}" 'runs-on: ubuntu-24.04' 'integration-amd64 job block'
 assert_block_contains "${integration_amd64_block}" 'path: /tmp/control-plane-buildx-cache-amd64' 'integration-amd64 job block'
+assert_block_contains "${integration_amd64_block}" '${{ runner.os }}-amd64-control-plane-buildx-min-' 'integration-amd64 job block'
 assert_block_contains "${integration_amd64_block}" 'CONTROL_PLANE_BUILDX_CACHE_ROOT: /tmp/control-plane-buildx-cache-amd64' 'integration-amd64 job block'
+assert_block_contains "${integration_amd64_block}" 'CONTROL_PLANE_BUILDX_CACHE_MODE: min' 'integration-amd64 job block'
 assert_block_contains "${integration_amd64_block}" 'name: control-plane-images-amd64' 'integration-amd64 job block'
 assert_block_contains "${integration_amd64_block}" 'docker save localhost/control-plane:test localhost/control-plane-exec-pod:test | gzip -1 > control-plane-images.tar.gz' 'integration-amd64 job block'
 assert_block_contains "${integration_amd64_block}" "${setup_buildx_action_reference}" 'integration-amd64 job block'
@@ -225,7 +227,9 @@ assert_block_contains "${integration_amd64_block}" 'driver: docker-container' 'i
 assert_block_contains "${integration_arm64_block}" 'name: Integration Images (aarch64)' 'integration-arm64 job block'
 assert_block_contains "${integration_arm64_block}" 'runs-on: ubuntu-24.04-arm' 'integration-arm64 job block'
 assert_block_contains "${integration_arm64_block}" 'path: /tmp/control-plane-buildx-cache-arm64' 'integration-arm64 job block'
+assert_block_contains "${integration_arm64_block}" '${{ runner.os }}-arm64-control-plane-buildx-min-' 'integration-arm64 job block'
 assert_block_contains "${integration_arm64_block}" 'CONTROL_PLANE_BUILDX_CACHE_ROOT: /tmp/control-plane-buildx-cache-arm64' 'integration-arm64 job block'
+assert_block_contains "${integration_arm64_block}" 'CONTROL_PLANE_BUILDX_CACHE_MODE: min' 'integration-arm64 job block'
 assert_block_contains "${integration_arm64_block}" 'name: control-plane-images-arm64' 'integration-arm64 job block'
 assert_block_contains "${integration_arm64_block}" 'docker save localhost/control-plane:test localhost/control-plane-exec-pod:test | gzip -1 > control-plane-images.tar.gz' 'integration-arm64 job block'
 assert_block_contains_one_of \
@@ -265,12 +269,14 @@ assert_block_contains_one_of \
 
 # shellcheck disable=SC2016
 assert_block_contains "${integration_regressions_block}" 'path: /tmp/control-plane-buildx-cache-amd64' 'integration-regressions job block'
+assert_block_contains "${integration_regressions_block}" '${{ runner.os }}-amd64-control-plane-buildx-min-' 'integration-regressions job block'
 # shellcheck disable=SC2016
 assert_block_contains "${integration_regressions_block}" 'path: /tmp/control-plane-rust-regression-cache' 'integration-regressions job block'
 assert_block_contains "${integration_regressions_block}" "${setup_buildx_action_reference}" 'integration-regressions job block'
 assert_block_contains "${integration_regressions_block}" 'driver: docker-container' 'integration-regressions job block'
 # shellcheck disable=SC2016
 assert_block_contains "${integration_regressions_block}" 'CONTROL_PLANE_BUILDX_CACHE_ROOT: /tmp/control-plane-buildx-cache-amd64' 'integration-regressions job block'
+assert_block_contains "${integration_regressions_block}" 'CONTROL_PLANE_BUILDX_CACHE_MODE: min' 'integration-regressions job block'
 # shellcheck disable=SC2016
 assert_block_contains "${integration_regressions_block}" 'CONTROL_PLANE_RUST_CONTAINER_CACHE_ROOT: /tmp/control-plane-rust-regression-cache' 'integration-regressions job block'
 assert_block_contains "${integration_regressions_block}" 'runs-on: ubuntu-24.04' 'integration-regressions job block'
