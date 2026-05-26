@@ -1123,6 +1123,7 @@ test "$(sed -n '1p' /workspace/k8s-fast-exec-blocked-stdout.txt)" = '$ cat /root
 test -z "$(sed -n '2p' /workspace/k8s-fast-exec-blocked-stdout.txt)"
 grep -Fq 'Direct reads of ~/.config/gh/hosts.yml are blocked by control-plane policy.' \
   /workspace/k8s-fast-exec-blocked-stderr.txt
+expected_exec_pod_node_version="$(sed -n 's/^ARG NODE_VERSION=//p' "${script_dir}/../containers/exec-pod/Dockerfile")"
 tooling_command=$(cat <<'INNER'
 set -Eeuo pipefail
 trap 'printf "tooling smoke failed while running: %s\n" "${BASH_COMMAND}" >&2' ERR
@@ -1143,7 +1144,7 @@ pkg-config --exists gtk+-3.0 gtk4 pango
 rustup target list --installed | grep -qx 'wasm32-unknown-unknown'
 rustup component list --installed | grep -Eq '^clippy-.*-unknown-linux-gnu$'
 rustup component list --installed | grep -Eq '^rustfmt-.*-unknown-linux-gnu$'
-expected_node_version="$(sed -n 's/^ARG NODE_VERSION=//p' /workspace/containers/exec-pod/Dockerfile)"
+expected_node_version="${EXPECTED_NODE_VERSION:?}"
 tooling_smoke_dir="$(mktemp -d)"
 trap 'rm -rf "${tooling_smoke_dir}"' EXIT
 printf '{"name":"exec-pod-tooling-smoke","version":"1.0.0","scripts":{"show-node-version":"node --version"}}\n' > "${tooling_smoke_dir}/package.json"
@@ -1175,6 +1176,7 @@ taplo --version >/dev/null
 printf 'exec-tooling-ok\n' > /workspace/fast-exec-tooling-marker.txt
 INNER
 )
+printf -v tooling_command 'EXPECTED_NODE_VERSION=%q\n%s' "${expected_exec_pod_node_version}" "${tooling_command}"
 tooling_command_base64="$(printf '%s' "${tooling_command}" | base64 | tr -d '\n')"
 control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${tooling_command_base64}" >/dev/null
 grep -qx 'exec-tooling-ok' /workspace/fast-exec-tooling-marker.txt
