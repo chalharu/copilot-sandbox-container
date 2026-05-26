@@ -43,14 +43,14 @@ jobs:
           CONTROL_PLANE_TOOLCHAIN: docker
         run: ./scripts/build-test.sh --build-only
       - name: Save integration images
-        run: docker save -o control-plane-images.tar localhost/control-plane:test localhost/control-plane-exec-pod:test
+        run: docker save localhost/control-plane:test localhost/control-plane-exec-pod:test | gzip -1 > control-plane-images.tar.gz
       - name: Upload integration images
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: control-plane-images-amd64
-          path: control-plane-images.tar
+          path: control-plane-images.tar.gz
           retention-days: 1
-          compression-level: 1
+          compression-level: 0
   integration-arm64:
     name: Integration Images (aarch64)
     runs-on: ubuntu-24.04-arm
@@ -73,14 +73,14 @@ jobs:
           CONTROL_PLANE_TOOLCHAIN: docker
         run: ./scripts/build-test.sh --build-only
       - name: Save integration images
-        run: docker save -o control-plane-images.tar localhost/control-plane:test localhost/control-plane-exec-pod:test
+        run: docker save localhost/control-plane:test localhost/control-plane-exec-pod:test | gzip -1 > control-plane-images.tar.gz
       - name: Upload integration images
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: control-plane-images-arm64
-          path: control-plane-images.tar
+          path: control-plane-images.tar.gz
           retention-days: 1
-          compression-level: 1
+          compression-level: 0
   integration-smoke-amd64:
     name: Integration Smoke (x64)
     runs-on: ubuntu-24.04
@@ -97,7 +97,7 @@ jobs:
           path: downloaded-images
       - &load-integration-images
         name: Load integration images
-        run: docker load -i downloaded-images/control-plane-images.tar
+        run: gzip -dc downloaded-images/control-plane-images.tar.gz | docker load
       - name: Run smoke integration group
         env:
           CONTROL_PLANE_TOOLCHAIN: docker
@@ -184,7 +184,7 @@ jobs:
       - name: Run Kind session integration group
         env:
           CONTROL_PLANE_TOOLCHAIN: docker
-          CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar
+          CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar.gz
         run: ./scripts/build-test.sh --skip-image-build --group kind-session
   integration-kind-jobs:
     name: Integration Kind Jobs Core (x64)
@@ -201,7 +201,7 @@ jobs:
       - name: Run Kind job core integration group
         env:
           CONTROL_PLANE_TOOLCHAIN: docker
-          CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar
+          CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar.gz
         run: ./scripts/build-test.sh --skip-image-build --group kind-jobs-core
   integration-kind-jobs-transfer:
     name: Integration Kind Jobs Transfer (x64)
@@ -218,7 +218,7 @@ jobs:
       - name: Run Kind job transfer integration group
         env:
           CONTROL_PLANE_TOOLCHAIN: docker
-          CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar
+          CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar.gz
         run: ./scripts/build-test.sh --skip-image-build --group kind-jobs-transfer
   publish-architecture-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -271,7 +271,7 @@ jobs:
             local archive_path="$1"
             local image_arch="$2"
 
-            docker load -i "${archive_path}"
+            gzip -dc "${archive_path}" | docker load
             docker tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-${image_arch}"
             docker tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${CONTROL_PLANE_COMPONENT_TAG}-${image_arch}"
             docker tag localhost/control-plane-exec-pod:test "${GHCR_EXEC_POD_IMAGE}:${GITHUB_SHA}-${image_arch}"
@@ -282,8 +282,8 @@ jobs:
             docker push "${GHCR_EXEC_POD_IMAGE}:${CONTROL_PLANE_COMPONENT_TAG}-${image_arch}"
           }
 
-          publish_architecture_image downloaded-images/amd64/control-plane-images.tar amd64
-          publish_architecture_image downloaded-images/arm64/control-plane-images.tar arm64
+          publish_architecture_image downloaded-images/amd64/control-plane-images.tar.gz amd64
+          publish_architecture_image downloaded-images/arm64/control-plane-images.tar.gz arm64
       - name: Publish GHCR multi-arch manifests
         env:
           GHCR_CONTROL_PLANE_IMAGE: ghcr.io/${{ github.repository }}/control-plane
