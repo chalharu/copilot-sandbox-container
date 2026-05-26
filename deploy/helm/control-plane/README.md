@@ -71,6 +71,9 @@ Deployment 側の `GH_GITHUB_TOKEN_FILE` も自動で注入されます。
 `/var/run/control-plane-auth/gh-github-token` を指します。
 `ghHostsYml` を入れると、`GH_HOSTS_YML_FILE` も自動で注入されます。
 `GH_HOSTS_YML_FILE` は `/var/run/control-plane-auth/gh-hosts.yml` を指します。
+`copilotProviderApiKey` を入れると、`COPILOT_PROVIDER_API_KEY_FILE` も自動で
+注入されます。`COPILOT_PROVIDER_API_KEY_FILE` は
+`/var/run/control-plane-auth/copilot-provider-api-key` を指します。
 `gh-hosts.yml` は `gh-github-token` より優先されます。
 両方を入れても追加の `controlPlaneEnv` override は不要です。
 `existingSecretName` で chart 外の Secret を使う場合は、chart が中身を
@@ -97,9 +100,14 @@ global:
     CONTROL_PLANE_GIT_USER_NAME: Copilot Workspace Bot
     CONTROL_PLANE_GIT_USER_EMAIL: copilot@example.com
     TZ: Asia/Tokyo
+    COPILOT_PROVIDER_TYPE: openai
+    COPILOT_PROVIDER_BASE_URL: https://api.openai.com/v1
+    COPILOT_MODEL: gpt-4.1
     # Optional: override the chart's default Renovate-managed Biome hook image.
     CONTROL_PLANE_BIOME_HOOK_IMAGE: ghcr.io/biomejs/biome:custom-tag
     CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: sudo apt-get update && sudo apt-get install -y ripgrep
+  auth:
+    copilotProviderApiKey: sk-... replace-me
 
 instances:
   - name: repo-a
@@ -119,6 +127,10 @@ instances:
 - `CONTROL_PLANE_GIT_USER_NAME` / `CONTROL_PLANE_GIT_USER_EMAIL` は startup 時に
   managed global Git config へ書かれる。
 - `TZ` は login shell と job tooling に渡される。
+- `COPILOT_PROVIDER_TYPE` / `COPILOT_PROVIDER_BASE_URL` / `COPILOT_MODEL` は
+  login shell と `control-plane-copilot` 経由の Copilot process に渡される。
+- `copilotProviderApiKey` は startup 時に private runtime file へ staging され、
+  `control-plane-copilot` が `COPILOT_PROVIDER_API_KEY` として secret 注入する。
 - `CONTROL_PLANE_BIOME_HOOK_IMAGE` は JS/TS 向け bundled Biome hook を
   Kubernetes Job の official Biome image へ逃がす。
 - `CONTROL_PLANE_RUST_HOOK_IMAGE` も同じ `controlPlaneEnv` で上書きでき、

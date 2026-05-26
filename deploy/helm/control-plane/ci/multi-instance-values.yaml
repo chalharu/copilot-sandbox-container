@@ -12,6 +12,7 @@ global:
         user: shared-user
         oauth_token: shared-host-token
         git_protocol: https
+    copilotProviderApiKey: shared-provider-key
   session:
     claimName: shared-session-pvc
     size: 4Gi
@@ -19,6 +20,9 @@ global:
   controlPlaneEnv:
     CONTROL_PLANE_GIT_USER_NAME: Control Plane Bot
     CONTROL_PLANE_GIT_USER_EMAIL: control-plane@example.com
+    COPILOT_PROVIDER_TYPE: openai
+    COPILOT_PROVIDER_BASE_URL: https://provider.example.test/v1
+    COPILOT_MODEL: gpt-4.1
     CONTROL_PLANE_FAST_EXECUTION_STARTUP_SCRIPT: printf global-startup
 instances:
   - name: repo-one

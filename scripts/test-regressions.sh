@@ -469,11 +469,13 @@ cat > "${workdir}/fake-bin/copilot" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'COPILOT_GITHUB_TOKEN=%s\n' "${COPILOT_GITHUB_TOKEN:-}" > "${TEST_REGRESSION_LOG_DIR:?}/copilot.env"
+printf 'COPILOT_PROVIDER_API_KEY=%s\n' "${COPILOT_PROVIDER_API_KEY:-}" >> "${TEST_REGRESSION_LOG_DIR:?}/copilot.env"
 printf '%s\n' "$@" > "${TEST_REGRESSION_LOG_DIR:?}/copilot.args"
 exit 0
 EOF
 chmod +x "${workdir}/fake-bin/copilot"
 printf '%s' 'copilot-token-for-test' > "${workdir}/copilot-token"
+printf '%s' 'provider-key-for-test' > "${workdir}/provider-api-key"
 
 run_copilot_launcher_test() {
   local PATH="${workdir}/fake-bin:${PATH}"
@@ -481,9 +483,11 @@ run_copilot_launcher_test() {
   local CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null
   local CONTROL_PLANE_COPILOT_BIN=copilot
   local CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE="${workdir}/copilot-token"
+  local CONTROL_PLANE_COPILOT_PROVIDER_API_KEY_FILE="${workdir}/provider-api-key"
   local CONTROL_PLANE_COPILOT_NICE_LEVEL=7
   export PATH TEST_REGRESSION_LOG_DIR CONTROL_PLANE_RUNTIME_ENV_FILE
   export CONTROL_PLANE_COPILOT_BIN CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE
+  export CONTROL_PLANE_COPILOT_PROVIDER_API_KEY_FILE
   export CONTROL_PLANE_COPILOT_NICE_LEVEL
   "${script_dir}/../containers/control-plane/bin/control-plane-copilot"
 }
@@ -494,6 +498,8 @@ grep -qx -- '-n' "${workdir}/nice.args"
 grep -qx '7' "${workdir}/nice.args"
 grep -qx -- '--yolo' "${workdir}/copilot.args"
 grep -qx -- '--secret-env-vars=COPILOT_GITHUB_TOKEN' "${workdir}/copilot.args"
+grep -qx -- '--secret-env-vars=COPILOT_PROVIDER_API_KEY' "${workdir}/copilot.args"
 grep -qx 'COPILOT_GITHUB_TOKEN=copilot-token-for-test' "${workdir}/copilot.env"
+grep -qx 'COPILOT_PROVIDER_API_KEY=provider-key-for-test' "${workdir}/copilot.env"
 
 printf '%s\n' 'regression-test: targeted regressions ok' >&2

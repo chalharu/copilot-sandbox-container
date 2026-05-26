@@ -94,6 +94,7 @@ hook_config="${HOME}/.copilot/hooks/preToolUse/deny-rules.yaml"
 exec_policy_library="${CONTROL_PLANE_EXEC_POLICY_LIBRARY:-}"
 exec_policy_rules="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE:-}"
 copilot_token_path="${HOME}/.config/control-plane/copilot-github-token"
+copilot_provider_api_key_path="${HOME}/.config/control-plane/copilot-provider-api-key"
 
 test -x "${hook_script}"
 test -f "${hook_config}"
@@ -105,6 +106,7 @@ test "${LD_PRELOAD}" = "${exec_policy_library}"
 
 mkdir -p "${HOME}/.config/gh"
 export CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE="${copilot_token_path}"
+export CONTROL_PLANE_COPILOT_PROVIDER_API_KEY_FILE="${copilot_provider_api_key_path}"
 
 # Raw secret mounts stay present, but direct reads are intentionally denied by
 # the exec policy. The explicit deny assertions below verify that contract.
@@ -130,6 +132,7 @@ assert_denied_exec() {
     CONTROL_PLANE_EXEC_POLICY_RULES_FILE="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE}" \
     GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL}" \
     CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE="${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}" \
+    CONTROL_PLANE_COPILOT_PROVIDER_API_KEY_FILE="${CONTROL_PLANE_COPILOT_PROVIDER_API_KEY_FILE}" \
     XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
     HOME="${HOME}" \
     PATH="${PATH}" \
@@ -160,6 +163,7 @@ assert_denied_shell() {
     CONTROL_PLANE_EXEC_POLICY_RULES_FILE="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE}" \
     GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL}" \
     CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE="${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}" \
+    CONTROL_PLANE_COPILOT_PROVIDER_API_KEY_FILE="${CONTROL_PLANE_COPILOT_PROVIDER_API_KEY_FILE}" \
     XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
     HOME="${HOME}" \
     PATH="${PATH}" \
@@ -189,6 +193,7 @@ assert_allowed_shell() {
     CONTROL_PLANE_EXEC_POLICY_RULES_FILE="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE}" \
     GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL}" \
     CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE="${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}" \
+    CONTROL_PLANE_COPILOT_PROVIDER_API_KEY_FILE="${CONTROL_PLANE_COPILOT_PROVIDER_API_KEY_FILE}" \
     XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
     HOME="${HOME}" \
     PATH="${PATH}" \
@@ -309,11 +314,13 @@ assert_denied_exec 'pull request merge endpoints are blocked' gh api repos/octo-
 assert_denied_exec 'Protected environment overrides are blocked' env GIT_CONFIG_GLOBAL=/tmp/evil git status --short
 assert_denied_exec 'repo-local policy' git status --short
 assert_denied_shell 'CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE' 'while IFS= read -r _; do :; done < "${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}"'
+assert_denied_shell 'CONTROL_PLANE_COPILOT_PROVIDER_API_KEY_FILE' 'while IFS= read -r _; do :; done < "${CONTROL_PLANE_COPILOT_PROVIDER_API_KEY_FILE}"'
 assert_denied_shell '~/.config/gh/hosts.yml' 'while IFS= read -r _; do :; done < "${HOME}/.config/gh/hosts.yml"'
 assert_denied_shell '/run/control-plane-auth' 'cat "/run/control-plane-auth/ssh-public-key"'
 assert_denied_shell '/run/control-plane-auth' 'cat "/run/control-plane-auth/gh-github-token"'
 assert_denied_shell '/run/control-plane-auth' 'cat "/run/control-plane-auth/gh-hosts.yml"'
 assert_denied_shell '/run/control-plane-auth' 'cat "/run/control-plane-auth/copilot-github-token"'
+assert_denied_shell '/run/control-plane-auth' 'cat "/run/control-plane-auth/copilot-provider-api-key"'
 assert_allowed_shell '/usr/local/bin/control-plane-copilot'
 assert_allowed_shell 'gh auth status'
 assert_allowed_shell 'gh pr view 123'
@@ -426,6 +433,7 @@ install -d -o copilot -g copilot /home/copilot/.config/gh
 install -d -o copilot -g copilot /home/copilot/.config/control-plane
 install -d -o copilot -g copilot /run/control-plane-auth/..data
 printf '%s\n' 'copilot-secret-token' > /home/copilot/.config/control-plane/copilot-github-token
+printf '%s\n' 'provider-secret-key' > /home/copilot/.config/control-plane/copilot-provider-api-key
 cat > /home/copilot/.config/gh/hosts.yml <<'YAML'
 github.com:
   oauth_token: managed-gh-token
@@ -439,22 +447,28 @@ github.com:
   user: mounted-bot
 YAML
 printf '%s\n' 'mounted-copilot-token' > /run/control-plane-auth/..data/copilot-github-token
+printf '%s\n' 'mounted-provider-key' > /run/control-plane-auth/..data/copilot-provider-api-key
 ln -s ..data/ssh-public-key /run/control-plane-auth/ssh-public-key
 ln -s ..data/gh-github-token /run/control-plane-auth/gh-github-token
 ln -s ..data/gh-hosts.yml /run/control-plane-auth/gh-hosts.yml
 ln -s ..data/copilot-github-token /run/control-plane-auth/copilot-github-token
+ln -s ..data/copilot-provider-api-key /run/control-plane-auth/copilot-provider-api-key
 chown copilot:copilot \
   /home/copilot/.config/control-plane/copilot-github-token \
+  /home/copilot/.config/control-plane/copilot-provider-api-key \
   /run/control-plane-auth/..data/ssh-public-key \
   /run/control-plane-auth/..data/gh-github-token \
   /run/control-plane-auth/..data/gh-hosts.yml \
-  /run/control-plane-auth/..data/copilot-github-token
+  /run/control-plane-auth/..data/copilot-github-token \
+  /run/control-plane-auth/..data/copilot-provider-api-key
 chmod 600 \
   /home/copilot/.config/control-plane/copilot-github-token \
+  /home/copilot/.config/control-plane/copilot-provider-api-key \
   /run/control-plane-auth/..data/ssh-public-key \
   /run/control-plane-auth/..data/gh-github-token \
   /run/control-plane-auth/..data/gh-hosts.yml \
-  /run/control-plane-auth/..data/copilot-github-token
+  /run/control-plane-auth/..data/copilot-github-token \
+  /run/control-plane-auth/..data/copilot-provider-api-key
 chown copilot:copilot /home/copilot/.config/gh/hosts.yml
 chmod 600 /home/copilot/.config/gh/hosts.yml
 rm -f \
@@ -464,6 +478,7 @@ cat > /usr/local/bin/control-plane-copilot <<'EOF_COPILOT'
 #!/usr/bin/env bash
 set -euo pipefail
 while IFS= read -r _; do :; done < "${CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE}"
+while IFS= read -r _; do :; done < "${CONTROL_PLANE_COPILOT_PROVIDER_API_KEY_FILE}"
 EOF_COPILOT
 cat > /usr/bin/gh <<'EOF_GH'
 #!/usr/bin/env bash

@@ -235,6 +235,11 @@ Refusing to install an empty gh hosts source from /var/run/control-plane-auth/gh
 優先されます。無ければ `gh-github-token` から最小
 `~/.config/gh/hosts.yml` を生成する順序で動きます。
 
+custom provider を併用するときも、API key は `control-plane-auth` Secret の
+`copilot-provider-api-key` へ置き、`COPILOT_PROVIDER_API_KEY_FILE` で startup
+入力にします。`/run/control-plane-auth` や private runtime file を login shell から
+直接読むのではなく、`control-plane-copilot` に注入を任せてください。
+
 ## 12. exec-pod の追加 volume 設定が壊れている
 
 ### 代表ログ

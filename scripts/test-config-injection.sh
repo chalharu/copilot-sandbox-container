@@ -85,6 +85,7 @@ github.com:
   user: secret-bot
 EOF
 printf '%s' 'unused-secret-fallback-token' > "${workdir}/file-backed/auth/gh-github-token"
+printf '%s' 'provider-key-from-file' > "${workdir}/file-backed/auth/copilot-provider-api-key"
 printf '%s\n' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILegacyConfigInjectionKey legacy-config-injection' > "${workdir}/file-backed/state/ssh/authorized_keys"
 printf '%s\n' legacy-rsa-private > "${workdir}/file-backed/state/ssh-host-keys/ssh_host_rsa_key"
 printf '%s\n' legacy-rsa-public > "${workdir}/file-backed/state/ssh-host-keys/ssh_host_rsa_key.pub"
@@ -101,6 +102,10 @@ file_backed_output="$("${container_bin}" run --rm \
   -e COPILOT_CONFIG_JSON_FILE=/var/run/control-plane-config/copilot-config.json \
   -e GH_HOSTS_YML_FILE=/var/run/control-plane-auth/gh-hosts.yml \
   -e GH_GITHUB_TOKEN_FILE=/var/run/control-plane-auth/gh-github-token \
+  -e COPILOT_PROVIDER_TYPE=openai \
+  -e COPILOT_PROVIDER_BASE_URL=https://provider.example.test/v1 \
+  -e COPILOT_MODEL=gpt-4.1 \
+  -e COPILOT_PROVIDER_API_KEY_FILE=/var/run/control-plane-auth/copilot-provider-api-key \
   -v "${workdir}/file-backed/state/copilot:/home/copilot/.copilot" \
   -v "${workdir}/file-backed/state/gh:/home/copilot/.config/gh" \
   -v "${workdir}/file-backed/state/ssh:/home/copilot/.ssh" \
@@ -155,6 +160,12 @@ grep -Fqx 'CONTROL_PLANE_RUNTIME_HOST_KEY_DIR=/run/control-plane/ssh-host-keys' 
 grep -Fqx 'CONTROL_PLANE_EXEC_POLICY_LIBRARY=/usr/local/lib/libcontrol_plane_exec_policy.so' /home/copilot/.config/control-plane/runtime.env
 grep -Fqx 'CONTROL_PLANE_EXEC_POLICY_RULES_FILE=/usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml' /home/copilot/.config/control-plane/runtime.env
 grep -Fqx 'LD_PRELOAD=/usr/local/lib/libcontrol_plane_exec_policy.so' /home/copilot/.config/control-plane/runtime.env
+grep -Fqx 'COPILOT_PROVIDER_TYPE=openai' /home/copilot/.config/control-plane/runtime.env
+grep -Fqx 'COPILOT_PROVIDER_BASE_URL=https://provider.example.test/v1' /home/copilot/.config/control-plane/runtime.env
+grep -Fqx 'COPILOT_MODEL=gpt-4.1' /home/copilot/.config/control-plane/runtime.env
+grep -Fqx 'CONTROL_PLANE_COPILOT_PROVIDER_API_KEY_FILE=/home/copilot/.config/control-plane/copilot-provider-api-key' /home/copilot/.config/control-plane/runtime.env
+! grep -q '^COPILOT_PROVIDER_API_KEY=' /home/copilot/.config/control-plane/runtime.env
+! grep -q '^COPILOT_PROVIDER_API_KEY_FILE=' /home/copilot/.config/control-plane/runtime.env
 grep -Fqx '    hooksPath = /usr/local/share/control-plane/hooks/git' "${GIT_CONFIG_GLOBAL}"
 test "$(grep -Fc '    helper = !gh auth git-credential' "${GIT_CONFIG_GLOBAL}")" -eq 2
 if su -s /bin/bash copilot -lc "printf tamper >> \"${GIT_CONFIG_GLOBAL}\"" 2>/dev/null; then
@@ -186,14 +197,23 @@ fi
 su -s /bin/bash copilot -lc 'test "${CONTROL_PLANE_EXEC_POLICY_LIBRARY}" = /usr/local/lib/libcontrol_plane_exec_policy.so'
 su -s /bin/bash copilot -lc 'test "${CONTROL_PLANE_EXEC_POLICY_RULES_FILE}" = /usr/local/share/control-plane/hooks/preToolUse/deny-rules.yaml'
 su -s /bin/bash copilot -lc 'test "${LD_PRELOAD}" = /usr/local/lib/libcontrol_plane_exec_policy.so'
+test "$(stat -c '%a %U %G' /home/copilot/.config/control-plane/copilot-provider-api-key)" = '600 copilot copilot'
+grep -Fqx 'provider-key-from-file' /home/copilot/.config/control-plane/copilot-provider-api-key
 cat > /tmp/fake-copilot <<'FAKE'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "${LD_PRELOAD:-missing}"
+printf 'LD_PRELOAD=%s\n' "${LD_PRELOAD:-missing}"
+printf 'COPILOT_GITHUB_TOKEN=%s\n' "${COPILOT_GITHUB_TOKEN:-}"
+printf 'COPILOT_PROVIDER_API_KEY=%s\n' "${COPILOT_PROVIDER_API_KEY:-}"
+printf 'ARG=%s\n' "$@"
 FAKE
 chmod 755 /tmp/fake-copilot
 copilot_ld_preload="$(su -s /bin/bash copilot -lc 'CONTROL_PLANE_COPILOT_BIN=/tmp/fake-copilot control-plane-copilot')"
-grep -qx '/usr/local/lib/libcontrol_plane_exec_policy.so' <<<"${copilot_ld_preload}"
+grep -qx 'LD_PRELOAD=/usr/local/lib/libcontrol_plane_exec_policy.so' <<<"${copilot_ld_preload}"
+grep -qx 'COPILOT_GITHUB_TOKEN=' <<<"${copilot_ld_preload}"
+grep -qx 'COPILOT_PROVIDER_API_KEY=provider-key-from-file' <<<"${copilot_ld_preload}"
+grep -qx 'ARG=--yolo' <<<"${copilot_ld_preload}"
+grep -qx 'ARG=--secret-env-vars=COPILOT_PROVIDER_API_KEY' <<<"${copilot_ld_preload}"
 jq -e '.chat.theme == "light"' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.chat.editor == null' /home/copilot/.copilot/config.json >/dev/null
 jq -e '.nested.keep == null' /home/copilot/.copilot/config.json >/dev/null
@@ -216,6 +236,60 @@ if [[ "${file_backed_status}" -ne 0 ]]; then
   exit 1
 fi
 grep -qx 'file-backed-ok' <<<"${file_backed_output}"
+
+printf '%s\n' 'config-injection-test: verifying direct provider API key env is staged without leaking to the shell' >&2
+prepare_state_tree env-backed
+
+set +e
+env_backed_output="$("${container_bin}" run --rm \
+  --name "${container_name}" \
+  "${control_plane_run_user[@]}" \
+  -i \
+  "${startup_caps[@]}" \
+  -e COPILOT_PROVIDER_TYPE=openai \
+  -e COPILOT_PROVIDER_BASE_URL=https://provider.example.test/v1 \
+  -e COPILOT_MODEL=gpt-4.1 \
+  -e COPILOT_PROVIDER_API_KEY=provider-key-from-env \
+  -v "${workdir}/env-backed/state/copilot:/home/copilot/.copilot" \
+  -v "${workdir}/env-backed/state/gh:/home/copilot/.config/gh" \
+  -v "${workdir}/env-backed/state/ssh:/home/copilot/.ssh" \
+  -v "${workdir}/env-backed/state/ssh-host-keys:/var/lib/control-plane/ssh-host-keys" \
+  -v "${workdir}/env-backed/state/workspace:/workspace" \
+  -v "${workdir}/env-backed/auth:/var/run/control-plane-auth:ro" \
+  -v "${workdir}/env-backed/config:/var/run/control-plane-config:ro" \
+  "${control_plane_image}" \
+  bash -l -se 2>&1 <<'EOF'
+set -euo pipefail
+test -z "${COPILOT_PROVIDER_API_KEY:-}"
+test -z "${COPILOT_PROVIDER_API_KEY_FILE:-}"
+grep -Fqx 'COPILOT_PROVIDER_TYPE=openai' /home/copilot/.config/control-plane/runtime.env
+grep -Fqx 'COPILOT_PROVIDER_BASE_URL=https://provider.example.test/v1' /home/copilot/.config/control-plane/runtime.env
+grep -Fqx 'COPILOT_MODEL=gpt-4.1' /home/copilot/.config/control-plane/runtime.env
+grep -Fqx 'CONTROL_PLANE_COPILOT_PROVIDER_API_KEY_FILE=/home/copilot/.config/control-plane/copilot-provider-api-key' /home/copilot/.config/control-plane/runtime.env
+grep -Fqx 'provider-key-from-env' /home/copilot/.config/control-plane/copilot-provider-api-key
+cat > /tmp/fake-copilot <<'FAKE'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'COPILOT_PROVIDER_API_KEY=%s\n' "${COPILOT_PROVIDER_API_KEY:-}"
+printf 'ARG=%s\n' "$@"
+FAKE
+chmod 755 /tmp/fake-copilot
+copilot_provider_output="$(su -s /bin/bash copilot -lc 'CONTROL_PLANE_COPILOT_BIN=/tmp/fake-copilot control-plane-copilot')"
+grep -qx 'COPILOT_PROVIDER_API_KEY=provider-key-from-env' <<<"${copilot_provider_output}"
+grep -qx 'ARG=--yolo' <<<"${copilot_provider_output}"
+grep -qx 'ARG=--secret-env-vars=COPILOT_PROVIDER_API_KEY' <<<"${copilot_provider_output}"
+printf '%s\n' env-backed-ok
+EOF
+)"
+env_backed_status=$?
+set -e
+
+if [[ "${env_backed_status}" -ne 0 ]]; then
+  printf 'Expected direct provider API key env to be staged without leaking into the login shell\n' >&2
+  printf '%s\n' "${env_backed_output}" >&2
+  exit 1
+fi
+grep -qx 'env-backed-ok' <<<"${env_backed_output}"
 
 printf '%s\n' 'config-injection-test: verifying gh token Secret generates hosts.yml when no file override exists' >&2
 prepare_state_tree token-backed
