@@ -18,9 +18,10 @@ Focus on real issues across architecture, security, SOLID design, and KISS/DRY m
 ## Review workflow
 
 1. Read the changed files in context before judging the design.
-2. Look for architecture drift, trust-boundary mistakes, unstable abstractions, duplication, and needless branching.
-3. Flag only issues that materially weaken correctness, safety, or maintainability.
-4. Explain the risk, failure mode, or healthier end state with concise evidence.
+2. Look for architecture drift, trust-boundary mistakes, and unstable abstractions.
+3. Look for duplication and needless branching.
+4. Flag only issues that materially weaken correctness, safety, or maintainability.
+5. Explain the risk, failure mode, or healthier end state with concise evidence.
 
 ## Reporting standards
 
