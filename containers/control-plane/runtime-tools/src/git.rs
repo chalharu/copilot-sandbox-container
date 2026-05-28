@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use git2::{Repository, Status, StatusOptions};
+use git2::{Repository, StatusOptions};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteInfo {
@@ -27,24 +27,6 @@ pub fn get_git_dir(repo_root: &Path) -> PathBuf {
 }
 
 pub fn list_dirty_files(repo_root: &Path) -> Result<Vec<PathBuf>, String> {
-    list_files_matching_status(repo_root, |_| true)
-}
-
-pub fn list_staged_files(repo_root: &Path) -> Result<Vec<PathBuf>, String> {
-    list_files_matching_status(repo_root, |status| {
-        status.intersects(
-            Status::INDEX_NEW
-                | Status::INDEX_MODIFIED
-                | Status::INDEX_RENAMED
-                | Status::INDEX_TYPECHANGE,
-        )
-    })
-}
-
-fn list_files_matching_status(
-    repo_root: &Path,
-    include_entry: impl Fn(Status) -> bool,
-) -> Result<Vec<PathBuf>, String> {
     let repo = Repository::discover(repo_root).map_err(|error| {
         format!(
             "failed to open git repository at {}: {error}",
@@ -73,9 +55,6 @@ fn list_files_matching_status(
     let mut seen = HashSet::new();
     let mut files = Vec::new();
     for entry in statuses.iter() {
-        if !include_entry(entry.status()) {
-            continue;
-        }
         let Ok(relative_path) = entry.path() else {
             continue;
         };
@@ -130,7 +109,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{RemoteInfo, get_repo_root, list_dirty_files, list_remotes, list_staged_files};
+    use super::{RemoteInfo, get_repo_root, list_dirty_files, list_remotes};
     use git2::Repository;
     use std::fs;
     use tempfile::tempdir;
@@ -150,31 +129,6 @@ mod tests {
         assert_eq!(get_repo_root(&nested_dir), temp_dir.path());
         assert!(repo.workdir().is_some());
         assert_eq!(dirty_files, vec![file_path]);
-    }
-
-    #[test]
-    fn list_staged_files_excludes_unstaged_files() {
-        let temp_dir = tempdir().expect("create temp dir");
-        let repo = Repository::init(temp_dir.path()).expect("init repo");
-        let staged_dir = temp_dir.path().join("packages/demo");
-        let staged_file = staged_dir.join("index.ts");
-        let unstaged_file = temp_dir.path().join("README.md");
-
-        fs::create_dir_all(&staged_dir).expect("create staged dir");
-        fs::write(&staged_file, "export const value = 1;\n").expect("write staged file");
-        fs::write(&unstaged_file, "# dirty\n").expect("write unstaged file");
-        let mut index = repo.index().expect("open index");
-        index
-            .add_path(std::path::Path::new("packages/demo/index.ts"))
-            .expect("stage file");
-        index.write().expect("write index");
-
-        let staged_files = list_staged_files(temp_dir.path()).expect("list staged files");
-        let dirty_files = list_dirty_files(temp_dir.path()).expect("list dirty files");
-
-        assert_eq!(staged_files, vec![staged_file.clone()]);
-        assert!(dirty_files.contains(&staged_file));
-        assert!(dirty_files.contains(&unstaged_file));
     }
 
     #[test]

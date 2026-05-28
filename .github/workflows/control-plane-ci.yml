@@ -34,24 +34,23 @@ jobs:
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/control-plane-buildx-cache-amd64
-          key: ${{ runner.os }}-amd64-control-plane-buildx-min-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/exec-pod/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
+          key: ${{ runner.os }}-amd64-control-plane-buildx-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/exec-pod/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
           restore-keys: |
-            ${{ runner.os }}-amd64-control-plane-buildx-min-
+            ${{ runner.os }}-amd64-control-plane-buildx-
       - name: Build integration images
         env:
           CONTROL_PLANE_BUILDX_CACHE_ROOT: /tmp/control-plane-buildx-cache-amd64
-          CONTROL_PLANE_BUILDX_CACHE_MODE: min
           CONTROL_PLANE_TOOLCHAIN: docker
         run: ./scripts/build-test.sh --build-only
       - name: Save integration images
-        run: docker save localhost/control-plane:test localhost/control-plane-exec-pod:test | gzip -1 > control-plane-images.tar.gz
+        run: docker save -o control-plane-images.tar localhost/control-plane:test localhost/control-plane-exec-pod:test
       - name: Upload integration images
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: control-plane-images-amd64
-          path: control-plane-images.tar.gz
+          path: control-plane-images.tar
           retention-days: 1
-          compression-level: 0
+          compression-level: 1
   integration-arm64:
     name: Integration Images (aarch64)
     runs-on: ubuntu-24.04-arm
@@ -65,24 +64,23 @@ jobs:
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/control-plane-buildx-cache-arm64
-          key: ${{ runner.os }}-arm64-control-plane-buildx-min-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/exec-pod/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
+          key: ${{ runner.os }}-arm64-control-plane-buildx-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/exec-pod/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
           restore-keys: |
-            ${{ runner.os }}-arm64-control-plane-buildx-min-
+            ${{ runner.os }}-arm64-control-plane-buildx-
       - name: Build integration images
         env:
           CONTROL_PLANE_BUILDX_CACHE_ROOT: /tmp/control-plane-buildx-cache-arm64
-          CONTROL_PLANE_BUILDX_CACHE_MODE: min
           CONTROL_PLANE_TOOLCHAIN: docker
         run: ./scripts/build-test.sh --build-only
       - name: Save integration images
-        run: docker save localhost/control-plane:test localhost/control-plane-exec-pod:test | gzip -1 > control-plane-images.tar.gz
+        run: docker save -o control-plane-images.tar localhost/control-plane:test localhost/control-plane-exec-pod:test
       - name: Upload integration images
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: control-plane-images-arm64
-          path: control-plane-images.tar.gz
+          path: control-plane-images.tar
           retention-days: 1
-          compression-level: 0
+          compression-level: 1
   integration-smoke-amd64:
     name: Integration Smoke (x64)
     runs-on: ubuntu-24.04
@@ -99,7 +97,7 @@ jobs:
           path: downloaded-images
       - &load-integration-images
         name: Load integration images
-        run: gzip -dc downloaded-images/control-plane-images.tar.gz | docker load
+        run: docker load -i downloaded-images/control-plane-images.tar
       - name: Run smoke integration group
         env:
           CONTROL_PLANE_TOOLCHAIN: docker
@@ -140,9 +138,9 @@ jobs:
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/control-plane-buildx-cache-amd64
-          key: ${{ runner.os }}-amd64-control-plane-buildx-min-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/exec-pod/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
+          key: ${{ runner.os }}-amd64-control-plane-buildx-${{ hashFiles('containers/control-plane/Dockerfile', 'containers/exec-pod/Dockerfile', 'containers/control-plane/Cargo.toml', 'containers/control-plane/Cargo.lock', 'containers/control-plane/**/Cargo.toml', 'containers/control-plane/**/build.rs', 'containers/control-plane/**/proto/**') }}
           restore-keys: |
-            ${{ runner.os }}-amd64-control-plane-buildx-min-
+            ${{ runner.os }}-amd64-control-plane-buildx-
       - name: Restore regression Rust cache
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -160,7 +158,6 @@ jobs:
       - name: Run regression integration group
         env:
           CONTROL_PLANE_BUILDX_CACHE_ROOT: /tmp/control-plane-buildx-cache-amd64
-          CONTROL_PLANE_BUILDX_CACHE_MODE: min
           CONTROL_PLANE_RUST_CONTAINER_CACHE_ROOT: /tmp/control-plane-rust-regression-cache
           CONTROL_PLANE_TOOLCHAIN: docker
         run: ./scripts/build-test.sh --skip-image-build --group regressions
@@ -187,7 +184,7 @@ jobs:
       - name: Run Kind session integration group
         env:
           CONTROL_PLANE_TOOLCHAIN: docker
-          CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar.gz
+          CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar
         run: ./scripts/build-test.sh --skip-image-build --group kind-session
   integration-kind-jobs:
     name: Integration Kind Jobs Core (x64)
@@ -204,7 +201,7 @@ jobs:
       - name: Run Kind job core integration group
         env:
           CONTROL_PLANE_TOOLCHAIN: docker
-          CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar.gz
+          CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar
         run: ./scripts/build-test.sh --skip-image-build --group kind-jobs-core
   integration-kind-jobs-transfer:
     name: Integration Kind Jobs Transfer (x64)
@@ -221,7 +218,7 @@ jobs:
       - name: Run Kind job transfer integration group
         env:
           CONTROL_PLANE_TOOLCHAIN: docker
-          CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar.gz
+          CONTROL_PLANE_KIND_IMAGE_ARCHIVE: downloaded-images/control-plane-images.tar
         run: ./scripts/build-test.sh --skip-image-build --group kind-jobs-transfer
   publish-architecture-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -274,7 +271,7 @@ jobs:
             local archive_path="$1"
             local image_arch="$2"
 
-            gzip -dc "${archive_path}" | docker load
+            docker load -i "${archive_path}"
             docker tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${GITHUB_SHA}-${image_arch}"
             docker tag localhost/control-plane:test "${GHCR_CONTROL_PLANE_IMAGE}:${CONTROL_PLANE_COMPONENT_TAG}-${image_arch}"
             docker tag localhost/control-plane-exec-pod:test "${GHCR_EXEC_POD_IMAGE}:${GITHUB_SHA}-${image_arch}"
@@ -285,8 +282,8 @@ jobs:
             docker push "${GHCR_EXEC_POD_IMAGE}:${CONTROL_PLANE_COMPONENT_TAG}-${image_arch}"
           }
 
-          publish_architecture_image downloaded-images/amd64/control-plane-images.tar.gz amd64
-          publish_architecture_image downloaded-images/arm64/control-plane-images.tar.gz arm64
+          publish_architecture_image downloaded-images/amd64/control-plane-images.tar amd64
+          publish_architecture_image downloaded-images/arm64/control-plane-images.tar arm64
       - name: Publish GHCR multi-arch manifests
         env:
           GHCR_CONTROL_PLANE_IMAGE: ghcr.io/${{ github.repository }}/control-plane

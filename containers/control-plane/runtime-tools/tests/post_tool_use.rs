@@ -411,16 +411,11 @@ fn make_python_rust_docker_dirty(repo: &Path) {
     .unwrap();
 }
 
-fn run_hook_for_tool(
-    repo: &Path,
-    hook_env: &HookEnv,
-    tool_name: &str,
-    tool_result_type: &str,
-) -> Output {
+fn run_hook(repo: &Path, hook_env: &HookEnv, tool_result_type: &str) -> Output {
     let hook_path = repo.join(".copilot/hooks/postToolUse/main");
     let input = serde_json::json!({
         "cwd": repo,
-        "toolName": tool_name,
+        "toolName": "bash",
         "toolResult": { "resultType": tool_result_type },
     })
     .to_string();
@@ -439,10 +434,6 @@ fn run_hook_for_tool(
         .write_all(input.as_bytes())
         .unwrap();
     child.wait_with_output().unwrap()
-}
-
-fn run_hook(repo: &Path, hook_env: &HookEnv, tool_result_type: &str) -> Output {
-    run_hook_for_tool(repo, hook_env, "bash", tool_result_type)
 }
 
 #[test]
@@ -570,69 +561,6 @@ fn hook_runs_incrementally() {
     let third_stderr = String::from_utf8_lossy(&third_run.stderr);
     assert!(third_stderr.contains("README.md"));
     assert!(third_stderr.contains("index.ts"));
-}
-
-#[test]
-fn git_hook_only_lints_staged_files() {
-    let repo = setup_repo("post-tool-use-git-hook-");
-    seed_repo(repo.path());
-    fs::create_dir_all(repo.path().join("packages/demo")).unwrap();
-    fs::write(
-        repo.path().join("README.md"),
-        "# Title\n\nunstaged root change\n",
-    )
-    .unwrap();
-    fs::write(
-        repo.path().join("packages/demo/index.ts"),
-        "export const value = 1;\n",
-    )
-    .unwrap();
-    run_checked("git", &["add", "packages/demo/index.ts"], repo.path());
-
-    let hook_env = create_tool_stubs(repo.path(), StubOptions::default());
-    let result = run_hook_for_tool(repo.path(), &hook_env, "git-hook", "success");
-    let hook_log = fs::read_to_string(&hook_env.log_file).unwrap();
-
-    assert_eq!(result.status.code(), Some(1));
-    assert!(log_contains_line(
-        &hook_log,
-        "control-plane-biome check --write packages/demo/index.ts"
-    ));
-    assert!(log_contains_line(
-        &hook_log,
-        "oxlint --fix packages/demo/index.ts"
-    ));
-    assert!(!hook_log.contains("README.md"));
-    assert!(!hook_log.contains("markdownlint-cli2"));
-}
-
-#[test]
-fn git_hook_does_not_skip_repeated_failed_staged_files() {
-    let repo = setup_repo("post-tool-use-git-hook-retry-");
-    seed_repo(repo.path());
-    fs::write(repo.path().join("index.ts"), "export const value=1\n").unwrap();
-    run_checked("git", &["add", "index.ts"], repo.path());
-
-    let hook_env = create_tool_stubs(repo.path(), StubOptions::default());
-    let first_result = run_hook_for_tool(repo.path(), &hook_env, "git-hook", "success");
-    let first_log = fs::read_to_string(&hook_env.log_file).unwrap();
-    let second_result = run_hook_for_tool(repo.path(), &hook_env, "git-hook", "success");
-    let second_log = fs::read_to_string(&hook_env.log_file).unwrap();
-
-    assert_eq!(first_result.status.code(), Some(1));
-    assert_eq!(second_result.status.code(), Some(1));
-    assert_eq!(
-        first_log
-            .matches("control-plane-biome check index.ts")
-            .count(),
-        1
-    );
-    assert_eq!(
-        second_log
-            .matches("control-plane-biome check index.ts")
-            .count(),
-        2
-    );
 }
 
 #[test]
