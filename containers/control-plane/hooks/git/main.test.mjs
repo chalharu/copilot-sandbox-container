@@ -170,6 +170,37 @@ function createSuccessToolStubs(repo) {
 	};
 }
 
+function createToolStubsWithFailingMarkdown(repo) {
+	const env = createSuccessToolStubs(repo);
+	writeExecutable(
+		path.join(repo, "bin", "markdownlint-cli2"),
+		[
+			"#!/bin/sh",
+			'printf "markdownlint-cli2 %s\\n" "$*" >> "$HOOK_LOG"',
+			'printf "remaining markdown issue in %s\\n" "$1" >&2',
+			"exit 1",
+		].join("\n"),
+	);
+	return env;
+}
+
+function createToolStubsWithFailingJavaScript(repo) {
+	const env = createSuccessToolStubs(repo);
+	writeExecutable(
+		path.join(repo, "bin", "oxlint"),
+		[
+			"#!/bin/sh",
+			'printf "oxlint %s\\n" "$*" >> "$HOOK_LOG"',
+			'if [ "$1" = "--fix" ]; then',
+			"  exit 0",
+			"fi",
+			'printf "oxlint unresolved in %s\\n" "$1" >&2',
+			"exit 1",
+		].join("\n"),
+	);
+	return env;
+}
+
 function writeRepoHook(repo, hookName, lines) {
 	const hookPath = path.join(repo, ".github", "git-hooks", hookName);
 	writeExecutable(hookPath, lines.join("\n"));
@@ -264,6 +295,93 @@ test("global pre-commit runs bundled linter and repository hook on feature branc
 	);
 	assert.doesNotMatch(fs.readFileSync(toolEnv.HOOK_LOG, "utf8"), /yamllint -c/);
 	assert.match(fs.readFileSync(repoHookLog, "utf8"), /repo-pre-commit/);
+});
+
+test("global pre-commit only lints staged files for subdirectory commits", (t) => {
+	const repo = setupRepo(t, "main");
+	const { env: hookEnv } = setupGlobalHooks(t, repo);
+	const toolEnv = createToolStubsWithFailingMarkdown(repo);
+	const subdir = path.join(repo, "packages", "demo");
+
+	run("git", ["switch", "-c", "feature/subdir-commit"], {
+		cwd: repo,
+		env: hookEnv,
+	});
+	fs.mkdirSync(subdir, { recursive: true });
+	fs.writeFileSync(
+		path.join(repo, "README.md"),
+		"# Title\n\nunstaged root change\n",
+		"utf8",
+	);
+	fs.writeFileSync(
+		path.join(subdir, "index.ts"),
+		"export const value = 1;\n",
+		"utf8",
+	);
+	run("git", ["add", "index.ts"], {
+		cwd: subdir,
+		env: hookEnv,
+	});
+
+	const result = run("git", ["commit", "-m", "subdir commit"], {
+		cwd: subdir,
+		env: {
+			...hookEnv,
+			...toolEnv,
+		},
+	});
+
+	assert.equal(result.status, 0);
+	const hookLog = fs.readFileSync(toolEnv.HOOK_LOG, "utf8");
+	assert.match(
+		hookLog,
+		/control-plane-biome check --write packages\/demo\/index\.ts/,
+	);
+	assert.doesNotMatch(hookLog, /markdownlint-cli2/);
+	assert.doesNotMatch(hookLog, /README\.md/);
+});
+
+test("global pre-commit does not skip repeated staged-file failures", (t) => {
+	const repo = setupRepo(t, "main");
+	const { env: hookEnv } = setupGlobalHooks(t, repo);
+	const toolEnv = createToolStubsWithFailingJavaScript(repo);
+
+	run("git", ["switch", "-c", "feature/retry-commit-hook"], {
+		cwd: repo,
+		env: hookEnv,
+	});
+	fs.writeFileSync(
+		path.join(repo, "index.ts"),
+		"export const value=1\n",
+		"utf8",
+	);
+	run("git", ["add", "index.ts"], {
+		cwd: repo,
+		env: hookEnv,
+	});
+
+	const firstResult = run("git", ["commit", "-m", "retry one"], {
+		cwd: repo,
+		env: {
+			...hookEnv,
+			...toolEnv,
+		},
+	});
+	const secondResult = run("git", ["commit", "-m", "retry two"], {
+		cwd: repo,
+		env: {
+			...hookEnv,
+			...toolEnv,
+		},
+	});
+
+	assert.equal(firstResult.status, 1);
+	assert.equal(secondResult.status, 1);
+	const hookLog = fs.readFileSync(toolEnv.HOOK_LOG, "utf8");
+	assert.equal(
+		(hookLog.match(/control-plane-biome check index\.ts/g) || []).length,
+		2,
+	);
 });
 
 test("global pre-push blocks protected branches and passes through repository hooks", (t) => {

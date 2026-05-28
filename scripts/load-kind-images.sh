@@ -109,6 +109,21 @@ if [[ -n "${image_archive}" ]]; then
     printf 'Missing Kind image archive: %s\n' "${image_archive}" >&2
     exit 1
   }
+  if [[ "${image_archive}" == *.tar.gz ]] || [[ "${image_archive}" == *.tgz ]]; then
+    require_command gzip
+    workdir="$(mktemp -d)"
+    case "${image_archive}" in
+      *.tar.gz)
+        archive_basename="$(basename "${image_archive%.gz}")"
+        ;;
+      *.tgz)
+        archive_basename="$(basename "${image_archive%.tgz}").tar"
+        ;;
+    esac
+    decompressed_archive="${workdir}/${archive_basename}"
+    gzip -dc "${image_archive}" > "${decompressed_archive}"
+    image_archive="${decompressed_archive}"
+  fi
   kind_cmd load image-archive "${image_archive}" --name "${cluster_name}"
   exit 0
 fi

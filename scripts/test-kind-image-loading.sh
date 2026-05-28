@@ -74,7 +74,9 @@ kind_log="${workdir}/kind.log"
 docker_log="${workdir}/docker.log"
 sudo_log="${workdir}/sudo.log"
 archive_path="${workdir}/control-plane-images.tar"
+compressed_archive_path="${workdir}/control-plane-images.tar.gz"
 : > "${archive_path}"
+gzip -n -c "${archive_path}" > "${compressed_archive_path}"
 
 printf '%s\n' 'kind-image-loading-test: verifying direct archive import' >&2
 PATH="${workdir}/bin:${PATH}" \
@@ -86,6 +88,22 @@ TEST_KIND_SUDO_LOG="${sudo_log}" \
   --image-archive "${archive_path}"
 
 grep -Fqx "load image-archive ${archive_path} --name control-plane-ci" "${kind_log}"
+test ! -e "${docker_log}"
+test ! -e "${sudo_log}"
+
+: > "${kind_log}"
+rm -f "${docker_log}" "${sudo_log}"
+
+printf '%s\n' 'kind-image-loading-test: verifying compressed archive import' >&2
+PATH="${workdir}/bin:${PATH}" \
+TEST_KIND_KIND_LOG="${kind_log}" \
+TEST_KIND_DOCKER_LOG="${docker_log}" \
+TEST_KIND_SUDO_LOG="${sudo_log}" \
+  "${script_dir}/load-kind-images.sh" \
+  --cluster-name control-plane-ci \
+  --image-archive "${compressed_archive_path}"
+
+grep -Eq "^load image-archive .*/control-plane-images\.tar --name control-plane-ci$" "${kind_log}"
 test ! -e "${docker_log}"
 test ! -e "${sudo_log}"
 
