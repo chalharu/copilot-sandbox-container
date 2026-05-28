@@ -204,6 +204,10 @@ printf "control-plane-biome %s\n" "$*" >> "$HOOK_LOG"
 mode="${BIOME_RUNTIME_FAILURE_MODE:-}"
 if [ "$1" = "check" ] && [ "${2:-}" = "--write" ]; then
   file="$3"
+  if [ "$mode" = "skip-write" ] || [ "$mode" = "skip-all" ]; then
+    printf "biome unavailable in %s\n" "$file" >&2
+    exit "${CONTROL_PLANE_HOOK_SKIP_EXIT_CODE:-76}"
+  fi
   if [ "$mode" = "write" ] || [ "$mode" = "all" ]; then
     printf "biome runtime failed in %s\n" "$file" >&2
     exit 70
@@ -214,6 +218,10 @@ if [ "$1" = "check" ] && [ "${2:-}" = "--write" ]; then
   exit 0
 fi
 file="${2:-}"
+if [ "$mode" = "skip-check" ] || [ "$mode" = "skip-all" ]; then
+  printf "biome unavailable in %s\n" "$file" >&2
+  exit "${CONTROL_PLANE_HOOK_SKIP_EXIT_CODE:-76}"
+fi
 if [ "$mode" = "check" ] || [ "$mode" = "all" ]; then
   printf "biome runtime failed in %s\n" "$file" >&2
   exit 70
@@ -685,6 +693,143 @@ fn hook_falls_back_to_markdownlint_npx_when_local_cli_is_missing() {
     assert!(hook_log.contains("npx --yes markdownlint-cli2 README.md"));
     assert!(stderr.contains("Markdown linter reported unresolved issues:"));
     assert!(stderr.contains("remaining markdown issue in README.md"));
+}
+
+#[test]
+fn hook_falls_back_to_local_execution_when_forwarding_transport_fails() {
+    let repo = setup_repo("post-tool-use-forward-fallback-");
+    seed_repo(repo.path());
+    fs::write(repo.path().join("README.md"), "# Title\n\nchanged\n").unwrap();
+    let mut hook_env = create_tool_stubs(repo.path(), StubOptions::default());
+    hook_env.env.insert(
+        "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ACTIVE".to_string(),
+        "0".to_string(),
+    );
+    hook_env.env.insert(
+        "CONTROL_PLANE_POST_TOOL_USE_FORWARD_ADDR".to_string(),
+        "http://127.0.0.1:1".to_string(),
+    );
+    hook_env.env.insert(
+        "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TOKEN".to_string(),
+        "token".to_string(),
+    );
+    hook_env.env.insert(
+        "CONTROL_PLANE_POST_TOOL_USE_FORWARD_TIMEOUT_SEC".to_string(),
+        "1".to_string(),
+    );
+
+    let result = run_hook(repo.path(), &hook_env, "success");
+    let hook_log = fs::read_to_string(&hook_env.log_file).unwrap();
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert_eq!(result.status.code(), Some(1));
+    assert!(hook_log.contains("--fix README.md"));
+    assert!(stderr.contains(
+        "post-tool-use: failed to forward hook to control-plane; falling back to local execution:"
+    ));
+    assert!(stderr.contains("remaining markdown issue in README.md"));
+}
+
+#[test]
+fn hook_skips_missing_tools_with_visible_stderr_note() {
+    let repo = setup_repo("post-tool-use-missing-tools-");
+    seed_repo(repo.path());
+    fs::write(repo.path().join("index.ts"), "export const value=1\n").unwrap();
+    let hook_env = create_tool_stubs(
+        repo.path(),
+        StubOptions {
+            biome: false,
+            oxlint: false,
+            eslint: false,
+            npx: false,
+            ..StubOptions::default()
+        },
+    );
+
+    let result = run_hook(repo.path(), &hook_env, "success");
+    let hook_log = fs::read_to_string(&hook_env.log_file).unwrap();
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert_eq!(result.status.code(), Some(0));
+    assert!(hook_log.is_empty());
+    assert!(stderr.contains("Hook skipped because no configured tool is available:"));
+    assert!(stderr.contains("biome-check-write (control-plane-biome)"));
+    assert!(stderr.contains("oxlint-fix (oxlint)"));
+    assert!(!stderr.contains("JavaScript/TypeScript linter reported unresolved issues:"));
+}
+
+#[test]
+fn hook_retries_skipped_files_once_tooling_becomes_available() {
+    let repo = setup_repo("post-tool-use-skip-retry-");
+    seed_repo(repo.path());
+    fs::write(repo.path().join("index.ts"), "export const value=1\n").unwrap();
+
+    let missing_tool_env = create_tool_stubs(
+        repo.path(),
+        StubOptions {
+            biome: false,
+            oxlint: false,
+            eslint: false,
+            npx: false,
+            ..StubOptions::default()
+        },
+    );
+    let skipped_result = run_hook(repo.path(), &missing_tool_env, "success");
+    let skipped_stderr = String::from_utf8_lossy(&skipped_result.stderr);
+
+    assert_eq!(skipped_result.status.code(), Some(0));
+    assert!(skipped_stderr.contains("Hook skipped because no configured tool is available:"));
+
+    let available_tool_env = create_tool_stubs(repo.path(), StubOptions::default());
+    let retried_result = run_hook(repo.path(), &available_tool_env, "success");
+    let hook_log = fs::read_to_string(&available_tool_env.log_file).unwrap();
+    let retried_stderr = String::from_utf8_lossy(&retried_result.stderr);
+
+    assert_eq!(retried_result.status.code(), Some(1));
+    assert!(log_contains_line(
+        &hook_log,
+        "control-plane-biome check --write index.ts"
+    ));
+    assert!(log_contains_line(&hook_log, "oxlint --fix index.ts"));
+    assert!(retried_stderr.contains("JavaScript/TypeScript linter reported unresolved issues:"));
+}
+
+#[test]
+fn hook_falls_back_to_biome_npx_when_wrapper_signals_retryable_skip() {
+    let repo = setup_repo("post-tool-use-biome-skip-npx-");
+    seed_repo(repo.path());
+    fs::write(repo.path().join("data.json"), "{\n  \"value\": 1\n}\n").unwrap();
+
+    let hook_env = create_tool_stubs(
+        repo.path(),
+        StubOptions {
+            oxlint: false,
+            eslint: false,
+            npx: true,
+            biome_runtime_failure_mode: Some("skip-all"),
+            ..StubOptions::default()
+        },
+    );
+    let result = run_hook(repo.path(), &hook_env, "success");
+    let hook_log = fs::read_to_string(&hook_env.log_file).unwrap();
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert_eq!(result.status.code(), Some(1));
+    assert!(log_contains_line(
+        &hook_log,
+        "control-plane-biome check --write data.json"
+    ));
+    assert!(log_contains_line(
+        &hook_log,
+        "npx --yes @biomejs/biome check --write data.json"
+    ));
+    assert!(log_contains_line(
+        &hook_log,
+        "npx --yes @biomejs/biome check data.json"
+    ));
+    assert!(stderr.contains("Biome reported unresolved issues:"));
+    assert!(stderr.contains("biome unresolved in data.json"));
+    assert!(!stderr.contains("Hook skipped because no configured tool is available:"));
 }
 
 #[test]

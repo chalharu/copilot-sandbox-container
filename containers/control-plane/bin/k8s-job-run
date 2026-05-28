@@ -13,6 +13,13 @@ die() {
   exit 64
 }
 
+infra_failure_exit_code="${CONTROL_PLANE_REMOTE_INFRA_FAILURE_EXIT_CODE:-75}"
+
+infra_fail() {
+  printf 'k8s-job-run: %s\n' "$*" >&2
+  exit "${infra_failure_exit_code}"
+}
+
 namespace="default"
 image=""
 job_name=""
@@ -88,19 +95,44 @@ if [[ ${#mount_files[@]} -gt 0 ]]; then
   done
 fi
 
-created_job="$(k8s-job-start "${start_args[@]}" -- "$@" | tr -d '\n')"
+if created_job="$(k8s-job-start "${start_args[@]}" -- "$@" | tr -d '\n')"; then
+  :
+else
+  infra_fail "failed to start Kubernetes Job"
+fi
 if [[ ${#mount_files[@]} -gt 0 ]]; then
   transfer_id="$(kubectl get job --namespace "${namespace}" "${created_job}" -o jsonpath='{.metadata.annotations.control-plane\.github\.io/job-transfer-id}' 2>/dev/null || true)"
 fi
-k8s-job-wait --namespace "${namespace}" --job-name "${created_job}" --timeout "${timeout}"
-pod_name="$(k8s-job-pod --namespace "${namespace}" --job-name "${created_job}" | tr -d '\n')"
+if k8s-job-wait --namespace "${namespace}" --job-name "${created_job}" --timeout "${timeout}"; then
+  :
+else
+  wait_status=$?
+  # A failed Job still has a Pod termination status that may encode the
+  # underlying tool exit code, so keep going and return that value below.
+  if [[ "${wait_status}" -ne 1 ]]; then
+    infra_fail "failed while waiting for Kubernetes Job ${created_job}"
+  fi
+fi
+if pod_name="$(k8s-job-pod --namespace "${namespace}" --job-name "${created_job}" | tr -d '\n')"; then
+  :
+else
+  infra_fail "failed to resolve pod for Kubernetes Job ${created_job}"
+fi
 
 if [[ -n "${pod_name}" ]]; then
-  k8s-job-logs --namespace "${namespace}" --job-name "${created_job}"
+  logs_failed=0
+  if k8s-job-logs --namespace "${namespace}" --job-name "${created_job}"; then
+    :
+  else
+    logs_failed=1
+  fi
   exit_code="$(kubectl get pod --namespace "${namespace}" "${pod_name}" -o jsonpath='{.status.containerStatuses[?(@.name=="execution")].state.terminated.exitCode}' 2>/dev/null || true)"
   if [[ -n "${exit_code}" ]]; then
     exit "${exit_code}"
   fi
+  if [[ "${logs_failed}" -eq 1 ]]; then
+    infra_fail "failed to stream logs for Kubernetes Job ${created_job}"
+  fi
 fi
 
-exit 0
+infra_fail "Kubernetes Job ${created_job} did not report an execution exit code"

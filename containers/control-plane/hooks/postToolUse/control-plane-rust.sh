@@ -22,8 +22,19 @@ die() {
   exit 64
 }
 
+skip_hook() {
+  printf 'control-plane-rust.sh: skipping hook step because %s\n' "$*" >&2
+  local skip_exit_code="${CONTROL_PLANE_HOOK_SKIP_EXIT_CODE:-0}"
+  if [[ "${skip_exit_code}" =~ ^[1-9][0-9]*$ ]]; then
+    exit "${skip_exit_code}"
+  fi
+  exit 0
+}
+
+remote_infra_failure_exit_code="${CONTROL_PLANE_REMOTE_INFRA_FAILURE_EXIT_CODE:-75}"
+
 require_command() {
-  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+  command -v "$1" >/dev/null 2>&1 || skip_hook "missing required command: $1"
 }
 
 find_repo_root() {
@@ -283,13 +294,13 @@ run_remote_cargo() {
 
   control-plane-run \
     --image "${remote_image}" \
-     -- bash -lc "${remote_command}"
+    -- bash -lc "${remote_command}"
 }
 
 require_local_build_toolchain() {
   [[ "${preset_requires_toolchain}" -eq 1 ]] || return 0
   command -v cc >/dev/null 2>&1 && command -v pkg-config >/dev/null 2>&1 && return 0
-  die "local ${preset} needs cc and pkg-config; set CONTROL_PLANE_RUST_HOOK_IMAGE to run heavy cargo work in a separate image"
+  skip_hook "local ${preset} needs cc and pkg-config; set CONTROL_PLANE_RUST_HOOK_IMAGE to run heavy cargo work in a separate image"
 }
 
 mapfile -t manifests < <(collect_target_manifests "$@")
@@ -302,9 +313,18 @@ for manifest in "${manifests[@]}"; do
   crate_dir="$(dirname "${manifest}")"
   printf 'control-plane-rust: %s\n' "$(repo_relative_path "${crate_dir}")" >&2
   if [[ "${use_remote}" -eq 1 ]]; then
-    run_remote_cargo "${manifest}"
-  else
-    require_local_build_toolchain
-    run_local_cargo "${manifest}"
+    if run_remote_cargo "${manifest}"; then
+      continue
+    else
+      remote_status=$?
+    fi
+    if [[ "${remote_status}" -ne "${remote_infra_failure_exit_code}" ]] \
+      && [[ "${remote_status}" -ne 126 ]] \
+      && [[ "${remote_status}" -ne 127 ]]; then
+      exit "${remote_status}"
+    fi
+    printf 'control-plane-rust: remote execution is unavailable (exit %s); falling back to local execution\n' "${remote_status}" >&2
   fi
+  require_local_build_toolchain
+  run_local_cargo "${manifest}"
 done

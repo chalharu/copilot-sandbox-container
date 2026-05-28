@@ -23,6 +23,17 @@ die() {
   exit 64
 }
 
+skip_hook() {
+  printf 'control-plane-biome: skipping hook step because %s\n' "$*" >&2
+  local skip_exit_code="${CONTROL_PLANE_HOOK_SKIP_EXIT_CODE:-0}"
+  if [[ "${skip_exit_code}" =~ ^[1-9][0-9]*$ ]]; then
+    exit "${skip_exit_code}"
+  fi
+  exit 0
+}
+
+remote_infra_failure_exit_code="${CONTROL_PLANE_REMOTE_INFRA_FAILURE_EXIT_CODE:-75}"
+
 find_repo_root() {
   if command -v git >/dev/null 2>&1; then
     git rev-parse --show-toplevel 2>/dev/null && return 0
@@ -154,7 +165,7 @@ run_remote_biome() {
     printf -v remote_command '%s %q' "${remote_command}" "${rewritten_argument}"
   done
 
-  exec control-plane-run \
+  control-plane-run \
     --image "${remote_image}" \
     --input-mount-path "${job_input_mount_path}" \
     "${mount_args[@]}" \
@@ -170,7 +181,7 @@ run_local_biome() {
     exec npx --yes @biomejs/biome "$@"
   fi
 
-  die "missing local biome CLI; install biome or set CONTROL_PLANE_BIOME_HOOK_IMAGE"
+  skip_hook "local biome tooling is unavailable; install biome or npx, or set CONTROL_PLANE_BIOME_HOOK_IMAGE"
 }
 
 [[ $# -gt 0 ]] || {
@@ -191,7 +202,17 @@ if [[ -n "${remote_image}" ]] && command -v control-plane-run >/dev/null 2>&1 &&
   for mount_spec in "${mount_specs[@]}"; do
     mount_args+=(--mount-file "${mount_spec}")
   done
-  run_remote_biome "$@"
+  if run_remote_biome "$@"; then
+    exit 0
+  else
+    remote_status=$?
+  fi
+  if [[ "${remote_status}" -ne "${remote_infra_failure_exit_code}" ]] \
+    && [[ "${remote_status}" -ne 126 ]] \
+    && [[ "${remote_status}" -ne 127 ]]; then
+    exit "${remote_status}"
+  fi
+  printf 'control-plane-biome: remote execution is unavailable (exit %s); falling back to local execution\n' "${remote_status}" >&2
 fi
 
 run_local_biome "$@"
