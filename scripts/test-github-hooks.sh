@@ -177,7 +177,9 @@ EOF
   set -e
   [[ "${remote_status}" -eq 9 ]]
   [[ ! -s "${local_log}" ]]
-  ! grep -Fq 'falling back to local execution' "${remote_failure_stderr}"
+  if grep -Fq 'falling back to local execution' "${remote_failure_stderr}"; then
+    exit 1
+  fi
 
   : > "${local_log}"
   remote_config_stderr="${workdir}/remote-config.stderr"
@@ -195,7 +197,9 @@ EOF
   set -e
   [[ "${remote_status}" -eq 64 ]]
   [[ ! -s "${local_log}" ]]
-  ! grep -Fq 'falling back to local execution' "${remote_config_stderr}"
+  if grep -Fq 'falling back to local execution' "${remote_config_stderr}"; then
+    exit 1
+  fi
 
   rm -f "${bin_dir}/biome"
   cat > "${bin_dir}/npx" <<'EOF'
@@ -319,7 +323,9 @@ EOF
   set -e
   [[ "${remote_status}" -eq 9 ]]
   [[ ! -s "${cargo_log}" ]]
-  ! grep -Fq 'falling back to local execution' "${remote_failure_stderr}"
+  if grep -Fq 'falling back to local execution' "${remote_failure_stderr}"; then
+    exit 1
+  fi
 
   : > "${cargo_log}"
   remote_config_stderr="${workdir}/remote-config.stderr"
@@ -340,7 +346,9 @@ EOF
   set -e
   [[ "${remote_status}" -eq 64 ]]
   [[ ! -s "${cargo_log}" ]]
-  ! grep -Fq 'falling back to local execution' "${remote_config_stderr}"
+  if grep -Fq 'falling back to local execution' "${remote_config_stderr}"; then
+    exit 1
+  fi
 
   restricted_bin="${workdir}/restricted-bin"
   mkdir -p "${restricted_bin}"
@@ -432,7 +440,9 @@ EOF
 
   [[ "${status}" -eq 127 ]]
   grep -Fqx 'job logs' "${stdout_log}"
-  ! grep -Fq 'k8s-job-run:' "${stderr_log}"
+  if grep -Fq 'k8s-job-run:' "${stderr_log}"; then
+    exit 1
+  fi
 
   cat > "${bin_dir}/k8s-job-logs" <<'EOF'
 #!/usr/bin/env bash
