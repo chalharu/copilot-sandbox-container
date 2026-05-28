@@ -1,4 +1,4 @@
-pub use crate::git::{get_git_dir, get_repo_root, list_dirty_files, list_staged_files};
+pub use crate::git::{get_git_dir, get_repo_root, list_dirty_files};
 
 use std::path::Path;
 

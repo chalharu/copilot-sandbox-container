@@ -53,23 +53,6 @@ fn handle_local(input: &HookInput) -> Result<i32, String> {
     let repo_root = git::get_repo_root(&input.cwd_path());
     let bundled_config_path = resolve_bundled_config_path()?;
     let config = config::load(&repo_root, &bundled_config_path)?;
-    if input.is_git_hook() {
-        let staged_relevant_files = pipeline::classify_files_by_pipeline(
-            &config,
-            &repo_root,
-            &git::list_staged_files(&repo_root)?,
-        );
-        if staged_relevant_files.matched_files.is_empty() {
-            return Ok(0);
-        }
-        let outcome = executor::run_pipelines(
-            &config,
-            &repo_root,
-            &staged_relevant_files.files_by_pipeline,
-        )?;
-        return Ok(outcome.exit_code);
-    }
-
     let state_path = state::resolve_state_file_path(&repo_root);
     let previous_signatures = state::load_state(&state_path)?;
     let current_relevant_files = pipeline::current_relevant_files(&config, &repo_root)?;
@@ -159,8 +142,6 @@ fn config_path_from_hook_path(hook_path: &Path) -> PathBuf {
 #[derive(Debug, Deserialize)]
 struct HookInput {
     cwd: Option<String>,
-    #[serde(rename = "toolName")]
-    tool_name: Option<String>,
     #[serde(rename = "toolResult")]
     tool_result: Option<HookToolResult>,
 }
@@ -184,10 +165,6 @@ impl HookInput {
                 .map(|value| value.result_type.as_str()),
             Some("denied")
         )
-    }
-
-    fn is_git_hook(&self) -> bool {
-        matches!(self.tool_name.as_deref(), Some("git-hook"))
     }
 
     fn cwd_path(&self) -> PathBuf {

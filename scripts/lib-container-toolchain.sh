@@ -304,18 +304,6 @@ buildx_local_cache_dir_for_context() {
   printf '%s/%s\n' "${cache_root}" "$(printf '%s' "${context_path}" | sha256sum | awk '{print $1}')"
 }
 
-buildx_cache_export_mode() {
-  case "${CONTROL_PLANE_BUILDX_CACHE_MODE:-max}" in
-    min|max)
-      printf '%s\n' "${CONTROL_PLANE_BUILDX_CACHE_MODE:-max}"
-      ;;
-    *)
-      printf 'Unsupported CONTROL_PLANE_BUILDX_CACHE_MODE: %s\n' "${CONTROL_PLANE_BUILDX_CACHE_MODE}" >&2
-      exit 1
-      ;;
-  esac
-}
-
 prepare_buildx_local_cache() {
   local context_dir="$1"
   local args_name="$2"
@@ -336,7 +324,7 @@ prepare_buildx_local_cache() {
   new_cache_dir_value="${cache_dir_value}-new"
   mkdir -p "${cache_root}" "${cache_dir_value}"
   rm -rf "${new_cache_dir_value}"
-  args_ref+=(--cache-from "type=local,src=${cache_dir_value}" --cache-to "type=local,dest=${new_cache_dir_value},mode=$(buildx_cache_export_mode)")
+  args_ref+=(--cache-from "type=local,src=${cache_dir_value}" --cache-to "type=local,dest=${new_cache_dir_value},mode=max")
   printf -v "${cache_dir_name}" '%s' "${cache_dir_value}"
   printf -v "${new_cache_dir_name}" '%s' "${new_cache_dir_value}"
 }
