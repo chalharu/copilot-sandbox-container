@@ -269,7 +269,9 @@ fn symlink_components_stay_in_root(raw_candidate: &Path, root: &Path) -> bool {
                     return false;
                 };
                 current = normalize_path(&resolved);
-                if !is_path_under_root(&current, &canonical_root) {
+                if !is_path_under_root(&current, &canonical_root)
+                    && !is_path_under_root(&canonical_root, &current)
+                {
                     return false;
                 }
             }
