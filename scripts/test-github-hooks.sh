@@ -94,6 +94,7 @@ printf '%s\n' 'test-github-hooks.sh: verifying control-plane-biome wrapper' >&2
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$@" > "${TEST_WRAPPER_LOG}"
+exit "${TEST_REMOTE_STATUS:-0}"
 EOF
   chmod 755 "${bin_dir}/control-plane-run"
 
@@ -132,6 +133,74 @@ EOF
   )
   grep -Fqx 'biome check --write src/index.ts' "${local_log}"
 
+  remote_fallback_stderr="${workdir}/remote-fallback.stderr"
+  : > "${local_log}"
+  (
+    cd "${repo_dir}"
+    TEST_REMOTE_STATUS=75 \
+      TEST_WRAPPER_LOG="${local_log}" \
+      PATH="${bin_dir}:/usr/bin:/bin" \
+      CONTROL_PLANE_BIOME_HOOK_IMAGE="${biome_hook_image}" \
+      CONTROL_PLANE_JOB_INPUT_MOUNT_PATH='/job-inputs' \
+      "${repo_root}/containers/control-plane/bin/control-plane-biome" check --write src/index.ts
+  ) > /dev/null 2> "${remote_fallback_stderr}"
+  grep -Fqx 'biome check --write src/index.ts' "${local_log}"
+  grep -Fq 'control-plane-biome: remote execution is unavailable (exit 75); falling back to local execution' "${remote_fallback_stderr}"
+
+  remote_missing_stderr="${workdir}/remote-missing.stderr"
+  : > "${local_log}"
+  (
+    cd "${repo_dir}"
+    TEST_REMOTE_STATUS=127 \
+      TEST_WRAPPER_LOG="${local_log}" \
+      PATH="${bin_dir}:/usr/bin:/bin" \
+      CONTROL_PLANE_BIOME_HOOK_IMAGE="${biome_hook_image}" \
+      CONTROL_PLANE_JOB_INPUT_MOUNT_PATH='/job-inputs' \
+      "${repo_root}/containers/control-plane/bin/control-plane-biome" check --write src/index.ts
+  ) > /dev/null 2> "${remote_missing_stderr}"
+  grep -Fqx 'biome check --write src/index.ts' "${local_log}"
+  grep -Fq 'control-plane-biome: remote execution is unavailable (exit 127); falling back to local execution' "${remote_missing_stderr}"
+
+  : > "${local_log}"
+  remote_failure_stderr="${workdir}/remote-failure.stderr"
+  set +e
+  (
+    cd "${repo_dir}"
+    TEST_REMOTE_STATUS=9 \
+      TEST_WRAPPER_LOG="${remote_log}" \
+      PATH="${bin_dir}:/usr/bin:/bin" \
+      CONTROL_PLANE_BIOME_HOOK_IMAGE="${biome_hook_image}" \
+      CONTROL_PLANE_JOB_INPUT_MOUNT_PATH='/job-inputs' \
+      "${repo_root}/containers/control-plane/bin/control-plane-biome" check --write src/index.ts
+  ) > /dev/null 2> "${remote_failure_stderr}"
+  remote_status=$?
+  set -e
+  [[ "${remote_status}" -eq 9 ]]
+  [[ ! -s "${local_log}" ]]
+  if grep -Fq 'falling back to local execution' "${remote_failure_stderr}"; then
+    exit 1
+  fi
+
+  : > "${local_log}"
+  remote_config_stderr="${workdir}/remote-config.stderr"
+  set +e
+  (
+    cd "${repo_dir}"
+    TEST_REMOTE_STATUS=64 \
+      TEST_WRAPPER_LOG="${remote_log}" \
+      PATH="${bin_dir}:/usr/bin:/bin" \
+      CONTROL_PLANE_BIOME_HOOK_IMAGE="${biome_hook_image}" \
+      CONTROL_PLANE_JOB_INPUT_MOUNT_PATH='/job-inputs' \
+      "${repo_root}/containers/control-plane/bin/control-plane-biome" check --write src/index.ts
+  ) > /dev/null 2> "${remote_config_stderr}"
+  remote_status=$?
+  set -e
+  [[ "${remote_status}" -eq 64 ]]
+  [[ ! -s "${local_log}" ]]
+  if grep -Fq 'falling back to local execution' "${remote_config_stderr}"; then
+    exit 1
+  fi
+
   rm -f "${bin_dir}/biome"
   cat > "${bin_dir}/npx" <<'EOF'
 #!/usr/bin/env bash
@@ -148,6 +217,254 @@ EOF
       "${repo_root}/containers/control-plane/bin/control-plane-biome" check --write src/index.ts
   )
   grep -Fqx 'npx --yes @biomejs/biome check --write src/index.ts' "${npx_log}"
+
+  rm -f "${bin_dir}/npx"
+  restricted_local_bin="${workdir}/restricted-local-bin"
+  mkdir -p "${restricted_local_bin}"
+  ln -s "$(command -v bash)" "${restricted_local_bin}/bash"
+  missing_local_stderr="${workdir}/missing-local.stderr"
+  (
+    cd "${repo_dir}"
+    PATH="${restricted_local_bin}" \
+      CONTROL_PLANE_BIOME_HOOK_IMAGE='' \
+      "${repo_root}/containers/control-plane/bin/control-plane-biome" check --write src/index.ts
+  ) > /dev/null 2> "${missing_local_stderr}"
+  grep -Fq 'control-plane-biome: skipping hook step because local biome tooling is unavailable; install biome or npx, or set CONTROL_PLANE_BIOME_HOOK_IMAGE' "${missing_local_stderr}"
+)
+
+printf '%s\n' 'test-github-hooks.sh: verifying Rust hook remote fallback' >&2
+(
+  set -euo pipefail
+
+  workdir="$(mktemp -d)"
+  trap 'rm -rf "${workdir}"' EXIT
+
+  repo_dir="${workdir}/repo"
+  bin_dir="${workdir}/bin"
+  cargo_log="${workdir}/cargo.log"
+  remote_log="${workdir}/remote.log"
+  mkdir -p "${repo_dir}/src" "${bin_dir}"
+  git -C "${repo_dir}" init -q
+
+  cat > "${repo_dir}/Cargo.toml" <<'EOF'
+[package]
+name = "test-root-crate"
+version = "0.1.0"
+edition = "2024"
+EOF
+  cat > "${repo_dir}/src/main.rs" <<'EOF'
+fn main() {}
+EOF
+
+  cat > "${bin_dir}/cargo" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s|%s\n' "${PWD}" "$*" >> "${TEST_CARGO_LOG}"
+EOF
+  chmod 755 "${bin_dir}/cargo"
+
+  cat > "${bin_dir}/control-plane-run" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" > "${TEST_WRAPPER_LOG}"
+exit "${TEST_REMOTE_STATUS:-0}"
+EOF
+  chmod 755 "${bin_dir}/control-plane-run"
+
+  remote_fallback_stderr="${workdir}/remote-fallback.stderr"
+  (
+    cd "${repo_dir}"
+    TEST_CARGO_LOG="${cargo_log}" \
+      TEST_WRAPPER_LOG="${remote_log}" \
+      TEST_REMOTE_STATUS=75 \
+      PATH="${bin_dir}:/usr/bin:/bin" \
+      CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+      CONTROL_PLANE_RUST_HOOK_IMAGE="${biome_hook_image}" \
+      CONTROL_PLANE_JOB_TRANSFER_IMAGE='' \
+      bash "${repo_root}/containers/control-plane/hooks/postToolUse/control-plane-rust.sh" \
+        fmt src/main.rs
+  ) > /dev/null 2> "${remote_fallback_stderr}"
+  grep -Fqx "${repo_dir}|fmt --all" "${cargo_log}"
+  grep -Fq 'control-plane-rust: remote execution is unavailable (exit 75); falling back to local execution' "${remote_fallback_stderr}"
+
+  remote_missing_stderr="${workdir}/remote-missing.stderr"
+  : > "${cargo_log}"
+  (
+    cd "${repo_dir}"
+    TEST_CARGO_LOG="${cargo_log}" \
+      TEST_WRAPPER_LOG="${remote_log}" \
+      TEST_REMOTE_STATUS=127 \
+      PATH="${bin_dir}:/usr/bin:/bin" \
+      CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+      CONTROL_PLANE_RUST_HOOK_IMAGE="${biome_hook_image}" \
+      CONTROL_PLANE_JOB_TRANSFER_IMAGE='' \
+      bash "${repo_root}/containers/control-plane/hooks/postToolUse/control-plane-rust.sh" \
+        fmt src/main.rs
+  ) > /dev/null 2> "${remote_missing_stderr}"
+  grep -Fqx "${repo_dir}|fmt --all" "${cargo_log}"
+  grep -Fq 'control-plane-rust: remote execution is unavailable (exit 127); falling back to local execution' "${remote_missing_stderr}"
+
+  : > "${cargo_log}"
+  remote_failure_stderr="${workdir}/remote-failure.stderr"
+  set +e
+  (
+    cd "${repo_dir}"
+    TEST_CARGO_LOG="${cargo_log}" \
+      TEST_WRAPPER_LOG="${remote_log}" \
+      TEST_REMOTE_STATUS=9 \
+      PATH="${bin_dir}:/usr/bin:/bin" \
+      CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+      CONTROL_PLANE_RUST_HOOK_IMAGE="${biome_hook_image}" \
+      CONTROL_PLANE_JOB_TRANSFER_IMAGE='' \
+      bash "${repo_root}/containers/control-plane/hooks/postToolUse/control-plane-rust.sh" \
+        fmt src/main.rs
+  ) > /dev/null 2> "${remote_failure_stderr}"
+  remote_status=$?
+  set -e
+  [[ "${remote_status}" -eq 9 ]]
+  [[ ! -s "${cargo_log}" ]]
+  if grep -Fq 'falling back to local execution' "${remote_failure_stderr}"; then
+    exit 1
+  fi
+
+  : > "${cargo_log}"
+  remote_config_stderr="${workdir}/remote-config.stderr"
+  set +e
+  (
+    cd "${repo_dir}"
+    TEST_CARGO_LOG="${cargo_log}" \
+      TEST_WRAPPER_LOG="${remote_log}" \
+      TEST_REMOTE_STATUS=64 \
+      PATH="${bin_dir}:/usr/bin:/bin" \
+      CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+      CONTROL_PLANE_RUST_HOOK_IMAGE="${biome_hook_image}" \
+      CONTROL_PLANE_JOB_TRANSFER_IMAGE='' \
+      bash "${repo_root}/containers/control-plane/hooks/postToolUse/control-plane-rust.sh" \
+        fmt src/main.rs
+  ) > /dev/null 2> "${remote_config_stderr}"
+  remote_status=$?
+  set -e
+  [[ "${remote_status}" -eq 64 ]]
+  [[ ! -s "${cargo_log}" ]]
+  if grep -Fq 'falling back to local execution' "${remote_config_stderr}"; then
+    exit 1
+  fi
+
+  restricted_bin="${workdir}/restricted-bin"
+  mkdir -p "${restricted_bin}"
+  ln -s "$(command -v bash)" "${restricted_bin}/bash"
+  ln -s /usr/bin/dirname "${restricted_bin}/dirname"
+  ln -s /usr/bin/find "${restricted_bin}/find"
+  ln -s /usr/bin/grep "${restricted_bin}/grep"
+  ln -s /usr/bin/sort "${restricted_bin}/sort"
+  missing_local_stderr="${workdir}/missing-local.stderr"
+  (
+    cd "${repo_dir}"
+    PATH="${restricted_bin}" \
+      CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+      CONTROL_PLANE_RUST_HOOK_IMAGE='' \
+      CONTROL_PLANE_JOB_TRANSFER_IMAGE='' \
+      bash "${repo_root}/containers/control-plane/hooks/postToolUse/control-plane-rust.sh" \
+        clippy-fix src/main.rs
+  ) > /dev/null 2> "${missing_local_stderr}"
+  grep -Fq 'control-plane-rust.sh: skipping hook step because local clippy-fix needs cc and pkg-config; set CONTROL_PLANE_RUST_HOOK_IMAGE to run heavy cargo work in a separate image' "${missing_local_stderr}"
+)
+
+printf '%s\n' 'test-github-hooks.sh: verifying k8s-job-run preserves failed pod exit codes' >&2
+(
+  set -euo pipefail
+
+  workdir="$(mktemp -d)"
+  trap 'rm -rf "${workdir}"' EXIT
+
+  bin_dir="${workdir}/bin"
+  stdout_log="${workdir}/stdout.log"
+  stderr_log="${workdir}/stderr.log"
+  mkdir -p "${bin_dir}"
+
+  ln -s "$(command -v bash)" "${bin_dir}/bash"
+  ln -s "$(command -v tr)" "${bin_dir}/tr"
+
+  cat > "${bin_dir}/k8s-job-start" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'failed-job\n'
+EOF
+  chmod 755 "${bin_dir}/k8s-job-start"
+
+  cat > "${bin_dir}/k8s-job-wait" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 1
+EOF
+  chmod 755 "${bin_dir}/k8s-job-wait"
+
+  cat > "${bin_dir}/k8s-job-pod" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'failed-pod\n'
+EOF
+  chmod 755 "${bin_dir}/k8s-job-pod"
+
+  cat > "${bin_dir}/k8s-job-logs" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'job logs\n'
+EOF
+  chmod 755 "${bin_dir}/k8s-job-logs"
+
+  cat > "${bin_dir}/kubectl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "get" && "$2" == "pod" ]]; then
+  printf '127'
+  exit 0
+fi
+if [[ "$1" == "delete" && "$2" == "job" ]]; then
+  exit 0
+fi
+printf 'unexpected kubectl invocation: %s\n' "$*" >&2
+exit 1
+EOF
+  chmod 755 "${bin_dir}/kubectl"
+
+  set +e
+  PATH="${bin_dir}" \
+    "${repo_root}/containers/control-plane/bin/k8s-job-run" \
+      --namespace demo \
+      --image example.invalid/control-plane:latest \
+      -- printf 'ignored\n' \
+      > "${stdout_log}" 2> "${stderr_log}"
+  status=$?
+  set -e
+
+  [[ "${status}" -eq 127 ]]
+  grep -Fqx 'job logs' "${stdout_log}"
+  if grep -Fq 'k8s-job-run:' "${stderr_log}"; then
+    exit 1
+  fi
+
+  cat > "${bin_dir}/k8s-job-logs" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'job logs\n'
+exit 1
+EOF
+  chmod 755 "${bin_dir}/k8s-job-logs"
+  stdout_log_fail="${workdir}/stdout-log-fail.log"
+  stderr_log_fail="${workdir}/stderr-log-fail.log"
+  set +e
+  PATH="${bin_dir}" \
+    "${repo_root}/containers/control-plane/bin/k8s-job-run" \
+      --namespace demo \
+      --image example.invalid/control-plane:latest \
+      -- printf 'ignored\n' \
+      > "${stdout_log_fail}" 2> "${stderr_log_fail}"
+  status=$?
+  set -e
+  [[ "${status}" -eq 127 ]]
+  grep -Fqx 'job logs' "${stdout_log_fail}"
+  ! grep -Fq 'k8s-job-run:' "${stderr_log_fail}"
 )
 
 printf '%s\n' 'test-github-hooks.sh: verifying Rust hook Cargo.lock routing' >&2

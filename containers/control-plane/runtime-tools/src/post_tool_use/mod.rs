@@ -122,13 +122,30 @@ fn maybe_forward(raw_input: &str, input: &HookInput) -> Result<Option<i32>, Stri
     )?);
     let cwd = input.cwd_path();
     let cwd = cwd.display().to_string();
-    let runtime = Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| format!("failed to build postToolUse forward runtime: {error}"))?;
-    let result = runtime
-        .block_on(execute_remote(&addr, timeout, &token, &cwd, raw_input))
-        .map_err(|error| format!("failed to forward postToolUse hook to control-plane: {error}"))?;
+    let runtime = match Builder::new_current_thread().enable_all().build() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!(
+                "post-tool-use: failed to build forward runtime; falling back to local execution: {error}"
+            );
+            return Ok(None);
+        }
+    };
+    let result = match runtime.block_on(execute_remote(&addr, timeout, &token, &cwd, raw_input)) {
+        Ok(result) => result,
+        Err(error) => {
+            let error_message = error.to_string();
+            if !should_fallback_from_forward_error(&error_message) {
+                return Err(format!(
+                    "failed to forward postToolUse hook to control-plane: {error_message}"
+                ));
+            }
+            eprintln!(
+                "post-tool-use: failed to forward hook to control-plane; falling back to local execution: {error_message}"
+            );
+            return Ok(None);
+        }
+    };
     if !result.stdout.is_empty() {
         print!("{}", result.stdout);
     }
@@ -212,6 +229,27 @@ fn parse_positive_u64(raw_value: &str, variable_name: &str) -> Result<u64, Strin
     }
 }
 
+fn should_fallback_from_forward_error(error_message: &str) -> bool {
+    let normalized = error_message.to_ascii_lowercase();
+    [
+        "transport error",
+        "connection refused",
+        "connection reset",
+        "broken pipe",
+        "unexpected eof",
+        "deadline has elapsed",
+        "timed out",
+        "dns error",
+        "failed to lookup address information",
+        "name or service not known",
+        "no such host",
+        "error trying to connect",
+        "tcp connect error",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle))
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -227,7 +265,10 @@ mod tests {
 
     use crate::test_support::{EnvRestore, lock_env};
 
-    use super::{FORWARD_ADDR_ENV, FORWARD_TIMEOUT_ENV, FORWARD_TOKEN_ENV, handle};
+    use super::{
+        FORWARD_ADDR_ENV, FORWARD_TIMEOUT_ENV, FORWARD_TOKEN_ENV, handle,
+        should_fallback_from_forward_error,
+    };
 
     fn start_server(
         workspace: &Path,
@@ -309,5 +350,70 @@ mod tests {
 
         shutdown_tx.send(()).unwrap();
         server_handle.join().unwrap();
+    }
+
+    #[test]
+    fn requires_forward_token_when_forward_addr_is_set() {
+        let _env_lock = lock_env();
+        let _forward_addr = EnvRestore::set(FORWARD_ADDR_ENV, "http://127.0.0.1:1234");
+        let _forward_token = EnvRestore::set(FORWARD_TOKEN_ENV, "");
+
+        let raw_input = r#"{"cwd":"/workspace","toolResult":{"resultType":"success"}}"#;
+        let error = handle(raw_input).unwrap_err();
+
+        assert_eq!(
+            error,
+            format!("{FORWARD_TOKEN_ENV} is required when {FORWARD_ADDR_ENV} is set")
+        );
+    }
+
+    #[test]
+    fn does_not_fallback_when_forward_token_is_invalid() {
+        let _env_lock = lock_env();
+        let workspace = TempDir::new().unwrap();
+        let home = TempDir::new().unwrap();
+        let hook_dir = home.path().join(".copilot/hooks/postToolUse");
+        fs::create_dir_all(&hook_dir).unwrap();
+        let hook_path = hook_dir.join("main");
+        fs::write(
+            &hook_path,
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&hook_path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&hook_path, permissions).unwrap();
+
+        let (addr, shutdown_tx, server_handle) =
+            start_server(workspace.path(), home.path(), "expected-token");
+        let _forward_addr = EnvRestore::set(FORWARD_ADDR_ENV, &addr);
+        let _forward_token = EnvRestore::set(FORWARD_TOKEN_ENV, "wrong-token");
+        let _forward_timeout = EnvRestore::set(FORWARD_TIMEOUT_ENV, "30");
+
+        let raw_input = format!(
+            r#"{{"cwd":"{}","toolResult":{{"resultType":"success"}}}}"#,
+            workspace.path().display()
+        );
+        let error = handle(&raw_input).unwrap_err();
+
+        shutdown_tx.send(()).unwrap();
+        server_handle.join().unwrap();
+
+        assert!(error.contains("failed to forward postToolUse hook to control-plane"));
+        assert!(error.contains("missing or invalid exec API token"));
+    }
+
+    #[test]
+    fn falls_back_only_for_known_transport_errors() {
+        assert!(should_fallback_from_forward_error(
+            "transport error: error trying to connect: tcp connect error: Connection refused (os error 111)"
+        ));
+        assert!(should_fallback_from_forward_error(
+            "transport error: dns error: failed to lookup address information"
+        ));
+        assert!(!should_fallback_from_forward_error(
+            "status: PermissionDenied, message: \"missing or invalid exec API token\""
+        ));
+        assert!(!should_fallback_from_forward_error("invalid URI"));
     }
 }

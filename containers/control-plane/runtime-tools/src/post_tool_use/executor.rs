@@ -9,6 +9,11 @@ use super::config::{Config, Tool, ToolApplicability};
 
 const DEFAULT_RUNTIME_FAILURE_LABEL: &str = "Hook runtime reported tool execution failure:";
 const HOOK_RUNTIME_FAILURE_EXIT_CODE: i32 = 70;
+const HOOK_SKIP_EXIT_CODE: i32 = 76;
+const HOOK_SKIP_EXIT_CODE_ENV: &str = "CONTROL_PLANE_HOOK_SKIP_EXIT_CODE";
+const REMOTE_INFRA_FAILURE_EXIT_CODE: i32 = 75;
+const REMOTE_INFRA_FAILURE_EXIT_CODE_ENV: &str = "CONTROL_PLANE_REMOTE_INFRA_FAILURE_EXIT_CODE";
+const MISSING_TOOL_SKIP_LABEL: &str = "Hook skipped because no configured tool is available:";
 
 pub struct PipelineRunOutcome {
     pub exit_code: i32,
@@ -22,6 +27,7 @@ pub fn run_pipelines(
 ) -> Result<PipelineRunOutcome, String> {
     let mut exit_code = 0;
     let mut has_reported_failure = false;
+    let mut saw_retryable_skip = false;
 
     for pipeline in &config.pipelines {
         let files = files_by_pipeline
@@ -35,6 +41,12 @@ pub fn run_pipelines(
         for step in &pipeline.steps {
             let result = run_step_with_fallback(config, repo_root, &step.tools, &files)?;
             if result.status == 0 {
+                if result.report_on_success {
+                    write_result_output(&result);
+                }
+                if result.runtime_failure {
+                    saw_retryable_skip = true;
+                }
                 continue;
             }
 
@@ -73,7 +85,7 @@ pub fn run_pipelines(
 
     Ok(PipelineRunOutcome {
         exit_code,
-        runtime_failure: false,
+        runtime_failure: saw_retryable_skip,
     })
 }
 
@@ -100,8 +112,13 @@ fn run_step_with_fallback(
 
         match execute_tool(tool, &args, repo_root, &tool_env) {
             Ok(result) => {
+                if result.status == HOOK_SKIP_EXIT_CODE {
+                    attempted.push(format!("{tool_id} ({})", tool.command));
+                    continue;
+                }
                 return Ok(CommandResult {
                     runtime_failure: tool.runtime_failure_exit_codes.contains(&result.status),
+                    report_on_success: false,
                     ..result
                 });
             }
@@ -114,6 +131,7 @@ fn run_step_with_fallback(
                     stdout: String::new(),
                     stderr: format!("{message}\n"),
                     runtime_failure: true,
+                    report_on_success: false,
                 });
             }
         }
@@ -125,14 +143,16 @@ fn run_step_with_fallback(
             stdout: String::new(),
             stderr: String::new(),
             runtime_failure: false,
+            report_on_success: false,
         });
     }
 
     Ok(CommandResult {
-        status: HOOK_RUNTIME_FAILURE_EXIT_CODE,
+        status: 0,
         stdout: String::new(),
-        stderr: format!("No available tool found. Tried: {}\n", attempted.join(", ")),
+        stderr: format!("{MISSING_TOOL_SKIP_LABEL} {}\n", attempted.join(", ")),
         runtime_failure: true,
+        report_on_success: true,
     })
 }
 
@@ -183,6 +203,14 @@ fn build_tool_env() -> Result<HashMap<OsString, OsString>, String> {
     env_map
         .entry(OsString::from("npm_config_cache"))
         .or_insert(npm_cache.into_os_string());
+    env_map.insert(
+        OsString::from(HOOK_SKIP_EXIT_CODE_ENV),
+        OsString::from(HOOK_SKIP_EXIT_CODE.to_string()),
+    );
+    env_map.insert(
+        OsString::from(REMOTE_INFRA_FAILURE_EXIT_CODE_ENV),
+        OsString::from(REMOTE_INFRA_FAILURE_EXIT_CODE.to_string()),
+    );
     Ok(env_map)
 }
 
@@ -225,6 +253,7 @@ fn execute_tool(
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr,
         runtime_failure: terminated_without_exit_code,
+        report_on_success: false,
     })
 }
 
@@ -250,6 +279,7 @@ struct CommandResult {
     stdout: String,
     stderr: String,
     runtime_failure: bool,
+    report_on_success: bool,
 }
 
 enum ExecuteError {
