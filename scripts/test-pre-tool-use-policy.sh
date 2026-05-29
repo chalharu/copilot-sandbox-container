@@ -95,6 +95,8 @@ exec_policy_library="${CONTROL_PLANE_EXEC_POLICY_LIBRARY:-}"
 exec_policy_rules="${CONTROL_PLANE_EXEC_POLICY_RULES_FILE:-}"
 copilot_token_path="${HOME}/.config/control-plane/copilot-github-token"
 copilot_provider_api_key_path="${HOME}/.config/control-plane/copilot-provider-api-key"
+managed_copilot_home="/var/lib/control-plane/managed-runtime/copilot-home"
+session_plan_path="${managed_copilot_home}/session-state/session-123/plan.md"
 
 test -x "${hook_script}"
 test -f "${hook_config}"
@@ -105,6 +107,8 @@ test -f "${exec_policy_rules}"
 test "${LD_PRELOAD}" = "${exec_policy_library}"
 
 mkdir -p "${HOME}/.config/gh"
+mkdir -p "${HOME}/.copilot/session-state/session-123"
+printf '%s\n' '# plan' > "${HOME}/.copilot/session-state/session-123/plan.md"
 export CONTROL_PLANE_COPILOT_GITHUB_TOKEN_FILE="${copilot_token_path}"
 export CONTROL_PLANE_COPILOT_PROVIDER_API_KEY_FILE="${copilot_provider_api_key_path}"
 
@@ -302,6 +306,14 @@ override_deny="$(run_hook '{"cwd":"/workspace","toolName":"bash","toolArgs":"{\"
 printf '%s\n' "${override_deny}" | jq -e '.permissionDecision == "deny"' >/dev/null
 printf '%s\n' "${override_deny}" | jq -e '.permissionDecisionReason == "repo-local policy"' >/dev/null
 
+printf -v read_plan_allow_payload '{"cwd":"/workspace","toolName":"Read","toolArgs":{"file_path":"%s"}}' "${session_plan_path}"
+read_plan_allow="$(CONTROL_PLANE_FAST_EXECUTION_ENABLED=1 run_hook "${read_plan_allow_payload}")"
+test -z "${read_plan_allow}"
+
+printf -v write_plan_allow_payload '{"cwd":"/workspace","toolName":"Write","toolArgs":{"file_path":"%s","content":"# plan\\n"}}' "${managed_copilot_home}/session-state/session-123/new-plan.md"
+write_plan_allow="$(CONTROL_PLANE_FAST_EXECUTION_ENABLED=1 run_hook "${write_plan_allow_payload}")"
+test -z "${write_plan_allow}"
+
 assert_denied_exec 'git commit --no-verify' git commit --no-verify -m skip
 assert_denied_exec 'git commit --no-verify' git commit -- --no-verify
 assert_denied_exec 'core.hooksPath overrides are blocked' git -c core.hooksPath=/tmp/evil commit -m skip
@@ -431,7 +443,9 @@ env -u LD_PRELOAD bash -se <<'EOF_SETUP'
 set -euo pipefail
 install -d -o copilot -g copilot /home/copilot/.config/gh
 install -d -o copilot -g copilot /home/copilot/.config/control-plane
+install -d -o copilot -g copilot /var/lib/control-plane/managed-runtime
 install -d -o copilot -g copilot /run/control-plane-auth/..data
+ln -sfn /home/copilot/.copilot /var/lib/control-plane/managed-runtime/copilot-home
 printf '%s\n' 'copilot-secret-token' > /home/copilot/.config/control-plane/copilot-github-token
 printf '%s\n' 'provider-secret-key' > /home/copilot/.config/control-plane/copilot-provider-api-key
 cat > /home/copilot/.config/gh/hosts.yml <<'YAML'

@@ -381,6 +381,69 @@ fn passes_write_tool_through_for_control_plane_session_state_path() {
     assert!(handle(&input).is_none());
 }
 
+#[cfg(unix)]
+#[test]
+fn passes_read_tool_through_for_symlinked_control_plane_session_state_path() {
+    let _env_lock = lock_env();
+    let temp_dir = TempDir::new().unwrap();
+    let managed_runtime = temp_dir.path().join("managed-runtime");
+    let managed_copilot_home = managed_runtime.join("copilot-home");
+    let real_copilot_home = temp_dir.path().join("home").join(".copilot");
+    let session_dir = real_copilot_home.join("session-state").join("session-123");
+    fs::create_dir_all(&managed_runtime).unwrap();
+    fs::create_dir_all(&session_dir).unwrap();
+    std::os::unix::fs::symlink(&real_copilot_home, &managed_copilot_home).unwrap();
+    let plan_path = managed_copilot_home
+        .join("session-state")
+        .join("session-123")
+        .join("plan.md");
+    fs::write(session_dir.join("plan.md"), "# plan\n").unwrap();
+
+    let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
+    let _copilot_home = EnvRestore::set("COPILOT_HOME", managed_copilot_home.to_str().unwrap());
+    let input = json!({
+        "toolName": "Read",
+        "cwd": "/workspace",
+        "toolArgs": {
+            "file_path": plan_path
+        }
+    })
+    .to_string();
+
+    assert!(handle(&input).is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn passes_write_tool_through_for_symlinked_control_plane_session_state_path() {
+    let _env_lock = lock_env();
+    let temp_dir = TempDir::new().unwrap();
+    let managed_runtime = temp_dir.path().join("managed-runtime");
+    let managed_copilot_home = managed_runtime.join("copilot-home");
+    let real_copilot_home = temp_dir.path().join("home").join(".copilot");
+    let session_dir = real_copilot_home.join("session-state").join("session-123");
+    fs::create_dir_all(&managed_runtime).unwrap();
+    fs::create_dir_all(&session_dir).unwrap();
+    std::os::unix::fs::symlink(&real_copilot_home, &managed_copilot_home).unwrap();
+
+    let _fast_exec = EnvRestore::set("CONTROL_PLANE_FAST_EXECUTION_ENABLED", "1");
+    let _copilot_home = EnvRestore::set("COPILOT_HOME", managed_copilot_home.to_str().unwrap());
+    let input = json!({
+        "toolName": "Write",
+        "cwd": "/workspace",
+        "toolArgs": {
+            "file_path": managed_copilot_home
+                .join("session-state")
+                .join("session-123")
+                .join("plan.md"),
+            "content": "# plan\n"
+        }
+    })
+    .to_string();
+
+    assert!(handle(&input).is_none());
+}
+
 #[test]
 fn denies_read_tool_for_unspecified_control_plane_home_file() {
     let _env_lock = lock_env();
