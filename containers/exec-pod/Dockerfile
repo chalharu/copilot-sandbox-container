@@ -30,7 +30,7 @@ ARG TAPLO_LINUX_AARCH64_SHA256=033681d01eec8376c3fd38fa3703c79316f5e14bb013d8599
 # renovate: datasource=node-version depName=node
 ARG NODE_VERSION=22.21.1
 # renovate: datasource=npm depName=pnpm
-ARG PNPM_VERSION=11.3.0
+ARG PNPM_VERSION=11.4.0
 # renovate: datasource=pypi depName=lizard
 ARG LIZARD_VERSION=1.22.2
 # Keep the Chrome for Testing version and Linux64 digests in sync when updating them.
