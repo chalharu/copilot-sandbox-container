@@ -267,6 +267,12 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" > "${TEST_WRAPPER_LOG}"
+if [[ -n "${TEST_REMOTE_STDOUT:-}" ]]; then
+  printf '%b' "${TEST_REMOTE_STDOUT}"
+fi
+if [[ -n "${TEST_REMOTE_STDERR:-}" ]]; then
+  printf '%b' "${TEST_REMOTE_STDERR}" >&2
+fi
 exit "${TEST_REMOTE_STATUS:-0}"
 EOF
   chmod 755 "${bin_dir}/control-plane-run"
@@ -303,6 +309,29 @@ EOF
   ) > /dev/null 2> "${remote_missing_stderr}"
   grep -Fqx "${repo_dir}|fmt --all" "${cargo_log}"
   grep -Fq 'control-plane-rust: remote execution is unavailable (exit 127); falling back to local execution' "${remote_missing_stderr}"
+
+  : > "${cargo_log}"
+  remote_override_stdout="${workdir}/remote-override.stdout"
+  remote_override_stderr="${workdir}/remote-override.stderr"
+  (
+    cd "${repo_dir}"
+    TEST_CARGO_LOG="${cargo_log}" \
+      TEST_WRAPPER_LOG="${remote_log}" \
+      TEST_REMOTE_STATUS=0 \
+      PATH="${bin_dir}:/usr/bin:/bin" \
+      CONTROL_PLANE_RUNTIME_ENV_FILE=/dev/null \
+      CONTROL_PLANE_WORKSPACE_MOUNT_PATH='/workspace/core' \
+      CONTROL_PLANE_RUST_HOOK_IMAGE="${biome_hook_image}" \
+      CONTROL_PLANE_JOB_TRANSFER_IMAGE='' \
+      bash "${repo_root}/containers/control-plane/hooks/postToolUse/control-plane-rust.sh" \
+        fmt src/main.rs
+  ) > "${remote_override_stdout}" 2> "${remote_override_stderr}"
+  grep -Fq 'cd /workspace/core && cargo fmt --all' "${remote_log}"
+  [[ ! -s "${cargo_log}" ]]
+  grep -Fqx 'control-plane-rust: .' "${remote_override_stderr}"
+  if grep -Fq 'falling back to local execution' "${remote_override_stderr}"; then
+    exit 1
+  fi
 
   : > "${cargo_log}"
   remote_failure_stderr="${workdir}/remote-failure.stderr"
