@@ -279,6 +279,8 @@ run_remote_cargo() {
   local remote_dir
   local remote_command
   local target_dir
+  local output
+  local remote_status
 
   crate_dir="$(dirname "${manifest}")"
   crate_relative="$(repo_relative_path "${crate_dir}")"
@@ -292,9 +294,24 @@ run_remote_cargo() {
     printf -v remote_command '%s %q' "${remote_command}" "${cargo_arg}"
   done
 
-  control-plane-run \
-    --image "${remote_image}" \
-    -- bash -lc "${remote_command}"
+  # Capture output to detect infra-like failures (k8s job / image pull / job create errors)
+  output="$(control-plane-run --image "${remote_image}" -- bash -lc "${remote_command}" 2>&1)" || true
+  remote_status=$?
+
+  if [[ "${remote_status}" -ne 0 ]]; then
+    # If remote failed due to job infra, normalize to remote_infra_failure_exit_code
+    if printf '%s\n' "${output}" | grep -q -E 'k8s-job-wait|job .* failed|image pull failed|failed to create job'; then
+      printf '%s\n' "${output}" >&2
+      return "${remote_infra_failure_exit_code}"
+    fi
+    # Otherwise propagate remote tool or lint failure
+    printf '%s\n' "${output}" >&2
+    return "${remote_status}"
+  fi
+
+  # Success: emit output and return 0
+  printf '%s\n' "${output}"
+  return 0
 }
 
 require_local_build_toolchain() {

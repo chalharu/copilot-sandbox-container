@@ -1,0 +1,19 @@
+{
+  "tools": [
+    {
+      "id": "control-plane-rust-fmt",
+      "command": "true",
+      "args": []
+    },
+    {
+      "id": "control-plane-rust-clippy-fix",
+      "command": "true",
+      "args": []
+    },
+    {
+      "id": "control-plane-rust-clippy-check",
+      "command": "true",
+      "args": []
+    }
+  ]
+}
