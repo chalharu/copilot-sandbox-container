@@ -27,8 +27,10 @@ ARG CARGO_LLVM_COV_AARCH64_UNKNOWN_LINUX_GNU_SHA256=8248a6d5dcb47307c2ef6d5815f9
 ARG TAPLO_CLI_VERSION=0.10.0
 ARG TAPLO_LINUX_X86_64_SHA256=8fe196b894ccf9072f98d4e1013a180306e17d244830b03986ee5e8eabeb6156
 ARG TAPLO_LINUX_AARCH64_SHA256=033681d01eec8376c3fd38fa3703c79316f5e14bb013d859943b60a07bccdcc3
+# renovate: datasource=node-version depName=node
+ARG NODE_VERSION=22.21.1
 # renovate: datasource=npm depName=pnpm
-ARG PNPM_VERSION=10.33.4
+ARG PNPM_VERSION=11.3.0
 # renovate: datasource=pypi depName=lizard
 ARG LIZARD_VERSION=1.22.2
 # Keep the Chrome for Testing version and Linux64 digests in sync when updating them.
@@ -229,7 +231,7 @@ RUN mkdir -p /opt/control-plane-tools/bin \
     && chmod 0755 /opt/control-plane-tools/bin/taplo
 
 FROM ${RUST_BASE_IMAGE}
-
+ARG NODE_VERSION
 ARG KUBECTL_VERSION
 ARG DOCKER_BUILDX_VERSION
 ARG PNPM_VERSION
@@ -258,8 +260,20 @@ RUN apt-get update -o Acquire::Retries=3 \
     && browser_apt_packages=() \
     && arch="$(dpkg --print-architecture)" \
     && case "${arch}" in \
-        amd64) kubectl_arch=amd64; buildx_arch=amd64; chrome_install_mode=chrome-for-testing; chrome_for_testing_platform=linux64 ;; \
-        arm64) kubectl_arch=arm64; buildx_arch=arm64; chrome_install_mode=debian-chromium; browser_apt_packages=(chromium chromium-driver) ;; \
+        amd64) \
+          kubectl_arch=amd64; \
+          buildx_arch=amd64; \
+          node_arch=x64; \
+          chrome_install_mode=chrome-for-testing; \
+          chrome_for_testing_platform=linux64; \
+          ;; \
+        arm64) \
+          kubectl_arch=arm64; \
+          buildx_arch=arm64; \
+          node_arch=arm64; \
+          chrome_install_mode=debian-chromium; \
+          browser_apt_packages=(chromium chromium-driver); \
+          ;; \
         *) printf 'Unsupported architecture for exec-pod tools: %s\n' "${arch}" >&2; exit 1 ;; \
     esac \
     && apt-get install -y --no-install-recommends \
@@ -291,6 +305,7 @@ RUN apt-get update -o Acquire::Retries=3 \
         sccache \
         sudo \
         unzip \
+        xz-utils \
         xdg-utils \
         yamllint \
         fonts-liberation \
@@ -327,6 +342,29 @@ RUN apt-get update -o Acquire::Retries=3 \
     && curl -fsSLo /tmp/buildx-checksums.txt "${buildx_download_root}/checksums.txt" \
     && awk -v asset="${buildx_asset}" '$2 == asset || $2 == "*" asset { print $1 "  /tmp/" asset; found=1 } END { exit(found ? 0 : 1) }' /tmp/buildx-checksums.txt | sha256sum -c - \
     && install -D -m 0755 "/tmp/${buildx_asset}" /usr/libexec/docker/cli-plugins/docker-buildx \
+    && node_download_root="https://nodejs.org/dist/v${NODE_VERSION}" \
+    && node_asset="node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" \
+    && curl -fsSLo "/tmp/${node_asset}" "${node_download_root}/${node_asset}" \
+    && curl -fsSLo /tmp/node-SHASUMS256.txt "${node_download_root}/SHASUMS256.txt" \
+    && awk -v asset="${node_asset}" '$2 == asset { print $1 "  /tmp/" asset; found=1 } END { exit(found ? 0 : 1) }' /tmp/node-SHASUMS256.txt | sha256sum -c - \
+    && install -d /opt/control-plane-pnpm-node/bin \
+    && tar -xJf "/tmp/${node_asset}" -C /opt/control-plane-pnpm-node/bin --strip-components=2 \
+        "node-v${NODE_VERSION}-linux-${node_arch}/bin/node" \
+    && chmod 0755 /opt/control-plane-pnpm-node/bin/node \
+    && rm -f "/tmp/${node_asset}" /tmp/node-SHASUMS256.txt \
+    && ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/local/bin/node \
+    && ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/local/bin/nodejs \
+    && ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/bin/node \
+    && ln -sfn /opt/control-plane-pnpm-node/bin/node /usr/bin/nodejs \
+    && npm_entry="$(readlink -f "$(command -v npm)")" \
+    && rm -f /usr/local/bin/npm \
+    && printf '%s\n' '#!/usr/bin/env bash' \
+        "export PATH=\"/opt/control-plane-pnpm-node/bin:\${PATH}\"" \
+        "exec /opt/control-plane-pnpm-node/bin/node \"${npm_entry}\" \"\$@\"" \
+        > /usr/local/bin/npm \
+    && chmod 0755 /usr/local/bin/npm \
+    && node --version >/dev/null \
+    && npm --version >/dev/null \
     && groupadd --gid "${CONTROL_PLANE_GID}" "${CONTROL_PLANE_USER}" \
     && useradd --uid "${CONTROL_PLANE_UID}" \
         --gid "${CONTROL_PLANE_USER}" \
@@ -358,6 +396,25 @@ RUN apt-get update -o Acquire::Retries=3 \
     && python3 -c 'import base64, hashlib, pathlib, sys; algorithm, expected = sys.argv[1].split("-", 1); actual = base64.b64encode(hashlib.new(algorithm, pathlib.Path(sys.argv[2]).read_bytes()).digest()).decode(); sys.exit(0 if actual == expected else f"pnpm integrity mismatch: expected {expected}, got {actual}")' "${pnpm_integrity}" /tmp/pnpm.tgz \
     && npm install --global "/tmp/pnpm.tgz" \
     && npm cache clean --force \
+    && pnpm_package_root="$(npm root --global)/pnpm" \
+    && pnpm_entry="${pnpm_package_root}/$(jq -er '.bin.pnpm' "${pnpm_package_root}/package.json")" \
+    && rm -f /usr/local/bin/pnpm \
+    && printf '%s\n' '#!/usr/bin/env bash' \
+        "export PATH=\"/opt/control-plane-pnpm-node/bin:\${PATH}\"" \
+        "exec /opt/control-plane-pnpm-node/bin/node \"${pnpm_entry}\" \"\$@\"" \
+        > /usr/local/bin/pnpm \
+    && chmod 0755 /usr/local/bin/pnpm \
+    && pnpx_relative="$(jq -er '.bin.pnpx // empty' "${pnpm_package_root}/package.json")" \
+    && if [ -n "${pnpx_relative}" ]; then \
+         pnpx_entry="${pnpm_package_root}/${pnpx_relative}"; \
+         rm -f /usr/local/bin/pnpx; \
+         printf '%s\n' '#!/usr/bin/env bash' \
+           "export PATH=\"/opt/control-plane-pnpm-node/bin:\${PATH}\"" \
+           "exec /opt/control-plane-pnpm-node/bin/node \"${pnpx_entry}\" \"\$@\"" \
+           > /usr/local/bin/pnpx; \
+         chmod 0755 /usr/local/bin/pnpx; \
+       fi \
+    && pnpm --version >/dev/null \
     && case "${chrome_install_mode}" in \
         chrome-for-testing) \
           curl -fsSLo /tmp/chrome-for-testing.json "https://googlechromelabs.github.io/chrome-for-testing/${CHROME_FOR_TESTING_VERSION}.json" \

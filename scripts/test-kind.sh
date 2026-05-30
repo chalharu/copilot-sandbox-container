@@ -1031,8 +1031,15 @@ EOF
 }
 
 run_fast_exec_assertions() {
+  local expected_exec_pod_node_version
+  local remote_command
+
   printf '%s\n' 'kind-test: verifying fast execution pod flow' >&2
-  if ! ssh_bash <<'EOF'
+  expected_exec_pod_node_version="$(sed -n 's/^ARG NODE_VERSION=//p' "${script_dir}/../containers/exec-pod/Dockerfile")"
+  printf -v remote_command 'EXPECTED_EXEC_POD_NODE_VERSION=%q bash -l -se' "${expected_exec_pod_node_version}"
+
+  # shellcheck disable=SC2029
+  if ! ssh "${ssh_opts[@]}" copilot@127.0.0.1 "${remote_command}" <<'EOF'
 set -euo pipefail
 session_key=kind-fast-exec
 control-plane-session-exec cleanup --session-key "${session_key}" >/dev/null 2>&1 || true
@@ -1124,7 +1131,8 @@ test -z "$(sed -n '2p' /workspace/k8s-fast-exec-blocked-stdout.txt)"
 grep -Fq 'Direct reads of ~/.config/gh/hosts.yml are blocked by control-plane policy.' \
   /workspace/k8s-fast-exec-blocked-stderr.txt
 tooling_command=$(cat <<'INNER'
-set -euo pipefail
+set -Eeuo pipefail
+trap 'printf "tooling smoke failed while running: %s\n" "${BASH_COMMAND}" >&2' ERR
 command -v node >/dev/null
 command -v npm >/dev/null
 command -v pnpm >/dev/null
@@ -1142,9 +1150,25 @@ pkg-config --exists gtk+-3.0 gtk4 pango
 rustup target list --installed | grep -qx 'wasm32-unknown-unknown'
 rustup component list --installed | grep -Eq '^clippy-.*-unknown-linux-gnu$'
 rustup component list --installed | grep -Eq '^rustfmt-.*-unknown-linux-gnu$'
-node --version >/dev/null
+expected_node_version="${EXPECTED_NODE_VERSION:?}"
+tooling_smoke_dir="$(mktemp -d)"
+trap 'rm -rf "${tooling_smoke_dir}"' EXIT
+printf '{"name":"exec-pod-tooling-smoke","version":"1.0.0","scripts":{"show-node-version":"node --version"}}\n' > "${tooling_smoke_dir}/package.json"
+actual_node_version="$(node --version | tr -d '\r')"
+test "${actual_node_version}" = "v${expected_node_version}"
 npm --version >/dev/null
 pnpm --version >/dev/null
+pnpm_child_node_output_file="${tooling_smoke_dir}/pnpm-child-node-output.txt"
+if ! (cd "${tooling_smoke_dir}" && pnpm --reporter=silent exec node --version > "${pnpm_child_node_output_file}" 2>&1); then
+  printf 'pnpm exec node --version failed:\n' >&2
+  cat "${pnpm_child_node_output_file}" >&2 || true
+  exit 1
+fi
+if ! tr -d '\r' < "${pnpm_child_node_output_file}" | grep -Fqx "v${expected_node_version}"; then
+  printf 'unexpected pnpm child node output:\n' >&2
+  cat "${pnpm_child_node_output_file}" >&2 || true
+  exit 1
+fi
 wasm-opt --version >/dev/null
 trunk --version >/dev/null
 wasm-bindgen --version >/dev/null
@@ -1158,6 +1182,7 @@ taplo --version >/dev/null
 printf 'exec-tooling-ok\n' > /workspace/fast-exec-tooling-marker.txt
 INNER
 )
+printf -v tooling_command 'EXPECTED_NODE_VERSION=%q\n%s' "${EXPECTED_EXEC_POD_NODE_VERSION:?}" "${tooling_command}"
 tooling_command_base64="$(printf '%s' "${tooling_command}" | base64 | tr -d '\n')"
 control-plane-session-exec proxy --session-key "${session_key}" --cwd /workspace --command-base64 "${tooling_command_base64}" >/dev/null
 grep -qx 'exec-tooling-ok' /workspace/fast-exec-tooling-marker.txt
