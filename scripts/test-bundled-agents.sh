@@ -51,6 +51,15 @@ assert_file_present() {
   }
 }
 
+assert_path_absent() {
+  local path="$1"
+
+  [[ ! -e "${path}" ]] || {
+    printf 'Did not expect path: %s\n' "${path}" >&2
+    exit 1
+  }
+}
+
 assert_file_contains() {
   local path="$1"
   local expected="$2"
@@ -78,6 +87,11 @@ assert_file_contains "${dockerfile_path}" 'COPY agents/ /usr/local/share/control
 assert_file_contains "${entrypoint_path}" 'bundled_agents_dir="/usr/local/share/control-plane/agents"'
 assert_file_contains "${entrypoint_path}" 'sync_bundled_control_plane_entries'
 assert_file_contains "${entrypoint_path}" 'install_bundled_control_plane_agents'
+assert_path_absent "${agents_dir}/kiss-dry-review-agent.agent.md"
+assert_path_absent "${agents_dir}/solid-review-agent.agent.md"
+assert_path_absent "${agents_dir}/security-review-agent.agent.md"
+assert_path_absent "${agents_dir}/architecture-review-agent.agent.md"
+assert_path_absent "${agents_dir}/review-coordinator-agent.agent.md"
 
 for spec in "${bundled_agent_specs[@]}"; do
   IFS='|' read -r agent_name agent_file <<<"${spec}"
@@ -97,13 +111,10 @@ for spec in "${bundled_agent_specs[@]}"; do
 done
 
 assert_file_contains "${agents_dir}/implementation-agent.agent.md" 'KISS, DRY, SOLID, security, and architecture-first reasoning'
-assert_file_contains "${agents_dir}/kiss-dry-review-agent.agent.md" 'KISS and DRY issues'
-assert_file_contains "${agents_dir}/solid-review-agent.agent.md" 'SOLID design issues'
-assert_file_contains "${agents_dir}/security-review-agent.agent.md" 'security weaknesses, trust boundary issues'
-assert_file_contains "${agents_dir}/architecture-review-agent.agent.md" 'architecture drift, layering issues'
-assert_file_contains "${agents_dir}/review-coordinator-agent.agent.md" 'high-performance model such as claude-opus-4.6'
-assert_file_contains "${agents_dir}/review-coordinator-agent.agent.md" 'batches of at most 4 concurrent review sub-agents'
-assert_file_contains "${agents_dir}/review-coordinator-agent.agent.md" 'Aggregate the results into one critical review'
+assert_file_contains "${agents_dir}/change-review-agent.agent.md" 'architecture, security, design, and unnecessary complexity issues'
+assert_file_contains "${agents_dir}/change-review-agent.agent.md" 'architecture, security, SOLID design, and KISS/DRY maintainability'
+assert_file_contains "${agents_dir}/change-review-agent.agent.md" 'trust-boundary mistakes'
+assert_file_contains "${agents_dir}/change-review-agent.agent.md" 'Do not repeat overlapping findings'
 assert_file_contains "${agents_dir}/pre-implementation-design-agent.agent.md" 'pre-implementation investigation and design'
 assert_file_contains "${agents_dir}/pre-implementation-design-agent.agent.md" 'standalone investigation-only requests'
 assert_file_contains "${agents_dir}/pre-implementation-design-agent.agent.md" 'repo-change-delivery` skill instead'

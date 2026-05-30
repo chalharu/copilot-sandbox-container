@@ -153,7 +153,7 @@ Copilot process への注入は `control-plane-copilot` が
 
 ## 8. bundled skill / agent を `~/.copilot` 配下へ同期する理由
 
-repo change delivery 系の bundled skill と implementation / review agent suite は
+repo change delivery 系の bundled skill と implementation agent / consolidated review agent は
 image へ同梱します。起動時は `~/.copilot/skills/` / `~/.copilot/agents/` へ
 同期します。
 これは `/workspace` が別リポジトリを指していても、Control Plane 固有の

@@ -265,8 +265,7 @@ bundled agent も image に同梱し、起動時に `~/.copilot/agents/` へ cop
 します。現在は次を同梱しています。
 
 - generic な implementation agent
-- KISS/DRY・SOLID・security・architecture 向け review agent 群
-- review coordinator agent
+- architecture / security / SOLID / KISS-DRY をまとめて見る review agent
 - 実装前の調査・設計専用の pre-implementation design agent
 
 skill と同じく user-owned copy を使って file mode を明示的に整えています。

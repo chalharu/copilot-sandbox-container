@@ -2,11 +2,7 @@
 
 CONTROL_PLANE_BUNDLED_AGENT_SPECS=(
   'implementation-agent|implementation-agent.agent.md'
-  'kiss-dry-review-agent|kiss-dry-review-agent.agent.md'
-  'solid-review-agent|solid-review-agent.agent.md'
-  'security-review-agent|security-review-agent.agent.md'
-  'architecture-review-agent|architecture-review-agent.agent.md'
-  'review-coordinator-agent|review-coordinator-agent.agent.md'
+  'change-review-agent|change-review-agent.agent.md'
   'pre-implementation-design-agent|pre-implementation-design-agent.agent.md'
 )
 
