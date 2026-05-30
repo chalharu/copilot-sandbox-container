@@ -176,6 +176,16 @@ cargo_target_dir() {
   printf '%s\n' "${CONTROL_PLANE_RUST_TARGET_DIR:-${CARGO_TARGET_DIR:-${CONTROL_PLANE_TMP_ROOT:-/var/tmp/control-plane}/cargo-target}}"
 }
 
+job_workspace_mount_path() {
+  local workspace_path="${CONTROL_PLANE_JOB_WORKSPACE_MOUNT_PATH:-${CONTROL_PLANE_WORKSPACE_MOUNT_PATH:-/workspace}}"
+
+  while [[ "${workspace_path}" != "/" && "${workspace_path}" == */ ]]; do
+    workspace_path="${workspace_path%/}"
+  done
+
+  printf '%s\n' "${workspace_path}"
+}
+
 resolved_cargo_args() {
   local manifest="$1"
 
@@ -278,12 +288,14 @@ run_remote_cargo() {
   local crate_relative
   local remote_dir
   local remote_command
+  local remote_workspace_root
   local target_dir
 
   crate_dir="$(dirname "${manifest}")"
   crate_relative="$(repo_relative_path "${crate_dir}")"
-  remote_dir="/workspace"
-  [[ "${crate_relative}" == "." ]] || remote_dir="/workspace/${crate_relative}"
+  remote_workspace_root="$(job_workspace_mount_path)"
+  remote_dir="${remote_workspace_root}"
+  [[ "${crate_relative}" == "." ]] || remote_dir="${remote_workspace_root}/${crate_relative}"
   resolved_cargo_args "${manifest}"
   target_dir="$(cargo_target_dir)"
 
