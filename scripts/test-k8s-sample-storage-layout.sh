@@ -5,7 +5,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib-biome-hook-image.sh
 source "${script_dir}/lib-biome-hook-image.sh"
 # renovate: datasource=docker depName=docker.io/library/rust versioning=docker
-rust_hook_image="${CONTROL_PLANE_TEST_RUST_HOOK_IMAGE:-docker.io/library/rust:1.95.0-bookworm@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1}"
+rust_hook_image="${CONTROL_PLANE_TEST_RUST_HOOK_IMAGE:-docker.io/library/rust:1.96.0-bookworm@sha256:13c186980fa33cc12759b429662a1322939dbe697484b7c33b47dd2698d28460}"
 manifest_root="${script_dir}/../deploy/kubernetes/control-plane.example"
 install_manifest_root="${script_dir}/../deploy/kubernetes/control-plane.example/install"
 sample_env_path="${manifest_root}/common/configmap-control-plane-env.yaml"
