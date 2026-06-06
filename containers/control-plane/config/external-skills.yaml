@@ -4,6 +4,6 @@
     - skills/doc-coauthoring
     - skills/skill-creator
 - repository: https://github.com/anthropics/claude-code
-  ref: 625c04c3350378c3d74662505aae3e9dcf3fa1b4 # renovate: datasource=git-refs currentValue=main
+  ref: c1b75cba5e990e643ed62db6769a9f9807bdb053 # renovate: datasource=git-refs currentValue=main
   skills:
     - plugins/frontend-design/skills/frontend-design
