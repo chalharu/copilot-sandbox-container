@@ -7,7 +7,7 @@ license = "AGPL-3.0-only"
 [dependencies]
 base64 = "=0.22.1"
 h2 = "=0.4.14"
-http = "=1.4.1"
+http = "=1.4.2"
 hyper = { version = "=1.10.1", features = ["http2", "server"] }
 hyper-util = { version = "=0.1.20", features = [
   "server-auto",
