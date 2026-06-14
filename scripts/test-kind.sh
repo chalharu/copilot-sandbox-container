@@ -18,7 +18,7 @@ workdir="$(mktemp -d)"
 ssh_key="${workdir}/id_ed25519"
 kubeconfig_path="${workdir}/kubeconfig"
 # renovate: datasource=docker depName=docker.io/library/rust versioning=docker
-rust_hook_image="${CONTROL_PLANE_TEST_RUST_HOOK_IMAGE:-docker.io/library/rust:1.96.0-bookworm@sha256:13c186980fa33cc12759b429662a1322939dbe697484b7c33b47dd2698d28460}"
+rust_hook_image="${CONTROL_PLANE_TEST_RUST_HOOK_IMAGE:-docker.io/library/rust:1.96.0-bookworm@sha256:19817ead3289c8c631c73df281e18b59b172f6a31f4f563290f69cddd06c30e9}"
 # Keep the Kind integration path self-contained by default. The exec-pod image is
 # built and loaded alongside the control-plane image by build-test.sh.
 fast_execution_image="${CONTROL_PLANE_TEST_FAST_EXECUTION_IMAGE:-${control_plane_image}}"
