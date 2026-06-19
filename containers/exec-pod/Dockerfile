@@ -28,7 +28,7 @@ ARG TAPLO_CLI_VERSION=0.10.0
 ARG TAPLO_LINUX_X86_64_SHA256=8fe196b894ccf9072f98d4e1013a180306e17d244830b03986ee5e8eabeb6156
 ARG TAPLO_LINUX_AARCH64_SHA256=033681d01eec8376c3fd38fa3703c79316f5e14bb013d859943b60a07bccdcc3
 # renovate: datasource=node-version depName=node
-ARG NODE_VERSION=24.16.0
+ARG NODE_VERSION=24.17.0
 # renovate: datasource=npm depName=pnpm
 ARG PNPM_VERSION=11.7.0
 # renovate: datasource=pypi depName=lizard
