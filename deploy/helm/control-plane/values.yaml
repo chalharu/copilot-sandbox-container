@@ -88,7 +88,7 @@ global:
     # renovate: datasource=docker depName=ghcr.io/biomejs/biome versioning=docker
     CONTROL_PLANE_BIOME_HOOK_IMAGE: ghcr.io/biomejs/biome:2.5.0
     # renovate: datasource=docker depName=docker.io/library/rust versioning=docker
-    CONTROL_PLANE_RUST_HOOK_IMAGE: docker.io/library/rust:1.96.0-bookworm@sha256:19817ead3289c8c631c73df281e18b59b172f6a31f4f563290f69cddd06c30e9
+    CONTROL_PLANE_RUST_HOOK_IMAGE: docker.io/library/rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc
     CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS: "10000"
     CONTROL_PLANE_JOB_CPU_REQUEST: 250m
     CONTROL_PLANE_JOB_CPU_LIMIT: "2"
