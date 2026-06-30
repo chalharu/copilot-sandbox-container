@@ -124,7 +124,7 @@ ARG KUBECTL_VERSION=v1.36.2
 # renovate: datasource=github-releases depName=rclone/rclone
 ARG RCLONE_VERSION=v1.74.3
 # renovate: datasource=github-releases depName=astral-sh/ruff
-ARG RUFF_VERSION=0.15.18
+ARG RUFF_VERSION=0.15.20
 # renovate: datasource=github-releases depName=hadolint/hadolint
 ARG HADOLINT_VERSION=v2.14.0
 # renovate: datasource=pypi depName=yamllint
