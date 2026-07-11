@@ -86,7 +86,7 @@ global:
     CONTROL_PLANE_FAST_EXECUTION_REQUEST_TIMEOUT_SEC: "3600"
     CONTROL_PLANE_JOB_INPUT_MOUNT_PATH: /var/run/control-plane/job-inputs
     # renovate: datasource=docker depName=ghcr.io/biomejs/biome versioning=docker
-    CONTROL_PLANE_BIOME_HOOK_IMAGE: ghcr.io/biomejs/biome:2.5.2
+    CONTROL_PLANE_BIOME_HOOK_IMAGE: ghcr.io/biomejs/biome:2.5.3
     # renovate: datasource=docker depName=docker.io/library/rust versioning=docker
     CONTROL_PLANE_RUST_HOOK_IMAGE: docker.io/library/rust:1.96.1-bookworm@sha256:a339861ae23e9abb272cea45dfafde21760d2ce6577a70f8a926153677902663
     CONTROL_PLANE_AUDIT_LOG_MAX_RECORDS: "10000"
