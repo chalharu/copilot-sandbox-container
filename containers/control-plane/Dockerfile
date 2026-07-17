@@ -114,7 +114,7 @@ RUN /usr/local/bin/install-git-skills-from-manifest /tmp/external-skills.yaml /o
 FROM node:24.18.0-bookworm-slim@sha256:cb4e8f7c443347358b7875e717c29e27bf9befc8f5a26cf18af3c3dec80e58c5
 
 # renovate: datasource=npm depName=@github/copilot
-ARG COPILOT_CLI_VERSION=1.0.70
+ARG COPILOT_CLI_VERSION=1.0.71
 # renovate: datasource=github-releases depName=kubernetes-sigs/kind
 ARG KIND_VERSION=v0.32.0
 # renovate: datasource=github-releases depName=jqlang/jq
