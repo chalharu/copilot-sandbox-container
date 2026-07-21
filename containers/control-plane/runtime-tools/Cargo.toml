@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 base64 = "=0.22.1"
 control-plane-exec-api = { path = "../exec-api" }
-futures-util = "=0.3.32"
+futures-util = "=0.3.33"
 git2 = { version = "=0.21.0", features = [
   "https",
   "vendored-libgit2",
