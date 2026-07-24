@@ -20,7 +20,7 @@ git2 = { version = "=0.21.0", features = [
 k8s-openapi = { version = "=0.27.1", default-features = false, features = [
   "latest",
 ] }
-kube = "=3.1.0"
+kube = "=4.2.0"
 libc = "=0.2.186"
 regex = "=1.13.1"
 rusqlite = { version = "=0.40.1", features = ["bundled"] }
