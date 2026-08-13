@@ -1,4 +1,4 @@
-ARG RUST_BASE_IMAGE=docker.io/library/rust:1.97.1-bookworm@sha256:14bc9c5966e7b3a385794b3d5389a8765668342025fbcc7b2e3d2866ac4bd8c3
+ARG RUST_BASE_IMAGE=docker.io/library/rust:1.97.1-bookworm@sha256:0e2bcaef56d041a486784e54104a81aebe0da44bd03019bd70bc0401e42e4a97
 # renovate: datasource=crate depName=cargo-chef
 ARG CARGO_CHEF_VERSION=0.1.77
 ARG CARGO_CHEF_X86_64_UNKNOWN_LINUX_GNU_SHA256=ff390181459f53c787a496c4ee9a52d8c9c7975ab8d02c8dbd1a0fa1626171f4
