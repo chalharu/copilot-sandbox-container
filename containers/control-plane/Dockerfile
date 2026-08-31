@@ -116,7 +116,7 @@ FROM node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733cee
 # renovate: datasource=npm depName=@github/copilot
 ARG COPILOT_CLI_VERSION=1.0.82
 # renovate: datasource=github-releases depName=kubernetes-sigs/kind
-ARG KIND_VERSION=v0.32.0
+ARG KIND_VERSION=v0.33.0
 # renovate: datasource=github-releases depName=jqlang/jq
 ARG JQ_VERSION=jq-1.8.1
 # renovate: datasource=github-releases depName=kubernetes/kubernetes
