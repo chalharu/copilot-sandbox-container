@@ -120,7 +120,7 @@ ARG KIND_VERSION=v0.33.0
 # renovate: datasource=github-releases depName=jqlang/jq
 ARG JQ_VERSION=jq-1.8.1
 # renovate: datasource=github-releases depName=kubernetes/kubernetes
-ARG KUBECTL_VERSION=v1.36.4
+ARG KUBECTL_VERSION=v1.37.0
 # renovate: datasource=github-releases depName=rclone/rclone
 ARG RCLONE_VERSION=v1.75.0
 # renovate: datasource=github-releases depName=astral-sh/ruff
