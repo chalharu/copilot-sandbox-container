@@ -40,7 +40,7 @@ ARG CHROME_FOR_TESTING_CHROMEDRIVER_LINUX64_SHA256=ad324679086572b638a0388a96f21
 # renovate: datasource=github-releases depName=kubernetes/kubernetes
 ARG KUBECTL_VERSION=v1.37.0
 # renovate: datasource=github-releases depName=docker/buildx
-ARG DOCKER_BUILDX_VERSION=v0.36.1
+ARG DOCKER_BUILDX_VERSION=v0.37.0
 
 FROM ${RUST_BASE_IMAGE} AS cargo-chef
 
