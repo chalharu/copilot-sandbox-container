@@ -126,7 +126,7 @@ ARG RCLONE_VERSION=v1.75.0
 # renovate: datasource=github-releases depName=astral-sh/ruff
 ARG RUFF_VERSION=0.16.5
 # renovate: datasource=github-releases depName=hadolint/hadolint
-ARG HADOLINT_VERSION=v2.14.0
+ARG HADOLINT_VERSION=v2.15.1
 # renovate: datasource=pypi depName=yamllint
 ARG YAMLLINT_VERSION=1.38.0
 # renovate: datasource=pypi depName=pathspec
