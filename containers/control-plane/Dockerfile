@@ -122,7 +122,7 @@ ARG JQ_VERSION=jq-1.8.1
 # renovate: datasource=github-releases depName=kubernetes/kubernetes
 ARG KUBECTL_VERSION=v1.37.0
 # renovate: datasource=github-releases depName=rclone/rclone
-ARG RCLONE_VERSION=v1.75.0
+ARG RCLONE_VERSION=v1.75.1
 # renovate: datasource=github-releases depName=astral-sh/ruff
 ARG RUFF_VERSION=0.16.5
 # renovate: datasource=github-releases depName=hadolint/hadolint
