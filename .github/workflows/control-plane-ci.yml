@@ -15,7 +15,7 @@ on:
 jobs:
   integration-amd64:
     name: Integration Images (x64)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 90
     permissions:
       contents: read
@@ -54,7 +54,7 @@ jobs:
           compression-level: 0
   integration-arm64:
     name: Integration Images (aarch64)
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 90
     permissions:
       contents: read
@@ -85,7 +85,7 @@ jobs:
           compression-level: 0
   integration-smoke-amd64:
     name: Integration Smoke (x64)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     needs: integration-amd64
     permissions:
@@ -106,7 +106,7 @@ jobs:
         run: ./scripts/build-test.sh --skip-image-build --group smoke
   integration-smoke-arm64:
     name: Integration Smoke (aarch64)
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 45
     needs: integration-arm64
     permissions:
@@ -125,7 +125,7 @@ jobs:
         run: ./scripts/build-test.sh --skip-image-build --group smoke
   integration-regressions:
     name: Integration Regressions (x64)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 90
     needs: integration-amd64
     permissions:
@@ -166,7 +166,7 @@ jobs:
         run: ./scripts/build-test.sh --skip-image-build --group regressions
   integration-kind-session:
     name: Integration Kind Session (x64)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     needs: integration-amd64
     permissions:
@@ -191,7 +191,7 @@ jobs:
         run: ./scripts/build-test.sh --skip-image-build --group kind-session
   integration-kind-jobs:
     name: Integration Kind Jobs Core (x64)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     needs: integration-amd64
     permissions:
@@ -208,7 +208,7 @@ jobs:
         run: ./scripts/build-test.sh --skip-image-build --group kind-jobs-core
   integration-kind-jobs-transfer:
     name: Integration Kind Jobs Transfer (x64)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     needs: integration-amd64
     permissions:
@@ -226,7 +226,7 @@ jobs:
   publish-architecture-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Publish Architecture Images
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 90
     needs:
       - integration-smoke-amd64
